@@ -104,15 +104,19 @@ Done: the song draws gh4's own highway (highway_guitar1 layout, the CAS
 highway skin, gems / buttons / tails from the script-built materials, D15).
 The debug highway remains for data without the gh4 tables.
 
-## D14. A descinterface call's `just` does not move the desc's root [I] (2026-11-11)
+## D14. A descinterface element wraps its desc; the desc's root is its child 0 (2026-11-11)
 
-What: `CreateScreenElement {type = descinterface ... just = [center center]}`
-keeps the desc root's own just (main_menu_bg: [-1 -1] at (0, 0)). Why:
-make_menu_frontend (career, game mode, instrument menus) and 20 other
-full-screen descs pass just = center at pos (0, 0); applied to the root it
-drew the 1280 x 720 picture centred on the top-left corner (the "skull art
-over the menus" of the proof of concept). The XEX's descinterface element is
-not read yet. Undo: ui_system.cpp CreateScreenElement's descinterface branch.
+What: `CreateScreenElement {type = descinterface desc = ...}` makes an
+element with the call's own props (pos, just, dims, pos_anchor, z, alpha);
+the desc's root element (main_menu_bg, helper_pill_container, hud_root's
+tree) is built as its child 0, and alias / prop paths start there. Why:
+setup_band_hud resolves `{hud_root child = 0}` as the HUD's root [C script];
+make_menu_frontend and 20 other full-screen descs pass just = [center
+center] without dims at pos (0, 0), which then moves nothing (applied to
+the root it drew the 1280 x 720 picture centred on the top-left corner: the
+"skull art over the menus" of the proof of concept). The XEX's
+descinterface class is not read yet [I]. Undo: ui/ui_desc.cpp buildDesc /
+descPath.
 
 ## D15. gh4 highway materials drawn as layered sprites [I] (2026-11-11)
 

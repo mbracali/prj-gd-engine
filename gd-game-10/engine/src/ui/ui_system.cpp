@@ -254,6 +254,8 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
     // gh4's menuelement: GH3's vmenu, or its hmenu with isvertical = false
     // (desc menus, CreateScreenElement type = menuelement) [C data uidesc_*; I].
     if (e.type == K("menuelement")) e.type = kVMenu;
+    // gh4's scrollingmenu: GH3's VScrollingMenu [C data uidesc_setlist_b; I].
+    if (e.type == K("scrollingmenu")) e.type = kVScrollingMenu;
     if (const qb::Value* v = qs::Vm::param(p, K("isvertical")); v && (e.type == kVMenu || e.type == kHMenu))
         e.type = (v->type == qb::Type::Key ? v->key != K("false") : v->number() != 0) ? kVMenu : kHMenu;
     float newDimsW = -1, newDimsH = -1;
@@ -338,6 +340,9 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
             e.fitH = v.key == K("clip bottom lines") ? 1 : v.key == K("clip top lines") ? 2 : v.key == K("expand dims") ? 3
                    : v.key == K("scale down if larger") ? 4 : v.key == K("scale to fit") ? 5 : 0;
         else if (n == K("scale_mode") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr)) e.scalePerAxis = v.key == K("per axis");
+        else if (n == K("adjust_visibility")) e.adjustVisibility = v.type == qb::Type::Key ? v.key != K("false") : v.number() != 0;
+        else if (n == K("center_selection")) e.centerSelection = v.type == qb::Type::Key ? v.key != K("false") : v.number() != 0;
+        else if (n == K("top_selection")) e.topSelection = v.type == qb::Type::Key ? v.key != K("false") : v.number() != 0;
         else if ((n == K("fit_major") || n == K("fit_minor")) && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr))
             (n == K("fit_major") ? e.fitMajor : e.fitMinor) = (v.key == K("size dims to content") || v.key == K("fit content")) ? 1
                 : (v.key == K("fit content if larger") || v.key == K("expand if content larger")) ? 2 : 0;
@@ -927,7 +932,9 @@ void UiSystem::scrollMenu(Element& s) {
             return;
         }
         h = it.h * m->sy * it.sy;
-        top = it.y * m->sy - (it.justY + 1) / 2 * h;
+        // From the menu's top whatever the item's pos_anchor (layoutMenu).
+        const float anY = it.posAnchorGiven ? it.posAnchorY : m->anchorY;
+        top = (it.y + (anY + 1) / 2 * m->h) * m->sy - (it.justY + 1) / 2 * h;
     };
     float d16 = 0, d17 = 0;
     if (itemSize >= 0) {
@@ -947,7 +954,11 @@ void UiSystem::scrollMenu(Element& s) {
     // A first item that cannot take the focus shows above the second [C].
     float d13 = 0;
     if (idx == 1 && (m->children[0]->notFocusable || m->children[0]->hidden)) d13 = h;
-    if (s.scroll + d16 <= top - d13) {
+    if (s.centerSelection || s.topSelection) {
+        // gh4: the selection held at the window's centre / top [I].
+        const float want = s.topSelection ? top : top + h / 2 - window / 2;
+        if (want != s.scroll) s.scroll = want, s.scrollDirty = true;
+    } else if (s.scroll + d16 <= top - d13) {
         if (top + h > s.scroll + window - d17) {
             s.scroll += s.scrollSpeed;
             if (top + h < s.scroll + window) {
@@ -968,7 +979,7 @@ void UiSystem::scrollMenu(Element& s) {
         Element& it = *m->children[size_t(i)];
         float t = 0, ih = 0;
         box(it, i, t, ih);
-        it.alpha = (s.scroll <= t && t + ih <= window + s.scroll) ? 1.0f : 0.0f;
+        if (s.adjustVisibility) it.alpha = (s.scroll <= t && t + ih <= window + s.scroll) ? 1.0f : 0.0f;
     }
 }
 
@@ -1954,12 +1965,10 @@ void UiSystem::addNatives() {
             if (!buildDesc(*raw, dn)) {
                 vm_.logOnce("ui: no desc " + dn);
             } else {
-                // The call's `just` does not move the desc's root (D14 [I]):
-                // make_menu_frontend's just = [center center] at pos (0, 0)
-                // is the full-screen career / game mode menu in the original.
-                qb::Struct q = p;
-                q.items.erase(std::remove_if(q.items.begin(), q.items.end(), [](const qb::Item& it) { return it.name == K("just"); }), q.items.end());
-                descSetProps(*raw, q);
+                // The call's props stay on this element; the desc's root is
+                // its child 0, so a just = [center center] with no dims moves
+                // nothing (D14).
+                descSetProps(*raw, p);
             }
         }
         // The main menu's XBOX LIVE (ONLINE: no online play in the port) as

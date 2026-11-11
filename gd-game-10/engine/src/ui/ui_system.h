@@ -84,6 +84,9 @@ struct Element {
     // 1 size dims to content / fit content, 2 fit content if larger /
     // expand if content larger.
     uint8_t fitMajor = 0, fitMinor = 0;
+    // gh4 scrollingmenu: adjust_visibility (items outside the window hidden),
+    // center_selection / top_selection [C data uidesc_setlist_b; I rules].
+    bool adjustVisibility = true, centerSelection = false, topSelection = false;
     bool scalePerAxis = false, upperCase = false;
     uint8_t blend = 0;  // a sprite's blend: 0 alpha, 1 add, 2 subtract (destination - source) [I: the setlist's shoeprints]  // text blocks: internal_scale, the dims' height before allow_expansion
     // Menus [C 0x82315AA0 / 0x82315B08]

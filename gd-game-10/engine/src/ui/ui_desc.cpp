@@ -42,13 +42,21 @@ bool UiSystem::buildDesc(Element& e, const std::string& name) {
     const qb::Struct* root = structOf(d->find(K("elements")));
     if (!root) return false;
     e.desc = key;
-    // The desc element is the tree's root: its type and props (the call's
-    // own pos / z_priority, applied again after, win) [I].
+    // The desc's root element is the descinterface element's child 0, not
+    // the element itself: setup_band_hud resolves {hud_root child = 0} as the
+    // HUD's root [C script]; the call's own props (pos, just, dims, z, alpha)
+    // stay on the descinterface element (D14).
+    auto rootEl = std::make_unique<Element>();
+    rootEl->id = nextDescId();
+    rootEl->type = K("containerelement");
+    rootEl->parent = &e;
+    Element* rootRaw = rootEl.get();
+    byId_[rootRaw->id] = rootRaw;
+    e.children.insert(e.children.begin(), std::move(rootEl));
+    ++stats_.created;
     if (const qb::Struct* props = structOf(root->find(K("props")))) {
-        qb::Struct q = *props;
-        q.items.erase(std::remove_if(q.items.begin(), q.items.end(), [](const qb::Item& it) { return it.name == K("type"); }), q.items.end());
-        if (const qb::Value* t = props->find(K("type")); t && t->key) e.type = t->key;
-        applyProps(e, q, true);
+        if (const qb::Value* t = props->find(K("type")); t && t->key) rootRaw->type = t->key;
+        applyProps(*rootRaw, *props, true);
     }
     struct Todo {
         Element* parent;
@@ -61,7 +69,7 @@ bool UiSystem::buildDesc(Element& e, const std::string& name) {
         for (const qb::Value& c : ch->arr->values)
             if (c.st) todo.push_back({parent, c.st.get()});
     };
-    addChildren(&e, root);
+    addChildren(rootRaw, root);
     for (size_t i = 0; i < todo.size(); ++i) {
         const Todo t = todo[i];
         const qb::Struct* props = structOf(t.node->find(K("props")));
@@ -93,8 +101,13 @@ Element* UiSystem::descPath(Element& e, const qb::Value* path) {
         if (!s) return nullptr;
         const uint32_t lid = keyOf(s->find(K("validatelocalid")));
         if (first) {
+            // The root: the desc element's child 0 (buildDesc).
             first = false;
-            if (!lid || at->localId == lid) continue;  // the root itself
+            if (!at->children.empty() && (!lid || at->children[0]->localId == lid)) {
+                at = at->children[0].get();
+                continue;
+            }
+            if (!lid || at->localId == lid) continue;
         }
         Element* next = nullptr;
         const qb::Value* idx = s->find(K("index"));

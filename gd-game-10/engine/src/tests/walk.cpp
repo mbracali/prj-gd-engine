@@ -56,11 +56,11 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
         steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
         steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
-        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000});
+        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000});
         steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
         steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
         // A song joins the set list (pad_choose), Start plays it (gh4's custom set list) [C scripts].
-        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000});
+        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000});
         steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, "wait", C}, 20000});
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 600000});
