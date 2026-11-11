@@ -48,7 +48,15 @@ Walk::Walk(const std::string& name) : name_(name) {
         {"uistate_optimal_drum", {"wait", "wait", C}, 60000, true},
         {"main_menu_fs", {}, 60000},
     };
-    if (name == "quickplay" || name == "lose") {
+    if (name == "qp4") {
+        // gh4 (Metallica) Quickplay, being built (M4): the main menu's
+        // QUICKPLAY (second item), then the screens as they come.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"wait", "wait", D, C}, 10000});
+        steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
+        steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
+        steps_.push_back({"uistate_never", {}, 15000});
+    } else if (name == "quickplay" || name == "lose") {
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {D, D, C}, 10000});  // career, co-op career, QUICKPLAY
         // The keyboard's Enter selects in the menus (the owner's rule: Enter is Start).

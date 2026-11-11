@@ -133,6 +133,7 @@ target_sources(gd10 PRIVATE
   src/ui/natives_sound.cpp
   src/ui/ui_system.cpp
   src/ui/ui_states.cpp
+  src/ui/natives_gh4.cpp
   src/ui/ui_desc.cpp
   src/ui/port_draw.cpp
   src/ui/port_enhanced.cpp

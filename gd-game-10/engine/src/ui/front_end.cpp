@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/front_end.h"
+#include "ui/natives_gh4.h"
 
 #include <string_view>
 
@@ -44,6 +45,7 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
     ui_->addMovieNatives();  // after the game natives' movie stubs
     scene_ = std::make_unique<MenuScene>(disc_, globals_, *vm_, *ui_);
     scene_->addNatives();  // after the flow natives' stubs (PlayIGCCam, KillCamAnim)
+    addGh4Natives(*vm_);
     states = std::make_unique<UiStates>(*vm_);
     states->focus = [this](uint32_t id) { return ui_->focusElement(id); };
     states->addNatives();  // last: the `ui` object's members before the composite objects'
