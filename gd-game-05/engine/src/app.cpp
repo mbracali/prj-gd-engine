@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <random>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -3582,7 +3583,15 @@ void prepareWalkDirs() {
     SDL_setenv_unsafe("GD05_SKIP_MOVIES", "1", 1);
     static std::string dir;
     if (!dir.empty()) return;
-    dir = (std::filesystem::temp_directory_path() / ("gd05-walk-" + std::to_string(SDL_GetTicksNS()))).string() + "/";
+    // SDL's ticks before SDL_Init are nanoseconds from the first call (all
+    // walks ~130 ms): parallel or earlier walks could share or reuse a folder
+    // (another walk's controllers.json or save). A random name, emptied.
+    std::random_device rd;
+    char tag[32];
+    std::snprintf(tag, sizeof tag, "%08x%08x", unsigned(rd()), unsigned(rd()));
+    dir = (std::filesystem::temp_directory_path() / ("gd05-walk-" + std::to_string(SDL_GetTicksNS()) + "-" + tag)).string() + "/";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
     std::filesystem::create_directories(dir);
     SDL_setenv_unsafe("GD05_SAVE_DIR", dir.c_str(), 1);
     // GD05_WALK_ENHANCED_SEED=<json>: the walk's enhanced.json before the game reads it.
