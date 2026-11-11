@@ -134,6 +134,7 @@ public:
     Element* descPath(Element& e, const qb::Value* path);
     Element* descAlias(Element& e, uint32_t alias);
     void descSetProps(Element& e, const qb::Struct& p);
+    bool descGetProp(Element& e, uint32_t name, qb::Value& out);
     // DisplayLoadingScreen's picture is up (over everything).
     bool loadingScreenUp() const { return loadingTex_ != 0; }
     Element& root() { return *root_; }

@@ -77,6 +77,16 @@ std::array<uint8_t, 4> globalColor(FrontEnd& fe, const char* name, std::array<ui
     return c;
 }
 
+// The element under `e` (any depth) with this text: gh4's help pills nest
+// their text (container > hmenu > textblock) where GH3's did not.
+const ui::Element* findText(const ui::Element& e, const std::string& text) {
+    for (const auto& c : e.children) {
+        if (c->text == text) return c.get();
+        if (const ui::Element* d = findText(*c, text)) return d;
+    }
+    return nullptr;
+}
+
 const char* itemLabel(const std::string& flowState) { return flowState == "main_menu_fs" ? "GAMEPADS" : "ENHANCED"; }
 
 }  // namespace
@@ -213,8 +223,7 @@ void PortScreens::ensureItem(const std::string& flowState) {
     const ui::Element* box = ui.find(qbkey::key("user_control_container"));
     if (!box || box->children.empty()) return;  // the screen's own helpers first
     const std::string label = itemLabel(flowState);
-    for (const auto& c : box->children)
-        if (c->text == label) return;
+    if (findText(*box, label)) return;
     qb::Struct p;
     qs::Vm::set(p, qbkey::key("Text"), qs::Vm::makeString(label));
     qs::Vm::set(p, qbkey::key("button"), qs::Vm::makeKey(qbkey::key(flowState == "main_menu_fs" ? "yellow" : "blue")));
@@ -229,11 +238,10 @@ bool PortScreens::itemRect(const std::string& flowState, float& x0, float& y0, f
     const ui::Element* box = ui.find(qbkey::key("user_control_container"));
     if (!box) return false;
     const std::string label = itemLabel(flowState);
-    for (const auto& c : box->children)
-        if (c->text == label && c->drawnIn == ui.drawCount()) {
-            x0 = c->bx0 - 40, x1 = c->bx1 + 8, y0 = c->by0 - 8, y1 = c->by1 + 8;
-            return true;
-        }
+    if (const ui::Element* c = findText(*box, label); c && c->drawnIn == ui.drawCount()) {
+        x0 = c->bx0 - 40, x1 = c->bx1 + 8, y0 = c->by0 - 8, y1 = c->by1 + 8;
+        return true;
+    }
     return false;
 }
 

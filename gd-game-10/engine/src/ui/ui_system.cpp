@@ -230,14 +230,21 @@ void UiSystem::setTexture(Element& e, uint32_t key) {
         ++stats_.missingTextures;
         return;
     }
-    // On texture set, base dims = texture size; given dims become a scale [C 0x82218F80].
-    if (e.dimsGiven && e.w > 0 && e.h > 0) e.sx = e.w / float(tw), e.sy = e.h / float(th);
-    e.w = float(tw), e.h = float(th);
-    e.dimsGiven = false;
+    // GH3: on texture set, base dims = texture size and given dims became a
+    // scale [C GH3 0x82218F80]. gh4 (Metallica): given dims stay the size and
+    // scale stays the scale (the descs give both, dims (1280, 720) on a
+    // 1024 x 512 picture with scale (1, 1), and lay children out in those
+    // dims) [I: D6]; without dims the texture's size.
+    if (!(e.dimsGiven && e.w > 0 && e.h > 0)) e.w = float(tw), e.h = float(th);
 }
 
 void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
     (void)create;
+    // gh4's menuelement: GH3's vmenu, or its hmenu with isvertical = false
+    // (desc menus, CreateScreenElement type = menuelement) [C data uidesc_*; I].
+    if (e.type == K("menuelement")) e.type = kVMenu;
+    if (const qb::Value* v = qs::Vm::param(p, K("isvertical")); v && (e.type == kVMenu || e.type == kHMenu))
+        e.type = (v->type == qb::Type::Key ? v->key != K("false") : v->number() != 0) ? kVMenu : kHMenu;
     float newDimsW = -1, newDimsH = -1;
     uint32_t newTexture = 0;
     bool haveScale = false;
@@ -383,12 +390,8 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
     }
     if (newDimsW >= 0) {
         e.w = newDimsW, e.h = newDimsH, e.givenH = newDimsH, e.dimsGiven = true;
-        if (e.type == kSprite && e.texture && !newTexture) {
-            // New dims on a textured sprite: dims are the on-screen size [C 0x82219C78].
-            int tw = 0, th = 0;
-            tex_.size(e.texContext, e.texture, tw, th);
-            if (tw) e.sx = newDimsW / float(tw), e.sy = newDimsH / float(th), e.w = float(tw), e.h = float(th), e.dimsGiven = false;
-        }
+        // GH3 turned new dims on a textured sprite into a scale [C GH3
+        // 0x82219C78]; gh4 keeps them as the size (D6).
     }
     if (newTexture) setTexture(e, newTexture);
     if (haveScale) {
@@ -1502,6 +1505,18 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
     }
     if (method == K("se_getprops")) {
         if (!e) return false;
+        // A desc's named props (se_getprops {main_menu_bg_scale}) -> locals of that name.
+        bool named = false;
+        if (e->desc)
+            for (const qb::Item& it : p.items)
+                if (it.name == 0 && it.value.type == qb::Type::Key) {
+                    qb::Value v;
+                    if (descGetProp(*e, it.value.key, v)) {
+                        if (qb::Struct* l = locals(run)) qs::Vm::set(*l, it.value.key, v);
+                        named = true;
+                    }
+                }
+        if (named) return true;
         qb::Struct q;
         qs::Vm::set(q, K("id"), qs::Vm::makeKey(e->id));
         return vm_.callNative(K("GetScreenElementProps"), run, q);

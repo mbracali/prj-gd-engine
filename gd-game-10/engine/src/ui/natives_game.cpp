@@ -432,24 +432,61 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
     // current pak per map (zones: the venue). Setting it loads the zone's
     // pak (textures now; the venue itself is M5); loads finish at once.
     auto current = std::make_shared<std::unordered_map<uint32_t, uint32_t>>();
-    auto setCurrent = [&disc, &textures, &fe, current](Vm& v, ScriptRun&, qb::Struct& p) {
+    // gh4: a pak's QB files join the globals (zone scripts, the screens'
+    // uidesc_* descs), once per pak [C data: z_frontend's uidesc_main_menu_layout].
+    auto qbLoaded = std::make_shared<std::set<std::string>>();
+    auto addQbs = [&disc, qbLoaded](Vm& v, const std::string& path) {
+        if (!qbLoaded->insert(path).second) return;
+        try {
+            const auto pak = Pak::shared(disc, path);
+            for (const PakEntry& e : pak->entries())
+                if (e.type == qbkey::key(".qb")) {
+                    auto [d, n] = pak->data(e);
+                    v.globals().add(qb::decode(d, n));
+                }
+        } catch (const std::exception& ex) {
+            SDL_Log("pak %s: %s", path.c_str(), ex.what());
+        }
+    };
+    auto setCurrent = [&disc, &textures, &fe, current, addQbs](Vm& v, ScriptRun&, qb::Struct& p) {
         const qb::Value* map = Vm::param(p, K("map"));
         const qb::Value* pak = Vm::param(p, K("pak"));
-        if (!map || !pak) return false;
-        (*current)[map->key] = pak->key;
-        if (map->key == K("zones")) fe.setZone(pak->key);
-        if (pak->key == K("none")) return true;
-        // Zone keys name the zone (z_budokan); its pak is ZONES/<zone>.pak.xen [C data].
-        const std::string zone = qbkey::name(pak->key);
-        const std::string path = "DATA/COMPRESSED/ZONES/" + zone + ".pak.xen";
-        // Under a loading screen (a song's zone, chosen in setlist_choose_song
-        // after create_loading_screen) the pak is read and decoded on a
-        // worker and uploaded when ready; the song starts after it (App).
-        // Read here it had stopped the game for half a second under the
-        // loading screen's movie [I: GH3 loads it asynchronously there too].
-        if (!disc.exists(path)) v.logOnce("SetPakManCurrent: no " + path);
-        else if (v.loadingHoldUntil() >= 0) textures.loadPakAsync(disc, path);
-        else textures.loadPak(disc, path);
+        const qb::Value* pakname = Vm::param(p, K("pakname"));
+        if (!map || (!pak && !pakname)) return false;
+        const uint32_t pk = pak ? pak->key : qbkey::key(pakname->str);
+        (*current)[map->key] = pk;
+        if (map->key == K("zones")) fe.setZone(pk);
+        if (pk == K("none")) return true;
+        auto load = [&](const std::string& path) {
+            static const bool log = SDL_getenv("GD10_FLOWLOG") != nullptr;
+            if (log) SDL_Log("pakman: %s %s", qbkey::name(map->key).c_str(), path.c_str());
+            if (!disc.exists(path)) {
+                v.logOnce("SetPakManCurrent: no " + path);
+                return;
+            }
+            // Under a loading screen (a song's zone, chosen in setlist_choose_song
+            // after create_loading_screen) the pak is read and decoded on a
+            // worker and uploaded when ready; the song starts after it (App).
+            // Read here it had stopped the game for half a second under the
+            // loading screen's movie [I: GH3 loads it asynchronously there too].
+            if (v.loadingHoldUntil() >= 0) textures.loadPakAsync(disc, path);
+            else textures.loadPak(disc, path);
+            addQbs(v, path);
+        };
+        if (map->key == K("ui_paks")) {
+            // gh4 UI paks (UIPaks, folder 'Pak/ui/'): DATA/COMPRESSED/PAK/<name>.pak.xen [C data].
+            const std::string name = pakname && !pakname->str.empty() ? pakname->str : qbkey::name(pk);
+            load("DATA/COMPRESSED/PAK/" + name + ".pak.xen");
+            return true;
+        }
+        // Zone keys name the zone (z_soundcheck); its pak is ZONES/<zone>.pak.xen,
+        // with the zones GHZones.<zone>.zones links (z_soundcheck: z_frontend) [C data].
+        load("DATA/COMPRESSED/ZONES/" + qbkey::name(pk) + ".pak.xen");
+        if (map->key == K("zones"))
+            if (const qb::Value* gz = v.global(K("GHZones")); gz && gz->st)
+                if (const qb::Value* z = gz->st->find(pk); z && z->st)
+                    if (const qb::Value* links = z->st->find(K("zones")); links && links->arr)
+                        for (const qb::Value& l : links->arr->values) load("DATA/COMPRESSED/ZONES/" + qbkey::name(l.key) + ".pak.xen");
         return true;
     };
     vm.addNative("SetPakManCurrentBlock", setCurrent);
@@ -460,10 +497,12 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         const qb::Value* map = Vm::param(p, K("map"));
         if (!map) return false;
         auto it = current->find(map->key);
-        if (it == current->end() || it->second == K("none")) return false;
+        // gh4: true with pak = none when nothing is current (frontend_load_soundcheck
+        // then loads z_soundcheck) [I: GH3 returned false; the gh4 script needs true].
+        const uint32_t pk = it == current->end() ? K("none") : it->second;
         if (qb::Struct* l = locals(run)) {
-            Vm::set(*l, K("pak"), Vm::makeKey(it->second));
-            Vm::set(*l, K("pakname"), Vm::makeString(qbkey::name(it->second)));
+            Vm::set(*l, K("pak"), Vm::makeKey(pk));
+            Vm::set(*l, K("pakname"), Vm::makeString(qbkey::name(pk)));
         }
         return true;
     };

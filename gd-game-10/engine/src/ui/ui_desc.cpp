@@ -157,4 +157,41 @@ void UiSystem::descSetProps(Element& e, const qb::Struct& p) {
     if (!own.items.empty()) applyProps(e, own, false);
 }
 
+// The value of a desc's named prop (its target on its path element) [I: the
+// targets the scripts read: pos, scale, alpha, rgba, dims].
+bool UiSystem::descGetProp(Element& e, uint32_t name, qb::Value& out) {
+    const qb::Struct* d = descOf(vm_, e.desc);
+    const qb::Value* props = d ? d->find(K("props")) : nullptr;
+    if (!props || !props->arr) return false;
+    for (const qb::Value& pv : props->arr->values) {
+        const qb::Struct* s = structOf(&pv);
+        if (!s || keyOf(s->find(K("name"))) != name) continue;
+        Element* t = descPath(e, s->find(K("path")));
+        const uint32_t prop = keyOf(s->find(K("target")));
+        if (!t) return false;
+        auto pair = [&out](float a, float b) {
+            out = qb::Value{};
+            out.type = qb::Type::Pair;
+            out.f[0] = a, out.f[1] = b;
+        };
+        if (prop == K("pos")) pair(t->x, t->y);
+        else if (prop == K("scale")) pair(t->sx, t->sy);
+        else if (prop == K("dims")) pair(t->w, t->h);
+        else if (prop == K("alpha")) out = qs::Vm::makeFloat(t->alpha);
+        else if (prop == K("rot_angle")) out = qs::Vm::makeFloat(t->rot);
+        else if (prop == K("text")) out = qs::Vm::makeString(t->text);
+        else if (prop == K("rgba")) {
+            out = qb::Value{};
+            out.type = qb::Type::Array;
+            out.arr = std::make_shared<qb::Array>();
+            out.arr->type = qb::Type::Int;
+            for (uint8_t b : t->rgba) out.arr->values.push_back(qs::Vm::makeInt(b));
+        } else {
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
 }  // namespace ui
