@@ -19,6 +19,7 @@ const char* difficultyName(int d);
 struct ChartNote {
     int32_t time = 0, length = 0;
     uint8_t frets = 0;    // bit 0 green .. bit 4 orange [C data: bits 0-4 and 0x20 only]
+    bool open = false;    // gh4: an open note (flags 0x20; bass) [I]
     bool flag20 = false;  // mask bit 0x20 [I: GH3's forced (HOPO-flip) flag; confirm in the XEX]
 };
 

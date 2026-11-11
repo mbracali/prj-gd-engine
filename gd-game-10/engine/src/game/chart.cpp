@@ -54,7 +54,19 @@ std::vector<ChartEvent> events(const qb::File& f, const std::string& name) {
     std::vector<ChartEvent> out;
     // (time, note, length) or (time, note, length, value) [C data: 4-wide
     // rows in some drums / performance / lightshow / anim / crowd arrays].
-    for (auto& r : rows(array(f, name), 3, name, 4)) out.push_back(ChartEvent{r[0], r[1], r[2], r.size() > 3 ? r[3] : -1});
+    const qb::Array* a = array(f, name);
+    // gh4 (Metallica): flat (time, packed) pairs, packed = velocity << 24 |
+    // note << 16 | length [C data: every *_notes array; the velocity is 100
+    // nearly everywhere].
+    if (a && !a->values.empty() && a->values[0].type == qb::Type::Int) {
+        if (a->values.size() % 2) throw std::runtime_error(name + ": (time, packed) pairs were expected");
+        for (size_t i = 0; i + 1 < a->values.size(); i += 2) {
+            const uint32_t p = uint32_t(intOf(a->values[i + 1]));
+            out.push_back(ChartEvent{intOf(a->values[i]), int32_t((p >> 16) & 0xFF), int32_t(p & 0xFFFF), int32_t(p >> 24)});
+        }
+        return out;
+    }
+    for (auto& r : rows(a, 3, name, 4)) out.push_back(ChartEvent{r[0], r[1], r[2], r.size() > 3 ? r[3] : -1});
     return out;
 }
 
@@ -86,18 +98,40 @@ Chart loadChart(const Disc& disc, const std::string& song) {
         for (int d = 0; d < kDifficulties; ++d) {
             const std::string notesName = song + "_song" + kPartInfix[p] + "_" + kDiff[d];
             if (const qb::Array* a = array(f, notesName)) {
-                if (a->values.size() % 3) throw std::runtime_error(notesName + ": not (time, length, frets) triples");
                 auto& out = c.parts[p].notes[size_t(d)];
-                out.reserve(a->values.size() / 3);
-                for (size_t i = 0; i < a->values.size(); i += 3) {
-                    ChartNote n;
-                    n.time = intOf(a->values[i]);
-                    n.length = intOf(a->values[i + 1]);
-                    const int32_t mask = intOf(a->values[i + 2]);
-                    if (mask & ~0x3f) throw std::runtime_error(notesName + ": unknown fret mask bits");
-                    n.frets = uint8_t(mask & 0x1f);
-                    n.flag20 = (mask & 0x20) != 0;
-                    out.push_back(n);
+                // gh4 (Metallica): (time, packed) pairs, packed = flags << 16 |
+                // length (ms); flags: frets 0x1f (green 0x01 .. orange 0x10),
+                // 0x20 an open note, 0x40 forced (GH3's 0x20 flip) [C data: every
+                // chart; meanings I, D9], 0x0f80 per-lane bits (all set on
+                // guitar) and 0x2000 (drums) not used here yet.
+                const bool gh4 = a->values.size() % 2 == 0 && a->values.size() >= 2 && (uint32_t(intOf(a->values[1])) >> 16) != 0;
+                if (gh4) {
+                    out.reserve(a->values.size() / 2);
+                    for (size_t i = 0; i + 1 < a->values.size(); i += 2) {
+                        ChartNote n;
+                        n.time = intOf(a->values[i]);
+                        const uint32_t packed = uint32_t(intOf(a->values[i + 1]));
+                        n.length = int32_t(packed & 0xFFFF);
+                        const uint32_t flags = packed >> 16;
+                        n.frets = uint8_t(flags & 0x1f);
+                        n.open = (flags & 0x20) != 0;
+                        n.flag20 = (flags & 0x40) != 0;
+                        if (!n.frets && !n.open) continue;  // no lane at all [I]
+                        out.push_back(n);
+                    }
+                } else {
+                    if (a->values.size() % 3) throw std::runtime_error(notesName + ": not (time, length, frets) triples");
+                    out.reserve(a->values.size() / 3);
+                    for (size_t i = 0; i < a->values.size(); i += 3) {
+                        ChartNote n;
+                        n.time = intOf(a->values[i]);
+                        n.length = intOf(a->values[i + 1]);
+                        const int32_t mask = intOf(a->values[i + 2]);
+                        if (mask & ~0x3f) throw std::runtime_error(notesName + ": unknown fret mask bits");
+                        n.frets = uint8_t(mask & 0x1f);
+                        n.flag20 = (mask & 0x20) != 0;
+                        out.push_back(n);
+                    }
                 }
             }
             const std::string base = song + kPartInfix[p] + "_" + kDiff[d];
