@@ -995,8 +995,11 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
                     static const Action acts[] = {Action::Up, Action::Down, Action::Down, Action::Up, Action::Confirm, Action::Confirm, Action::Back,
                                                   Action::Left, Action::Right};
                     Action a = acts[(fuzzRng_ >> 16) % 9];
-                    // No song or tutorial starts (they would need the pause menu to leave).
-                    if (a == Action::Confirm && (flowState(fe) == "uistate_select_difficulty" || flowState(fe) == "uistate_select_tutorial"))
+                    // No song, tutorial or jam session starts (they would need
+                    // the pause menu to leave: the jam band screen has no Back,
+                    // jam_band_quit_dialog is its pause menu's).
+                    if (a == Action::Confirm && (flowState(fe) == "uistate_select_difficulty" || flowState(fe) == "uistate_select_tutorial" ||
+                                                 flowState(fe) == "UIstate_jam_select_song"))
                         a = Action::Back;
                     ++fuzzPresses_;
                     if (SDL_getenv("GD10_WALKLOG")) SDL_Log("walk: fuzz %d at %s", int(a), flowState(fe).c_str());

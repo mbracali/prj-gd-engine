@@ -220,6 +220,13 @@ void SongHooks::syncStatus(SongScreen& s, int p) {
     Vm::set(*v.st, K("best_run"), Vm::makeInt(st.bestRun));
     Vm::set(*v.st, K("notes_hit"), Vm::makeInt(st.notesHit));
     Vm::set(*v.st, K("total_notes"), Vm::makeInt(st.totalNotes));
+    // The results' "highest multiplier" and notes-hit percentage read these
+    // (ui_song_breakdown_get_basic_player_data; playerinfo.qb defaults 1 / 0:
+    // the results said 1x and N/A) [C scripts; I: the C's counting].
+    const qb::Value* hm = cur->st->find(K("highest_multiplier"));
+    const int prevHigh = st.score > 0 && hm ? int(hm->number()) : 1;
+    Vm::set(*v.st, K("highest_multiplier"), Vm::makeInt(std::max(prevHigh, st.multiplier())));
+    Vm::set(*v.st, K("max_notes"), Vm::makeInt(int(t.notes.size())));
     Vm::set(*v.st, K("current_health"), Vm::makeFloat(st.health));
     Vm::set(*v.st, K("star_power_amount"), Vm::makeFloat(st.starPower));
     Vm::set(*v.st, K("star_power_used"), Vm::makeInt(st.starPowerActive ? 1 : 0));

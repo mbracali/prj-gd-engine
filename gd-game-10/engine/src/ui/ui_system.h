@@ -150,6 +150,10 @@ public:
     // gh4 descinterface (ui_desc.cpp): builds the uidesc_<desc> tree under
     // `e`; the element named by a desc alias / prop path; se_setprops on a desc.
     bool buildDesc(Element& e, const std::string& desc);
+    // autosizedims = true: the element takes the desc's rect size and the
+    // rect's corner sits on its top-left (the desc's root moves by -corner).
+    // True when it applied.
+    bool descAutoSize(Element& e, const qb::Struct& props);
     Element* descPath(Element& e, const qb::Value* path);
     Element* descAlias(Element& e, uint32_t alias);
     void descSetProps(Element& e, const qb::Struct& p);
@@ -243,6 +247,12 @@ private:
         float sx = 1, sy = 1;
     };
     BlockFit blockFit(const FontEntry& fe, const Element& e) const;
+    // A text block's lines are its children in the original (text elements:
+    // dims = the line's measured text, scale = internal_scale x the fit's
+    // scale); GetScreenElementChildren hands out ids for them (scripts read
+    // their dims: ui_setlist_unfocus_song places the icons after the title).
+    mutable std::unordered_map<uint32_t, std::pair<uint32_t, int>> lineIds_;
+    bool lineProps(uint32_t id, float& w, float& h, float& sx, float& sy) const;
     // SetText: "\m<n>" (a meta button) becomes "\b<glyph>" through
     // meta_button_map, "\_" a space [C 0x8231A2C8, 0x8228E0B0].
     // A text element's glyphs (its shadow with `shadowPass`) at the corner
@@ -268,6 +278,16 @@ private:
     // The local pos that puts e's pos point on screen point (x, y) (`pos =
     // {absolute (x, y)}`).
     void absoluteToLocal(const Element& e, float x, float y, float& lx, float& ly) const;
+    // A desc's root starts its own position space: its summed position is its
+    // own pos and its descendants' summed / absolute positions are in that
+    // space [C 0x82375E08: an element with flag 0x80000 copies its local
+    // transform; I: the flag is on a desc's root]. The nearest such root at
+    // or above e (nullptr: screen space).
+    const Element* descSpaceRoot(const Element* e) const;
+    // A native's params with included (unnamed) structs merged in.
+    static qb::Struct flattenParams(const qb::Struct& p);
+    void descToScreen(const Element& r, float& x, float& y) const;
+    void screenToDesc(const Element& r, float& x, float& y) const;
 
     qs::Vm& vm_;
     const Disc& disc_;

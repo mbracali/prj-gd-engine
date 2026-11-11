@@ -82,6 +82,11 @@ bool UiSystem::buildDesc(Element& e, const std::string& name) {
             if (c.st) todo.push_back({parent, c.st.get()});
     };
     addChildren(rootRaw, root);
+    struct Nested {
+        Element* el;
+        const qb::Struct* props;
+    };
+    std::vector<Nested> nested;
     for (size_t i = 0; i < todo.size(); ++i) {
         const Todo t = todo[i];
         const qb::Struct* props = structOf(t.node->find(K("props")));
@@ -97,9 +102,47 @@ bool UiSystem::buildDesc(Element& e, const std::string& name) {
         if (raw->zGiven) raw->z += baseZ;  // desc z on top of the element's own (below)
         ++stats_.created;
         addChildren(raw, t.node);
+        if (raw->type == K("descinterface") && props) nested.push_back({raw, props});
+    }
+    // A descinterface inside a desc builds its own desc, then takes its
+    // named props (the results' player rows song_complete_player_stats_,
+    // the set list's stars Setlist_B_stars) [C data].
+    for (const Nested& n : nested) {
+        const qb::Value* dv = n.props->find(K("desc"));
+        const std::string dn = !dv ? std::string() : dv->type == qb::Type::String ? dv->str : qbkey::name(dv->key);
+        if (dn.empty() || !buildDesc(*n.el, dn)) {
+            vm_.logOnce("ui: no nested desc " + dn);
+            continue;
+        }
+        descSetProps(*n.el, *n.props);
+        descAutoSize(*n.el, *n.props);
     }
     // The original applies each subtree before the next sibling; the order
     // above (breadth first) only matters for z ties [I].
+    return true;
+}
+
+bool UiSystem::descAutoSize(Element& e, const qb::Struct& props) {
+    // [C data: a desc's rect is its elements' bounds (Setlist_B_stars: the
+    // 150 x 30 menu at (40, 73) centred = [-35 58 150 30]); the rows made
+    // with autosizedims (song_complete_player_stats_, generic menu items,
+    // cash reward rows) are laid out in that size; I: the shift].
+    const qb::Value* a = props.find(K("autosizedims"));
+    if (!a || !(a->type == qb::Type::Key ? a->key == K("true") : a->number() != 0)) return false;
+    const qb::Struct* d = descOf(vm_, e.desc);
+    const qb::Value* rect = d ? d->find(K("rect")) : nullptr;
+    if (!rect || !rect->arr || rect->arr->values.size() < 4 || e.children.empty()) return false;
+    const float rx = rect->arr->values[0].number(), ry = rect->arr->values[1].number();
+    e.w = rect->arr->values[2].number(), e.h = rect->arr->values[3].number();
+    e.dimsGiven = true;
+    // The rect is in the desc's own space, where the root's pos is taken
+    // without its pos_anchor (cash_reward_row_3's centred root at (0, 0),
+    // rect [-155.5 0 752 100]; song_complete_player_stats_'s top-left one at
+    // (121.5, 265.2), rect [115.8 265.2 ...]): the root sits at pos - corner
+    // from the element's top-left [I].
+    Element& root = *e.children[0];
+    root.x -= rx, root.y -= ry;
+    root.posAnchorX = root.posAnchorY = -1, root.posAnchorGiven = true;
     return true;
 }
 
@@ -158,6 +201,16 @@ Element* UiSystem::descAlias(Element& e, uint32_t alias) {
 }
 
 void UiSystem::descSetProps(Element& e, const qb::Struct& p) {
+    // `desc = '<name>'`: another desc in its place (the set list's focused
+    // song: setlist_b_listing_desc -> setlist_b_info_desc, its info panel)
+    // [C script ui_setlist_focus_song; I: the old tree goes].
+    if (const qb::Value* dv = p.find(K("desc")); dv && (dv->type == qb::Type::String || dv->type == qb::Type::Key)) {
+        const std::string dn = dv->type == qb::Type::String ? dv->str : qbkey::name(dv->key);
+        if (!dn.empty() && qbkey::key("uidesc_" + dn) != e.desc) {
+            if (!e.children.empty() && e.desc) destroy(e.children[0].get());
+            if (!buildDesc(e, dn)) vm_.logOnce("ui: no desc " + dn);
+        }
+    }
     const qb::Struct* d = descOf(vm_, e.desc);
     const qb::Value* props = d ? d->find(K("props")) : nullptr;
     qb::Struct own;
@@ -176,8 +229,12 @@ void UiSystem::descSetProps(Element& e, const qb::Struct& p) {
         Element* target = descPath(e, match->find(K("path")));
         const uint32_t prop = keyOf(match->find(K("target")));
         if (!target || !prop) continue;
+        // A desc prop sets its one target; the element's flips stay [I].
         qb::Struct one;
         qs::Vm::set(one, prop, it.value);
+        qb::Item keep;
+        keep.value.type = qb::Type::Key, keep.value.key = K("preserve_flip");
+        one.items.push_back(keep);
         applyProps(*target, one, false);
     }
     if (!own.items.empty()) applyProps(e, own, false);

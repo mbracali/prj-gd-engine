@@ -26,6 +26,7 @@ uint32_t K(const char* s) { return qbkey::key(s); }
 const uint32_t kRootWindow = K("root_window");
 const uint32_t kVMenu = K("vmenu"), kHMenu = K("hmenu"), kVScrollingMenu = K("vscrollingmenu");
 const uint32_t kSprite = K("spriteelement"), kText = K("textelement"), kTextBlock = K("textblockelement");
+const uint32_t kDescInterface = K("descinterface");
 constexpr float kDeg = 3.14159265f / 180.0f;
 
 bool isMenu(const Element& e) { return e.type == kVMenu || e.type == kHMenu; }
@@ -274,6 +275,13 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         // z) sets nothing: the element keeps its parent's z + 1 [I: only so is
         // the select-difficulty highlight over its backdrop].
         if (n != 0 && v.type == qb::Type::None) continue;
+        // A desc's `flip_h = true` / `flip_v = true` (the left set list
+        // highlight, the right inner shadow, the set list's fade) [C data].
+        if (n == K("flip_h") || n == K("flip_v")) {
+            const bool on = v.type == qb::Type::Key ? v.key == K("true") : v.number() != 0;
+            (n == K("flip_h") ? e.flipH : e.flipV) = on;
+            continue;
+        }
         if (n == 0) {
             if (v.type != qb::Type::Key) continue;
             const uint32_t f = v.key;
@@ -365,7 +373,8 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
                 e.exclusiveDevice = int(v.number());
             }
         }
-        else if (n == K("font_spacing")) e.fontSpacing = v.number(), e.fontSpacingGiven = true;
+        // font_spacing -1: the font's own bearing and tracking [C 0x824D11B0].
+        else if (n == K("font_spacing")) e.fontSpacing = v.number(), e.fontSpacingGiven = int(v.number()) != -1;
         else if (n == K("space_spacing")) e.spaceSpacing = v.number();
         else if (n == K("line_spacing")) e.lineSpacing = v.number();
         else if (n == K("regular_space_amount")) e.regularSpace = v.number();
@@ -441,9 +450,10 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
 }
 
 float UiSystem::textWidth(const FontEntry& fe, const std::u16string& s, const Element& e) const {
-    // [C 0x8232ADF0]: a glyph adds its width - bearing, a space the font's
-    // space width; each then adds the tracking (font_spacing, if given,
-    // replaces the tracking and drops the bearing). Button glyphs
+    // [C 0x824D11B0]: a glyph adds width + advance adjust - x offset -
+    // bearing, a space the font's space width - bearing; each then adds the
+    // tracking (font_spacing other than -1 replaces the tracking and drops
+    // the bearing). Button glyphs
     // ("\b<n>", "\s<n>") measure like glyphs; "\c", "\u" (3 chars) and
     // "\L" (2) take no room.
     const font::Font& f = fe.f;
@@ -480,8 +490,14 @@ float UiSystem::textWidth(const FontEntry& fe, const std::u16string& s, const El
         } else if (s[i] == u'\\' && i + 1 < s.size()) {
             ++i;  // "\\\\": one backslash
         }
-        if (!g && s[i] == u' ') w += f.spaceWidth + e.spaceSpacing + track;
-        else w += (g ? g->width : f.glyphFor(uint16_t(s[i])).width) - bearing + track;
+        // As the draw: a glyph adds width + advance adjust - x offset -
+        // bearing + tracking, a space its width - bearing + tracking [C 0x824D11B0].
+        if (!g && s[i] == u' ') {
+            w += f.spaceWidth + e.spaceSpacing - bearing + track;
+        } else {
+            const font::Glyph& gg = g ? *g : f.glyphFor(uint16_t(s[i]));
+            w += gg.width + float(gg.advanceAdjust) - float(gg.xOffset) - bearing + track;
+        }
     }
     return std::max(best, w);
 }
@@ -553,6 +569,21 @@ UiSystem::BlockFit UiSystem::blockFit(const FontEntry& fe, const Element& e) con
         b.lineScale.push_back(k);
     }
     return b;
+}
+
+bool UiSystem::lineProps(uint32_t id, float& w, float& h, float& sx, float& sy) const {
+    auto it = lineIds_.find(id);
+    if (it == lineIds_.end()) return false;
+    const Element* e = find(it->second.first);
+    const FontEntry* fe = e ? fontFor(e->font) : nullptr;
+    if (!fe) return false;
+    const BlockFit b = blockFit(*fe, *e);
+    const size_t i = size_t(it->second.second);
+    if (i >= b.lines.size()) return false;
+    w = textWidth(*fe, b.lines[i], *e), h = fe->f.lineHeight;
+    sx = e->internalScale * b.sx * b.lineScale[i];
+    sy = e->internalScale * (e->scalePerAxis ? b.sy : b.sx * b.lineScale[i]);
+    return true;
 }
 
 // text_case = upper: letters up, escape codes ("\\n", "\\c1", "\\b0") kept.
@@ -1180,7 +1211,51 @@ UiSystem::Frame UiSystem::frameOf(const Element& e) const {
     return f;
 }
 
+qb::Struct UiSystem::flattenParams(const qb::Struct& p) {
+    bool any = false;
+    for (const qb::Item& it : p.items) any = any || (it.name == 0 && it.value.type == qb::Type::Struct && it.value.st);
+    if (!any) return p;
+    qb::Struct out;
+    for (const qb::Item& it : p.items) {
+        if (it.name == 0 && it.value.type == qb::Type::Struct && it.value.st) {
+            for (const qb::Item& sub : flattenParams(*it.value.st).items) {
+                if (sub.name) qs::Vm::set(out, sub.name, sub.value);
+                else out.items.push_back(sub);
+            }
+        } else if (it.name) {
+            qs::Vm::set(out, it.name, it.value);
+        } else {
+            out.items.push_back(it);
+        }
+    }
+    return out;
+}
+
+const Element* UiSystem::descSpaceRoot(const Element* e) const {
+    for (; e && e != root_.get(); e = e->parent)
+        if (e->parent && e->parent->type == kDescInterface && !e->parent->children.empty() && e->parent->children[0].get() == e) return e;
+    return nullptr;
+}
+
+void UiSystem::descToScreen(const Element& r, float& x, float& y) const {
+    const Frame f = frameOf(r);
+    x = f.wx + (x - r.x) * (r.sx != 0 ? f.wsx / r.sx : 1), y = f.wy + (y - r.y) * (r.sy != 0 ? f.wsy / r.sy : 1);
+}
+
+void UiSystem::screenToDesc(const Element& r, float& x, float& y) const {
+    const Frame f = frameOf(r);
+    x = r.x + (x - f.wx) * (f.wsx != 0 ? r.sx / f.wsx : 1), y = r.y + (y - f.wy) * (f.wsy != 0 ? r.sy / f.wsy : 1);
+}
+
 void UiSystem::absoluteToLocal(const Element& e, float x, float y, float& lx, float& ly) const {
+    // In the space of e's desc (see descSpaceRoot); a desc's root takes it as its pos.
+    if (const Element* r = descSpaceRoot(&e)) {
+        if (r == &e) {
+            lx = x, ly = y;
+            return;
+        }
+        descToScreen(*r, x, y);
+    }
     const Element& p = e.parent ? *e.parent : *root_;
     const Frame f = e.parent && e.parent != root_.get() ? frameOf(p) : Frame{};
     const float pr = -f.wrot * kDeg;
@@ -1965,6 +2040,10 @@ void UiSystem::addNatives() {
         return true;
     });
     vm_.addNative("CreateScreenElement", [this](Vm&, ScriptRun& run, qb::Struct& p) {
+        // `CreateScreenElement <sprite_params> pos = ...`: an included struct
+        // gives its fields, later ones replacing earlier (setup_custom_setlist_helpers'
+        // six circles: type, parent, just in sprite_params) [C script].
+        p = flattenParams(p);
         auto e = std::make_unique<Element>();
         static uint32_t anonymous = 0x80000000u;
         const qb::Value* type = Vm::param(p, K("type"));
@@ -1996,7 +2075,8 @@ void UiSystem::addNatives() {
                 // with dims (the helper pills, 1024 x 36) the call's just
                 // places it (D14 [I]).
                 descSetProps(*raw, p);
-                if (!Vm::param(p, K("dims"))) {
+                if (descAutoSize(*raw, p)) {
+                } else if (!Vm::param(p, K("dims"))) {
                     raw->w = parent->w, raw->h = parent->h;
                     raw->justX = raw->justY = -1;
                 }
@@ -2093,20 +2173,43 @@ void UiSystem::addNatives() {
             qb::Value v;
             v.type = qb::Type::Pair;
             v.f[0] = e->x, v.f[1] = e->y;
-            // `summed`: on screen (the pos point through every parent) [I:
-            // mainmenu_focus puts the highlight there with pos = {absolute}].
+            // `summed`: the pos point through every parent [C 0x823F5AA8 reads
+            // +0x1B0, 0x82375E08 sets it], in the desc's space (descSpaceRoot;
+            // ui_create_setlist_spawned places the icons from it in the row's
+            // own frame); mainmenu_focus puts the highlight there with pos =
+            // {absolute}.
             if (Vm::flag(p, K("summed"))) {
                 const Frame f = frameOf(*e);
                 v.f[0] = f.wx, v.f[1] = f.wy;
+                if (const Element* r = descSpaceRoot(e)) screenToDesc(*r, v.f[0], v.f[1]);
             }
             Vm::set(*l, K("ScreenElementPos"), v);
         }
         return true;
     });
     vm_.addNative("GetScreenElementProps", [this](Vm&, ScriptRun& run, qb::Struct& p) {
+        auto pair = [](float a, float b) {
+            qb::Value v;
+            v.type = qb::Type::Pair;
+            v.f[0] = a, v.f[1] = b;
+            return v;
+        };
+        // A text block's line (GetScreenElementChildren of a text block).
+        if (const qb::Value* idv = Vm::param(p, K("id")); idv && (idv->type == qb::Type::Key || idv->type == qb::Type::KeyPtr)) {
+            float w = 0, h = 0, sx = 1, sy = 1;
+            if (lineProps(idv->key, w, h, sx, sy)) {
+                if (qb::Struct* l = locals(run)) {
+                    Vm::set(*l, K("dims"), pair(w, h));
+                    Vm::set(*l, K("scale"), pair(sx, sy));
+                    Vm::set(*l, K("pos"), pair(0, 0));
+                }
+                return true;
+            }
+        }
         Element* e = resolve(Vm::param(p, K("id")));
         if (!e) return false;
         if (qb::Struct* l = locals(run)) {
+            Vm::set(*l, K("dims"), pair(e->w, e->h));
             qb::Value pos;
             pos.type = qb::Type::Pair;
             pos.f[0] = e->x, pos.f[1] = e->y;
@@ -2147,8 +2250,19 @@ void UiSystem::addNatives() {
         arr.arr = std::make_shared<qb::Array>();
         arr.arr->type = qb::Type::Key;
         for (auto& ch : e->children) arr.arr->values.push_back(Vm::makeKey(ch->id));
+        // A text block: its lines [I: the original builds a text element per line].
+        if (e->type == kTextBlock && e->children.empty()) {
+            if (const FontEntry* fe = fontFor(e->font)) {
+                const size_t n = blockFit(*fe, *e).lines.size();
+                for (size_t i = 0; i < n; ++i) {
+                    const uint32_t lid = 0xB0000000u | ((e->id & 0x00FFFFFFu) << 4) | uint32_t(i & 15);
+                    lineIds_[lid] = {e->id, int(i)};
+                    arr.arr->values.push_back(Vm::makeKey(lid));
+                }
+            }
+        }
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("children"), arr);
-        return !e->children.empty();
+        return !arr.arr->values.empty();
     });
     vm_.addNative("ResolveScreenElementID", [this](Vm&, ScriptRun& run, qb::Struct& p) {
         Element* e = resolve(Vm::param(p, K("id")));
