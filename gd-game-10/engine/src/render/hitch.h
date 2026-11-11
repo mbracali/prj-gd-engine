@@ -18,6 +18,16 @@ double frameMs();
 // frame: while the frame has spent less than the slice budget (8 ms), and
 // always one piece a frame (of all the loads: they go on in turn).
 bool slice();
+// While one is open, slice() is always true: a load done at once in a loop
+// (VenueStage::attach, a song started without its preload) would otherwise
+// make no progress once the frame's slice is taken (it spun for ever).
+class AllAtOnce {
+public:
+    AllAtOnce();
+    ~AllAtOnce();
+    AllAtOnce(const AllAtOnce&) = delete;
+    AllAtOnce& operator=(const AllAtOnce&) = delete;
+};
 // The hitch log's summary (frames over the budget, the longest, by screen).
 void report();
 // The last frame's work without its present (a "present" scope: the swap,

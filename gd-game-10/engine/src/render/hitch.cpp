@@ -58,8 +58,15 @@ void frameBegin() {
 
 double frameMs() { return st().frameOpen ? double(SDL_GetTicksNS() - st().frameStart) / 1e6 : 0; }
 
+namespace {
+thread_local int allAtOnce = 0;  // AllAtOnce scopes open on this thread
+}
+
+AllAtOnce::AllAtOnce() { ++allAtOnce; }
+AllAtOnce::~AllAtOnce() { --allAtOnce; }
+
 bool slice() {
-    if (!onRenderThread()) return true;
+    if (!onRenderThread() || allAtOnce > 0) return true;
     State& s = st();
     const bool ok = !s.sliceTaken || frameMs() < kSliceMs;
     s.sliceTaken = true;
