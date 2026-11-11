@@ -60,6 +60,9 @@ public:
     // quad where the beam's frustum meets the stage plane (y 0), shadowed by
     // the band's dynamic shadow map.
     void drawProjectors(const venue::CamPose& cam, const venue::LightShow& show);
+    // The light at `at` for lit particles (every created light, any group):
+    // gh3shader::spriteLight of its light set; rgb 1 when the venue has none.
+    void lightAt(const std::vector<venue::LightState>& lights, const venue::LightShow& show, const venue::Vec3& at, float rgb[3]) const;
     // A viewport texture override (CreateViewportTextureOverride: the crowd's
     // renders on the cards); an empty id removes it.
     // Moving level objects (render/particles.h nodeMotion): a node's world

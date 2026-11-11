@@ -617,7 +617,13 @@ void VenueStage::draw(double ms) {
     view_->drawVolumes(cam, lights_);
     static const bool noRays = SDL_getenv("GD10_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
     if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, fx_.depthSnapshot());
-    if (particles_) particles_->draw(cam, ms);
+    if (particles_) {
+        VenueView* vv = view_.get();
+        const auto* ls = &lightState_;
+        const auto* show = &lights_;
+        particles_->lightAt = [vv, ls, show](const venue::Vec3& at, float rgb[3]) { vv->lightAt(*ls, *show, at, rgb); };
+        particles_->draw(cam, ms);
+    }
     // gd02's extras (EnhancedLights) work in GH2's space (z up, ~44 units a
     // metre): the band's feet and the camera mapped there, and back by the matrix [I].
     constexpr float kU = 44.0f;

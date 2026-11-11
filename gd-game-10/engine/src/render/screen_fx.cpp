@@ -209,11 +209,14 @@ void ScreenFx::bloomBlur(const Target& t, const Target& tmp, float gain) {
     if (!h || !v) return;
     float g7[7], sum = 0;
     for (int i = 0; i < 7; ++i) sum += (g7[i] = gauss(float(i - 3), 1.0f));
-    float w[7][4] = {};
-    for (int i = 0; i < 7; ++i) w[i][0] = w[i][1] = w[i][2] = w[i][3] = gain * g7[i] / sum;
+    // m_filterSampleWeights: gh4's c64..c70 (GH3: c0..c6) [C data].
     gh3shader::Globals g;
-    pass(h, &tmp, dev_->targetTexture(t.id), {}, g, w, 7, Blend::Replace, true);
-    pass(v, &t, dev_->targetTexture(tmp.id), {}, g, w, 7, Blend::Replace, true);
+    for (int i = 0; i < 7; ++i) {
+        const float wi = gain * g7[i] / sum;
+        g.set(64 + i, wi, wi, wi, wi);
+    }
+    pass(h, &tmp, dev_->targetTexture(t.id), {}, g, nullptr, 0, Blend::Replace, true);
+    pass(v, &t, dev_->targetTexture(tmp.id), {}, g, nullptr, 0, Blend::Replace, true);
 }
 
 void ScreenFx::dofBlur(const Target& t, const Target& tmp, float radius) {
@@ -234,7 +237,7 @@ void ScreenFx::dofBlur(const Target& t, const Target& tmp, float radius) {
         const Target& dst = dir == 0 ? tmp : t;
         for (int k = 0; k < passes; ++k) {
             const float base = 6.0f * float(k);
-            float off[7], w[7][4] = {};
+            float off[7];
             off[0] = 0;
             float wt[7];
             wt[0] = k == 0 ? gauss(0, rho) : 0.0f;
@@ -244,13 +247,14 @@ void ScreenFx::dofBlur(const Target& t, const Target& tmp, float radius) {
                 off[2 * j - 1] = o, off[2 * j] = -o;
                 wt[2 * j - 1] = wt[2 * j] = ww;
             }
-            for (int i = 0; i < 7; ++i) w[i][0] = w[i][1] = w[i][2] = w[i][3] = wt[i];
+            // gh4: m_filterSampleWeights c64.., m_filterSampleOffsets c80.. (GH3: c0.., c168..) [C data].
             gh3shader::Globals g;
             for (int i = 0; i < 7; ++i) {
                 const float ox = dir == 0 ? off[i] / float(src.w) : 0.0f, oy = dir == 1 ? off[i] / float(src.h) : 0.0f;
-                g.set(168 + i, ox, oy, 0, 0);
+                g.set(80 + i, ox, oy, 0, 0);
+                g.set(64 + i, wt[i], wt[i], wt[i], wt[i]);
             }
-            pass(p, &dst, dev_->targetTexture(src.id), {}, g, w, 7, k == 0 ? Blend::Replace : Blend::Add);
+            pass(p, &dst, dev_->targetTexture(src.id), {}, g, nullptr, 0, k == 0 ? Blend::Replace : Blend::Add);
         }
     }
 }
@@ -293,13 +297,13 @@ void ScreenFx::end(const Params& p, gfx::TargetId into) {
         const Target& out = next();
         pass(nullptr, &out, cur, {}, none, nullptr, 0, Blend::Replace);
         const gh3shader::Program* comp = gh3_.get(immediate_, "_2D_DepthOfFieldNear");
-        float pc[55][4] = {};
-        // m_vInvProjMatT (c53): viewZ = 1 / (depth x z + w) [C]; this depth buffer's projection.
+        float pc[5][4] = {};
+        // m_vInvProjMatT (gh4 c0; GH3 c53): viewZ = 1 / (depth x z + w) [C]; this depth buffer's projection.
         const float n = p.nearZ, f = p.farZ;
-        pc[53][2] = -(f - n) / (f * n), pc[53][3] = 1.0f / n;
-        // m_vDepthOfFieldParams (c54): (-, strength, (back - front) x far, front x far) [C].
-        pc[54][1] = d.strength, pc[54][2] = (d.backDist - d.frontDist) * p.cameraFar, pc[54][3] = d.frontDist * p.cameraFar;
-        if (comp) pass(comp, &out, dev_->targetDepth(scene_.id), dev_->targetTexture(blurA->id), none, pc, 55, Blend::Alpha, true);
+        pc[0][2] = -(f - n) / (f * n), pc[0][3] = 1.0f / n;
+        // m_vDepthOfFieldParams (gh4 c4; GH3 c54): (-, strength, (back - front) x far, front x far) [C].
+        pc[4][1] = d.strength, pc[4][2] = (d.backDist - d.frontDist) * p.cameraFar, pc[4][3] = d.frontDist * p.cameraFar;
+        if (comp) pass(comp, &out, dev_->targetDepth(scene_.id), dev_->targetTexture(blurA->id), none, pc, 5, Blend::Alpha, true);
         cur = dev_->targetTexture(out.id), curT = &out;
     }
     // bright_sat (8243E5F0): out = (rgb, 1) x H x S x C x B x M as three
@@ -340,10 +344,9 @@ void ScreenFx::end(const Params& p, gfx::TargetId into) {
                 m[j][3] = o;
             }
         }
-        gh3shader::Globals g;
-        for (int j = 0; j < 3; ++j) g.set(128 + j, m[j][0], m[j][1], m[j][2], m[j][3]);
+        // m_ColorTransform0..2: the pixel shader's c0..c2 in gh4 (GH3: c128..c130) [C data].
         const Target& out = next();
-        pass(prog, &out, cur, {}, g, nullptr, 0, Blend::Replace);
+        pass(prog, &out, cur, {}, none, m, 3, Blend::Replace);
         cur = dev_->targetTexture(out.id), curT = &out;
     }
     // simple_bloom (8243D240), materialfilter: the colour where the stencil
@@ -366,10 +369,9 @@ void ScreenFx::end(const Params& p, gfx::TargetId into) {
             toQuarter(dev_->targetTexture(scene_.id));
         } else {
             // _2D_Cutoff: the 16-texel mean where its rgb sum exceeds the cutoff colour's [C #2330].
-            float pc[55][4] = {};
-            pc[54][0] = b.cutoff[0], pc[54][1] = b.cutoff[1], pc[54][2] = b.cutoff[2];
+            float pc[1][4] = {{b.cutoff[0], b.cutoff[1], b.cutoff[2], 0}};  // m_sCutoffColor: gh4 c0 (GH3 c54) [C data]
             const bool direct = sceneQ_.w == quarterA_.w && sceneQ_.h == quarterA_.h;
-            pass(gh3_.get(immediate_, "_2D_Cutoff"), direct ? &quarterA_ : &sceneQ_, cur, {}, none, pc, 55, Blend::Replace);
+            pass(gh3_.get(immediate_, "_2D_Cutoff"), direct ? &quarterA_ : &sceneQ_, cur, {}, none, pc, 1, Blend::Replace);
             if (!direct) resample(dev_->targetTexture(sceneQ_.id), sceneQ_.w, sceneQ_.h, quarterA_);
         }
         bloomBlur(quarterA_, quarterB_, b.falloff1);
@@ -379,10 +381,9 @@ void ScreenFx::end(const Params& p, gfx::TargetId into) {
     pass(nullptr, nullptr, cur, {}, none, nullptr, 0, Blend::Replace);
     if (bloom) {
         const gh3shader::Program* comp = gh3_.get(immediateAlt_, "_2D_ComposeBloom0");
-        gh3shader::Globals gc;
-        gc.set(128, b.strength[0], b.strength[1], b.strength[2], 1);  // m_kColor
-        gc.set(129, b.bloom1, b.bloom1, b.bloom1, 1);                  // m_kColorBloom0
-        if (comp) pass(comp, nullptr, dev_->targetTexture(quarterA_.id), {}, gc, nullptr, 0, Blend::Add);
+        // m_kColor, m_kColorBloom0: gh4's c0 / c1 (GH3: c128 / c129) [C data].
+        const float kc[2][4] = {{b.strength[0], b.strength[1], b.strength[2], 1}, {b.bloom1, b.bloom1, b.bloom1, 1}};
+        if (comp) pass(comp, nullptr, dev_->targetTexture(quarterA_.id), {}, none, kc, 2, Blend::Add);
     }
     dev_->setTarget(outer_);
     dev_->setViewport(ox_, oy_, ow_, oh_);

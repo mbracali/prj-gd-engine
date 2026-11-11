@@ -17,22 +17,26 @@
 
 class Disc;
 
-// GH3's own material shaders on the render device: the material library
-// (data/matlib.h) read once per disc, each template's technique translated
-// (render/xenos_glsl.h) and compiled on first use, and the engine constants
-// c128..c255 the shaders read (gh3shader::Globals), laid out as GH3's
-// shaders declare them [C: the constant tables, docs/venues.md "Shading"].
+// The original material shaders on the render device: the material library
+// (data/matlib.h, gh4's MATL v3) read once per disc, each template's
+// technique translated (render/xenos_glsl.h) and compiled ahead of the
+// draw, and the engine constants the shaders read (gh3shader::Globals,
+// ObjectConstants), laid out as gh4's shaders declare them [C: the
+// constant tables, docs/render.md].
 namespace gh3shader {
 
 // The disc's material library (cached; nullptr when the disc has none or
 // it does not parse, with the reason logged once).
 std::shared_ptr<const matlib::Library> library(const Disc& disc);
 
-// The engine's float constants c128..c255 (one block, both stages) [C:
-// register numbers from the constant tables of all 4,981 shaders].
+// The engine's float constants c64..c255 (one block, both stages) [C:
+// register numbers from the constant tables of all 4,981 shaders]; c64..c99
+// are the filter passes' (m_filterSampleWeights c64, m_filterSampleOffsets
+// c80, ...), c124 the vertex shaders' g_TextureProjection0.
 struct Globals {
-    float c[128][4] = {};
-    float* reg(int r) { return c[r - 128]; }
+    float c[192][4] = {};
+    float* reg(int r) { return c[r - 64]; }
+    const float* reg(int r) const { return c[r - 64]; }
     void set(int r, float x, float y, float z, float w) {
         float* p = reg(r);
         p[0] = x, p[1] = y, p[2] = z, p[3] = w;
@@ -43,11 +47,11 @@ struct Globals {
     void setMatrix(int r, const gfx::Mat4& m, int rows = 4);
 };
 
-// The per-object registers: c176..c191 (the lights) in c[0..15] and
-// c216..c227 (g_World, g_WorldView, g_WorldViewProj) in c[16..27].
+// The per-object registers (xenos::objectSlot): gh4's lights c160..c211,
+// the world matrices c216..c231 and the light attenuations c248..c253.
 struct ObjectConstants {
-    float c[28][4] = {};
-    float* reg(int r) { return c[r < 216 ? r - 176 : r - 200]; }
+    float c[xenos::kObjectRegs][4] = {};
+    float* reg(int r) { return c[xenos::objectSlot(r)]; }
     void set(int r, float x, float y, float z, float w) {
         float* p = reg(r);
         p[0] = x, p[1] = y, p[2] = z, p[3] = w;
@@ -57,18 +61,27 @@ struct ObjectConstants {
     }
 };
 
+// gh4's registers [C data: the constant tables].
 enum : int {
-    kRegShadowLightIntensity = 137,  // g_shLightShadowIntensity
+    kRegTextureProjection0 = 124,    // g_TextureProjection0 (vertex, 4 rows)
+    kRegTopviewRange = 132,          // g_TopviewRange
+    kRegWetEffect = 134,             // g_wetEffectParams
+    kRegNearFar = 135,               // g_NearFar_Values
+    kRegWibbleDir = 137,             // g_wibbleDirection
     kRegDistanceLodScaler = 138,     // g_distanceLODScaler
     kRegShadowDir = 140,             // g_shadowDirWorldSpace
     kRegShadowMapConstants = 141, kRegShadowLevel = 142, kRegShadowMapSize = 143,
     kRegViewToLight0 = 144, kRegViewToLight1 = 148,
-    kRegInvProj = 152, kRegViewport = 154, kRegTime = 155, kRegTexProj0 = 156, kRegWibbleDir = 164,
-    kRegAmbient = 176,               // g_ambientLightColor
-    kRegDirLight0 = 177,             // g_dirLight<n>Dir 177 + 2n, Color 178, SpecColor 179 (+ 2n for 1..3: 181, 183, 185)
-    kRegShLight0 = 188,              // g_shLight0..3Color: L1 spherical harmonics (constant, x, y, z)
-    kRegWorld = 216, kRegWorldView = 220, kRegWorldViewProj = 224, kRegView = 232, kRegProjection = 236,
-    kRegInvView = 240, kRegViewProj = 244,
+    kRegInvProj = 152, kRegClipPlanes = 153, kRegViewport = 154, kRegTime = 155,
+    kRegAmbient = 160,               // g_ambientLightColor
+    kRegDirLight0 = 161,             // g_dirLight<n>Dir 161 + 2n (n > 0: 164, 166, 168), Color 162, SpecColor 163 (165, 167, 169)
+    kRegShLight0 = 172,              // g_SHLight0..3: L1 spherical harmonics (constant, x, y, z)
+    kRegPointLight = 176,            // g_PointLight: 4 lights x (position, colour, -, -)
+    kRegSpotLight = 192,             // g_SpotLight: 5 lights x (direction, position, colour, -); the fifth's w row: its attenuation and cone
+    kRegWorld = 216, kRegWorldView = 220, kRegWorldViewProj = 224, kRegWorldIT = 228,
+    kRegView = 232, kRegProjection = 236, kRegInvView = 240, kRegViewProj = 244,
+    kRegPointAtten = 248,            // g_pointLightGroup0AttenuationX / Y: lights 0..3 in x..w
+    kRegSpotAtten = 250,             // g_spotLightGroup0AttenuationX / Y (distance), Z / W (cone): lights 0..3
 };
 
 // A light as the light manager sees it (the light record 822BE020 fills,
@@ -79,6 +92,7 @@ struct LightIn {
     gfx::Vec3 color{1, 1, 1};      // lightcolor (0..1), not scaled
     float intensity = 1, specular = 1, shadow = 1;
     float attA = 0, attB = -2000;  // point / spot: attenend^2, 1 / (attenend^2 - attenstart^2 + 0.0001)
+    float coneX = 1, coneY = 0;    // spot: cone = saturate((cos - X) x Y), X = cos(field / 2), Y = 1 / (cos(hotspot / 2) - X)
     bool dynamic = false;          // a candidate everywhere (no box)
     bool shadowLight = false;      // ranked x 50000
     gfx::Vec3 boxCenter, boxHalf{1e9f, 1e9f, 1e9f};
@@ -91,18 +105,29 @@ LightIn lightIn(const venue::Light& l, const venue::LightState& s);
 // light without a lightgroup) everywhere [C].
 bool groupLights(uint32_t lightGroup, uint32_t objectGroup);
 
-// The light registers (c176..c191) of an object at `p` (a mesh: its
-// bounding sphere's centre; a model: its origin): 823DA990's light set and
-// 823DB168's upload [C]. The candidates are the lights whose box holds `p`
-// (and the dynamic ones), at most 32 in order, ranked by luminance x
-// intensity x attenuation (x 50000 for shadow lights); the first
-// directional / point light is the key light (c177..c179, not in the SH),
-// the next three take the specular slots (c180..c185) and go into the L1
-// spherical harmonics (4/17, 8/17 l) with every other directional, point
-// (attenuated) and spot light (by the unnormalised axis distance); ambient
-// lights sum into c176; a prt light adds its own coeff0..3 x intensity to
-// the SH (no slot).
+// The light registers of an object at `p` (a mesh: its bounding sphere's
+// centre; a model: its origin), gh4's layout [C data: the registers and
+// what the microcode does with them; I: which light takes which slot, the
+// executable's light set is VMX128 code not read yet, docs/render.md
+// "Lights"]. The candidates are GH3's (823DA990: the lights whose box
+// holds `p` and the dynamic ones, at most 32, ranked by luminance x
+// intensity x attenuation, x 50000 for shadow lights). The first
+// directional light is the key light (c161..c163), the next three take
+// the specular slots (c164..c169) and the L1 spherical harmonics (4/17,
+// 8/17 l, c172..c175); the first four point lights are the vertex
+// shaders' g_PointLight (c176 + 4i: position, colour x intensity; c248 /
+// c249: attend^2, 1 / (attend^2 - attstart^2)), the first five spot
+// lights g_SpotLight (c192 + 4i: direction, position, colour x intensity;
+// c250..c253 and c211: distance and cone terms); lights beyond those go
+// into the SH as GH3's did. Ambient lights sum into c160 and SH0 (the
+// shaders read one or the other, never both [C data]); a prt light adds
+// its coeff0..3 x intensity to the SH.
 void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, ObjectConstants& out);
+// The light a camera-facing sprite at `p` takes from an object's registers
+// (lit particles): SH0 (with the ambient) + half of the key light and of
+// each vertex light, attenuated and coned as the vertex shaders do [I: the
+// average over the sprite's normals].
+gfx::Vec3 spriteLight(const ObjectConstants& oc, const gfx::Vec3& p);
 
 // The band's dynamic shadow for one frame (VenueStage::shadowPass), as the
 // DynamicShadowReciever shaders read it [C: the microcode, 822B6E08]:

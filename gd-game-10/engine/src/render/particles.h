@@ -114,6 +114,7 @@ public:
         bool additive = true;
         int blend = 1;          // blendmode: 0 diffuse, 1 add, 2 subtract, 3 blend, 4 modulate, 5 brighten [C 823B7768]
         float burn = 0;         // `burn`: burnvalue (premultiplied blend, the burn shader) [C]
+        bool lit = false;       // the quick material's `lighting`: lit by the venue's lights (gh4) [C data]
         int layout = 0;         // texturelayout: 0 1x1, 1 2x2, 2 1x2, 3 2x1
         float animFps = 0;      // quadanimationfps
         float alphaCut = 0;
@@ -149,6 +150,8 @@ public:
     bool hasNamed(uint32_t name) const;
     void destroyGroup(uint32_t group);
     std::function<bool(uint32_t member, uint32_t bone, venue::Vec3& out)> bonePos;
+    // The light reaching a point (rgb, 1 = unlit white), for `lighting` materials.
+    std::function<void(const venue::Vec3& at, float rgb[3])> lightAt;
     // EngineWind (the Star Power hearts / bats / butterflies / peace swirl):
     // a twist about the wind's vertical axis plus its velocity, on the
     // particles within `range` (inv_distance attenuation) [C scripts; I: the

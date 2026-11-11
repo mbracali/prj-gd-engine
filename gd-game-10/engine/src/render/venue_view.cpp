@@ -373,6 +373,17 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
         }
         if (it.gh3) ++stats_.gh3Meshes;
         else ++stats_.fallbackMeshes;
+        // Development aids: GD10_VENUE_MESHLOG=1 logs each mesh's template and
+        // blend; GD10_VENUE_SKIP=<template>,... leaves those templates out.
+        if (mat && gh3_.library()) {
+            const matlib::Template* tp = gh3_.library()->find(mat->shader);
+            const std::string tn = tp ? tp->name : std::string("?");
+            if (SDL_getenv("GD10_VENUE_MESHLOG"))
+                SDL_Log("venue mesh: %s blend %u flags 0x%x tris %u textures %u%s", tn.c_str(), mat->d8, mat->cc, it.count / 3,
+                        unsigned(mat->textures.size()), it.gh3 ? "" : " (approximated)");
+            if (const char* skip = SDL_getenv("GD10_VENUE_SKIP"); skip && ("," + std::string(skip) + ",").find("," + tn + ",") != std::string::npos)
+                return;
+        }
         items_.push_back(it);
     };
     for (const venue::Part& part : v.parts) {
@@ -565,7 +576,7 @@ void VenueView::cameraGlobals(const venue::CamPose& cam, bool clipZeroToOne, dou
     g.setMatrix(gh3shader::kRegProjection, proj, 4);
     g.setMatrix(gh3shader::kRegInvView, inv, 4);
     g.setMatrix(gh3shader::kRegViewProj, vp, 4);
-    g.setMatrix(gh3shader::kRegTexProj0, gfx::Mat4::identity(), 4);
+    g.setMatrix(gh3shader::kRegTextureProjection0, gfx::Mat4::identity(), 4);
     g.set(gh3shader::kRegInvProj, 1.0f / sx, 1.0f / sy, 0, 0);
     const float t = float(seconds);
     g.set(gh3shader::kRegTime, t, t, t, t);
@@ -573,13 +584,27 @@ void VenueView::cameraGlobals(const venue::CamPose& cam, bool clipZeroToOne, dou
     // g_distanceLODScaler: max(x, w * (y - distance)) scales the normal and
     // specular detail; x = 1 keeps the full detail [I].
     g.set(gh3shader::kRegDistanceLodScaler, 1, 0, 0, 0);
-    // The static shadow (light) map applies fully to the SH and key lights [I].
-    g.set(gh3shader::kRegShadowLightIntensity, 1, 1, 1, 1);
     g.set(gh3shader::kRegShadowMapSize, 1024, 1024, 1.0f / 1024, 1.0f / 1024);
     g.set(gh3shader::kRegShadowLevel, 0, 0, 0, 0);
     g.set(gh3shader::kRegShadowMapConstants, 1, 0, 0, 0);
     if (viewProjOut) *viewProjOut = vp;
     if (viewOut) *viewOut = view;
+}
+
+void VenueView::lightAt(const std::vector<venue::LightState>& lights, const venue::LightShow& show, const venue::Vec3& at, float rgb[3]) const {
+    if (!v_) return;
+    std::vector<gh3shader::LightIn> in;
+    for (size_t i = 0; i < v_->lights.size() && i < lights.size(); ++i) {
+        const venue::Light& l = v_->lights[i];
+        if (!l.createdAtStart && !(l.createdOn && show.flag(l.createdOn))) continue;
+        in.push_back(gh3shader::lightIn(l, lights[i]));
+    }
+    if (in.empty()) return;
+    gh3shader::ObjectConstants oc;
+    const gfx::Vec3 p{at[0], at[1], at[2]};
+    gh3shader::lightObject(in.data(), in.size(), p, oc);
+    const gfx::Vec3 c = gh3shader::spriteLight(oc, p);
+    rgb[0] = c.x, rgb[1] = c.y, rgb[2] = c.z;
 }
 
 void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show) {

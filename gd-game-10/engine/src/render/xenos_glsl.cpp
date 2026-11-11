@@ -113,14 +113,17 @@ std::string Translator::constRef(uint32_t index, bool rel, bool a0) const {
         for (int k = 0; k < 4; ++k) zero = zero && f[k] == 0.0f;
         // A literal range also covers registers it does not define (zeros):
         // registers the engine sets keep their uniform.
-        if (!zero || index >= 248)
+        // A register the constant table names (gh4's light attenuations
+        // c248..c253 sit where GH3's literals did) keeps its uniform.
+        bool named = false;
+        for (const matlib::Constant& c : s_.constants)
+            named = named || (c.set == 2 && index >= c.reg && index < uint32_t(c.reg + c.count));
+        if (!zero || (index >= 248 && !named))
             return "vec4(" + fmtFloat(f[0]) + ", " + fmtFloat(f[1]) + ", " + fmtFloat(f[2]) + ", " + fmtFloat(f[3]) + ")";
     }
-    if (index >= 176 && index < 192) return "cO[" + std::to_string(index - 176) + "]";
-    if (index >= 216 && index < 228) return "cO[" + std::to_string(index - 200) + "]";
-    if (index >= 128) return "cG[" + std::to_string(index - 128) + "]";
-    if (index < 64) return std::string(pixel_ ? "cP[" : "cV[") + std::to_string(index) + "]";
-    return "vec4(0.0)";
+    if (const int slot = objectSlot(int(index)); slot >= 0) return "cO[" + std::to_string(slot) + "]";
+    if (index >= 64) return "cG[" + std::to_string(index - 64) + "]";
+    return std::string(pixel_ ? "cP[" : "cV[") + std::to_string(index) + "]";
 }
 
 // Source operand i (1..3) of an ALU instruction as a vec4 expression.
@@ -505,8 +508,8 @@ void Translator::run() {
 }
 
 const char* kCommon = R"(
-layout(std140) uniform GdXG { vec4 cG[128]; };
-layout(std140) uniform GdXO { vec4 cO[28]; };
+layout(std140) uniform GdXG { vec4 cG[192]; };
+layout(std140) uniform GdXO { vec4 cO[74]; };
 float gdMax4(vec4 v) { return max(max(v.x, v.y), max(v.z, v.w)); }
 // Shader Model 3 / Xenos: +-0 x anything (inf, NaN) = +0 in MUL, MAD, the
 // dot products, DST.y, MULS, MUL_PREV and MUL_CONST (Xenia's translators).
@@ -547,8 +550,9 @@ std::string declarations(const Translator& t, const char* matBlock) {
     s += std::string("layout(std140) uniform ") + matBlock + " { vec4 " + (t.pixel_ ? "cP" : "cV") + "[64]; };\n";
     s += std::string("bool gdBool(int i) { return ((int(") + (t.pixel_ ? "cP" : "cV") +
          "[63].y) >> i) & 1) != 0; }\n";
-    s += std::string("vec4 gdC(int i) { if (i >= 176 && i < 192) return cO[i - 176]; if (i >= 216 && i < 228) return cO[i - 200];\n"
-                     "    return i >= 128 ? cG[clamp(i - 128, 0, 127)] : (i < 64 ? ") + (t.pixel_ ? "cP" : "cV") +
+    s += std::string("vec4 gdC(int i) { if (i >= 160 && i < 212) return cO[i - 160]; if (i >= 216 && i < 232) return cO[i - 164];\n"
+                     "    if (i >= 248 && i < 254) return cO[i - 180];\n"
+                     "    return i >= 64 ? cG[clamp(i - 64, 0, 191)] : (i < 64 ? ") + (t.pixel_ ? "cP" : "cV") +
          "[clamp(i, 0, 63)] : vec4(0.0)); }\n";
     for (int k = 0; k < 16; ++k) {
         if (!(t.samplers_ >> k & 1)) continue;

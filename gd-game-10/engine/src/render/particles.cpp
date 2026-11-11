@@ -814,12 +814,20 @@ void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t
                   : bm == K("brighten") ? 5 : 0;
         p.additive = p.blend == 1;
         p.alphaCut = num(g_->field(*qm, K("alphacutoff")), 0) / 255.0f;
-        // `burn` sits in the quick material on the zone objects.
-        for (const qb::Item& it : qm->items)
+        // `burn` sits in the quick material on the zone objects; `lighting`
+        // (gh4's smoke, glows and dust): the particles take the venue's light.
+        for (const qb::Item& it : qm->items) {
             if (it.name == 0 && it.value.type == qb::Type::Key && it.value.key == K("burn"))
                 p.burn = std::max(0.0f, num(g_->field(*qm, K("burnvalue")), 0.0f));
+            if (it.name == 0 && it.value.type == qb::Type::Key && it.value.key == K("lighting")) p.lit = true;
+        }
     }
     if (rate >= 0) p.rate = rate, p.lifetime = 1e6f, p.burst = 0, p.delay = 0;  // a node's emitter
+    // `max`: the most particles alive at once (z_forum's stage glows: 20 a
+    // second for 1.2..1.7 s, max 10): the rate held to max / the mean life
+    // [C data; I: the emitter's pool modelled as a steady rate].
+    if (const float mx = num(f("max"), 0); mx > 0 && p.rate > 0)
+        p.rate = std::min(p.rate, mx / std::max(0.05f, 0.5f * (p.lifeMin + p.lifeMax)));
     // lifetime 0 and no emitnum: emit_rate a second until the scripts stop or
     // destroy it (the Star Power FX and their swirls, the 4x finger flames:
     // Kill_StarPower_StageFX / kill_4x_fx end them); with an emitnum, the
@@ -972,6 +980,13 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
         Batch b{p.texture, p.additive, p.blend, p.burn, p.alphaCut, verts.size(), 0};
         venue::Vec3 base = s.pos;
         if (s.member && !(bonePos && bonePos(s.member, s.bone, base))) continue;
+        // A lit material: its colour x the light at the system (one value a
+        // system a frame) [I: the quick material's lit shaders not translated].
+        float lit[3] = {1, 1, 1};
+        if (p.lit && lightAt) {
+            lightAt(base, lit);
+            for (float& c : lit) c = std::clamp(c, 0.0f, 1.0f);  // a vertex colour [I]
+        }
         // The burst at the start, then emit_rate a second for `lifetime` [I].
         const int continuous = int(std::floor(double(p.rate) * double(p.lifetime)));
         const int total = p.burst + continuous;
@@ -1086,7 +1101,7 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
                     }
                 }
                 for (int k = 0; k < 4; ++k) {
-                    const float v = float((p.color >> (24 - 8 * k)) & 0xFF) * col[k];
+                    const float v = float((p.color >> (24 - 8 * k)) & 0xFF) * col[k] * (k < 3 ? lit[k] : 1.0f);
                     c8[k] = uint8_t(std::clamp(v, 0.0f, 255.0f));
                 }
             }

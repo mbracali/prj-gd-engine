@@ -34,14 +34,11 @@ std::shared_ptr<const matlib::Library> library(const Disc& disc) {
             const Bytes b = disc.read(path);
             auto lib = std::make_shared<matlib::Library>();
             lib->parse(b.data(), b.size());
-            // gh4 (MATL v3): the shaders parse, but their engine constants
-            // differ from GH3's (g_PointLight c176 x 14, g_SpotLight c192 x 20,
-            // attenuation terms c248..c253 [C data: the constant tables]) and
-            // are not fed yet: venues, the band and the screen effects drew
-            // black with them. Off (the approximations draw) unless
-            // GD10_GH4_SHADERS=1 (a development aid).
-            if (lib->gh4() && !(SDL_getenv("GD10_GH4_SHADERS") && SDL_getenv("GD10_GH4_SHADERS")[0] == '1')) {
-                SDL_Log("material library: gh4 (MATL v3), %llu templates; its shaders are off (GD10_GH4_SHADERS=1)",
+            // gh4 (MATL v3): its engine constants sit at other registers than
+            // GH3's (xenos::objectSlot, Globals, docs/render.md). GD10_GH4_SHADERS=0
+            // (a development aid) switches them off: the approximations draw.
+            if (const char* e = SDL_getenv("GD10_GH4_SHADERS"); e && e[0] == '0') {
+                SDL_Log("material library: %llu templates; its shaders are off (GD10_GH4_SHADERS=0)",
                         static_cast<unsigned long long>(lib->templates().size()));
                 off = true;
                 return nullptr;
@@ -181,6 +178,14 @@ LightIn lightIn(const venue::Light& l, const venue::LightState& s) {
         li.attA = l.attenEnd * l.attenEnd;
         li.attB = 1.0f / (l.attenEnd * l.attenEnd - l.attenStart * l.attenStart + 0.0001f);
     }
+    if (li.type == LightIn::Spot) {
+        // hotspot / field: the full cone angles in degrees [I: half of each
+        // against the cosine the shaders compute].
+        const float kDeg = 3.14159265f / 360.0f;
+        const float field = std::max(l.field, l.hotspot), hot = std::min(l.hotspot, field);
+        li.coneX = std::cos(field * kDeg);
+        li.coneY = 1.0f / std::max(std::cos(hot * kDeg) - li.coneX, 0.001f);
+    }
     li.dynamic = l.dynamic, li.shadowLight = l.shadowLight;
     li.boxCenter = {l.boxCenter[0], l.boxCenter[1], l.boxCenter[2]};
     li.boxHalf = {l.boxHalf[0], l.boxHalf[1], l.boxHalf[2]};
@@ -195,7 +200,8 @@ bool groupLights(uint32_t lightGroup, uint32_t objectGroup) {
 }
 
 void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, ObjectConstants& out) {
-    for (int r = kRegAmbient; r < kRegAmbient + 16; ++r) out.set(r, 0, 0, 0, 0);
+    for (int r = kRegAmbient; r < kRegSpotLight + 20; ++r) out.set(r, 0, 0, 0, 0);
+    for (int r = kRegPointAtten; r < kRegSpotAtten + 4; ++r) out.set(r, 0, 0, 0, 0);
     struct Cand {
         const LightIn* l;
         float scale, inten, att, score;
@@ -217,7 +223,7 @@ void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, Object
     std::stable_sort(cand, cand + n, [](const Cand& x, const Cand& y) { return x.score > y.score; });
     gfx::Vec3 amb{}, sh[4]{};
     const Cand* slot[4] = {};
-    int ndir = 0;
+    int ndir = 0, npoint = 0, nspot = 0;
     auto addSh = [&](const gfx::Vec3& c, const gfx::Vec3& travel) {
         // 823DA668: SH0 += C x 4/17, SH1..3 += C x 8/17 x l (l = towards the light) [C].
         const gfx::Vec3 l = travel * -1.0f;
@@ -239,30 +245,53 @@ void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, Object
             if (ndir < 4) slot[ndir++] = &c;
             break;
         case LightIn::Point:
-            if (ndir > 0) addSh(l.color * (c.inten * c.att), norm(p - l.pos));
-            if (ndir < 4) slot[ndir++] = &c;
+            if (npoint < 4) {
+                // The vertex shaders light by distance and N.L themselves [C microcode].
+                const gfx::Vec3 col = l.color * c.inten;
+                out.set(kRegPointLight + 4 * npoint, l.pos.x, l.pos.y, l.pos.z, 1);
+                out.set(kRegPointLight + 4 * npoint + 1, col.x, col.y, col.z, 1);
+                out.reg(kRegPointAtten)[npoint] = l.attA;
+                out.reg(kRegPointAtten + 1)[npoint] = l.attB;
+                ++npoint;
+            } else {
+                addSh(l.color * (c.inten * c.att), norm(p - l.pos));
+            }
             break;
-        case LightIn::Spot: {
-            const float along = std::clamp(gfx::dot(p - l.pos, l.dir), 0.0f, 1.0f);
-            addSh(l.color * (c.inten * along), norm(p - l.pos));
+        case LightIn::Spot:
+            if (nspot < 5) {
+                const gfx::Vec3 col = l.color * c.inten, dir = norm(l.dir);
+                const int r = kRegSpotLight + 4 * nspot;
+                out.set(r, dir.x, dir.y, dir.z, 0);
+                out.set(r + 1, l.pos.x, l.pos.y, l.pos.z, 1);
+                out.set(r + 2, col.x, col.y, col.z, 1);
+                if (nspot < 4) {
+                    out.reg(kRegSpotAtten)[nspot] = l.attA;
+                    out.reg(kRegSpotAtten + 1)[nspot] = l.attB;
+                    out.reg(kRegSpotAtten + 2)[nspot] = l.coneX;
+                    out.reg(kRegSpotAtten + 3)[nspot] = l.coneY;
+                } else {
+                    out.set(r + 3, l.attA, l.attB, l.coneX, l.coneY);  // c211 [C microcode]
+                }
+                ++nspot;
+            } else {
+                const float along = std::clamp(gfx::dot(p - l.pos, l.dir), 0.0f, 1.0f);
+                addSh(l.color * (c.inten * along), norm(p - l.pos));
+            }
             break;
-        }
         case LightIn::Ambient: amb = amb + l.color * c.inten; break;
         case LightIn::Prt:
             // 823DAFA8: SH0..3 += coeff0..3 x the candidate's intensity (no
-            // colour, no slot; for objects whose record has the SH bit, as
-            // the characters') [C].
+            // colour, no slot) [C].
             for (int k = 0; k < 4; ++k) sh[k] = sh[k] + l.prt[k] * c.inten;
             break;
         }
     }
     out.set(kRegAmbient, amb.x, amb.y, amb.z, 1);
+    sh[0] = sh[0] + amb;
     for (int k = 0; k < ndir; ++k) {
         const LightIn& l = *slot[k]->l;
         const float a = slot[k]->scale;
-        // Slots 0 and 1: a point light's direction from it to the object;
-        // slots 2 and 3 always the light's own direction (as coded) [C 823DB168].
-        const gfx::Vec3 dir = (k < 2 && l.type != LightIn::Directional) ? norm(p - l.pos) : l.dir;
+        const gfx::Vec3 dir = l.dir;
         const gfx::Vec3 spec = l.color * (l.specular * a);
         if (k == 0) {
             const gfx::Vec3 col = l.color * (l.intensity * a);
@@ -275,6 +304,30 @@ void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, Object
         }
     }
     for (int k = 0; k < 4; ++k) out.set(kRegShLight0 + k, sh[k].x, sh[k].y, sh[k].z, 0);
+}
+
+gfx::Vec3 spriteLight(const ObjectConstants& ocIn, const gfx::Vec3& p) {
+    ObjectConstants& oc = const_cast<ObjectConstants&>(ocIn);
+    auto v3 = [&](int r) { const float* f = oc.reg(r); return gfx::Vec3{f[0], f[1], f[2]}; };
+    gfx::Vec3 out = v3(kRegShLight0) + v3(kRegDirLight0 + 1) * 0.5f;
+    for (int i = 0; i < 4; ++i) {
+        const gfx::Vec3 d = v3(kRegPointLight + 4 * i) - p;
+        const float att = std::clamp((oc.reg(kRegPointAtten)[i] - gfx::dot(d, d)) * oc.reg(kRegPointAtten + 1)[i], 0.0f, 1.0f);
+        out = out + v3(kRegPointLight + 4 * i + 1) * (0.5f * att);
+    }
+    for (int i = 0; i < 5; ++i) {
+        const int r = kRegSpotLight + 4 * i;
+        const gfx::Vec3 d = p - v3(r + 1);
+        const float d2 = gfx::dot(d, d), len = std::sqrt(d2);
+        const float* a = oc.reg(kRegSpotAtten);
+        const float attA = i < 4 ? a[i] : oc.reg(r + 3)[0], attB = i < 4 ? oc.reg(kRegSpotAtten + 1)[i] : oc.reg(r + 3)[1];
+        const float cx = i < 4 ? oc.reg(kRegSpotAtten + 2)[i] : oc.reg(r + 3)[2], cy = i < 4 ? oc.reg(kRegSpotAtten + 3)[i] : oc.reg(r + 3)[3];
+        const float att = std::clamp((attA - d2) * attB, 0.0f, 1.0f);
+        const float cosA = len > 0 ? gfx::dot(d, v3(r)) / len : 1.0f;
+        const float cone = std::clamp((cosA - cx) * cy, 0.0f, 1.0f);
+        out = out + v3(r + 2) * (0.5f * att * cone);
+    }
+    return out;
 }
 
 const gfx::VertexLayout& vertexLayout() {
