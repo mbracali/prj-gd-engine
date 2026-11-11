@@ -213,6 +213,7 @@ CameraDirector::Keyed CameraDirector::readCam(const qb::Struct* st) const {
     k.lookatBone = keyOf(st->find(K("lookatbone")));
     if (const qb::Value* so = st->find(K("screenoffset")); so && (so->type == qb::Type::Pair || so->type == qb::Type::Vector))
         k.screenOffset[0] = so->f[0], k.screenOffset[1] = so->f[1];
+    if (const qb::Value* d = st->find(K("distfromlookat"))) k.dist = d->number();
     k.valid = true;
     return k;
 }
@@ -695,6 +696,13 @@ CamPose CameraDirector::aim(const CamPose& p, const Keyed& k0, const Keyed& k1, 
     for (float& x : r) x /= n;
     CamPose out = p;
     out.rot = mul(r, p.rot);
+    // distfromlookat: the camera keeps that distance from the bone along the
+    // ray it frames it on (the member's mocap moves him off his start node;
+    // the authored pos is that distance from the bone in the authoring pose
+    // [C data: |pos - bone| = distfromlookat with the bone at its rest
+    // height]; I: the camera follows on the ray).
+    const float dist = mix < 0.5f || !k1.lookat ? k0.dist : k1.dist;
+    if (dist > 0) out.pos = {target[0] - b[0] * dist, target[1] - b[1] * dist, target[2] - b[2] * dist};
     return out;
 }
 

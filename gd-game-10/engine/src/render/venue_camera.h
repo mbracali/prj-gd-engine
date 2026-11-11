@@ -123,6 +123,7 @@ private:
         uint32_t lockTo = 0, lockToBone = 0;
         uint32_t lookat = 0, lookatBone = 0;  // lookat / lookatbone (0: none)
         float screenOffset[2] = {0, 0};       // screenoffset: where the bone sits on screen
+        float dist = 0;                       // distfromlookat (0: none)
         bool valid = false;
     };
     CamPose aim(const CamPose& p, const Keyed& k0, const Keyed& k1, float mix, double ms) const;
