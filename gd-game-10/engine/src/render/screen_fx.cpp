@@ -3,6 +3,7 @@
 #include "render/screen_fx.h"
 
 #include <SDL3/SDL_log.h>
+#include <SDL3/SDL_timer.h>
 
 #include <algorithm>
 #include <cmath>
@@ -346,6 +347,18 @@ void ScreenFx::dofBlur(const Target& t, const Target& tmp, float radius) {
 
 void ScreenFx::end(const Params& p, gfx::TargetId into) {
     if (!dev_) return;
+    // GD10_SCREENFX_TIME=1 (development aid): the chain's CPU time a frame, averaged over 600 frames.
+    static const bool timeLog = SDL_getenv("GD10_SCREENFX_TIME") != nullptr;
+    struct Timer {
+        bool on;
+        uint64_t t0;
+        ~Timer() {
+            if (!on) return;
+            static uint64_t sum = 0, n = 0;
+            sum += SDL_GetTicksNS() - t0;
+            if (++n == 600) SDL_Log("screen fx: %.3f ms CPU a frame (600 frames)", double(sum) / 600e6), sum = 0, n = 0;
+        }
+    } timer{timeLog, timeLog ? SDL_GetTicksNS() : 0};
     // Into the port's buffer (Enhanced's chain reads it), scene-sized; else the viewport begin() saw.
     const gfx::TargetId realOuter = outer_;
     const int rx = ox_, ry = oy_, rw = ow_, rh = oh_;
@@ -946,6 +959,9 @@ void readShot(const Globals& g, uint32_t effect, uint32_t dof, Params& p) {
     static std::mutex mutex;
     static const Globals* cachedFor = nullptr;
     static std::map<uint32_t, Params> cache;
+    // GD10_SCREENFX=<effect> (development aid): every shot takes that effect (e.g. InkBlotch_Red).
+    static const char* forced = SDL_getenv("GD10_SCREENFX");
+    if (forced && *forced) effect = qbkey::key(forced);
     const uint32_t manager = effectManager(g, effect);
     static uint32_t lastManager = 0;
     static const bool camLog = SDL_getenv("GD10_CAMLOG") != nullptr;

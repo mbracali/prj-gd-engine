@@ -74,29 +74,70 @@ g_SpotLight (cone from hotspot / field as full angles, half of each against
 the cosine [I]); further point / spot lights into the SH as GH3's;
 ambient lights into c160 and SH0 [I]. Vertex colours 0..255 (no 2x).
 
-## Screen effects (D18)
+## Screen effects (D18, D40..D42)
 
 gh4's TOD profiles (`scripts\engine\tod_profiles.qb`) list, in order:
 bloom2, bright_sat, dof3, godray (off), vignette (off), noise2, uberscreenfx
-[C data]. The parsers are in the XEX (bloom2 825074F8, dof3 82503388, the
-type switch 824B8460) [C: the keys] but their passes are VMX128 code not
-read. gd10 draws:
+[C data]; the Metal_* profiles add inkblotch, turn vignette / godray on.
+None of these draws on its own: the uberscreenfx entry composes them
+(D40).
 
-- **bright_sat**: as GH3 (hue, saturation, contrast, brightness, the mix;
-  gh4 writes the mix as red_mix_r.. floats) [C data]; Default_TOD_Manager's
-  saturation 0.6 makes the venue less saturated, as the data says.
-- **bloom2**: on GH3's simple_bloom passes: the stencil-marked materials
-  (materialfilter 1) or the colour over `subtract`, blurred at a quarter
-  (7x7 H + V), added x colormodulate [I]; saturation, thickness and
-  equation are not applied.
-- **dof3**: the far blur only, farblurbegin..farblurend in metres x
-  strength (_2D_DepthOfFieldNear), 3 quarter texels [I]; the near blur is
-  not drawn.
-- Not drawn: noise2 (film grain, intensity 0.1), uberscreenfx, godray and
-  vignette (off in every profile) [open].
+- **The type switch** 824B8460 [C]: each instance of bg_viewport's list
+  takes a slot by its type key and, when on, a flag: bloom2 1, godray 1,
+  dof3 2, noise2 4, bright_sat 8, vignette 0x10, inkblotch 0x20 (a later
+  instance of a type replaces an earlier one).
+- **The uber pass** 8251EC80 [C]: the material sys_uberscreenfx (global.pak's
+  global_gfx.scn, template `_Uber_ScreenFX`) with the template
+  `_Uber_ScreenFX` + `_bloom1 _dof1 _noise1 _color1 _vignette1 _inkblot1`
+  for the flags set (64 templates in the library); each part's constants
+  set by its instance.
+- **What the pixel shader does** [C: the library's microcode, read through
+  xenos_glsl; constants named by its table]: viewZ from the depth
+  (g_invProjMat c152); a = saturate(max((c9.x - z) / c9.y, (z - c9.z) /
+  c9.w)) x g_DOF_Strength c10.x; colour = lerp(frame, dof blur, a) + bloom
+  (g_BloomEffectSampler); colour = g_ColorTransform0..2 (c4..c6) x (rgb,
+  frame alpha); n = fract(sys_noise + 270669.031 v + 668.3186 u), colour =
+  lerp(colour, n x g_Color.rgb, g_Color.w); colour = lerp(colour,
+  g_VignetteColor c8, the vignette mask); colour += inkblot.rgb x
+  g_ScratchColor c11; colour = lerp(colour, g_BlotchColor c12, inkblot.a x
+  c12.w); alpha = the frame's. Vertex: noise UV = (uv + g_Random.xy) x
+  g_UV.xy + g_Random.zw, ink UV = g_InkBlotch_Mat (c13, c14, c16) x uv.
+- **bloom2's buffer** [C: `_Bloom_SubtractModulate(Stencil)`: out = r c0 +
+  g c1 + b c2 + c3; the stencil variant's alpha the converted stencil]:
+  the stencil-marked materials (materialfilter) at a quarter of the size
+  through colormodulate x (saturation(rgb) - subtract) [I: the matrix's
+  values, colormodulate's fourth value as a scale], blurred over
+  thickness / 4 quarter texels [I]; equation (eq0 everywhere) not applied.
+- **dof3's buffer**: the colour at a quarter, GH3's 7x7 blur at 3 texels
+  [I]; g_DOF0 = (nearblurend, nearblurend - nearblurbegin, farblurbegin,
+  farblurend - farblurbegin) [I: the shader's form; the CPU's values not
+  read]. Strength 0 (every profile; the cameras' DOF_* set it): no dof1.
+- **noise2**: g_UV = uv (8, 6), g_Color = (color.rgb, intensity), g_Random
+  new every frame [I]. sys_noise / sys_inkblot: global_gfx.tex [C data].
+- **vignette**: sys_vignettemask names no texture on the disc [C data]:
+  the mask is made from alpha x saturate((r - inner) / (outer - inner)) [I].
+- **inkblotch**: placement moved every intervala..intervalb s, rotated
+  rotationa..rotationb degrees, tiled xtiling / ytiling [I].
+- **bright_sat**: as GH3 (hue, saturation, contrast, brightness, the mix)
+  [C data], now inside the uber pass: after the bloom is added (the order
+  changed: GH3's chain added the bloom last). ScreenFlash's FlashBS stays a
+  pass of its own after the uber [I].
+- **godray**: on in Metal_HotBlue only; not drawn [open].
 
-Order: dof, bright_sat, bloom (GH3's chain); the gh4 list order (bloom2
-first) is not followed yet [open].
+Which profile (D41): the songs' camera notes 81..127 run
+CameraCuts_SetNextScreenFx effect = X (change next_screenfx);
+CameraCuts_StartCallback's ApplyDeferredCameraEffects runs ApplyScreenFx
+effect = next_screenfx at the cut: TOD_Proxim_Apply_<X> replaces the whole
+list with Metal_<...>_tod_manager's (none / default: Default_TOD_Manager),
+then the shot's dof updates Depth_of_Field__simplified_ [C scripts
+guitar_cameras.qb, tod_proxims.qb]. screen_fx.cpp effectManager / readShot;
+the camera keeps next_screenfx (venue_camera.cpp). E.g. One: Default, then
+Metal_NoisyDefault, Metal_BW_Grainy (black and white), Metal_BW_Grungy.
+
+Not yet: the camera notes 101..108 (CameraBlur_* zoom / focus blurs,
+CameraFX_WhiteFlash, CameraFX_BlackFadeIn / Out: BG_fx_set_blur /
+_brightness on the instances over time), godray, the practice / training
+modes' skip of ApplyDeferredCameraEffects.
 
 ## Particles (D19)
 
@@ -150,12 +191,14 @@ The walks check it: every frame from a song's request to 5 s into it within
 GD10_GH4_SHADERS=0, GD10_XENOS_DUMP=1 (the GLSL of each program),
 GD10_VENUE_MESHLOG=1 (template, blend, flags per mesh), GD10_VENUE_SKIP=<template>,..,
 GD10_PARTICLES_LOG=1 (with size, colour, blend, lit), GD10_PARTICLES_SKIP=<texture>,..,
-GD10_NO_SCREENFX / _PARTICLES / _PROJECTORS / _RAYTRACE.
+GD10_SCREENFX=<effect> (every shot takes that camera effect, e.g. InkBlotch_Red),
+GD10_SCREENFX_TIME=1 (the chain's CPU time), GD10_NO_SCREENFX / _PARTICLES / _PROJECTORS / _RAYTRACE.
 
 ## Open
 
-- The XEX's light set (which light takes which slot), bloom2 / dof3 / noise2 /
-  uberscreenfx passes: VMX128 code; needs a VMX128 decoding table of our own.
+- The XEX's light set (which light takes which slot), and the values the
+  screen effects' instances put in their constants (VMX128 code; needs a
+  VMX128 decoding table of our own): the shaders are read, the constants [I].
 - Meadowlands at 90 s (Enter Sandman): a ring of 17 scripted spark glows
   (PH_RadialGlow_01, 0.2 -> 4 m, add, opaque) near the camera still veils
   the shot.
