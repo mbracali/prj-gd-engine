@@ -311,3 +311,14 @@ play from the Linux launcher and under Wine; the final report at the top of
 
 ## Owner's answers
 
+Defaults chosen for the proof of concept, **owner to confirm** (run of 2026-11-10):
+
+1. Proof of concept: boot first (M0-M3: disc, formats incl. the new pak / pab layout, scripts, intro → title → main menu with the universal menus), then M4 (one Quickplay song on guitar in a venue) if time allows. Stop there and report; no M5..M9.
+2. Version: stays `0.0.0` (game-info, engine, CHANGELOG); no bump without the owner.
+3. Branch: `feature/spike-metal`.
+4. Original bugs: faithful by default; fixes later, as Enhanced toggles (off).
+5. DLC: a later wave.
+6. Everything stays in `gd-game-10/`; the core's existing backends and audio are used as gd04 does.
+7. Hardware: tested headless; the owner checks devices later.
+8. Shared Neversoft library: after Metallica reaches its gates.
+

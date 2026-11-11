@@ -10,3 +10,6 @@ based_on: Xbox 360
 guitar_dream_version: "0.0.0"
 ready_to_play: false
 completeness: 0
+iso_signatures:
+  - format: xdvdfs            # USA / Europe (read from default.xex's execution info)
+    xex_title_id: "41560830"

@@ -1,0 +1,122 @@
+// SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+// Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
+#pragma once
+
+#include <memory>
+
+#include "data/matlib.h"
+#include "render/device.h"
+#include "render/gh3_shader.h"
+
+class Globals;
+namespace qb {
+struct Struct;
+}
+
+// GH3's screen effects on the venue viewport (bg_viewport): the ScreenFX
+// instances the scripts add (TOD_Proxim_Update_LightFX_Viewport:
+// Default_TOD_Manager's bright_sat + simple_bloom, the cameras' venue_DOF,
+// ScreenFlash's FlashBS) run with the engine's own filter passes from the
+// material library (ImmediateMode / ImmediateModeAlt / ImmediateModeFilter
+// techniques, translated like every other GH3 shader) over the venue and
+// band drawn into an off-screen colour + depth target; the result is
+// composited where the venue would have drawn. The highway and HUD (the
+// UI viewport) are drawn afterwards, untouched. docs/venues.md "Screen
+// effects".
+namespace screenfx {
+
+struct Bloom {  // simple_bloom (Function_8241BC20 parses, Function_8243D240 draws) [C]
+    bool on = false;
+    float cutoff[3] = {0, 0, 0};    // color / 255: m_sCutoffColor
+    float strength[3] = {1, 1, 1};  // strength / 255
+    float bloom1 = 0, bloom2 = 0;   // the two blooms' amounts
+    float falloff1 = 0, falloff2 = 0;
+    bool materialFilter = false, autoLuminance = false;
+    float distanceMod = 0;
+};
+
+struct Dof {  // dof (Function_8241EE68 parses, Function_824440F8 draws) [C params; the chain: screen_fx.cpp]
+    bool on = false;
+    float backDist = 1, frontDist = 0, strength = 0, blurRadius = 0;
+    int resolution = 1;  // blurresolution: 0 half, 1 quarter, 2 sixteenth [C 8241F160]
+};
+
+struct BrightSat {  // bright_sat
+    bool on = false;
+    float contrast = 1, brightness = 1, saturation = 1, hue = 1;
+    float mix[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+};
+
+struct Params {
+    Bloom bloom;
+    Dof dof;
+    BrightSat brightSat[2];  // the TOD's BnS and global_brightness (ScreenFlash's FlashBS replaces [1]'s values while on)
+    float nearZ = 0.05f, farZ = 4000.0f;  // the projection's clip planes (the depth buffer's)
+    // GH3's camera far clip, DOF's backdist / frontdist scale: the render's
+    // far plane (0x82c18acc, from the camera component's +0xe0: 823A8DB8),
+    // far_clip of the camera's params, default 400 (822BF1E0, 0x8200fa1c);
+    // PlayIGCCam's cameras (the songs' cuts, the menus') give none [C].
+    float cameraFar = 400.0f;
+};
+
+// One screen_FX entry (ScreenFX_AddFXInstance's params: Type dof /
+// bright_sat / simple_bloom) into `p`; bright_sat fills brightSat[slot++].
+void readEntry(const qb::Struct& e, Params& p, int& brightSlot);
+// TOD_Proxim_Update_LightFX_Viewport on bg_viewport: venue_DOF from
+// DOF_Off_TOD_Manager's screen_FX[0], then `manager`'s screen_FX
+// (Default_TOD_Manager: BnS, sbloom) [C scripts tod_proxims.qb].
+void readViewport(const Globals& g, uint32_t manager, Params& p);
+// venue_DOF set to a DOF_*_tod_manager's screen_FX[0] (CameraCuts_StartCallback).
+void readDof(const Globals& g, uint32_t manager, Params& p);
+
+class ScreenFx {
+public:
+    ~ScreenFx() { shutdown(); }
+    bool init(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Library> lib);
+    void shutdown();
+    // Redirects drawing to the scene target (the current viewport's size);
+    // false when the effects cannot run (draw straight to the target then).
+    bool begin(float scale = 1.0f);
+    // Runs the effects and composites into the target and viewport bound at begin().
+    void end(const Params& p, gfx::TargetId into = {});
+    // The scene target's depth and size, and the viewport begin() saw (Enhanced's chain).
+    gfx::TextureId sceneDepth() const { return dev_ && scene_.id ? dev_->targetDepth(scene_.id) : gfx::TextureId{}; }
+    // A copy of the scene's depth so far (the raytraced light beams sample
+    // it while the scene target stays bound) [I: GH3 resolves its depth].
+    gfx::TextureId depthSnapshot();
+    int sceneW() const { return scene_.w; }
+    int sceneH() const { return scene_.h; }
+    gfx::TargetId outer() const { return outer_; }
+    void outerViewport(int& x, int& y, int& w, int& h) const { x = ox_, y = oy_, w = ow_, h = oh_; }
+
+private:
+    struct Target {
+        gfx::TargetId id;
+        int w = 0, h = 0;
+    };
+    gfx::RenderDevice* dev_ = nullptr;
+    gh3shader::Programs gh3_;
+    gfx::BufferId quad_;
+    gfx::ProgramId copy_;
+    Target scene_, quarterA_, quarterB_, copyA_, copyB_, depthCopy_;
+    Target sceneQ_, halves_[4];  // the scene's quarter, and the steps down to the effects' fixed size
+    Target sixteenA_, sixteenB_;  // dof blurresolution sixteenth
+    gfx::TargetId outer_;
+    int ox_ = 0, oy_ = 0, ow_ = 0, oh_ = 0;
+    uint32_t immediate_ = 0, immediateAlt_ = 0, filter_ = 0;
+
+    enum class Blend : uint8_t { Replace, Add, Alpha };  // ONE,ZERO / SRC_ALPHA,ONE / SRC_ALPHA,ONE_MINUS_SRC_ALPHA
+    bool ensure(Target& t, int w, int h, bool depth);
+    // One full-screen pass into `dst` (null: the target and viewport begin() saw).
+    void pass(const gh3shader::Program* prog, const Target* dst, gfx::TextureId s0, gfx::TextureId s1, const gh3shader::Globals& g,
+              const float (*ps)[4], int psCount, Blend blend, bool s0Point = false, bool stencilEqual1 = false);
+    void downsample4x(gfx::TextureId src, const Target& dst);
+    // `src` (w x h) into `dst` by bilinear copies halving the size (2 x 2 means) [I].
+    void resample(gfx::TextureId src, int w, int h, const Target& dst);
+    // The scene colour (or a quarter-size pass's result in sceneQ_) into quarterA_.
+    void toQuarter(gfx::TextureId sceneColor);
+    void bloomBlur(const Target& t, const Target& tmp, float gain);
+    void dofBlur(const Target& t, const Target& tmp, float radius);
+};
+
+}  // namespace screenfx

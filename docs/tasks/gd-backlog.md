@@ -1010,7 +1010,12 @@ universal launcher, not released on its own.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD10-001 | Original | 🟡 kickoff written | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | Kickoff: [docs/spikes/GD-GAME-10_KICKOFF.md](../spikes/GD-GAME-10_KICKOFF.md) (owner's answers pending); knowledge from [colabs01](../spikes/colabs01.md). `gd-game-10/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
+| GD10-001 | Original | 🟡 in progress (proof of concept, M0-M4) | Reimplementation of Guitar Hero: Metallica, wave 01 proof of concept: boot to the main menu, then one Quickplay song on guitar | Kickoff: [docs/spikes/GD-GAME-10_KICKOFF.md](../spikes/GD-GAME-10_KICKOFF.md) (defaults chosen, owner to confirm); knowledge from [colabs01](../spikes/colabs01.md); progress in `gd-game-10/agents/PROGRESS.md` | New 10-28 |
+| GD10-002 | Original | 🟡 started 11-10 | M0 set-up: gd04's engine copied as gd10, rip, Ghidra project + export, title ID 41560830 | `gd-game-10/agents/CONTEXT.md` | Kickoff M0 |
+| GD10-003 | Original | ❌ | M1 data layer: gh4 pak + pab (CHNK), QB, textures, scenes, anims, sounds, Bink | `gd-game-10/docs/formats.md` | Kickoff M1 |
+| GD10-004 | Original | ❌ | M2 songs and the guitar core | | Kickoff M2 |
+| GD10-005 | Original | ❌ | M3 QScript, boot to the main menu, audit | | Kickoff M3 |
+| GD10-006 | Original | ❌ | M4 proof of concept: Quickplay, one song on guitar in a venue | | Kickoff M4 |
 
 
 ## gd-game-11: Guitar Hero: Smash Hits (Xbox 360)
