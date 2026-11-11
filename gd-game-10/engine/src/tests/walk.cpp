@@ -790,7 +790,10 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
     if (done() || failed_) return out;
     // A song under a loading screen (GD10-040's regression): 5 s into a song
     // the loading screen's tip and picture are gone [C script start_gem_scroller].
-    if (!songPlaying && fe.ui().find(qbkey::key("loading_tip_text"))) loadingSeen_ = true;
+    // GH3's tip text, or gh4's loading screen (create_loading_screen's
+    // loading_screen_container with its desc) [C scripts].
+    if (!songPlaying && (fe.ui().find(qbkey::key("loading_tip_text")) || fe.ui().find(qbkey::key("loading_screen_container"))))
+        loadingSeen_ = true;
     if (songPlaying && songSeenAt_ < 0) {
         songSeenAt_ = now;
         if (!loadingSeen_ && !fe.attractMode()) ++songsWithoutLoading_;

@@ -5,6 +5,56 @@ Guitar Hero: Metallica (Xbox 360) -> `gd10`. Kickoff:
 Newest entries at the bottom. "Verified" lines quote the command and its
 output; "built only" and "not tested" are said explicitly.
 
+## Final report, proof of concept (2026-11-11, about 3 h of agent time, 23:39 -> 02:40)
+
+Scope (defaults chosen, owner to confirm: kickoff "Owner's answers"): boot
+first, then one Quickplay song on guitar. Version stays 0.0.0;
+ready_to_play false; not in the launcher's packages.
+
+**Milestones.** M0 done. M1 done for what the boot and a song need (paks,
+QB, scripts, fonts, UI images, QS strings, song audio, Bink), not for
+scenes / anims / skins / .wav. M2: charts, tuning and the three song banks
+in; the judging rules are still GH3's [I]. M3: gh4's UI state machine and
+descs run the original's own boot to the main menu. M4 in part: Quickplay
+from the main menu to a song, YOU ROCK!, the results, cash rewards and back
+to the set list, but on the labelled debug highway and with no venue drawn.
+
+**What boots (verified, fresh `engine/build/devv/gd10`, headless):**
+- `--walktest boot`: passed (legal, the four boot movies skipped with A,
+  press start, sign-in, memcard, drum tip pop-up, main menu); black frames 0.
+- `--walktest quickplay`: passed (main menu > QUICKPLAY > game mode >
+  guitar > set list (+ first-time pop-ups) > Albatross > Start > Expert >
+  song in z_Forum on autoplay > YOU ROCK! > song breakdown > cash rewards >
+  autosave > set list).
+- `--scripttest`: "every script tokenizes; boot ran (71 natives to write)".
+- `pak.py` / `qb.py` / `qbscript.py check`: 0 problems over the whole disc.
+- `--selftest`: 688 charts autoplayed; 66 failures (4 Death Magnetic DLC
+  songs have no audio on the disc, bass open notes in the tapping check, 2
+  near misses, 5 virtual-controller checks inherited from gd04).
+- `--songaudiotest entersandman`: the three banks decode (9 stereo pairs).
+- Build: 0 warnings (Linux GCC, dev builds).
+
+**Screenshots checked** (agents/scratch/, git-ignored): press start
+(correct), main menu (correct layout and art), drum tip and double-bass
+pop-ups (correct), difficulty pop-up (text clipped), set list (song names
+empty, tabs overlap), career / difficulty menus (skull art over the menu),
+the song (debug highway), YOU ROCK!, song breakdown (score 000,000, text
+clipped).
+
+**Built only / not tested:** MinGW, Android and Steam Deck builds, the
+launcher module, Wine, real controllers, audio output (dummy driver).
+
+**Approximations (all in DECISIONS):** D4 state call order, D6 sprite dims,
+D8 stem routing, D9 note flags, D10 Glitches stand-in, D11 switch
+fallthrough, D12 IsSongAvailable, D13 debug highway.
+
+**Next (in order):** gh4 scenes (venues, the 3D gems of Gem_Set_01, the
+highway skins), the score into the results (gh4 reads player info, not
+GH3's playerN_status fields), the set list's song names and the text
+fitting (fit_width / fit_height), the remaining 71 natives (--scripttest),
+the judging rules from Metallica's XEX (hit window, HOPO, Star Power,
+whammy), streamall's XMA (sound effects), song previews' key, then M5+.
+
 Estimate (kickoff 2): 4-6 h for the proof of concept (M0..M4 on guitar);
 stop at about 6 h whatever the milestone.
 

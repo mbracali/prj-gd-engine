@@ -1014,8 +1014,8 @@ universal launcher, not released on its own.
 | GD10-002 | Original | ✅ | M0 set-up: gd04's engine copied as gd10, rip, Ghidra project + export (30,337 functions), title ID 41560830 | `gd-game-10/agents/CONTEXT.md` | Kickoff M0 |
 | GD10-003 | Original | 🟡 paks, QB, scripts, fonts, UI images, song audio, Bink done; scenes, anims, .wav, skins, some textures not | M1 data layer: gh4 CHNK files, padded paks, GZ entries, QB struct items and type 0x1C, QS strings, script opcodes 0x4E-0x50, FSB4 + key | `gd-game-10/docs/formats.md` | Kickoff M1 |
 | GD10-004 | Original | 🟡 charts, tuning, three banks done; rules still GH3's [I] | M2 songs and the guitar core (`--selftest`: 66 failures, see PROGRESS) | | Kickoff M2 |
-| GD10-005 | Original | 🟡 boot walk passes; audit not run | M3 gh4 UI state machine, descs, boot to the main menu | `gd-game-10/docs/ui.md` | Kickoff M3 |
-| GD10-006 | Original | 🟡 Quickplay song plays (debug highway, no venue, no results) | M4 proof of concept: Quickplay, one song on guitar in a venue | `--walktest qp4` | Kickoff M4 |
+| GD10-005 | Original | 🟡 boot walk passes; --scripttest: 71 natives to write; audit not run | M3 gh4 UI state machine, descs, boot to the main menu | `gd-game-10/docs/ui.md` | Kickoff M3 |
+| GD10-006 | Original | 🟡 `--walktest quickplay` passes to the results and back; debug highway, no venue drawn | M4 proof of concept: Quickplay, one song on guitar in a venue | Next: gh4 scenes (venues, 3D gems), results score, set list names | Kickoff M4 |
 
 
 ## gd-game-11: Guitar Hero: Smash Hits (Xbox 360)
