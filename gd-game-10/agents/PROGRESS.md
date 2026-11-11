@@ -280,3 +280,48 @@ bloom2 / dof3 / noise2 passes (VMX128 code); loading-screen frames of
 250-500 ms under play_song (the menu scene's synchronous load and the
 venue's shader compiles; not in the song); the highway / gems / HUD on the
 library's own templates (D15).
+
+## 2026-11-11 12:00 Front end alignment (layout agent, GD10-020)
+
+Time: about 1 h 15 min of agent time (10:45 -> 12:00), own build dir
+`engine/build/ui2`. Audit: `docs/frontend.md` (now 17 match, 2 differ, 2 not
+reached).
+
+Misaligned, and why:
+- Set list titles ran 30 px past their 630 and into the skulls: the text
+  measure left out each glyph's advance adjust and x offset, and took
+  font_spacing -1 as "given" [C 0x824D11B0].
+- Set list skulls / double-kick icons stuck at the row's edge: the scripts
+  place them from the title's line child (a text block's lines are its
+  children) and the title's `summed` position, which is (0, 0) for an
+  element not laid out yet [C 0x823F5AA8 / 0x82375E08; I].
+- Focused song had no info panel: `se_setprops desc = ...` was ignored.
+- Hard dark band over the set list's bottom, mirrored halves of the inner
+  shadow and highlights not mirrored: a desc's `flip_h = true` /
+  `flip_v = true` were ignored (the band is a subtract gradient, flipped).
+- Black pill without circles at the set list's corner: CreateScreenElement
+  did not merge an included struct (type, parent, just).
+- Results player row and set list stars empty: descinterfaces inside a
+  desc were never built; cash reward rows shifted right and clipped:
+  `autosizedims` (rect size, rect corner on the element's top-left) [I].
+- Cheats: the bone stayed over the list: a prop name on two elements set
+  only the first; its highlight sat on another row (line children).
+- Results' highest multiplier 1x: highest_multiplier / max_notes were never
+  synced into the player status.
+- Pause spacing is the original's (selection_height 50, spacing -15): kept.
+
+Verified (build/ui2/gd10, headless, scratch XDG_DATA_HOME):
+- walks: boot, quickplay, menus, qp_pause passed; fuzz seeds 7 and 99
+  passed ("300 presses, the menus kept the focus"; the fuzz no longer
+  starts a jam session, which has no Back, like a song).
+- `--selftest`: 31 FAILED (10 Death Magnetic DLC songs x3 + jamsession).
+- `--scripttest`: "every script tokenizes; boot ran (71 natives to write)";
+  `--sfxtest`: "every sound decodes".
+- Shots looked at: 1280x720 (all walk screens), 1920x1080, 1024x768,
+  2560x1080 and 3440x1440 (set list, results, cash rewards, cheats, main
+  menu): the same placement, 16:9 letterboxed / pillarboxed.
+
+Not done: results name placeholder (no gamertag), notes N/A / streak 0
+(detailed stats), black sides behind the results (venue); "Rock Rank"
+wraps and shrinks as measured (unconfirmed); credits, Extras sub-screens,
+calibration, audio, save/load, jam, career flow not audited.

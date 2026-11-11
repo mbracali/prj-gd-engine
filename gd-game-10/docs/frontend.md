@@ -28,9 +28,30 @@ XEX address; [I] = inferred.
   [C script].
 - `setprops` / `SetScreenElementProps` / `se_setprops` reach a desc's named
   props; `se_getprops` without names returns all of them [C scripts].
+- Text width: a glyph adds width + advance adjust - x offset - bearing +
+  tracking, a space its width - bearing + tracking; font_spacing other
+  than -1 replaces the tracking and drops the bearing [C 0x824D11B0].
 - Text blocks: fit_width (wrap, expand dims, scale each line if larger / to
   fit), fit_height (clip bottom / top lines, expand dims, scale down if
-  larger, scale to fit), scale_mode, text_case [C data values; I rules].
+  larger, scale to fit), scale_mode (per axis: a squeezed line keeps its
+  height), text_case [C data values; I rules]. A block's lines are its
+  children (dims = the line's text, scale = internal_scale x fit):
+  ui_create_setlist_spawned puts the difficulty icon after the title and
+  ui_options_cheats_focus sizes the highlight from them [C scripts; I].
+- `summed` positions: the pos point on screen (parent's corner + anchor +
+  pos), cached by the element's update [C 0x823F5AA8 reads +0x1B0,
+  0x82375E08 writes it]; an element not laid out yet gives (0, 0) [I: the
+  set list rows read their new title so, in the row's own frame].
+- Descs: `se_setprops desc = ...` swaps the desc (the focused song's info
+  panel); a descinterface inside a desc builds its own desc (results rows,
+  set list stars); `autosizedims = true` takes the desc's rect size, the
+  rect's corner on the element's top-left; a prop name on several elements
+  sets all (new_cheat_alpha); `flip_h = true` / `flip_v = true` props
+  [C data; I: the rect shift].
+- Window sizes: the menus are 1280 x 720 units letterboxed into the window
+  (16:9 as the 360; 4:3 and ultrawide get bars), so placement is the same
+  at every size (checked 1280x720, 1920x1080, 1024x768, 2560x1080,
+  3440x1440).
 - Menus: fit_major / fit_minor (size dims to content, fit content [if
   larger], expand if content larger, keep dims) [C data; I rules]; children
   placed by their pos_anchor.
@@ -42,7 +63,7 @@ XEX address; [I] = inferred.
 
 ## Screens (flow order)
 
-Counts: 21 screens looked at; 14 match (no difference seen), 5 differ, 2
+Counts: 21 screens looked at; 17 match (no difference seen), 2 differ, 2
 not reached; sub-screens of Backstage, Settings and Music Studio below the
 first level are not audited yet.
 
@@ -59,14 +80,14 @@ first level are not audited yet.
 | Backstage | uistate_backstage | badge, typewriter items, highlight, help bar | - |
 | Practice (Backstage) | uistate_select_instrument | reached | - |
 | Settings | uistate_options | items, highlight, help bar + ENHANCED | - |
-| Cheats | uistate_options_cheats | title, bone slots, snakes, scroll bar | cheat list box empty |
+| Cheats | uistate_options_cheats | title, list, highlight on the focused item, snakes, scroll bar (the cheat bone hides: new_cheat_alpha) | - |
 | Music Studio | uistate_jam | sign-in, memcard, download scan, jam | jam screen itself not audited (band characters missing: CAS) |
-| Set list | uistate_setlist | songs, sections, scroll, stars, difficulty icons, help bar | long titles squeezed per line (fit rule [I]); help bar over the last row |
+| Set list | uistate_setlist | songs (squeezed to 630 per axis), icons after each title, focused song's info panel (difficulty skulls, stars), sections, fade under the help bar (subtract gradient), custom set circles, scroll, help bar | - |
 | Difficulty pop-up | uistate_select_difficulty | frame, five items, icons, title | - |
 | Loading | create_loading_screen | tip, picture | - |
-| Gameplay pause | uistate_pausemenu | PAUSED, six items, focus colours, Back resumes | item spacing tight |
-| Results | uistate_song_breakdown | title, stars, score, multiplier, streak table, help bar | highest multiplier reads 1x on autoplay; black sides (venue) |
-| Cash rewards | uistate_cash_rewards_3 | milestones, gig / career totals, rank, logo | Rock Rank title wraps small; milestone descriptions clipped |
+| Gameplay pause | uistate_pausemenu | PAUSED, six items 35 apart (selection_height 50, spacing_between -15 [C script]), focus colours, Back resumes | - |
+| Results | uistate_song_breakdown | title, stars, score, highest multiplier, player row (rank, cut, icons), help bar | name shows the desc's placeholder (no gamertag), notes N/A and streak 0 (detailed stats); black sides (venue not drawn behind) |
+| Cash rewards | uistate_cash_rewards_3 | reward rows (check, amount, description), gig / career totals, rank, logo | "Rock Rank" (367 wide in 350) wraps and scales down, its labels too: as the measure says [C 0x824D11B0], unconfirmed on the original |
 | Credits | - | not reached | - |
 | Extras | uistate_extras | reached (state posts now) | not looked at |
 
@@ -77,4 +98,5 @@ first level are not audited yet.
 - `--walktest quickplay`: passes (boot to the results and back to the set list).
 - `--walktest qp_pause`: passes (Esc pauses, Back resumes, the pause items).
 - `--walktest fuzz` (300 seeded random presses, `GD10_SEED`; a menu must
-  keep the focus with text shown, never 8 s without): passes on seeds 7, 99.
+  keep the focus with text shown, never 8 s without; no song, tutorial or
+  jam session starts): passes on seeds 7, 99.
