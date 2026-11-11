@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "render/canvas.h"
+#include "render/gem_materials.h"
 
 class Globals;
 class TextureCache;
@@ -136,6 +137,14 @@ public:
     }
 
 private:
+    // gh4: gems drawn from the script-built materials (layered grey textures, D13 done) [C data].
+    gemmat::Library gems_;
+    bool gh4_ = false;
+    void gemGh4(Canvas& c, const TextureCache& tex, uint32_t material, float x, float y, float scale, float just, uint8_t alpha,
+                double now) const;
+    // One material's passes as sprites (just jx, jy; sx < 0 mirrors).
+    void matSprite(Canvas& c, const TextureCache& tex, uint32_t material, float x, float y, float sx, float sy, float jx, float jy,
+                   uint8_t alpha, double now) const;
     void drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double nowMs, uint8_t held);
     float yAt(float v) const { return topY_ + height_ * v; }
     // The normalised depth of perspective row `r` (0 .. 1152; 1024 the playline).

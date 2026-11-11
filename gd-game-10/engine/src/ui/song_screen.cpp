@@ -669,6 +669,32 @@ uint32_t SongScreen::highwayTexture(const Disc& disc, const Globals& g, TextureC
     if (p == 1 && bossProps)
         if (const qb::Struct* b = structOf(bossProps))
             if (const qb::Value* cp = g.field(*b, qbkey::key("character_profile"))) charId = keyOf(cp), outfit = style = 1;
+    // gh4: the profile's appearance CAS_Guitar_Highway desc_id -> its
+    // CAS_Highways_List row: highway_pak (PAK/<name>.pak.xen) and
+    // highway_texture [C data car_rocker_highway.qb, guitar_band_preset_profiles.qb];
+    // without a character the first preset profile (James) [I].
+    if (const qb::Value* list = g.find(qbkey::key("CAS_Highways_List")); list && list->arr) {
+        const qb::Struct* gp = nullptr;
+        if (const qb::Value* a = g.find(qbkey::key("Preset_Musician_Profiles_Modifiable")); a && a->arr) {
+            for (const qb::Value& e : a->arr->values)
+                if (e.st && keyOf(e.st->find(qbkey::key("name"))) == charId) gp = e.st.get();
+            if (!gp && !a->arr->values.empty() && a->arr->values[0].st) gp = a->arr->values[0].st.get();
+        }
+        const qb::Value* ap = gp ? g.field(*gp, qbkey::key("appearance")) : nullptr;
+        const qb::Value* hw = ap && ap->st ? g.field(*ap->st, qbkey::key("CAS_Guitar_Highway")) : nullptr;
+        const uint32_t desc = hw && hw->st ? keyOf(hw->st->find(qbkey::key("desc_id"))) : 0;
+        for (const qb::Value& e : list->arr->values) {
+            if (!e.st || keyOf(e.st->find(qbkey::key("desc_id"))) != desc) continue;
+            const uint32_t texKey = keyOf(e.st->find(qbkey::key("highway_texture")));
+            std::string pak = qbkey::name(keyOf(e.st->find(qbkey::key("highway_pak"))));
+            for (char& ch : pak) ch = char(ch >= 'A' && ch <= 'Z' ? ch - 'A' + 'a' : ch);
+            const std::string path = "DATA/COMPRESSED/PAK/" + pak + ".pak.xen";
+            if (!tex.find(texKey).id && disc.exists(path)) tex.loadPak(disc, path);
+            if (tex.find(texKey).id) return texKey;
+            SDL_Log("highway: %s has no %08x (player %d)", path.c_str(), texKey, p + 1);
+        }
+        return 0;
+    }
     const qb::Struct* prof = nullptr;
     if (const qb::Value* a = g.find(qbkey::key("musician_profiles")); a && a->arr)
         for (const qb::Value& e : a->arr->values)

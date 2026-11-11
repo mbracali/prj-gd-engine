@@ -154,7 +154,8 @@ bool Highway2D::init(const Globals& g, int difficulty, int players, int player) 
     // scene) and its skins live in highway_<name> paks: until those draw,
     // the song keeps the labelled debug highway (D13); GD10_GH4_HIGHWAY=1
     // draws this one (development aid).
-    if (hw && !SDL_getenv("GD10_GH4_HIGHWAY")) return false;
+    gh4_ = hw && gems_.load(g);
+    if (hw && !gh4_) return false;
     return travelMs_ > 0;
 }
 
@@ -236,6 +237,51 @@ void Highway2D::sprite(Canvas& c, uint32_t key, const TextureCache& tex, float x
     const Vertex A = P(l, t, u0, v0), B = P(l + w, t, u1, v0), C = P(l + w, t + h, u1, v1), D = P(l, t + h, u0, v1);
     const Vertex q[6] = {A, B, C, A, C, D};
     c.draw(q, 6, int(id.id), blend);
+}
+
+void Highway2D::gemGh4(Canvas& c, const TextureCache& tex, uint32_t material, float x, float y, float scale, float just, uint8_t alpha,
+                       double now) const {
+    const gemmat::Material* m = gems_.find(material);
+    if (!m) return;
+    // A flip-book (AnimatedTexture: m_ucells x m_vcells at m_FPS) [C data; frame order I].
+    float u0 = 0, v0 = 0, u1 = 1, v1 = 1;
+    if (m->fps > 0 && m->ucells >= 1 && m->vcells >= 1) {
+        const int nu = int(m->ucells), nv = int(m->vcells);
+        const int frame = int(now / 1000.0 * double(m->fps)) % (nu * nv);
+        u0 = float(frame % nu) / float(nu), v0 = float(frame / nu) / float(nv);
+        u1 = u0 + 1.0f / float(nu), v1 = v0 + 1.0f / float(nv);
+    }
+    for (const gemmat::Pass& p : m->passes) {
+        int tw = 128, th = 64;
+        tex.size(p.texture, tw, th);
+        auto ch = [](float f) { return uint8_t(std::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f); };
+        const SDL_Color col{ch(p.color[0]), ch(p.color[1]), ch(p.color[2]), uint8_t(float(alpha) * std::clamp(p.color[3], 0.0f, 1.0f))};
+        if (!col.a) continue;
+        const float fw = float(tw) * (u1 - u0), fh = float(th) * (v1 - v0);
+        quad(c, p.texture, tex, x, y, fw * scale, fh * scale, just, col, u0, v0, u1, v1, m->additive ? Blend::Add : Blend::Alpha);
+    }
+}
+
+void Highway2D::matSprite(Canvas& c, const TextureCache& tex, uint32_t material, float x, float y, float sx, float sy, float jx, float jy,
+                          uint8_t alpha, double now) const {
+    const gemmat::Material* m = gems_.find(material);
+    if (!m) return;
+    float u0 = 0, v0 = 0, u1 = 1, v1 = 1;
+    if (m->fps > 0 && m->ucells >= 1 && m->vcells >= 1) {
+        const int nu = int(m->ucells), nv = int(m->vcells);
+        const int frame = int(now / 1000.0 * double(m->fps)) % (nu * nv);
+        u0 = float(frame % nu) / float(nu), v0 = float(frame / nu) / float(nv);
+        u1 = u0 + 1.0f / float(nu), v1 = v0 + 1.0f / float(nv);
+    }
+    for (const gemmat::Pass& p : m->passes) {
+        int tw = 128, th = 64;
+        tex.size(p.texture, tw, th);
+        auto ch = [](float f) { return uint8_t(std::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f); };
+        const SDL_Color col{ch(p.color[0]), ch(p.color[1]), ch(p.color[2]), uint8_t(float(alpha) * std::clamp(p.color[3], 0.0f, 1.0f))};
+        if (!col.a) continue;
+        sprite(c, p.texture, tex, x, y, float(tw) * (u1 - u0) * sx, float(th) * (v1 - v0) * sy, jx, jy, 0, col, u0, v0, u1, v1,
+               m->additive ? Blend::Add : Blend::Alpha);
+    }
 }
 
 void Highway2D::noteHit(uint8_t frets, uint8_t held, double now, bool starPower) {
@@ -575,6 +621,16 @@ void Highway2D::drawButtons(Canvas& c, const TextureCache& tex, uint8_t held, bo
             tex.size(key, tw, th);
             sprite(c, key, tex, px, py, float(tw) * scx, float(th) * scy, 0, 1, 0, white);
         };
+        if (gh4_) {  // the same parts as materials [C data button_up_models]
+            const gemmat::Lane& ln = gems_.lane(l);
+            const float sx = sxl * ln.scale;
+            const bool down = held & (1 << l);
+            matSprite(c, tex, ln.mid, x, y, sx, nowScaleY_, 0, 1, 255, now);
+            matSprite(c, tex, ln.neck, x, y - neckLipBase_, sx, (p + neckLipAdd_) / neckSprite_, 0, 1, 255, now);
+            matSprite(c, tex, !down ? ln.head : p <= 0 ? ln.down : ln.headLit, x, y - p, sx, nowScaleY_, 0, 1, 255, now);
+            matSprite(c, tex, ln.lip, x, y, sx, nowScaleY_, 0, 1, 255, now);
+            continue;
+        }
         at(kMid[l], x, y, sxl, nowScaleY_);
         at(kNeck, x, y - neckLipBase_, sxl, (p + neckLipAdd_) / neckSprite_);
         const bool down = held & (1 << l);
@@ -824,6 +880,14 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
                         scale *= starScale_;
                         just = starJust_;
                     } else key = n.hopo ? kGemHammer[l] : kGem[l];
+                    if (gh4_) {
+                        const gemmat::Lane& ln = gems_.lane(l);
+                        const uint32_t mat = spGem ? (n.hopo ? ln.spHammer : ln.spGem) : star ? (n.hopo ? ln.starHammer : ln.star)
+                                                                                              : (n.hopo ? ln.hammer : ln.gem);
+                        const float y = yAt(v);
+                        gemGh4(c, tex, mat, laneX(lane, v), y, gemStart_ + (gemEnd_ - gemStart_) * v, just, uint8_t(255 * alphaAt(y)), now);
+                        continue;
+                    }
                     int tw = 128, th = 64;
                     tex.size(key, tw, th);
                     const float fw = float(tw) * (u1 - u0), fh = float(th) * (v1 - v0);

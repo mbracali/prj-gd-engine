@@ -132,12 +132,19 @@ std::shared_ptr<TextureCache::Prepared> TextureCache::prepare(const Disc& disc, 
                 const scene::Kind kind = e.type == qbkey::key(".skin") ? scene::Kind::Skin
                                          : e.type == qbkey::key(".mdl") ? scene::Kind::Mdl
                                                                         : scene::Kind::Scn;
-                for (const scene::Material& m : scene::parse(p, size, kind).materials)
-                    if (m.key && !m.textures.empty()) {
-                        Prepared::Item it;
-                        it.kind = Prepared::Item::Material, it.material = m.key, it.firstTexture = m.textures.front();
-                        pr->items.push_back(std::move(it));
-                    }
+                // A scene the reader does not take yet (gh4 skins, two .mdl)
+                // costs its materials' aliases only, not the pak's textures.
+                try {
+                    for (const scene::Material& m : scene::parse(p, size, kind).materials)
+                        if (m.key && !m.textures.empty()) {
+                            Prepared::Item it;
+                            it.kind = Prepared::Item::Material, it.material = m.key, it.firstTexture = m.textures.front();
+                            pr->items.push_back(std::move(it));
+                        }
+                } catch (const std::exception& ex) {
+                    static std::atomic<int> logged{0};
+                    if (logged++ < 8) SDL_Log("textures: %s: a scene skipped: %s", pakPath.c_str(), ex.what());
+                }
             }
         }
     } catch (const std::exception& ex) {
