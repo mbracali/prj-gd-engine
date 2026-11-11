@@ -13,8 +13,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <deque>
 #include <exception>
+#include <future>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -435,20 +437,64 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
     // gh4: a pak's QB files join the globals (zone scripts, the screens'
     // uidesc_* descs), once per pak [C data: z_frontend's uidesc_main_menu_layout].
     auto qbLoaded = std::make_shared<std::set<std::string>>();
-    auto addQbs = [&disc, qbLoaded](Vm& v, const std::string& path) {
-        if (!qbLoaded->insert(path).second) return;
-        try {
-            const auto pak = Pak::shared(disc, path);
-            for (const PakEntry& e : pak->entries())
-                if (e.type == qbkey::key(".qb")) {
-                    auto [d, n] = pak->data(e);
-                    v.globals().add(qb::decode(d, n));
-                }
-        } catch (const std::exception& ex) {
-            SDL_Log("pak %s: %s", path.c_str(), ex.what());
+    // The pak is read and its QB files decoded on a worker; the script waits
+    // for them (its frames go on: reading z_tushino here had held the loading
+    // screen ~260 ms, no-stutter rule). They join the globals in the order
+    // asked (a zone, then its links), when ready: polled by the waiting
+    // script and by every later SetPakManCurrent (a script killed while it
+    // waited). A script run as a condition reads them at once.
+    struct QbLoad {
+        std::future<std::vector<qb::File>> work;
+        bool added = false;
+    };
+    auto qbLoads = std::make_shared<std::deque<std::shared_ptr<QbLoad>>>();
+    auto drainQbs = [qbLoads](Vm& v) {
+        while (!qbLoads->empty()) {
+            QbLoad& l = *qbLoads->front();
+            if (l.work.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+            for (const qb::File& f : l.work.get()) v.globals().add(f);
+            l.added = true;
+            qbLoads->pop_front();
         }
     };
-    auto setCurrent = [&disc, &textures, &fe, current, addQbs](Vm& v, ScriptRun&, qb::Struct& p) {
+    auto addQbs = [&disc, qbLoaded, qbLoads, drainQbs](Vm& v, ScriptRun& run, const std::string& path) {
+        drainQbs(v);
+        if (!qbLoaded->insert(path).second) return;
+        const Disc* d = &disc;
+        auto read = [d, path] {
+            std::vector<qb::File> files;
+            try {
+                const auto pak = Pak::shared(*d, path);
+                for (const PakEntry& e : pak->entries())
+                    if (e.type == qbkey::key(".qb")) {
+                        auto [p, n] = pak->data(e);
+                        files.push_back(qb::decode(p, n));
+                    }
+            } catch (const std::exception& ex) {
+                SDL_Log("pak %s: %s", path.c_str(), ex.what());
+            }
+            return files;
+        };
+        if (run.id == 0 && qbLoads->empty()) {
+            for (const qb::File& f : read()) v.globals().add(f);
+            return;
+        }
+        auto load = std::make_shared<QbLoad>();
+        load->work = std::async(std::launch::async, read);
+        qbLoads->push_back(load);
+        if (run.id == 0) {  // (a condition's run cannot wait: in now, after the ones before)
+            while (!load->added) {
+                qbLoads->front()->work.wait();
+                drainQbs(v);
+            }
+            return;
+        }
+        run.waitFor = [&v, load, drainQbs] {
+            drainQbs(v);
+            return load->added;
+        };
+    };
+    auto setCurrent = [&disc, &textures, &fe, current, addQbs](Vm& v, ScriptRun& run, qb::Struct& p) {
         const qb::Value* map = Vm::param(p, K("map"));
         const qb::Value* pak = Vm::param(p, K("pak"));
         const qb::Value* pakname = Vm::param(p, K("pakname"));
@@ -471,7 +517,7 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
             // loading screen's movie [I: GH3 loads it asynchronously there too].
             if (v.loadingHoldUntil() >= 0) textures.loadPakAsync(disc, path);
             else textures.loadPak(disc, path);
-            addQbs(v, path);
+            addQbs(v, run, path);
         };
         if (map->key == K("ui_paks")) {
             // gh4 UI paks (UIPaks, folder 'Pak/ui/'): DATA/COMPRESSED/PAK/<name>.pak.xen [C data].
