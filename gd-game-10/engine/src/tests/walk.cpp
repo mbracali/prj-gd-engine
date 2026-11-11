@@ -50,23 +50,18 @@ Walk::Walk(const std::string& name) : name_(name) {
     };
     if (name == "qp4") {
         // gh4 (Metallica) Quickplay, being built (M4): the main menu's
-        // QUICKPLAY (second item), then the screens as they come.
+        // QUICKPLAY (second item), single player, guitar, the set list.
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", D, C}, 10000});
         steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
         steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
-        steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", C}, 20000});
-        steps_.push_back({"uistate_character_selection", {"wait", "wait", "wait", "wait", D, "wait", C}, 20000});
-        steps_.push_back({"UIstate_band_name_logo", {"wait", "wait", "wait", "wait", "key:Up", "key:Up", C, "key:Up", C, "key:Up", "key:Return", "wait", "key:Return"}, 20000});
-        steps_.push_back({"uistate_optimal_drum", {"wait", "wait", "wait", C}, 20000, true});
-        // A new band (no save): naming it saves and goes back to the main
-        // menu [C scripts: band_name_logo -> memcard -> boot states]; the
-        // second time through the band exists.
-        steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", D, C}, 20000});
-        steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
-        steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
-        steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, C}, 20000});
-        steps_.push_back({"uistate_character_selection", {"wait", "wait", "wait", "wait", D, "wait", C}, 20000});
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000});
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+        // A song joins the set list (pad_choose), Start plays it (gh4's custom set list) [C scripts].
+        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000});
+        steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, "wait", C}, 20000});
         steps_.push_back({"uistate_never", {}, 15000});
     } else if (name == "quickplay" || name == "lose") {
         steps_ = boot;

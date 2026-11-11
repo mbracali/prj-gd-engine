@@ -231,7 +231,18 @@ void addCoreNatives(Vm& vm) {
             if (g) a = g;
         }
         const int n = a && a->type == qb::Type::Array && a->arr ? int(a->arr->values.size()) : 0;
-        if (!run.frames.empty() && run.frames.back().locals) Vm::set(*run.frames.back().locals, K("array_size"), Vm::makeInt(n));
+        static const bool nTrace = [] { const char* e = SDL_getenv("GD10_VMTRACE"); return e && *e == '2'; }();
+        if (nTrace) {
+            const qb::Value* f0 = first(p);
+            SDL_Log("qscript: GetArraySize first %s %s -> %d", f0 ? qb::typeName(f0->type) : "none",
+                    f0 && (f0->type == qb::Type::Key || f0->type == qb::Type::KeyPtr) ? qbkey::name(f0->key).c_str() : "", n);
+        }
+        if (!run.frames.empty()) {
+            // A script with no parameters yet has no locals: make them (gh4's
+            // ui_setlist_get_next_custom_index starts with GetArraySize).
+            if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
+            Vm::set(*run.frames.back().locals, K("array_size"), Vm::makeInt(n));
+        }
         return true;
     });
     // FormatText checksumName = x / TextName = x 'fmt' params.

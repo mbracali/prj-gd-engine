@@ -2,8 +2,11 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/natives_gh4.h"
 
+#include <algorithm>
+#include <cctype>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "data/qbkey.h"
 #include "script/globals.h"
@@ -141,6 +144,70 @@ void addGh4Natives(qs::Vm& vm) {
             }
         }
         return false;
+    });
+    // GetUpperCaseString <string> -> uppercasestring [C use: the set list's sort keys].
+    vm.addNative("GetUpperCaseString", [setLocal](Vm&, ScriptRun& run, qb::Struct& p) {
+        std::string out;
+        for (const qb::Item& it : p.items)
+            if (!it.name && (it.value.type == qb::Type::String || it.value.type == qb::Type::WString)) {
+                out = it.value.str;
+                break;
+            }
+        for (char& c : out) c = char(std::toupper(static_cast<unsigned char>(c)));
+        setLocal(run, K("uppercasestring"), Vm::makeString(out));
+        return true;
+    });
+    // IsSongAvailable song = <song>: a song of the disc's set list (its first
+    // audio bank on the disc; not a tutorial, test or debug chart) [I: D12,
+    // the XEX's rule to find].
+    vm.addNative("IsSongAvailable", [](Vm& v, ScriptRun&, qb::Struct& p) {
+        const qb::Value* sg = Vm::param(p, K("song"));
+        if (!sg) return false;
+        std::string n = qbkey::name(sg->key);
+        for (char& c : n) c = char(std::tolower(static_cast<unsigned char>(c)));
+        static const char* const kOut[] = {"tut_", "synctest", "debug", "testtones", "placeholder", "drumstreamtest", "jamsession"};
+        for (const char* o : kOut)
+            if (n.find(o) != std::string::npos) return false;
+        if (n.rfind("0x", 0) == 0) return false;
+        const qb::Value* props = v.global(K("gh_songlist_props"));
+        if (!props || !props->st) return false;
+        const qb::Value* sp = v.globals().field(*props->st, sg->key);
+        if (!sp || !sp->st) return false;
+        const qb::Value* nm = v.globals().field(*sp->st, K("name"));
+        return nm && !nm->str.empty() && v.songAvailable && v.songAvailable(nm->str);
+    });
+    // SortAndBuildSonglist songlist = [{song_checksum song_title song_artist}]
+    // sortby = title_alphabetical | artist_alphabetical | career_order ->
+    // sorted_songlist (the songs) [C use; I: the order of equal keys].
+    vm.addNative("SortAndBuildSonglist", [setLocal](Vm&, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* list = Vm::param(p, K("songlist"));
+        const qb::Value* by = Vm::param(p, K("sortby"));
+        struct E {
+            uint32_t song;
+            std::string title, artist;
+        };
+        std::vector<E> es;
+        if (list && list->arr)
+            for (const qb::Value& e : list->arr->values) {
+                if (!e.st) continue;
+                E x{0, {}, {}};
+                if (const qb::Value* s = e.st->find(K("song_checksum"))) x.song = s->key;
+                if (const qb::Value* s = e.st->find(K("song_title"))) x.title = s->str;
+                if (const qb::Value* s = e.st->find(K("song_artist"))) x.artist = s->str;
+                es.push_back(std::move(x));
+            }
+        const uint32_t sb = by ? by->key : 0;
+        if (sb == K("title_alphabetical"))
+            std::stable_sort(es.begin(), es.end(), [](const E& a, const E& b) { return a.title < b.title; });
+        else if (sb == K("artist_alphabetical"))
+            std::stable_sort(es.begin(), es.end(), [](const E& a, const E& b) { return a.artist != b.artist ? a.artist < b.artist : a.title < b.title; });
+        qb::Value out;
+        out.type = qb::Type::Array;
+        out.arr = std::make_shared<qb::Array>();
+        out.arr->type = qb::Type::Key;
+        for (const E& e : es) out.arr->values.push_back(Vm::makeKey(e.song));
+        setLocal(run, K("sorted_songlist"), out);
+        return true;
     });
     // obj_getid: the element (object) the script runs on, as objid [C scripts].
     vm.addNative("obj_getid", [setLocal](Vm&, ScriptRun& run, qb::Struct&) {

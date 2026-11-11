@@ -174,6 +174,8 @@ public:
     // drive GH3's (the song's end: Transition_CameraCut, destroy_hud,
     // disable_highway, kill_gem_scroller).
     std::function<void(uint32_t name, const qb::Struct& params)> onScriptEnter;
+    // gh4: whether a song's audio is on the disc (IsSongAvailable), set by the front end.
+    std::function<bool(const std::string& songName)> songAvailable;
 
     // Code of a script global (tokenized once).
     std::shared_ptr<const CodeCache> code(uint32_t name);

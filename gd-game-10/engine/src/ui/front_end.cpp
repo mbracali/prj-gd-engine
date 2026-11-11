@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/front_end.h"
 #include "ui/natives_gh4.h"
+#include "data/disc.h"
 
 #include <string_view>
 
@@ -46,6 +47,7 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
     scene_ = std::make_unique<MenuScene>(disc_, globals_, *vm_, *ui_);
     scene_->addNatives();  // after the flow natives' stubs (PlayIGCCam, KillCamAnim)
     addGh4Natives(*vm_);
+    vm_->songAvailable = [this](const std::string& name) { return disc_.exists("DATA/MUSIC/" + name + "_1.fsb.xen"); };
     states = std::make_unique<UiStates>(*vm_);
     states->focus = [this](uint32_t id) { return ui_->focusElement(id); };
     states->addNatives();  // last: the `ui` object's members before the composite objects'

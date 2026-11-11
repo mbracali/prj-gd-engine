@@ -228,6 +228,10 @@ struct Exec {
             else {
                 qb::Value inner = primary();
                 if (inner.type == qb::Type::Key || inner.type == qb::Type::KeyPtr) name = inner.key;
+                // `$ <arg> song_array` where the local already holds the global's
+                // value (a name in an array literal read as its global: gh4's
+                // ui_create_setlist_spawned final_array) [I].
+                else if (inner.type == qb::Type::Array || inner.type == qb::Type::Struct) return inner;
             }
             return name ? globalValue(name) : none();
         }
@@ -792,6 +796,9 @@ bool Vm::callName(ScriptRun& run, uint32_t name, qb::Struct& params, bool& resul
     if (nat != natives_.end()) {
         ++stats_.nativeCalls;
         result = nat->second(*this, run, params);
+        // GD10_VMTRACE=2: natives too, with their result (development aid).
+        static const bool nTrace = [] { const char* e = SDL_getenv("GD10_VMTRACE"); return e && *e == '2'; }();
+        if (nTrace) SDL_Log("qscript: native %s -> %d", qbkey::name(name).c_str(), result ? 1 : 0);
         return true;
     }
     if (auto c = code(name)) {
@@ -1275,8 +1282,33 @@ bool Vm::step(ScriptRun& run, int budget) {
                         Exec tmp(*this, run);
                         eq = truth(tmp.binary(kSameAs, v, c));
                     }
+                    static const bool swTrace = [] { const char* e = SDL_getenv("GD10_VMTRACE"); return e && *e && *e != '0'; }();
+                    if (swTrace)
+                        SDL_Log("qscript: switch %s %s vs case %s %s -> %d", qb::typeName(v.type), qbkey::name(v.key).c_str(), qb::typeName(c.type),
+                                qbkey::name(c.key).c_str(), eq ? 1 : 0);
                     if (eq) {
-                        fr.pc = cv.i;
+                        // An empty body (only its jump to the end, then the next
+                        // case) shares the next case's body: `case p1_quickplay
+                        // case p2_quickplay ... case p4_quickplay <body>`
+                        // (ui_create_play_song_spawned) [I: D11; the compiled
+                        // jumps of empty cases point past endswitch].
+                        auto nl = [&](size_t k) {
+                            while (k < t.size() && (t[k].op == kEndOfLine || t[k].op == kEndOfLineNumber)) ++k;
+                            return k;
+                        };
+                        size_t at = cv.i;
+                        for (;;) {
+                            const size_t j = nl(at);
+                            if (!(j + 1 < t.size() && t[j].op == kShortJump && t[nl(j + 1)].op == kCase)) break;
+                            at = nl(j + 1);
+                            size_t h = at + 1;
+                            if (h < t.size() && t[h].op == kShortJump) ++h;
+                            Exec skip(*this, run);
+                            skip.i = h;
+                            (void)skip.expression();  // the next case's value
+                            at = skip.i;
+                        }
+                        fr.pc = at;
                         matched = true;
                         break;
                     }
@@ -1427,6 +1459,19 @@ bool Vm::step(ScriptRun& run, int budget) {
             callName(run, first.u, p, result);
             (void)depth;
             continue;
+        }
+        if (first.op == kOpenParen) {
+            // gh4: `( $ default_loading_screen . create ) play_song`: a call of
+            // the script an expression names (ui_create_play_song_spawned) [C data].
+            const qb::Value target = ex.primary();
+            if (target.type == qb::Type::Key || target.type == qb::Type::KeyPtr) {
+                qb::Struct p = ex.params();
+                while (ex.i < t.size() && !isEnd(t[ex.i].op)) ++ex.i;
+                fr.pc = ex.i;
+                bool result = false;
+                callName(run, target.key, p, result);
+                continue;
+            }
         }
         logOnce("UNHANDLED line start token " + std::to_string(int(first.op)) + " in " + qbkey::name(fr.code->name));
         while (ex.i < t.size() && !isEnd(t[ex.i].op)) ++ex.i;
