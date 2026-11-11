@@ -337,6 +337,20 @@ Scene parseGh4(const View& v, const uint8_t* data, size_t end, Kind kind) {
     return sc;
 }
 
+// gh4: materials 0xD0 bytes (template at +0x70), or with none, meshes 0x90
+// bytes apart (the scene header's +0x8C - +0x80) [C data].
+bool isGh4(const View& v, size_t end) {
+    if (end < 0x40) return false;
+    const uint32_t nmat = v.u16(0x22);
+    if (nmat > 0) return v.u32(0x30 + 0x7C) == 0xD0 && v.allBytes(0x38, 0xA0, 0);
+    const size_t s = 0x20 + size_t(v.u32(0x24));
+    if (s + 8 > end || v.u32(s) != 0xBABEFACEu) return false;
+    const size_t B = s + 8 + v.u32(s + 4);
+    if (B + 0x90 > end) return false;
+    const uint32_t nm = v.u32(B + 0x4C);
+    return nm ? v.u32(B + 0x8C) - v.u32(B + 0x80) == 0x90 * nm : v.u32(B + 0x78) == 0;
+}
+
 }  // namespace
 
 Scene parse(const uint8_t* data, size_t size, Kind kind) {
@@ -355,7 +369,7 @@ Scene parse(const uint8_t* data, size_t size, Kind kind) {
     } else {
         need(v.u32(0) == 0, "first word not 0");
     }
-    if (v.u16(0x22) > 0 && v.u32(0x30 + 0x7C) == 0xD0 && v.allBytes(0x38, 0xA0, 0)) return parseGh4(v, data, end, kind);
+    if (isGh4(v, end)) return parseGh4(v, data, end, kind);
 
     // Materials (Function_822B27E8, Function_822B2068).
     need(data[0x20] == 4 && data[0x21] == 0x10, "material header");

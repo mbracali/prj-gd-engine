@@ -1755,7 +1755,11 @@ int App::run() {
         const int n = textures_->loadPak(*disc_, "DATA/COMPRESSED/ZONES/global.pak.xen");
         if (textures_->sharpened) SDL_Log("textures: %d sharpened (Sharper Text & Sprites)", textures_->sharpened);
         const int a = textures_->loadPak(*disc_, "DATA/COMPRESSED/PAK/axel_1.pak.xen");  // the default guitarist [I]
-        SDL_Log("textures: %d from global.pak, %d from axel_1.pak (%.0f ms)", n, a, double(SDL_GetTicksNS() - t0) / 1e6);
+        // gh4: every venue zone links z_in_game (GHZones zones [C data
+        // zone_links.qb]): the gem, highway and HUD textures; kept resident.
+        const int ig = textures_->loadPak(*disc_, "DATA/COMPRESSED/ZONES/z_in_game.pak.xen");
+        SDL_Log("textures: %d from global.pak, %d from axel_1.pak, %d from z_in_game.pak (%.0f ms)", n, a, ig,
+                double(SDL_GetTicksNS() - t0) / 1e6);
     }
     if ((!options_.song.empty() || !options_.walk.empty()) && !disc_) {
         std::fprintf(stderr, "%s: %s\n", app::kProgram, message_.empty() ? "no disc image given" : message_.c_str());
