@@ -9,6 +9,7 @@ class Vm;
 
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 // SoundEventFast / PlaySound and the sound stubs (natives_sound.cpp).
 class Disc;
@@ -16,6 +17,13 @@ void addSoundNatives(qs::Vm& vm, Sfx& sfx, const Disc& disc);
 // Called with each sound event's key as SoundEventFast plays it (the song
 // hooks' counters); empty: none.
 void setSoundEventListener(std::function<void(uint32_t)> f);
+// gh4's sound units: vol in dB -> gain, pitch in semitones -> ratio.
+float dbGain(float db);
+float semitoneRatio(float semis);
+// The voices the scripts started (PlaySound, StartPreloadedStream's
+// streamall streams) with the starting script's name: StopSoundEvent on a
+// script event (Menu_Music_SE) stops those of the scripts named after it.
+void addScriptVoice(Sfx& sfx, uint32_t voice, uint32_t script);
 namespace qb {
 struct Struct;
 }

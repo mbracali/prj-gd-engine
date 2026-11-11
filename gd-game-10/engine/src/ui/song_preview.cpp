@@ -12,11 +12,13 @@
 #include <string>
 
 #include "audio/mixer.h"
+#include "audio/sfx.h"
 #include "audio/song_stream.h"
 #include "audio/sound_buss.h"
 #include "data/qbkey.h"
 #include "script/vm.h"
 #include "ui/front_end.h"
+#include "ui/natives_sound.h"
 
 // GH3's section-menu preview, as its scripts drive it [C scripts
 // practice_songpreview_monitor, preload_song, startpreloadpaused_song,
@@ -65,6 +67,8 @@ bool endsWith(const std::string& s, const std::string& tail) {
 struct State {
     // unique_id -> the stream's name (lower-cased, '<prefix>_song' ...).
     std::map<int32_t, std::string> streams;
+    // unique_id -> a streamall sample (the menu music: Menu_Music_SE_spawned).
+    std::map<int32_t, uint32_t> sfxStreams;
     int32_t nextId = 0x5000;
     int32_t songId = 0;   // the '<prefix>_song' stream's unique_id
     float pitch = 1;      // StartPreloadedStream's pitch / 100 for it
@@ -96,7 +100,17 @@ void addSongPreviewNatives(qs::Vm& vm, FrontEnd& fe, Mixer& mixer, const Disc& d
     // as before [C script preload_song: ScriptAssert on a failure].
     vm.addNative("PreloadStream", [st, fp](Vm& v, ScriptRun& run, qb::Struct& p) {
         const qb::Value* s = firstUnnamed(p);
-        if (!s || fp->songPlaying) return false;
+        if (!s) return false;
+        // A streamall sample (gh4's menu music, Menu_Music_SE_spawned): played
+        // by the sound effects at StartPreloadedStream [C script; I: the port's
+        // streams are the sound effects' voices].
+        if (fp->sfx.has(s->key)) {
+            const int32_t id = st->nextId++;
+            st->sfxStreams[id] = s->key;
+            if (qb::Struct* l = locals(run)) Vm::set(*l, K("unique_id"), Vm::makeInt(id));
+            return true;
+        }
+        if (fp->songPlaying) return false;
         std::string name = qbkey::name(s->key);
         std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return char(std::tolower(c)); });
         static const char* const tails[] = {"_song", "_guitar", "_rhythm", "_crowd"};
@@ -119,9 +133,18 @@ void addSongPreviewNatives(qs::Vm& vm, FrontEnd& fe, Mixer& mixer, const Disc& d
     // StartPreloadedStream <id> startpaused = 1 buss pitch: the song stream's
     // pitch (current_speedfactor * 100) is the preview's speed; player 1's
     // stream (First_Player_Lead_Playback) tells its part [C script startpreloadpaused_song].
-    vm.addNative("StartPreloadedStream", [st](Vm&, ScriptRun&, qb::Struct& p) {
+    vm.addNative("StartPreloadedStream", [st, fp](Vm&, ScriptRun& run, qb::Struct& p) {
         const qb::Value* id = firstUnnamed(p);
         if (!id) return true;
+        // A streamall sample: vol in dB, pitch in percent (vol = -5 pitch = 100) [C script Menu_Music_SE_spawned].
+        if (auto sf = st->sfxStreams.find(int32_t(id->number())); sf != st->sfxStreams.end()) {
+            const qb::Value* b = Vm::param(p, K("buss"));
+            const float gain = dbGain(Vm::number(Vm::param(p, K("vol")), 0));
+            const float ratio = Vm::number(Vm::param(p, K("pitch")), 100) / 100.0f;
+            if (const uint32_t voice = fp->sfx.play(sf->second, gain, ratio, b ? b->key : K("default"))) addScriptVoice(fp->sfx, voice, run.name);
+            st->sfxStreams.erase(sf);
+            return true;
+        }
         auto it = st->streams.find(int32_t(id->number()));
         if (it == st->streams.end()) return true;
         if (int32_t(id->number()) == st->songId) st->pitch = Vm::number(Vm::param(p, K("pitch")), 100) / 100.0f;

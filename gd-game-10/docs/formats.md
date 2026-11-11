@@ -98,6 +98,22 @@ data/fsb.cpp fsbKeyGh4). `<song>_preview.fsb.xen` uses another key (not
 done). streamall.fsb.xen is FSB4, not encrypted, 2,629 samples; its .dat as
 GH3's.
 
+XMA packets: gh4's FSB4 samples (the song banks and streamall) are XMA2
+packets (the header's first 6 bits a frame count, 8 to 10), not GH3's XMA1
+(a 4-bit sequence number); decoded as XMA1 they fail ("overflow in spectral
+RLE", "frame would have to skip N bits") [C data].
+
+## Sound effects (.wav in the sound paks)
+
+`global_sfx.pak.xen` (1,017) and the zones' paks: RIFF/WAVE with the "data"
+chunk first (XMA2 packets, 2048 bytes, 0xFF padding), then a big-endian
+"XMA2" chunk (44 bytes: version 4, streams, reserved, loop count, loop
+begin, loop end, rate at 12, encode options, bytes per second, block size,
+samples encoded, samples in source, block count, then each stream's
+channels / reserved / u16 mask from 40) and a "seek" chunk. No "fmt "
+chunk (GH3's had XMAWAVEFORMAT there) [C data]. `--sfxtest` decodes every
+one and fails on a silent one.
+
 ## Charts (.mid.qb)
 
 Notes: (time, packed) int pairs, packed = flags << 16 | length (ms); flags
@@ -138,7 +154,7 @@ the 8in16 swap [C: Z_Forum.tex].
 
 ## Not decoded yet (C++ `--formattest`, 2026-11-10)
 
-`.ska` (8,255), `.img` (2,548 "image version" + 259 short), `.wav` (2,466),
+`.ska` (8,255), `.img` (2,548 "image version" + 259 short), `.wav` (2,466: decoded since, see above),
 `.skin` (2,166), `.tex` (1,891), `.ske` (251), `.rag` (200), `.hkc` (45),
 `.scn` (46), `.table` (46), `.fnt` (15), `.mdl` (14); the FSB used by
 `streamall.fsb.xen` (not FSB3). Each needs its gh4 layout.

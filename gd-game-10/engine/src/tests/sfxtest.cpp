@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 
+#include "audio/sfx.h"
 #include "audio/xma_decoder.h"
 #include "data/disc.h"
 #include "data/fsb.h"
@@ -41,8 +42,9 @@ int runSfxTest(const std::string& discPath) {
     std::vector<FsbBank> banks;
     int failures = 0;
     for (const std::string& f : disc->list()) {
-        const bool music = f.rfind("DATA/MUSIC/", 0) == 0, streams = f.rfind("DATA/STREAMS/", 0) == 0;
-        if ((!music && !streams) || f.size() < 8 || f.compare(f.size() - 8, 8, ".fsb.xen") != 0) continue;
+        // gh4's DATA/MUSIC banks are the songs' multichannel stems (--songaudiotest).
+        const bool streams = f.rfind("DATA/STREAMS/", 0) == 0;
+        if (!streams || f.size() < 8 || f.compare(f.size() - 8, 8, ".fsb.xen") != 0) continue;
         std::string dat = f.substr(0, f.size() - 8);
         for (size_t i = dat.rfind('/') + 1; i < dat.size(); ++i) dat[i] = char(std::tolower(static_cast<unsigned char>(dat[i])));
         try {
@@ -65,6 +67,7 @@ int runSfxTest(const std::string& discPath) {
     std::atomic<size_t> next{0};
     std::atomic<int> bad{0};
     std::atomic<uint64_t> frames{0};
+    std::atomic<double> seconds{0.0};
     std::mutex logMutex;
     auto worker = [&]() {
         for (size_t i = next++; i < jobs.size(); i = next++) {
@@ -76,16 +79,24 @@ int runSfxTest(const std::string& discPath) {
                 if (j.bank->encrypted) fsbDecrypt(data.data(), data.size(), j.sample->offset);
                 std::vector<float> pcm;
                 uint32_t decoded = 0;
-                if (!xma::decodeXma1(data.data(), data.size(), j.sample->rate, j.sample->channels, 0, pcm, why, &decoded)) {
+                const bool ok = j.bank->fsb4 ? xma::decode(data.data(), data.size(), j.sample->rate, j.sample->channels, 0, pcm, why, &decoded)
+                                             : xma::decodeXma1(data.data(), data.size(), j.sample->rate, j.sample->channels, 0, pcm, why, &decoded);
+                if (!ok) {
                 } else if (decoded < j.sample->length) {
                     why = "decoded " + std::to_string(decoded) + " of " + std::to_string(j.sample->length) + " frames";
                 } else {
-                    for (float v : pcm)
+                    float peak = 0.0f;
+                    for (float v : pcm) {
                         if (!std::isfinite(v)) {
                             why = "non-finite samples";
                             break;
                         }
+                        peak = std::max(peak, std::fabs(v));
+                    }
+                    // A decoder fed the wrong packet format "decodes" to silence.
+                    if (why.empty() && peak < 1e-4f) why = "silent (peak " + std::to_string(peak) + ")";
                     frames += decoded;
+                    seconds += double(decoded) / double(j.sample->rate);
                 }
             } catch (const std::exception& e) {
                 why = e.what();
@@ -101,8 +112,30 @@ int runSfxTest(const std::string& discPath) {
     for (unsigned t = 0; t < n; ++t) threads.emplace_back(worker);
     for (auto& t : threads) t.join();
     failures += bad;
-    std::printf("banks: %zu, samples decoded: %zu, %.1f hours of audio\n", banks.size(), jobs.size(),
-                double(frames.load()) / 44100.0 / 3600.0);
+    // The sound paks' .wav (gh4: XMA2 chunks; the menus' and the game's sound
+    // effects): each decodes and is not silent.
+    int wavs = 0, wavBad = 0;
+    for (const char* pakPath : {"DATA/COMPRESSED/ZONES/global_sfx.pak.xen"}) {
+        Sfx sfx;
+        sfx.addPak(*disc, pakPath);
+        std::vector<uint32_t> keys = sfx.keys();
+        std::sort(keys.begin(), keys.end());
+        keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+        std::vector<float> pcm;
+        int rate = 0, channels = 0;
+        for (uint32_t k : keys) {
+            ++wavs;
+            float peak = 0;
+            const bool ok = sfx.pcm(k, pcm, rate, channels);
+            for (float v : pcm) peak = std::max(peak, std::isfinite(v) ? std::fabs(v) : 1e9f);
+            if (!ok || peak < 1e-4f || peak > 1e8f) {
+                if (++wavBad <= 30) std::printf("FAIL %s 0x%08x: %s (peak %f)\n", pakPath, k, ok ? "silent or bad" : "does not decode", double(peak));
+            }
+        }
+    }
+    std::printf("sound paks: %d .wav keys, %d failed\n", wavs, wavBad);
+    failures += wavBad;
+    std::printf("banks: %zu, samples decoded: %zu, %.1f hours of audio\n", banks.size(), jobs.size(), seconds.load() / 3600.0);
     if (failures) {
         std::printf("sfxtest: %d FAILED\n", failures);
         return 1;

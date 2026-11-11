@@ -7,6 +7,7 @@
 #include <SDL3/SDL_timer.h>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 #include <memory>
 #include <random>
@@ -34,7 +35,25 @@ const qb::Value* firstUnnamed(const qb::Struct& p) {
         if (it.name == 0) return &it.value;
     return nullptr;
 }
+
 }  // namespace
+
+// gh4's sound units [C 0x8217AFB0 / 0x8217B0B8, the busses' conversions;
+// I: the sounds use them too]: vol in dB -> gain 2^(v / 6), at most 4, 0 at
+// -100 or below; pitch in semitones -> 2^(p / 12).
+float dbGain(float db) { return db <= -100.0f ? 0.0f : std::min(4.0f, std::exp2(db / 6.0f)); }
+float semitoneRatio(float semis) { return semis <= -48.0f ? 0.01f : std::min(16.0f, std::exp2(semis / 12.0f)); }
+
+std::vector<std::pair<uint32_t, std::string>>& scriptVoices() {
+    static std::vector<std::pair<uint32_t, std::string>> v;
+    return v;
+}
+
+void addScriptVoice(Sfx& sfx, uint32_t voice, uint32_t script) {
+    auto& v = scriptVoices();
+    v.erase(std::remove_if(v.begin(), v.end(), [&](const auto& e) { return !sfx.playing(e.first); }), v.end());
+    v.emplace_back(voice, qbkey::name(script));
+}
 
 void setSoundEventListener(std::function<void(uint32_t)> f) { listener() = std::move(f); }
 
@@ -74,35 +93,58 @@ void addSoundNatives(qs::Vm& vm, Sfx& sfx, const Disc& disc) {
         int last[2] = {-1, -1};
     };
     auto events = std::make_shared<std::unordered_map<uint32_t, EventState>>();
-    // SoundEventFast event = E: <E>_container's sounds (randomness: one at
-    // random, randomnorepeatlasttwotype: not one of the last two picks) under
-    // <E>_struct's rules -- norepeatfor (seconds since the last start: none),
-    // instancelimit with instancemanagement (ignore / ignore_spawn_request:
-    // the new one is dropped; stop_oldest: the oldest stops), default_buss
-    // (the buss calls) [C data <E>_struct; I: the engine's FMOD-side rules].
-    vm.addNative("SoundEventFast", [&sfx, events](Vm& v, ScriptRun&, qb::Struct& p) {
+    // SoundEventFast event = E: <E>_container's sounds (gh4: an array of
+    // {<sample> vol (dB) pitch (semitones) randomvol {vals [lo hi]} ...};
+    // GH3: a struct Sound1 .. {<sample> vol (percent)}), randomness (none:
+    // the first; random: one at random; randomnorepeatlasttwotype: not one
+    // of the last two picks), norepeatfor (seconds since the last start:
+    // none), instancelimit with instancemanagement (ignore /
+    // ignore_spawn_request: the new one is dropped; stop_oldest: the oldest
+    // stops), default_buss -- in the container (gh4) or <E>_struct (GH3)
+    // [C data global_sound_events.qb; I: the engine's FMOD-side rules, the
+    // units]. An event with no container that is a script (Menu_Music_SE:
+    // it picks and starts the menu music's stream) runs that script [I].
+    // A container without sounds plays the sample of the event's own name
+    // when there is one [I].
+    vm.addNative("SoundEventFast", [&sfx, events](Vm& v, ScriptRun& run, qb::Struct& p) {
         const qb::Value* ev = Vm::param(p, K("event"));
         if (!ev) ev = firstUnnamed(p);
         if (!ev || (ev->type != qb::Type::Key && ev->type != qb::Type::KeyPtr)) return false;
         if (listener()) listener()(ev->key);
         const std::string base = qbkey::name(ev->key);
         const qb::Value* c = v.global(qbkey::key(base + "_container"));
+        const qb::Value* script = v.global(ev->key);
+        if (script && script->type != qb::Type::Script) script = nullptr;
         if (!c || !c->st) {
+            if (script) {
+                v.spawn(ev->key, p, run.id);
+                return true;
+            }
             v.logOnce("SoundEvent: no container for " + base);
             return false;
         }
         const qb::Value* sounds = c->st->find(K("sounds"));
-        if (!sounds || !sounds->st || sounds->st->items.empty()) return false;
+        std::vector<const qb::Struct*> picks;
+        if (sounds && sounds->type == qb::Type::Array && sounds->arr) {
+            for (const qb::Value& s : sounds->arr->values)
+                if (s.st) picks.push_back(s.st.get());
+        } else if (sounds && sounds->st) {
+            for (const qb::Item& it : sounds->st->items)
+                if (it.value.st) picks.push_back(it.value.st.get());
+        }
+        const bool gh4 = sounds && sounds->type == qb::Type::Array;
         EventState& es = (*events)[ev->key];
         es.voices.erase(std::remove_if(es.voices.begin(), es.voices.end(), [&](uint32_t id) { return !sfx.playing(id); }), es.voices.end());
         uint32_t buss = K("default");  // no default_buss: FMOD's default group [I]
-        if (const qb::Value* st = v.global(qbkey::key(base + "_struct")); st && st->st) {
+        const qb::Value* st = v.global(qbkey::key(base + "_struct"));
+        const qb::Struct* rules = st && st->st ? st->st.get() : c->st.get();
+        {
             const uint64_t now = SDL_GetTicksNS();
-            const float norepeat = Vm::number(st->st->find(K("norepeatfor")), 0);
+            const float norepeat = Vm::number(rules->find(K("norepeatfor")), 0);
             if (norepeat > 0 && es.lastNs && double(now - es.lastNs) / 1e9 < double(norepeat)) return true;
-            const int limit = int(Vm::number(st->st->find(K("instancelimit")), 0));
+            const int limit = int(Vm::number(rules->find(K("instancelimit")), 0));
             if (limit > 0 && int(es.voices.size()) >= limit) {
-                const qb::Value* m = st->st->find(K("instancemanagement"));
+                const qb::Value* m = rules->find(K("instancemanagement"));
                 if (m && m->key == K("stop_oldest")) {
                     sfx.stop(es.voices.front());
                     es.voices.erase(es.voices.begin());
@@ -110,25 +152,41 @@ void addSoundNatives(qs::Vm& vm, Sfx& sfx, const Disc& disc) {
                     return true;  // ignore: the playing one stays
                 }
             }
-            if (const qb::Value* b = st->st->find(K("default_buss"))) buss = b->key;
+            if (const qb::Value* b = rules->find(K("default_buss"))) buss = b->key;
         }
-        const size_t n = sounds->st->items.size();
-        size_t idx = size_t(v.rng()() % n);
-        const qb::Value* rnd = c->st->find(K("randomness"));
-        if (rnd && rnd->key == K("randomnorepeatlasttwotype") && n > 2)
-            for (int tries = 0; tries < 8 && (int(idx) == es.last[0] || int(idx) == es.last[1]); ++tries) idx = size_t(v.rng()() % n);
-        es.last[1] = es.last[0], es.last[0] = int(idx);
-        const qb::Item& pick = sounds->st->items[idx];
-        if (!pick.value.st) return false;
         uint32_t sample = 0;
-        float vol = 100, pitch = 100;
-        for (const qb::Item& it : pick.value.st->items) {
-            if (it.name == 0 && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr)) sample = it.value.key;
-            else if (it.name == K("vol")) vol = it.value.number();
-            else if (it.name == K("pitch")) pitch = it.value.number();
+        float vol = gh4 ? 0.0f : 100.0f, pitch = gh4 ? 0.0f : 100.0f;
+        if (picks.empty()) {
+            if (script) {
+                v.spawn(ev->key, p, run.id);
+                es.lastNs = SDL_GetTicksNS();
+                return true;
+            }
+            if (!sfx.has(ev->key)) return false;
+            sample = ev->key;
+        } else {
+            const size_t n = picks.size();
+            const qb::Value* rnd = c->st->find(K("randomness"));
+            size_t idx = rnd && rnd->key == K("none") ? 0 : size_t(v.rng()() % n);
+            if (rnd && rnd->key == K("randomnorepeatlasttwotype") && n > 2)
+                for (int tries = 0; tries < 8 && (int(idx) == es.last[0] || int(idx) == es.last[1]); ++tries) idx = size_t(v.rng()() % n);
+            es.last[1] = es.last[0], es.last[0] = int(idx);
+            for (const qb::Item& it : picks[idx]->items) {
+                if (it.name == 0 && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr)) sample = it.value.key;
+                else if (it.name == K("vol")) vol = it.value.number();
+                else if (it.name == K("pitch")) pitch = it.value.number();
+                else if (it.name == K("randomvol") && it.value.st) {
+                    const qb::Value* vals = it.value.st->find(K("vals"));
+                    if (vals && vals->arr && vals->arr->values.size() == 2) {
+                        const float lo = vals->arr->values[0].number(), hi = vals->arr->values[1].number();
+                        vol = lo + (hi - lo) * float(v.rng()() % 1001) / 1000.0f;
+                    }
+                }
+            }
         }
         if (!sample) return false;
-        const uint32_t voice = sfx.play(sample, vol / 100.0f, pitch / 100.0f, buss);
+        const float gain = gh4 ? dbGain(vol) : vol / 100.0f, ratio = gh4 ? semitoneRatio(pitch) : pitch / 100.0f;
+        const uint32_t voice = sfx.play(sample, gain, ratio, buss);
         if (!voice) {
             v.logOnce("SoundEvent: no sample " + qbkey::name(sample));
         } else {
@@ -146,7 +204,7 @@ void addSoundNatives(qs::Vm& vm, Sfx& sfx, const Disc& disc) {
             if (sfx.playing(id)) return true;
         return false;
     });
-    vm.addNative("StopSoundEvent", [&sfx, events](Vm&, ScriptRun&, qb::Struct& p) {
+    vm.addNative("StopSoundEvent", [&sfx, events](Vm& v, ScriptRun&, qb::Struct& p) {
         const qb::Value* ev = firstUnnamed(p);
         if (!ev) return false;
         auto it = events->find(ev->key);
@@ -154,15 +212,35 @@ void addSoundNatives(qs::Vm& vm, Sfx& sfx, const Disc& disc) {
             for (uint32_t id : it->second.voices) sfx.stop(id);
             it->second.voices.clear();
         }
+        // A script event (Menu_Music_SE, Menu_Guitar_Lick_SFX): the sounds
+        // its scripts started (theirs and <event>_spawned's) [I].
+        if (const qb::Value* sc = v.global(ev->key); sc && sc->type == qb::Type::Script) {
+            const std::string name = qbkey::name(ev->key);
+            auto& sv = scriptVoices();
+            for (auto i = sv.begin(); i != sv.end();) {
+                if (i->second.compare(0, name.size(), name) == 0) sfx.stop(i->first), i = sv.erase(i);
+                else ++i;
+            }
+        }
         return true;
     });
-    // PlaySound <sample> vol pitch buss (the song previews, the intro crowd).
-    vm.addNative("PlaySound", [&sfx](Vm& v, ScriptRun&, qb::Struct& p) {
+    // PlaySound <sample> vol (dB) | vol_percent, pitch (semitones) |
+    // pitch_percent, buss, num_loops (-1: until stopped) [C scripts: gh4
+    // writes vol = -13 and vol_percent = 100, pitch_percent = 60..100; I:
+    // the units, as the busses'].
+    vm.addNative("PlaySound", [&sfx](Vm& v, ScriptRun& run, qb::Struct& p) {
         const qb::Value* s = firstUnnamed(p);
         if (!s) return false;
-        const float vol = Vm::number(Vm::param(p, K("vol")), 100), pitch = Vm::number(Vm::param(p, K("pitch")), 100);
+        float gain = 1, ratio = 1;
+        if (const qb::Value* vp = Vm::param(p, K("vol_percent"))) gain = vp->number() / 100.0f;
+        else if (const qb::Value* vd = Vm::param(p, K("vol"))) gain = dbGain(vd->number());
+        if (const qb::Value* pp = Vm::param(p, K("pitch_percent"))) ratio = pp->number() / 100.0f;
+        else if (const qb::Value* ps = Vm::param(p, K("pitch"))) ratio = semitoneRatio(ps->number());
+        const int loops = int(Vm::number(Vm::param(p, K("num_loops")), 0));
         const qb::Value* b = Vm::param(p, K("buss"));
-        if (!sfx.play(s->key, vol / 100.0f, pitch / 100.0f, b ? b->key : K("default"))) v.logOnce("PlaySound: no sample " + qbkey::name(s->key));
+        const uint32_t voice = sfx.play(s->key, gain, ratio, b ? b->key : K("default"), loops);
+        if (!voice) v.logOnce("PlaySound: no sample " + qbkey::name(s->key));
+        else addScriptVoice(sfx, voice, run.name);
         return true;
     });
     // SongLoadFSB song_prefix = p: the song's bank (DATA/MUSIC/<p>.fsb.xen +

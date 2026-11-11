@@ -54,8 +54,9 @@ public:
 
     // Texture-slot playback (GH3's PlayMovieFromBuffer / StartPreLoadedMovie:
     // a video drawn by the screen elements, the game going on): decodes the
-    // opened video on its own thread, without its sound, from the start
-    // (again at its end with `loop`).
+    // opened video on its own thread, its sound on the sound effects'
+    // device (fed as the pictures are taken), from the start (again at its
+    // end with `loop`).
     bool startStream(bool loop);
     // The newest picture due by `ms` (since the start) as RGBA rows; false
     // if no new one is due.

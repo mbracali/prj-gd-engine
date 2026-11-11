@@ -8,6 +8,7 @@
 #include <stdexcept>
 
 #include "app_ids.h"
+#include "audio/audio_device.h"
 #include "audio/mixer.h"
 #include "data/disc.h"
 #include "input/input.h"
@@ -173,11 +174,20 @@ struct MoviePlayer::Impl {
     std::atomic<bool> abort{false};
     std::shared_ptr<SoundQueue> sound = std::make_shared<SoundQueue>();
     std::thread thread;
+    // A texture-slot movie's sound: an SDL stream on the sound effects'
+    // device, fed by takeFrame up to a little past the picture clock.
+    SDL_AudioStream* slotSound = nullptr;
+    int64_t slotSoundFrames = 0;
 
     ~Impl() { close(); }
 
     void close() {
         stopThread();
+        if (slotSound) {
+            audiodev::unbindFx(slotSound);
+            SDL_DestroyAudioStream(slotSound);
+            slotSound = nullptr;
+        }
         av_frame_free(&frame);
         av_packet_free(&pkt);
         avcodec_free_context(&vctx);
@@ -554,7 +564,16 @@ int MoviePlayer::dumpFrames(int count, std::FILE* out) {
 bool MoviePlayer::startStream(bool loop) {
     Impl& d = *impl_;
     if (!d.fmt || d.thread.joinable()) return false;
-    d.aIndex = -1;  // no sound: the pictures alone
+    // The sound plays on the sound effects' device (the boot movies are
+    // texture-slot movies in gh4: ui_boot_movie_wait's PlayMovieAndWait
+    // noblack [C script]); without that device, the pictures alone.
+    if (d.actx) {
+        const SDL_AudioSpec src{SDL_AUDIO_F32, d.sound->channels, d.actx->sample_rate};
+        d.slotSound = SDL_CreateAudioStream(&src, nullptr);
+        if (d.slotSound && !audiodev::bindFx(d.slotSound)) SDL_DestroyAudioStream(d.slotSound), d.slotSound = nullptr;
+    }
+    if (!d.slotSound) d.aIndex = -1;
+    d.slotSoundFrames = 0;
     d.loop = loop, d.loopBase = 0, d.lastMs = 0;
     d.thread = std::thread([&d] { d.run(); });
     return true;
@@ -562,6 +581,22 @@ bool MoviePlayer::startStream(bool loop) {
 
 bool MoviePlayer::takeFrame(double ms, std::vector<uint8_t>& rgba, int& w, int& h) {
     Impl& d = *impl_;
+    if (d.slotSound) {
+        // The sound up to 250 ms past the picture clock, queued in order:
+        // it plays from the first call on, in step with the pictures.
+        const int64_t want = int64_t((std::max(0.0, ms) + 250.0) / 1000.0 * d.actx->sample_rate);
+        std::vector<float> buf;
+        {
+            std::lock_guard lock(d.sound->m);
+            const size_t ch = size_t(d.sound->channels);
+            const size_t n = size_t(std::clamp<int64_t>(want - d.slotSoundFrames, 0, int64_t(d.sound->samples.size() / ch)));
+            buf.assign(d.sound->samples.begin(), d.sound->samples.begin() + long(n * ch));
+            d.sound->samples.erase(d.sound->samples.begin(), d.sound->samples.begin() + long(n * ch));
+            d.slotSoundFrames += int64_t(n);
+        }
+        d.sound->cv.notify_all();
+        if (!buf.empty()) SDL_PutAudioStreamData(d.slotSound, buf.data(), int(buf.size() * sizeof(float)));
+    }
     std::optional<Frame> due;
     {
         std::lock_guard lock(d.m);

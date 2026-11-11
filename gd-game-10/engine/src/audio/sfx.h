@@ -34,7 +34,9 @@ public:
     // Plays a sample; volume 1 = as recorded, pitch 1 = normal. Returns a
     // voice id (0: unknown sample).
     // `buss`: the voice's FMOD buss key (0: none) for the buss calls below.
-    uint32_t play(uint32_t sample, float volume, float pitch, uint32_t buss = 0);
+    // `loops`: times it plays again at its end (-1: until stopped; the
+    // scripts' num_loops).
+    uint32_t play(uint32_t sample, float volume, float pitch, uint32_t buss = 0, int loops = 0);
     bool playing(uint32_t voice) const;
     void stop(uint32_t voice);
     // StopSound <sample>: every voice of that sample.
@@ -47,6 +49,12 @@ public:
     // Frees finished voices (call once a frame).
     void update();
     bool has(uint32_t sample) const { return entries_.count(sample) != 0; }
+    // Every indexed sample's key (the self-test's list).
+    std::vector<uint32_t> keys() const {
+        std::vector<uint32_t> k;
+        for (const auto& e : entries_) k.push_back(e.first);
+        return k;
+    }
     // A sample's decoded audio (interleaved float), or false.
     bool pcm(uint32_t sample, std::vector<float>& out, int& rate, int& channels);
     struct Stats {
@@ -80,6 +88,9 @@ private:
         uint64_t offset = 0;
         uint32_t stored = 0, length = 0;
         bool encrypted = false;
+        // XMA packet format: 1 (GH3 FSB3 and the .wav RIFFs: 4-bit sequence
+        // number) or 2 (gh4 FSB4: 6-bit frame count) [C data].
+        int xma = 1;
         std::shared_ptr<Job> job;  // a streamed decode (then pcm stays empty)
     };
     bool decode(Entry& e);
@@ -98,6 +109,7 @@ private:
         float gainSet = -1, ratioSet = -1;  // what the stream has
         std::shared_ptr<Job> job;  // still being fed from a streamed decode
         size_t fed = 0;            // floats of job->pcm put so far
+        int loops = 0;             // plays left after this one (-1: until stopped)
     };
     void applyBuss(Voice& v);
     void feed(Voice& v);
