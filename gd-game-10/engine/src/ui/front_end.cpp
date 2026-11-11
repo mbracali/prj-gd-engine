@@ -229,6 +229,11 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
                 qs::Vm::set(p, qbkey::key("songs_only"), qs::Vm::makeInt(0));
                 vm_->spawn(qbkey::key("unlock_all_profiles"), qb::Struct{});
                 vm_->spawn(qbkey::key("purchase_all_profiles"), qb::Struct{});
+                // Its band is named The Glitches (current_band_has_band_name
+                // reads band_info.name) [C script; the name is the port's].
+                qb::Struct& bi = vm_->globalTags[qbkey::key("band_info")];
+                const qb::Value* nm = qs::Vm::param(bi, qbkey::key("name"));
+                if (!nm || nm->str.empty()) qs::Vm::set(bi, qbkey::key("name"), qs::Vm::makeString("The Glitches"));
                 SDL_Log("The Glitches (gh4): unlock_all_profiles, purchase_all_profiles");
             }
         }

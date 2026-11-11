@@ -57,6 +57,16 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
         steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", C}, 20000});
         steps_.push_back({"uistate_character_selection", {"wait", "wait", "wait", "wait", D, "wait", C}, 20000});
+        steps_.push_back({"UIstate_band_name_logo", {"wait", "wait", "wait", "wait", "key:Up", "key:Up", C, "key:Up", C, "key:Up", "key:Return", "wait", "key:Return"}, 20000});
+        steps_.push_back({"uistate_optimal_drum", {"wait", "wait", "wait", C}, 20000, true});
+        // A new band (no save): naming it saves and goes back to the main
+        // menu [C scripts: band_name_logo -> memcard -> boot states]; the
+        // second time through the band exists.
+        steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", D, C}, 20000});
+        steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
+        steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
+        steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, C}, 20000});
+        steps_.push_back({"uistate_character_selection", {"wait", "wait", "wait", "wait", D, "wait", C}, 20000});
         steps_.push_back({"uistate_never", {}, 15000});
     } else if (name == "quickplay" || name == "lose") {
         steps_ = boot;

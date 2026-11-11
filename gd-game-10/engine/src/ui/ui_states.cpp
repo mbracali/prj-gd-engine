@@ -5,6 +5,7 @@
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_stdinc.h>
 
+#include <algorithm>
 #include <memory>
 #include <utility>
 
@@ -44,8 +45,10 @@ UiStates::Entry UiStates::make(uint32_t state, const qb::Struct* data) const {
     e.state = state;
     auto it = states_.find(state);
     if (it != states_.end()) e.params = it->second.params;
+    // The event's data, its included structs flattened (generic_event_choose
+    // sends `data = { <data> state = <state> }`) [C scripts].
     if (data)
-        for (const qb::Item& item : data->items)
+        for (const qb::Item& item : vm_.globals().expand(*data))
             if (item.name != K("state")) qs::Vm::set(e.params, item.name, item.value);
     return e;
 }
@@ -113,18 +116,25 @@ void UiStates::handle(uint32_t event, const qb::Struct& data) {
         enter(stack_.back(), true);
     } else if (event == K("menu_back")) {
         if (stack_.size() <= 1) return;
-        // Back to `state` when given (popping every state above it), else one.
+        // Back to `state` when given (popping every state above it), else
+        // num_states states (default one) [C scripts: band_name_logo's
+        // event_params {event = menu_back data = {num_states = n}}; I].
+        int count = 1;
+        if (const qb::Value* n = data.find(K("num_states")); n && n->type == qb::Type::Int && n->i > 0) count = n->i;
         do {
             leave(stack_.back(), true);
             stack_.pop_back();
-        } while (state && stack_.size() > 1 && stack_.back().state != state);
+        } while (stack_.size() > 1 && (state ? stack_.back().state != state : --count > 0));
         Entry& t = stack_.back();
-        merge(t.params, data);
+        qb::Struct d = data;
+        d.items.erase(std::remove_if(d.items.begin(), d.items.end(), [](const qb::Item& it) { return it.name == K("num_states") || it.name == K("state"); }),
+                      d.items.end());
+        merge(t.params, qb::Struct{vm_.globals().expand(d)});
         enter(t, false);
     } else if (event == K("menu_refresh")) {
         if (stack_.empty()) return;
         leave(stack_.back(), false);
-        merge(stack_.back().params, data);
+        merge(stack_.back().params, qb::Struct{vm_.globals().expand(data)});
         enter(stack_.back(), false);
     } else if (event == K("menu_anim_in_done") || event == K("menu_anim_out_done") || event == K("menu_add_data") ||
                event == K("menu_remove_data")) {
@@ -141,6 +151,12 @@ void UiStates::update() {
         auto ev = std::move(events_.front());
         events_.pop_front();
         handle(ev.first, ev.second);
+        if (log_) {
+            std::string st;
+            for (const Entry& e : stack_) st += " " + text(e.params.find(K("base_name")));
+            const qb::Value* gm = vm_.global(K("game_mode"));
+            SDL_Log("ui stack:%s (game_mode %s)", st.c_str(), gm ? qbkey::name(gm->key).c_str() : "-");
+        }
         vm_.launchEvent(K("taskmenu_callback"));  // releases ui_event_block's Block [I]
     }
 }
