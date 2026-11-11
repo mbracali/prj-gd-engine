@@ -214,7 +214,9 @@ void addCoreNatives(Vm& vm) {
         // tiers) counts too: Progression_GetBossSong finds a tier's boss so,
         // and leaves the encore out of its count [C script; I: the native's
         // flag test, which the script relies on].
-        for (const qb::Item& it : s->st->items)
+        // gh4: also inside an included struct (`{ <profile_struct> appearance =
+        // ... }`, globaltag_get_preset_musician's $locked) [C script].
+        for (const qb::Item& it : v.globals().expand(*s->st))
             if (!it.name && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr) && it.value.key == n->key) return true;
         return false;
     });

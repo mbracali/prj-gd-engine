@@ -122,6 +122,26 @@ void addGh4Natives(qs::Vm& vm) {
         setLocal(run, K("min_players"), n);
         return true;
     });
+    // SearchMusicianProfileArray array_name = <global array> id = <name>:
+    // the index of the profile of that name -> index; false if none [C
+    // 0x820044EC's native, by its use in get_musician_profile_struct_by_id; I].
+    vm.addNative("SearchMusicianProfileArray", [setLocal](Vm& v, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* an = Vm::param(p, K("array_name"));
+        const qb::Value* id = Vm::param(p, K("id"));
+        if (!an || !id) return false;
+        const qb::Value* arr = v.global(an->key);
+        if (!arr || !arr->arr) return false;
+        for (size_t i = 0; i < arr->arr->values.size(); ++i) {
+            const qb::Value& e = arr->arr->values[i];
+            if (!e.st) continue;
+            const qb::Value* n = v.globals().field(*e.st, K("name"));
+            if (n && n->key == id->key) {
+                setLocal(run, K("index"), Vm::makeInt(int32_t(i)));
+                return true;
+            }
+        }
+        return false;
+    });
     // obj_getid: the element (object) the script runs on, as objid [C scripts].
     vm.addNative("obj_getid", [setLocal](Vm&, ScriptRun& run, qb::Struct&) {
         if (!run.object) return false;

@@ -220,8 +220,18 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     }
     // The Glitches, once the boot has loaded or created the save (the first main menu).
     if (!glitchesDone_) {
-        if (states && states->top() == qbkey::key("uistate_mainmenu"))
-            glitchesDone_ = true, (SDL_getenv("GD10_NO_GLITCHES") ? false : ensureGlitches(*vm_));  // (development aid: off)
+        // gh4 (D10): the original's own unlock-all scripts (GlobalTags_UnlockAll,
+        // unlock_all_profiles) stand for The Glitches until its band is built.
+        if (states && states->top() == qbkey::key("uistate_mainmenu")) {
+            glitchesDone_ = true;
+            if (!SDL_getenv("GD10_NO_GLITCHES")) {  // (development aid: off)
+                qb::Struct p;
+                qs::Vm::set(p, qbkey::key("songs_only"), qs::Vm::makeInt(0));
+                vm_->spawn(qbkey::key("unlock_all_profiles"), qb::Struct{});
+                vm_->spawn(qbkey::key("purchase_all_profiles"), qb::Struct{});
+                SDL_Log("The Glitches (gh4): unlock_all_profiles, purchase_all_profiles");
+            }
+        }
     }
     // During a song GH3's scripts keep running (the attract mode's input
     // check, the end-of-song events) and their elements draw over it [C: one VM].

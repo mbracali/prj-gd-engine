@@ -1028,6 +1028,23 @@ bool Vm::callForValue(ScriptRun& run, uint32_t name, qb::Struct& params) {
                     if (it.name) set(*run.frames.back().locals, it.name, it.value);
             }
         }
+        // GD10_CONDTRACE=1: each script used as a condition and its value (development aid).
+        static const bool condTrace = [] { const char* v = SDL_getenv("GD10_CONDTRACE"); return v && *v && *v != '0'; }();
+        if (condTrace) {
+            std::string ps;
+            for (const qb::Item& it : params.items) {
+                ps += " " + (it.name ? qbkey::name(it.name) : std::string("_")) + "=" + qb::typeName(it.value.type);
+                if (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr) ps += ":" + qbkey::name(it.value.key);
+                else if (it.value.type == qb::Type::Int) ps += ":" + std::to_string(it.value.i);
+                else if (it.value.type == qb::Type::Struct && it.value.st) {
+                    ps += "{";
+                    for (const qb::Item& f : it.value.st->items)
+                        ps += (f.name ? qbkey::name(f.name) : std::string("_")) + ":" + qb::typeName(f.value.type) + " ";
+                    ps += "}";
+                }
+            }
+            SDL_Log("qscript: condition %s -> %d (%s)", qbkey::name(name).c_str(), value ? 1 : 0, ps.c_str());
+        }
         return value;
     }
     if (unhandledNames_.insert(name).second) {

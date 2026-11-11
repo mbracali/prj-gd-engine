@@ -62,6 +62,10 @@ const qb::Value* Globals::field(const qb::Struct& st, uint32_t name) const {
             const qb::Value* inc = find(it.value.key);
             if (inc && inc->type == qb::Type::Struct && inc->st)
                 if (const qb::Value* v = field(*inc->st, name)) found = v;
+        } else if (it.name == 0 && it.value.type == qb::Type::Struct && it.value.st) {
+            // gh4: an included struct value (`{ <profile_struct> appearance = ... }`,
+            // globaltag_get_preset_musician) [C script; I: as expand()].
+            if (const qb::Value* v = field(*it.value.st, name)) found = v;
         }
     }
     return found;
