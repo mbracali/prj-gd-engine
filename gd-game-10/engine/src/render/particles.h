@@ -43,6 +43,11 @@ public:
     bool start(const Disc& disc, const Globals& g, const venue::Venue& v, const Chart& chart, const venue::PerfTimeline* perf,
                double startMs, std::string& error);
     bool attach(gfx::RenderDevice& dev, const Disc& disc, std::string& error);
+    // The same in parts (no-stutter rule): prepare (any thread, after start)
+    // decodes the quick materials' textures; attachStep (the render thread,
+    // once a frame) uploads them a slice at a time: 1 done, 0 more, -1 failed.
+    void prepare(const Disc& disc);
+    int attachStep(gfx::RenderDevice& dev, const Disc& disc, std::string& error);
     void shutdown();
     // Runs the zone's scripts and creates systems up to song time `ms`.
     void advance(double ms);
@@ -271,5 +276,7 @@ private:
     size_t vbSize_ = 0;
     std::unordered_map<uint32_t, gfx::TextureId> textures_;
     gfx::TextureId white_;
+    struct Prepared;
+    std::shared_ptr<Prepared> prepared_;  // prepare's textures until attachStep has uploaded them
     std::vector<float> scratch_;
 };

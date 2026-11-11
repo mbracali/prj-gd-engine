@@ -130,7 +130,8 @@ private:
     venue::CameraDirector cameras_;
     venue::LightShow lights_;
     std::unique_ptr<VenueView> view_;
-    static constexpr int kAttachSteps = 6;
+    std::unique_ptr<VenueView> pendingView_;  // prepared (start), uploading (attachStep 0)
+    static constexpr int kAttachSteps = 7;
     int attachStep_ = 0;
     std::vector<venue::LightState> lightState_;
     std::vector<uint32_t> hide_;  // the crowd cards' textures

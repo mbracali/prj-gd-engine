@@ -5,6 +5,7 @@
 #include <SDL3/SDL_log.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <exception>
 
@@ -14,6 +15,7 @@
 #include "game/chart.h"
 #include "render/canvas.h"
 #include "render/gh3_shader.h"
+#include "render/hitch.h"
 #include "render/renderer.h"
 #include "render/venue_stage.h"
 #include "render/venue_view.h"
@@ -76,7 +78,16 @@ MenuScene::MenuScene(const Disc& disc, Globals& globals, qs::Vm& vm, ui::UiSyste
     });
 }
 
-MenuScene::~MenuScene() { releaseGpu(); }
+MenuScene::~MenuScene() {
+    dropPending();
+    for (auto& [f, v] : discard_) f.wait();
+    releaseGpu();
+}
+
+void MenuScene::dropPending() {
+    if (prepareWork_.valid()) discard_.emplace_back(std::move(prepareWork_), std::move(pendingView_));
+    pendingView_.reset();
+}
 
 void MenuScene::releaseGpu() {
     fx_.shutdown();
@@ -194,17 +205,31 @@ MenuScene::Pose MenuScene::world(const Pose& p) {
     return w;
 }
 
-bool MenuScene::ensureVenue() {
+bool MenuScene::ensureVenue(bool wait) {
     if (!zone_ || zone_ == K("none")) return false;
     if (zone_ != loadedZone_) {
-        view_.reset(), venue_.reset();
-        loadedZone_ = zone_, failed_ = false;
-        const std::string zone = qbkey::name(zone_);
-        try {
-            venue_ = venue::load(disc_, zone);
-        } catch (const std::exception& ex) {
-            SDL_Log("menu scene %s: %s", zone.c_str(), ex.what());
+        // The zone read on a worker (no-stutter rule); the draw goes on
+        // without it meanwhile, the scripts' node lookups wait for it.
+        if (loadingZone_ != zone_) {
+            if (venueWork_.valid()) venueDiscard_.push_back(std::move(venueWork_));
+            loadingZone_ = zone_;
+            const Disc* d = &disc_;
+            const std::string zone = qbkey::name(zone_);
+            venueWork_ = std::async(std::launch::async, [d, zone]() -> std::shared_ptr<venue::Venue> {
+                try {
+                    return std::shared_ptr<venue::Venue>(venue::load(*d, zone));
+                } catch (const std::exception& ex) {
+                    SDL_Log("menu scene %s: %s", zone.c_str(), ex.what());
+                }
+                return nullptr;
+            });
         }
+        if (!wait && venueWork_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return false;
+        dropPending();
+        view_.reset();
+        hitch::Scope hs("menu scene load");
+        venue_ = venueWork_.get();
+        loadedZone_ = zone_, loadingZone_ = 0, failed_ = false;
         if (!venue_) {
             failed_ = true;
             return false;
@@ -327,16 +352,56 @@ void MenuScene::draw(Canvas& c) {
         for (const ui::Element* p = b; p; p = p->parent) a *= p->alpha, shown = shown && !p->hidden;
         if (shown && a >= 0.999f && b->rgba[3] == 255) return;
     }
-    if (!ensureVenue()) return;
+    if (!ensureVenue(false)) return;  // (loading: nothing of it yet)
+    discard_.erase(std::remove_if(discard_.begin(), discard_.end(),
+                                  [](auto& d) { return d.first.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }),
+                   discard_.end());
+    venueDiscard_.erase(std::remove_if(venueDiscard_.begin(), venueDiscard_.end(),
+                                       [](auto& f) { return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }),
+                        venueDiscard_.end());
     if (!view_ && !failed_) {
+        // The zone's view: read and decoded on a worker, then uploaded and
+        // compiled a slice a frame; nothing of it draws until it is in (a
+        // zone's view had held the menus ~1 s).
+        if (!pendingView_) {
+            pendingView_ = std::make_shared<VenueView>();
+            std::shared_ptr<VenueView> pv = pendingView_;
+            std::shared_ptr<const venue::Venue> v = venue_;
+            const Disc* d = &disc_;
+            prepareWork_ = std::async(std::launch::async, [pv, v, d] { pv->prepare(*d, *v); });
+        }
+        if (prepareWork_.valid()) {
+            if (prepareWork_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+            prepareWork_.get();
+        }
         const std::string zone = qbkey::name(zone_);
-        view_ = std::make_unique<VenueView>();
         std::string error;
-        if (!view_->init(c.renderer().device(), disc_, *venue_, {}, error)) {
-            SDL_Log("menu scene %s: %s", zone.c_str(), error.c_str());
-            view_.reset(), failed_ = true;
+        hitch::Scope hs("menu scene view");
+        gfx::RenderDevice& dev = c.renderer().device();
+        if (!fxTried_) {
+            // bg_viewport's screen effects and the shadow map, with the first zone.
+            fxTried_ = true, dev_ = &dev;
+            fxReady_ = !SDL_getenv("GD10_NO_SCREENFX") && fx_.init(dev, gh3shader::library(disc_));
+            screenfx::readViewport(globals_, K("Default_TOD_Manager"), fxParams_);
+            if (!SDL_getenv("GD10_NO_SHADOWS")) {
+                std::string serr;
+                gfx::TargetDesc td;
+                td.width = td.height = 1024;
+                td.depth = true;
+                shadow_ = dev.createTarget(td, serr);
+                if (!shadow_) SDL_Log("menu scene: no shadow map: %s", serr.c_str());
+            }
             return;
         }
+        if (fxReady_ && !fx_.settle()) return;  // its programs a slice a frame
+        const VenueView::InitStep r = pendingView_->initStep(dev, disc_, *venue_, {}, error);
+        if (r == VenueView::InitStep::More) return;
+        if (r == VenueView::InitStep::Failed) {
+            SDL_Log("menu scene %s: %s", zone.c_str(), error.c_str());
+            pendingView_.reset(), failed_ = true;
+            return;
+        }
+        view_ = std::move(pendingView_);
         SDL_Log("menu scene: %s", zone.c_str());
     }
     if (failed_ || !view_) return;
@@ -354,19 +419,6 @@ void MenuScene::draw(Canvas& c) {
     }
     c.flush();
     gfx::RenderDevice& dev = c.renderer().device();
-    if (!fxTried_) {
-        fxTried_ = true, dev_ = &dev;
-        fxReady_ = !SDL_getenv("GD10_NO_SCREENFX") && fx_.init(dev, gh3shader::library(disc_));
-        screenfx::readViewport(globals_, K("Default_TOD_Manager"), fxParams_);
-        if (!SDL_getenv("GD10_NO_SHADOWS")) {
-            std::string serr;
-            gfx::TargetDesc td;
-            td.width = td.height = 1024;
-            td.depth = true;
-            shadow_ = dev.createTarget(td, serr);
-            if (!shadow_) SDL_Log("menu scene: no shadow map: %s", serr.c_str());
-        }
-    }
     objects_->prepareFrame(dev);
     shadowPass(dev);
     const bool fx = fxReady_ && fx_.begin();

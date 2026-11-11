@@ -14,6 +14,7 @@
 
 #include "data/qbkey.h"
 #include "render/gh3_shader.h"
+#include "render/hitch.h"
 #include "game/chart.h"
 #include "script/globals.h"
 
@@ -199,6 +200,7 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
             particles_.reset();
         }
         cameras_.retryScript();  // the intro's, started before the VM was there
+        if (particles_) particles_->prepare(disc);  // its textures decoded here, uploaded in attachStep
     }
     // The stage peds: their trigger scripts run on the zone VM (Particles).
     peds_.reset();
@@ -239,6 +241,10 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
                 if (const qb::Value* t = e.st->find(qbkey::key("textureasset"))) hide_.push_back(t->key);
     view_.reset();
     attachStep_ = 0;  // a restarted stage uploads again (attachStep)
+    // The view's reads and decodes here (a worker's, under the loading
+    // screen); its uploads and compiles a slice a frame (attachStep).
+    pendingView_ = std::make_unique<VenueView>();
+    pendingView_->prepare(disc, *venue_);
     if (device && !attach(*device, disc, error)) return false;
     return true;
 }
@@ -246,22 +252,28 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
 bool VenueStage::attach(gfx::RenderDevice& device, const Disc& disc, std::string& error) {
     if (!venue_) return bool(view_);
     while (!attachStep(device, disc, error))
-        if (!view_) return false;
+        if (!view_ && !pendingView_) return false;
     return bool(view_);
 }
 
 bool VenueStage::attachStep(gfx::RenderDevice& device, const Disc& disc, std::string& error) {
     if (!venue_) return true;
     if (attachStep_ >= kAttachSteps) return true;
+    static const char* const kStepName[] = {"attach view", "attach band", "attach fx", "attach particles", "attach peds", "attach crowd", "attach fx programs"};
+    hitch::Scope hs(attachStep_ < kAttachSteps ? kStepName[attachStep_] : "attach");
     switch (attachStep_) {
-    case 0:
-        view_ = std::make_unique<VenueView>();
-        if (!view_->init(device, disc, *venue_, hide_, error)) {
-            view_.reset();
+    case 0: {
+        if (!pendingView_) pendingView_ = std::make_unique<VenueView>();
+        const VenueView::InitStep r = pendingView_->initStep(device, disc, *venue_, hide_, error);
+        if (r == VenueView::InitStep::More) return false;  // more of it next frame
+        if (r == VenueView::InitStep::Failed) {
+            pendingView_.reset();
             attachStep_ = kAttachSteps;  // failed: nothing more to upload
             return true;
         }
+        view_ = std::move(pendingView_);
         break;
+    }
     case 1:
         if (band_) {
             std::string berr;
@@ -293,7 +305,9 @@ bool VenueStage::attachStep(gfx::RenderDevice& device, const Disc& disc, std::st
     case 3:
         if (particles_) {
             std::string perr;
-            if (!particles_->attach(device, disc, perr)) {
+            const int r = particles_->attachStep(device, disc, perr);
+            if (r == 0) return false;  // more of its textures next frame
+            if (r < 0) {
                 SDL_Log("particles: %s", perr.c_str());
                 particles_.reset();
             }
@@ -317,6 +331,10 @@ bool VenueStage::attachStep(gfx::RenderDevice& device, const Disc& disc, std::st
                 crowd_.reset();
             }
         }
+        break;
+    case 6:
+        // The screen effects' programs (asked for in step 2) ready.
+        if (fxReady_ && !fx_.settle()) return false;
         break;
     }
     return ++attachStep_ >= kAttachSteps;

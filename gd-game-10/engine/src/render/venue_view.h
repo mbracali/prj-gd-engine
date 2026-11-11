@@ -33,6 +33,13 @@ public:
     // of `hide` (the crowd's cards) draw only while setOverride gives that
     // texture a replacement. False and `error` on failure.
     bool init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venue& v, const std::vector<uint32_t>& hide, std::string& error);
+    // The same in parts (no-stutter rule): prepare (any thread, before) reads
+    // and decodes; initStep (the render thread, once a frame) uploads the
+    // textures and compiles the programs a slice at a time (hitch::sliceLeft),
+    // then builds the geometry. More until Done or Failed (`error`).
+    void prepare(const Disc& disc, const venue::Venue& v);
+    enum class InitStep { More, Done, Failed };
+    InitStep initStep(gfx::RenderDevice& dev, const Disc& disc, const venue::Venue& v, const std::vector<uint32_t>& hide, std::string& error);
     void shutdown();
     // Draws into the bound target and viewport (depth tested; the caller's
     // frame cleared depth). `lights`: LightShow::evaluate's values.
@@ -153,6 +160,10 @@ private:
     uint32_t rayCount_ = 0;
     gfx::BufferId projVb_, projIb_;
     gh3shader::Programs gh3_;
+    struct Prepared;
+    std::unique_ptr<Prepared> prep_;  // prepare's result until initStep has built the view
+    size_t zoneTextureCount_ = 0;     // the zone's and global_ad_tex's textures (the log's count)
+    InitStep build(gfx::RenderDevice& dev, const venue::Venue& v, const std::vector<uint32_t>& hide, std::string& error);
     std::function<bool(uint32_t, gfx::Mat4&)> motion_;
     std::function<int(uint32_t)> visible_;
     double seconds_ = 0;

@@ -15,6 +15,7 @@
 #include "data/disc.h"
 #include "data/qbkey.h"
 #include "render/camera.h"
+#include "render/hitch.h"
 #include "render/rmath.h"
 #include "data/pak.h"
 #include "data/texture.h"
@@ -185,15 +186,43 @@ void VenueView::shutdown() {
     dev_ = nullptr;
 }
 
-bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venue& v, const std::vector<uint32_t>& hide, std::string& error) {
-    shutdown();
-    dev_ = &dev;
-    v_ = &v;
-    program_ = dev.createProgram(programDesc(), error);
-    if (!program_) return false;
-    // GH3's own shaders (GD10_GH3_SHADERS=0: the approximation only, a development aid).
-    if (!(SDL_getenv("GD10_GH3_SHADERS") && SDL_getenv("GD10_GH3_SHADERS")[0] == '0')) gh3_.init(dev, gh3shader::library(disc));
-    stats_ = Stats{};
+// The CPU side of init (any thread): the zone's textures decoded, the light
+// housings' models read. initStep uploads them a slice a frame (no-stutter
+// rule: a venue's ~1 s of decodes, uploads and compiles had held one frame).
+struct VenueView::Prepared {
+    std::vector<gh3tex::Texture> textures;  // the zone's, global_ad_tex's, then the housings' (upload order)
+    std::unordered_map<uint32_t, std::unique_ptr<scene::Scene>> models;  // the housings' models by path key
+    std::vector<gh3tex::Texture> smoke;     // global_gfx.tex's 0xa500318e
+    size_t zoneTextures = 0;                // of `textures`, the zone's and global_ad_tex's
+    std::string error;
+    int step = 0;
+    size_t next = 0;  // the step's next texture / program
+    std::vector<std::pair<uint32_t, matlib::Technique>> programs;
+    // build's progress: the next part and sector, the phase.
+    size_t part = 0, sector = 0;
+    int phase = 0;  // 0 the sectors, 1 the housings, 2 the vertex buffer, 3 the index buffer
+    size_t uploaded = 0;  // bytes of the buffer being filled
+    std::vector<Vtx> verts;
+    std::vector<uint32_t> idx;
+};
+
+namespace {
+
+// A light housing's model path key (lightvolumetype nodes with a Model), or 0.
+uint32_t housingModelKey(const venue::Node& n) {
+    if (!n.st || !n.st->find(K("lightvolumetype"))) return 0;
+    const qb::Value* mv = n.st->find(K("Model"));
+    if (!mv || (mv->type != qb::Type::String && mv->type != qb::Type::WString)) return 0;
+    std::string path = "models\\";
+    for (char c : mv->str)
+        if (!(c == '\\' && path.back() == '\\')) path += c == '/' ? '\\' : c;
+    return qbkey::key(path);
+}
+
+}  // namespace
+
+void VenueView::prepare(const Disc& disc, const venue::Venue& v) {
+    auto pr = std::make_unique<Prepared>();
     // The zone's textures (every .tex dictionary in its pak), with their
     // class, and the global ad textures some venue signs use [C data:
     // global_ad_tex.pak holds the ad_* sectors' textures].
@@ -205,27 +234,160 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
             for (const PakEntry& e : pak.entries()) {
                 if (e.type != K(".tex")) continue;
                 auto [p, size] = pak.data(e);
-                for (const gh3tex::Texture& t : gh3tex::decodeTexDict(p, size)) {
-                    if (!t.supported || t.levels.empty() || textures_.count(t.key)) continue;
-                    std::string err;
-                    auto levels = t.texLevels();
-                    const gfx::TextureId id = dev.createTexture(t.desc(), levels.data(), err);
-                    if (id) textures_[t.key] = Tex{id, t.usage, t.kind == gfx::TexKind::Cube};
-                }
+                for (gh3tex::Texture& t : gh3tex::decodeTexDict(p, size))
+                    if (t.supported && !t.levels.empty()) pr->textures.push_back(std::move(t));
             }
         } catch (const std::exception& ex) {
-            error = pakPath + ": " + ex.what();
-            return false;
+            pr->error = pakPath + ": " + ex.what();
+            prep_ = std::move(pr);
+            return;
         }
     }
-    stats_.textures = textures_.size();
+    pr->zoneTextures = pr->textures.size();
+    // The light housings' models (LightHousings/GO_LightHousing02/
+    // GO_LightHousing02.mdl, in ZONES/global.pak with its .tex) [C data].
+    std::shared_ptr<const Pak> global;
+    for (const venue::Node& n : v.nodes) {
+        const uint32_t key = housingModelKey(n);
+        if (!key || pr->models.count(key)) continue;
+        std::unique_ptr<scene::Scene> sc;
+        try {
+            if (!global) global = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
+            if (const PakEntry* e = global->findType(key, K(".mdl"))) {
+                auto [p, size] = global->data(*e);
+                sc = std::make_unique<scene::Scene>(scene::parse(p, size, scene::Kind::Mdl));
+                if (e->parent)
+                    if (const PakEntry* te = global->findType(e->parent, K(".tex"))) {
+                        auto [tp, ts] = global->data(*te);
+                        for (gh3tex::Texture& t : gh3tex::decodeTexDict(tp, ts))
+                            if (t.supported && !t.levels.empty()) pr->textures.push_back(std::move(t));
+                    }
+            }
+        } catch (const std::exception& ex) {
+            SDL_Log("venue: %s: %s", qbkey::name(key).c_str(), ex.what());
+        }
+        pr->models.emplace(key, std::move(sc));
+    }
+    // The beams' smoke (build).
+    try {
+        const auto gpPtr = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
+        if (const PakEntry* te = gpPtr->findType(K("global_gfx"), K(".tex"))) {
+            auto [tp, ts] = gpPtr->data(*te);
+            for (gh3tex::Texture& t : gh3tex::decodeTexDict(tp, ts))
+                if (t.key == 0xa500318eu && t.supported && !t.levels.empty()) pr->smoke.push_back(std::move(t));
+        }
+    } catch (const std::exception& ex) {
+        SDL_Log("venue: the beams' smoke: %s", ex.what());
+    }
+    prep_ = std::move(pr);
+}
+
+bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venue& v, const std::vector<uint32_t>& hide, std::string& error) {
+    if (prep_ && prep_->step != 0) prep_.reset();  // a part-done init starts again (a prepared one is used)
+    for (;;) {
+        const InitStep s = initStep(dev, disc, v, hide, error);
+        if (s != InitStep::More) return s == InitStep::Done;
+    }
+}
+
+VenueView::InitStep VenueView::initStep(gfx::RenderDevice& dev, const Disc& disc, const venue::Venue& v, const std::vector<uint32_t>& hide,
+                                        std::string& error) {
+    if (!prep_ || prep_->step == 0) {
+        hitch::Scope hs("venue prepare");
+        if (!prep_) prepare(disc, v);  // (not prepared on a worker: now)
+        shutdown();
+        dev_ = &dev;
+        v_ = &v;
+        if (!prep_->error.empty()) {
+            error = prep_->error;
+            prep_.reset();
+            return InitStep::Failed;
+        }
+        program_ = dev.beginProgram(programDesc(), error);  // ready by step 3 (below)
+        if (!program_) {
+            prep_.reset();
+            return InitStep::Failed;
+        }
+        // GH3's own shaders (GD10_GH3_SHADERS=0: the approximation only, a development aid).
+        if (!(SDL_getenv("GD10_GH3_SHADERS") && SDL_getenv("GD10_GH3_SHADERS")[0] == '0')) gh3_.init(dev, gh3shader::library(disc));
+        stats_ = Stats{};
+        prep_->step = 1, prep_->next = 0;
+        zoneTextureCount_ = 0;
+        return InitStep::More;
+    }
+    Prepared& pr = *prep_;
+    if (pr.step == 1) {
+        // The textures, a slice a frame (the first of a call always).
+        hitch::Scope hs("venue textures");
+        for (bool first = true; pr.next < pr.textures.size() && (first || hitch::sliceLeft()); ++pr.next, first = false) {
+            if (pr.next == pr.zoneTextures) zoneTextureCount_ = textures_.size();
+            const gh3tex::Texture& t = pr.textures[pr.next];
+            if (textures_.count(t.key)) continue;
+            std::string err;
+            auto levels = t.texLevels();
+            const gfx::TextureId id = dev.createTexture(t.desc(), levels.data(), err);
+            if (id) textures_[t.key] = Tex{id, t.usage, t.kind == gfx::TexKind::Cube};
+        }
+        if (pr.next < pr.textures.size()) return InitStep::More;
+        if (pr.zoneTextures == pr.textures.size()) zoneTextureCount_ = textures_.size();
+        pr.textures.clear(), pr.textures.shrink_to_fit();
+        // The programs the meshes draw with (their template's Default; an
+        // opaque one's DynamicShadowReciever too), compiled next.
+        auto want = [&](const scene::Scene& sc) {
+            for (const scene::Mesh& m : sc.meshes)
+                for (const scene::Material& mm : sc.materials)
+                    if (mm.key == m.material) {
+                        pr.programs.emplace_back(mm.shader, matlib::Default);
+                        if (mm.d8 == 0) pr.programs.emplace_back(mm.shader, matlib::DynamicShadowReceiver);
+                        break;
+                    }
+        };
+        if (gh3_.ready()) {
+            for (const venue::Part& part : v.parts) want(part.scene);
+            for (const auto& [k, sc] : pr.models)
+                if (sc) want(*sc);
+        }
+        std::sort(pr.programs.begin(), pr.programs.end());
+        pr.programs.erase(std::unique(pr.programs.begin(), pr.programs.end()), pr.programs.end());
+        pr.step = 2, pr.next = 0;
+        return InitStep::More;
+    }
+    if (pr.step == 2) {
+        // The programs, compiled before the first frame that draws them: begun
+        // a slice a frame (OpenGL compiles them in the driver's threads, the
+        // others now), then waited for frame by frame.
+        hitch::Scope hs("venue programs");
+        for (bool first = true; pr.next < pr.programs.size() && (first || hitch::sliceLeft()); ++pr.next, first = false)
+            gh3_.request(pr.programs[pr.next].first, pr.programs[pr.next].second);
+        if (pr.next < pr.programs.size() || !gh3_.settle()) return InitStep::More;
+        const int ps = dev.programStatus(program_, error);  // the approximation's
+        if (ps == 0) return InitStep::More;
+        if (ps < 0) {
+            program_ = {};
+            prep_.reset();
+            return InitStep::Failed;
+        }
+        pr.step = 3;
+        return InitStep::More;
+    }
+    hitch::Scope hs("venue build");
+    const InitStep r = build(dev, v, hide, error);
+    if (r != InitStep::More) prep_.reset();
+    return r;
+}
+
+// The geometry: the sectors a slice a frame, then the housings and the
+// vertex buffer, then the index buffer (each ~15..40 ms for z_tushino).
+VenueView::InitStep VenueView::build(gfx::RenderDevice& dev, const venue::Venue& v, const std::vector<uint32_t>& hide, std::string& error) {
+    Prepared& pr = *prep_;
+    stats_.textures = zoneTextureCount_;
     auto tex = [&](uint32_t key) {
         auto it = textures_.find(key);
         return it == textures_.end() ? nullptr : &it->second;
     };
 
-    std::vector<Vtx> verts;
-    std::vector<uint32_t> idx;
+    std::vector<Vtx>& verts = pr.verts;
+    std::vector<uint32_t>& idx = pr.idx;
     auto groupOf = [&](uint32_t key) {
         if (!key) key = K("none");
         for (size_t i = 0; i < groups_.size(); ++i)
@@ -233,7 +395,7 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
         groups_.push_back(key);
         return int(groups_.size() - 1);
     };
-    groupOf(K("none"));
+    if (groups_.empty()) groupOf(K("none"));
     // One mesh: its vertices (moved by `place`, or left in model space for
     // a housing, which draws at its live transform), indices and item.
     auto addMesh = [&](const scene::Scene& sc, const scene::Mesh& m, const venue::Node* place, int ni, const venue::Node* node,
@@ -389,9 +551,45 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
         }
         items_.push_back(it);
     };
-    for (const venue::Part& part : v.parts) {
+    if (pr.phase >= 2) {
+        // The vertex, then the index buffer, 4 MB at a time (z_tushino's
+        // 50 MB of vertices had held a frame 40 ms).
+        constexpr size_t kChunk = 4u << 20;
+        const bool vtx = pr.phase == 2;
+        const uint8_t* src = vtx ? reinterpret_cast<const uint8_t*>(verts.data()) : reinterpret_cast<const uint8_t*>(idx.data());
+        const size_t total = vtx ? verts.size() * sizeof(Vtx) : idx.size() * sizeof(uint32_t);
+        for (bool first = true; pr.uploaded < total && (first || hitch::sliceLeft()); first = false) {
+            const size_t n = std::min(kChunk, total - pr.uploaded);
+            dev.updateBuffer(vtx ? vb_ : ib_, pr.uploaded, src + pr.uploaded, n);
+            pr.uploaded += n;
+        }
+        if (pr.uploaded < total) return InitStep::More;
+        pr.uploaded = 0;
+        if (vtx) {
+            verts.clear(), verts.shrink_to_fit();
+            ib_ = dev.createBuffer(gfx::BufferKind::Index, idx.size() * sizeof(uint32_t), nullptr, false);
+            pr.phase = 3;
+            return InitStep::More;
+        }
+        // The items in draw order.
+        std::stable_sort(items_.begin(), items_.end(), [](const Item& a, const Item& b) {
+            const bool ta = a.mode != Mode::Opaque, tb = b.mode != Mode::Opaque;
+            if (ta != tb) return !ta;
+            return ta && a.drawOrder < b.drawOrder;
+        });
+        using ull = unsigned long long;  // (MinGW's SDL_Log has no %zu)
+        SDL_Log("venue %s: %llu meshes, %llu triangles, %llu textures (%llu missing), %llu lights, %llu local sectors without a node, "
+                "%llu crowd-card meshes; %llu meshes with GH3's shaders, %llu approximated", v.zone.c_str(), ull(stats_.meshes),
+                ull(stats_.triangles), ull(stats_.textures), ull(stats_.missingTextures), ull(v.lights.size()), ull(stats_.hiddenSectors),
+                ull(stats_.hiddenMeshes), ull(stats_.gh3Meshes), ull(stats_.fallbackMeshes));
+        return InitStep::Done;
+    }
+    for (bool first = true; pr.part < v.parts.size(); ++pr.part, pr.sector = 0) {
+        const venue::Part& part = v.parts[pr.part];
         const scene::Scene& sc = part.scene;
-        for (size_t si = 0; si < sc.sectors.size(); ++si) {
+        for (; pr.sector < sc.sectors.size(); ++pr.sector, first = false) {
+            if (!first && !hitch::sliceLeft()) return InitStep::More;  // more sectors next frame
+            const size_t si = pr.sector;
             const scene::Sector& sec = sc.sectors[si];
             const int ni = part.sectorNode[si];
             const venue::Node* node = ni >= 0 ? &v.nodes[size_t(ni)] : nullptr;
@@ -406,46 +604,21 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
                 addMesh(sc, sc.meshes[mi], place, ni, node, sec.key, -1);
         }
     }
+    if (pr.phase == 0) {
+        pr.phase = 1;
+        if (!hitch::sliceLeft()) return InitStep::More;  // the housings and the vertex buffer next frame
+    }
     // The light housings: game objects of the _gfx node array with a
     // lightvolumetype and a Model (LightHousings/GO_LightHousing02/
     // GO_LightHousing02.mdl, in ZONES/global.pak with its .tex) [C data].
     {
-        std::unordered_map<uint32_t, std::unique_ptr<scene::Scene>> models;
-        std::shared_ptr<const Pak> global;
+        std::unordered_map<uint32_t, std::unique_ptr<scene::Scene>>& models = pr.models;
         for (size_t ni = 0; ni < v.nodes.size(); ++ni) {
             const venue::Node& n = v.nodes[ni];
-            if (!n.st || !n.st->find(K("lightvolumetype"))) continue;
-            const qb::Value* mv = n.st->find(K("Model"));
-            if (!mv || (mv->type != qb::Type::String && mv->type != qb::Type::WString)) continue;
-            std::string path = "models\\";
-            for (char c : mv->str)
-                if (!(c == '\\' && path.back() == '\\')) path += c == '/' ? '\\' : c;
-            const uint32_t key = qbkey::key(path);
+            const uint32_t key = housingModelKey(n);
+            if (!key) continue;
             auto it = models.find(key);
-            if (it == models.end()) {
-                std::unique_ptr<scene::Scene> sc;
-                try {
-                    if (!global) global = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
-                    if (const PakEntry* e = global->findType(key, K(".mdl"))) {
-                        auto [p, size] = global->data(*e);
-                        sc = std::make_unique<scene::Scene>(scene::parse(p, size, scene::Kind::Mdl));
-                        if (e->parent)
-                            if (const PakEntry* te = global->findType(e->parent, K(".tex"))) {
-                                auto [tp, ts] = global->data(*te);
-                                for (const gh3tex::Texture& t : gh3tex::decodeTexDict(tp, ts)) {
-                                    if (!t.supported || t.levels.empty() || textures_.count(t.key)) continue;
-                                    std::string err;
-                                    auto levels = t.texLevels();
-                                    if (const gfx::TextureId id = dev.createTexture(t.desc(), levels.data(), err))
-                                        textures_[t.key] = Tex{id, t.usage, t.kind == gfx::TexKind::Cube};
-                                }
-                            }
-                    }
-                } catch (const std::exception& ex) {
-                    SDL_Log("venue: %s: %s", path.c_str(), ex.what());
-                }
-                it = models.emplace(key, std::move(sc)).first;
-            }
+            if (it == models.end()) continue;
             // ConeImpostor's beam; `volume`: GH3's _Raytrace_cone_volume (drawRaytraced).
             const qb::Value* lt = n.st->find(K("lightvolumetype"));
             const qb::Value* pt = n.st->find(K("projectortype"));
@@ -466,26 +639,16 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
     // by the full path it was never found and the beams drew with white for
     // their smoke, far brighter and without the noise.
     if ((!cones_.empty() || !rays_.empty()) && !smoke_) {
-        try {
-            const auto gpPtr = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
-            const Pak& gp = *gpPtr;
-            if (const PakEntry* te = gp.findType(K("global_gfx"), K(".tex"))) {
-                auto [tp, ts] = gp.data(*te);
-                for (const gh3tex::Texture& t : gh3tex::decodeTexDict(tp, ts)) {
-                    if (t.key != 0xa500318eu || !t.supported || t.levels.empty()) continue;
-                    std::string err;
-                    auto levels = t.texLevels();
-                    smoke_ = dev.createTexture(t.desc(), levels.data(), err);
-                }
-            }
-        } catch (const std::exception& ex) {
-            SDL_Log("venue: the beams' smoke: %s", ex.what());
+        for (const gh3tex::Texture& t : pr.smoke) {
+            std::string err;
+            auto levels = t.texLevels();
+            smoke_ = dev.createTexture(t.desc(), levels.data(), err);
         }
         if (!smoke_) SDL_Log("venue: the beams' smoke (global_gfx.tex 0xa500318e) not found; drawn with white");
     }
     if (verts.empty()) {
         error = v.zone + ": no geometry";
-        return false;
+        return InitStep::Failed;
     }
     // The cone impostor's quad: (x, y, z, w) = near edge (+-1, 0, 0, 1), far
     // edge (0, +-1, 1, 0); _Cone_Impostor's vertex shader places it at
@@ -529,20 +692,9 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
         projVb_ = dev.createBuffer(gfx::BufferKind::Vertex, pv.size() * sizeof(float), pv.data(), true);
         projIb_ = dev.createBuffer(gfx::BufferKind::Index, pi.size() * sizeof(uint32_t), pi.data(), false);
     }
-    vb_ = dev.createBuffer(gfx::BufferKind::Vertex, verts.size() * sizeof(Vtx), verts.data(), false);
-    ib_ = dev.createBuffer(gfx::BufferKind::Index, idx.size() * sizeof(uint32_t), idx.data(), false);
-    // Opaque first, then the blended ones by draw order (sorted again by depth each frame).
-    std::stable_sort(items_.begin(), items_.end(), [](const Item& a, const Item& b) {
-        const bool ta = a.mode != Mode::Opaque, tb = b.mode != Mode::Opaque;
-        if (ta != tb) return !ta;
-        return ta && a.drawOrder < b.drawOrder;
-    });
-    using ull = unsigned long long;  // (MinGW's SDL_Log has no %zu)
-    SDL_Log("venue %s: %llu meshes, %llu triangles, %llu textures (%llu missing), %llu lights, %llu local sectors without a node, "
-            "%llu crowd-card meshes; %llu meshes with GH3's shaders, %llu approximated", v.zone.c_str(), ull(stats_.meshes),
-            ull(stats_.triangles), ull(stats_.textures), ull(stats_.missingTextures), ull(v.lights.size()), ull(stats_.hiddenSectors),
-            ull(stats_.hiddenMeshes), ull(stats_.gh3Meshes), ull(stats_.fallbackMeshes));
-    return true;
+    vb_ = dev.createBuffer(gfx::BufferKind::Vertex, verts.size() * sizeof(Vtx), nullptr, false);
+    pr.phase = 2;  // its contents and the index buffer from the next frame
+    return InitStep::More;
 }
 
 void VenueView::cameraGlobals(const venue::CamPose& cam, bool clipZeroToOne, double seconds, gh3shader::Globals& g, gfx::Mat4* viewProjOut,

@@ -31,7 +31,7 @@ public:
     // (it had stopped the game for half a second).
     void loadPakAsync(const Disc& disc, const std::string& pakPath);
     void poll(bool wait = false);
-    bool pending() const { return !pending_.empty(); }
+    bool pending() const { return !pending_.empty() || !committing_.empty(); }
     // Uploads one loose image (an .img.xen, e.g. a loading screen) under
     // `key`; true if it is there (loaded now or before).
     bool loadImage(const Disc& disc, const std::string& path, uint32_t key);
@@ -69,8 +69,9 @@ public:
 private:
     struct Prepared;
     static std::shared_ptr<Prepared> prepare(const Disc& disc, const std::string& pakPath, bool sharpen);
-    int commit(Prepared& pr);
+    int commit(Prepared& pr, bool sliced = false);
     std::list<std::future<std::shared_ptr<Prepared>>> pending_;
+    std::list<std::shared_ptr<Prepared>> committing_;  // ready, uploading a slice a frame
     struct Entry {
         gfx::TextureId id;
         int w = 0, h = 0;

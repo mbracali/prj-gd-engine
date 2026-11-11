@@ -19,6 +19,7 @@
 #include "data/texture.h"
 #include "data/venue.h"
 #include "render/camera.h"
+#include "render/hitch.h"
 #include "render/rmath.h"
 #include "render/venue_lights.h"
 #include "script/natives_core.h"
@@ -629,13 +630,14 @@ bool Particles::nodeMotion(uint32_t node, double ms, gfx::Mat4& delta) const {
     return true;
 }
 
-bool Particles::attach(gfx::RenderDevice& dev, const Disc& disc, std::string& error) {
-    dev_ = &dev;
-    program_ = dev.createProgram(programDesc(), error);
-    if (!program_) return false;
-    const uint8_t px[4] = {255, 255, 255, 255};
-    gfx::TexLevel l{px, 4};
-    white_ = dev.createTexture({1, 1, 1, gfx::TexFormat::RGBA8, gfx::TexKind::Tex2D}, &l, error);
+struct Particles::Prepared {
+    std::vector<std::pair<uint32_t, gh3tex::Texture>> textures;
+    size_t next = 0;
+    bool started = false;  // the program and the white texture made
+};
+
+void Particles::prepare(const Disc& disc) {
+    auto pr = std::make_shared<Prepared>();
     // The quick materials' textures: .img entries of ZONES/global.pak by name [C data: JOW_Spark01].
     try {
         const auto pakPtr = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
@@ -645,14 +647,45 @@ bool Particles::attach(gfx::RenderDevice& dev, const Disc& disc, std::string& er
             auto [p, size] = pak.data(e);
             gh3tex::Texture t = gh3tex::decodeImg(p, size);
             if (!t.supported || t.levels.empty() || t.kind != gfx::TexKind::Tex2D) continue;
-            std::string err;
-            auto levels = t.texLevels();
-            if (const gfx::TextureId id = dev.createTexture(t.desc(), levels.data(), err)) textures_[e.name ? e.name : e.fullName] = id;
+            pr->textures.emplace_back(e.name ? e.name : e.fullName, std::move(t));
         }
     } catch (const std::exception& ex) {
         SDL_Log("particles: global.pak: %s", ex.what());
     }
-    return true;
+    prepared_ = std::move(pr);
+}
+
+bool Particles::attach(gfx::RenderDevice& dev, const Disc& disc, std::string& error) {
+    int r;
+    while ((r = attachStep(dev, disc, error)) == 0) {}
+    return r > 0;
+}
+
+int Particles::attachStep(gfx::RenderDevice& dev, const Disc& disc, std::string& error) {
+    if (!prepared_) prepare(disc);  // (not prepared on a worker: now)
+    Prepared& pr = *prepared_;
+    if (!pr.started) {
+        pr.started = true;
+        dev_ = &dev;
+        program_ = dev.createProgram(programDesc(), error);
+        if (!program_) {
+            prepared_.reset();
+            return -1;
+        }
+        const uint8_t px[4] = {255, 255, 255, 255};
+        gfx::TexLevel l{px, 4};
+        white_ = dev.createTexture({1, 1, 1, gfx::TexFormat::RGBA8, gfx::TexKind::Tex2D}, &l, error);
+        return 0;
+    }
+    for (bool first = true; pr.next < pr.textures.size() && (first || hitch::sliceLeft()); ++pr.next, first = false) {
+        const auto& [key, t] = pr.textures[pr.next];
+        std::string err;
+        auto levels = t.texLevels();
+        if (const gfx::TextureId id = dev.createTexture(t.desc(), levels.data(), err)) textures_[key] = id;
+    }
+    if (pr.next < pr.textures.size()) return 0;
+    prepared_.reset();
+    return 1;
 }
 
 void Particles::shutdown() {

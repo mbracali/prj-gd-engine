@@ -15,6 +15,7 @@
 #include "data/disc.h"
 #include "data/pak.h"
 #include "data/qbkey.h"
+#include "render/hitch.h"
 #include "data/scene.h"
 #include "data/texture.h"
 
@@ -108,6 +109,7 @@ struct TextureCache::Prepared {
     };
     std::vector<Item> items;
     std::unordered_map<uint32_t, Sharp> sharp;
+    size_t next = 0;  // the first item not committed yet (commit in slices)
 };
 
 std::shared_ptr<TextureCache::Prepared> TextureCache::prepare(const Disc& disc, const std::string& pakPath, bool sharpen) {
@@ -188,7 +190,7 @@ std::shared_ptr<TextureCache::Prepared> TextureCache::prepare(const Disc& disc, 
     return pr;
 }
 
-int TextureCache::commit(Prepared& pr) {
+int TextureCache::commit(Prepared& pr, bool sliced) {
     if (pr.failed) return -1;
     int n = 0;
     auto upload = [&](uint32_t key, const gh3tex::Texture& t) {
@@ -211,7 +213,10 @@ int TextureCache::commit(Prepared& pr) {
         textures_[key] = Entry{id, t.width, t.height, true};
         ++n;
     };
-    for (const Prepared::Item& it : pr.items) {
+    for (; pr.next < pr.items.size(); ++pr.next) {
+        // A slice a frame (the loading screen and menus keep their frame rate).
+        if (sliced && n > 0 && !hitch::sliceLeft()) break;
+        const Prepared::Item& it = pr.items[pr.next];
         if (it.kind == Prepared::Item::Tex) {
             upload(it.key, it.tex);
         } else if (it.kind == Prepared::Item::Img) {
@@ -243,8 +248,15 @@ void TextureCache::poll(bool wait) {
             ++it;
             continue;
         }
-        auto pr = it->get();
+        if (auto pr = it->get()) committing_.push_back(std::move(pr));
         it = pending_.erase(it);
-        if (pr) commit(*pr);
+    }
+    // The decoded textures uploaded in slices: a zone's ~1 s of uploads had
+    // held one frame of the boot and the loading screen (no-stutter rule).
+    while (!committing_.empty()) {
+        Prepared& pr = *committing_.front();
+        commit(pr, !wait);
+        if (!pr.failed && pr.next < pr.items.size()) return;  // more next frame
+        committing_.pop_front();
     }
 }

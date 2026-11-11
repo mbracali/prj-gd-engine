@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <unordered_set>
 #include <unordered_map>
@@ -65,8 +66,15 @@ private:
     qs::Vm& vm_;
     ui::UiSystem& ui_;
     uint32_t zone_ = 0, loadedZone_ = 0;
-    std::unique_ptr<venue::Venue> venue_;
-    std::unique_ptr<VenueView> view_;
+    std::shared_ptr<venue::Venue> venue_;
+    std::shared_ptr<VenueView> view_;
+    // The view loading (no-stutter rule): prepared on a worker, then uploaded
+    // a slice a frame (VenueView::initStep); a zone left before it is in is
+    // dropped once its worker is done (discard_).
+    std::shared_ptr<VenueView> pendingView_;
+    std::future<void> prepareWork_;
+    std::vector<std::pair<std::future<void>, std::shared_ptr<VenueView>>> discard_;
+    void dropPending();
     venue::LightShow lights_;
     std::vector<venue::LightState> lightState_;
     bool failed_ = false;  // the zone did not load (logged once)
@@ -82,8 +90,12 @@ private:
     int motion_ = 0;
     Pose pose();
     Pose world(const Pose& p);
-    // The current zone's nodes (GetWaypointPos, the objects); false if it does not load.
-    bool ensureVenue();
+    // The current zone's nodes (GetWaypointPos, the objects); false if it does
+    // not load (or, without `wait`, is still loading on its worker).
+    bool ensureVenue(bool wait = true);
+    uint32_t loadingZone_ = 0;
+    std::future<std::shared_ptr<venue::Venue>> venueWork_;
+    std::vector<std::future<std::shared_ptr<venue::Venue>>> venueDiscard_;
     std::unique_ptr<MenuObjects> objects_;
     // bg_viewport's screen effects (setup_bg_viewport -> enable_bg_viewport_properties:
     // DOF_Off, Default_TOD_Manager's BnS and sbloom) and the characters'
