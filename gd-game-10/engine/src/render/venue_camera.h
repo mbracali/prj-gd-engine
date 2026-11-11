@@ -103,6 +103,11 @@ public:
     // cameras' lookat / lookatbone aim at it. Unset: the authored Quat.
     using BoneLookup = std::function<bool(uint32_t member, uint32_t bone, double ms, Vec3& out)>;
     void setBoneLookup(BoneLookup f) { lookup_ = std::move(f); }
+    // A camera lock target's bone (render/mocap_camera.h): lockto = <target>
+    // locktobone = bone_camera; `animated` false: the target plays nothing then.
+    using LockLookup = std::function<bool(uint32_t target, uint32_t bone, double ms, Vec3& pos, Quat& rot)>;
+    using LockAnimated = std::function<bool(uint32_t target, double ms)>;
+    void setLockLookup(LockLookup f, LockAnimated a) { lockLookup_ = std::move(f), lockAnimated_ = std::move(a); }
     // The member and bone the shot playing frames (lookat / lookatbone of its first camera; 0: none).
     uint32_t lookatMember() const { return keys_.empty() ? 0 : keys_.front().lookat; }
     uint32_t lookatBone() const { return keys_.empty() ? 0 : keys_.front().lookatBone; }
@@ -112,7 +117,7 @@ private:
         Vec3 pos{};
         Quat rot{0, 0, 0, 1};
         float fov = 72;
-        uint32_t lockTo = 0;
+        uint32_t lockTo = 0, lockToBone = 0;
         uint32_t lookat = 0, lookatBone = 0;  // lookat / lookatbone (0: none)
         float screenOffset[2] = {0, 0};       // screenoffset: where the bone sits on screen
         bool valid = false;
@@ -177,6 +182,9 @@ private:
     float orbitRad_ = 0;          // total orbit angle
     bool orbit1_ = true, orbit2_ = true, handCam_ = false;
     BoneLookup lookup_;
+    LockLookup lockLookup_;
+    LockAnimated lockAnimated_;
+    mutable double evalMs_ = 0;  // the song time world() places lock targets at
 };
 
 }  // namespace venue

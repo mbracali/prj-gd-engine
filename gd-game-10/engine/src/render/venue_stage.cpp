@@ -142,6 +142,23 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
             b->evaluate(ms);
             return b->bonePos(member, bone, out);
         });
+        // The camera lock targets' anims (the song's Band_PlayClip cameras, the drummer's loop cameras).
+        std::vector<const qb::Struct*> perfEvents;
+        for (const qb::File& f : b->songFiles())
+            if (const qb::Value* pv = f.find(qbkey::key(chart.song + "_performance")); pv && pv->type == qb::Type::Array && pv->arr)
+                for (const qb::Value& e : pv->arr->values)
+                    if (e.type == qb::Type::Struct && e.st) perfEvents.push_back(e.st.get());
+        mocap_ = {};
+        mocap_.init(*venue_, g, &b->songFiles(), perfEvents, b->library().skeleton(qbkey::key("GH4_Camera")),
+                    [b](uint32_t key) -> const anim::Clip* {
+                        for (const Band::Entry& e : b->members())
+                            if (const anim::Clip* c = e.model ? e.model->clip(key) : nullptr) return c;
+                        return nullptr;
+                    },
+                    from);
+        venue::MocapCameras* mc = &mocap_;
+        cameras_.setLockLookup([mc](uint32_t t, uint32_t bone, double ms, venue::Vec3& p, venue::Quat& q) { return mc->frame(t, bone, ms, p, q); },
+                               [mc](uint32_t t, double ms) { return mc->animated(t, ms); });
     }
     // The crowd (create_crowd_models) and its cards: textures the crowd
     // cameras' renders replace (<zone>_crowd_models[].textureasset,

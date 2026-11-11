@@ -207,6 +207,7 @@ CameraDirector::Keyed CameraDirector::readCam(const qb::Struct* st) const {
     if (const qb::Value* f = st->find(K("fov"))) k.fov = f->number();
     k.lockTo = keyOf(st->find(K("lockto")));
     if (k.lockTo == K("world")) k.lockTo = 0;
+    k.lockToBone = keyOf(st->find(K("locktobone")));
     k.lookat = keyOf(st->find(K("lookat")));
     k.lookatBone = keyOf(st->find(K("lookatbone")));
     if (const qb::Value* so = st->find(K("screenoffset")); so && (so->type == qb::Type::Pair || so->type == qb::Type::Vector))
@@ -218,6 +219,19 @@ CameraDirector::Keyed CameraDirector::readCam(const qb::Struct* st) const {
 CamPose CameraDirector::world(const Keyed& k) const {
     CamPose p{k.pos, k.rot, k.fov};
     if (!k.lockTo) return p;
+    // A camera lock target (the mocap / moment cameras): its bone_camera's
+    // frame at the song time, the entry's pos / Quat on top [C data: those
+    // entries are pos (0,0,0) Quat (0,0,0) locktobone = bone_camera].
+    if (lockLookup_ && k.lockToBone) {
+        Vec3 bp;
+        Quat bq;
+        if (lockLookup_(k.lockTo, k.lockToBone, evalMs_, bp, bq)) {
+            const Vec3 r = rotate(bq, k.pos);
+            p.pos = {bp[0] + r[0], bp[1] + r[1], bp[2] + r[2]};
+            p.rot = mul(bq, k.rot);
+            return p;
+        }
+    }
     // LockTo a band member: the member's frame, its start waypoint [I: no
     // characters yet, so no animation or bone (locktobone) on top].
     const char* wp = k.lockTo == K("Bassist")    ? "_TRG_Waypoint_Bassist_Start"
@@ -276,6 +290,10 @@ void CameraDirector::startShot(double t) {
         } else if (lastType_ && type == lastType_) {
             continue;
         }
+        // A mocap / moment camera whose lock target plays no camera anim at
+        // the cut: its bone sits at the world's origin, never framed [I: the
+        // original's targets always play one when their notes / shots come].
+        if (lockAnimated_ && keyOf(entryField(e, K("locktobone"))) && !lockAnimated_(keyOf(entryField(e, K("lockto"))), t)) continue;
         if (const qb::Value* inc = entryField(e, K("includenodes")); inc && inc->type == qb::Type::Array && inc->arr) {
             bool found = false;
             for (const qb::Value& n : inc->arr->values) found = found || n.key == targetNode_;
@@ -489,6 +507,7 @@ void CameraDirector::starPower(double ms, bool on) {
 }
 
 CamPose CameraDirector::pose(double ms) const {
+    evalMs_ = ms;
     if (ctl_ == Ctl::Script) {
         // ccam_domorph: from the pose at the call to its target over `time` (0: at once) [C].
         if (!haveMorph_) return lastPose_;
@@ -588,6 +607,7 @@ void CameraDirector::retryScript() {
 }
 
 void CameraDirector::scriptMorph(const qb::Struct& params, double ms) {
+    evalMs_ = ms;
     Keyed k = readCam(&params);
     if (!k.valid) return;
     morphFrom_ = haveMorph_ ? pose(ms) : world(k);

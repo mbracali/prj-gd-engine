@@ -93,6 +93,7 @@ target_sources(gd10 PRIVATE
   src/render/texture_cache.cpp
   src/render/texture_codec.cpp
   src/render/venue_camera.cpp
+  src/render/mocap_camera.cpp
   src/render/venue_lights.cpp
   src/render/venue_stage.cpp
   src/render/venue_view.cpp

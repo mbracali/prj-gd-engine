@@ -12,6 +12,7 @@
 #include "render/crowd.h"
 #include "render/enhanced_fx.h"
 #include "render/enhanced_lights.h"
+#include "render/mocap_camera.h"
 #include "render/particles.h"
 #include "render/screen_fx.h"
 #include "render/stage_peds.h"
@@ -128,6 +129,7 @@ public:
 private:
     std::unique_ptr<venue::Venue> venue_;
     venue::CameraDirector cameras_;
+    venue::MocapCameras mocap_;  // the camera lock targets (mocap / moment cameras)
     venue::LightShow lights_;
     std::unique_ptr<VenueView> view_;
     std::unique_ptr<VenueView> pendingView_;  // prepared (start), uploading (attachStep 0)
