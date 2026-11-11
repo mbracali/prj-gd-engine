@@ -72,13 +72,14 @@ struct Play {
     const anim::Clip* clip = nullptr;
     double start = 0;  // song ms
     float blend = 0;   // s: the degenerateblend's cross-fade from what played before [I: linear]
-    double end() const { return start + (clip ? double(clip->duration) * 1000.0 : 0.0); }
+    float offset = 0;  // s into the clip at `start` (gh4 Band_PlayClip's startframe)
+    double end() const { return start + (clip ? (double(clip->duration) - offset) * 1000.0 : 0.0); }
 };
 
 // A degenerateblend node: the clips it played, the newest last.
 struct Node {
     std::vector<Play> plays;
-    void play(const anim::Clip* c, double t, float blend);
+    void play(const anim::Clip* c, double t, float blend, float offset = 0);
     bool empty() const { return plays.empty(); }
 };
 
@@ -157,6 +158,7 @@ public:
 private:
     enum class Ev : uint8_t {
         Strum, Fret, Chord, Perf, DrumArm, Cymbal,                                       // from the song
+        Mocap,                                                                         // gh4 Band_PlayClip
         BodyDone, TransitionDone, StrumDone, FaceDone, ChordRelease, ArmDone, Twist,  // scheduled
         ClipEvent                                                                     // ped_animevents
     };
@@ -191,6 +193,17 @@ private:
     void strum(int length, double t);
     void facial(double t);
     bool guitarLike() const { return role_ == band::Role::Guitarist || role_ == band::Role::Bassist; }
+    // The struct with anim_set, strum_anims, finger_anims, fret_anims: GH3's
+    // profile, gh4's anim struct member (band::Member::animPart).
+    const qb::Struct* animProfile() const;
+    // gh4 Band_PlayClip clips of this member: the clip, its start frame, the clip struct's arms.<member>.
+    struct Mocap {
+        const anim::Clip* clip = nullptr;
+        uint32_t key = 0;
+        float startFrame = 0;
+        const qb::Struct* arms = nullptr;
+    };
+    std::vector<Mocap> mocaps_;
 
     Rig rig_;
     const band::Model* model_ = nullptr;

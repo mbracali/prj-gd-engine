@@ -42,6 +42,14 @@ struct Member {
     uint32_t skeleton = 0;         // the .ske key (Skeleton, or skeleton2 for outfit 2)
     int outfit = 1, style = 1;
     float scale = 1;               // the profile's uniform scale [C script create_guitarist]
+
+    // gh4 (World Tour engine, docs/band.md "gh4"): the character is its
+    // appearance's CAS parts (band_builder_create_band, create_band_member).
+    bool gh4 = false;
+    uint32_t part = 0;                     // guitar, rhythm, bass, drum, vocals (band_builder part)
+    std::vector<std::string> meshes;       // the parts' 'models/...skin' paths (body first)
+    const qb::Struct* animPart = nullptr;  // the anim struct's member: anim_set, strum_anims, finger_anims, ...
+    std::vector<std::string> animPaks;     // disc paths of the paks with its clips
 };
 
 // The band of a one-player song in `zone` (create_band with
@@ -65,6 +73,17 @@ const qb::Struct* bodyDesc(const Globals& g, uint32_t descId);
 const qb::Struct* instrumentDesc(const Globals& g, uint32_t descId);
 // A desc's 'pak\models\...\x.pak' as a disc path (DATA/COMPRESSED/PAK/x.pak.xen) [C data: every desc's pak is there].
 std::string pakPath(const std::string& qbPath);
+
+// gh4: band_builder_create_band's members for `song` (the song struct's
+// band, player 1's character on its part), empty when there is no gh4
+// profile data (then chooseBand is GH3's).
+std::vector<Member> chooseBandGh4(const Globals& g, uint32_t songKey);
+// gh4: a member from a musician profile (Preset_Musician_Profiles_*: name,
+// appearance) playing `part` (guitar, rhythm, bass, drum, vocals; 0: none,
+// the front end's). `songKey` 0: no song.
+bool memberGh4(const Globals& g, const qb::Struct& profile, uint32_t object, uint32_t part, uint32_t songKey, Member& out);
+// gh4: a musician profile by its name key (find_profile_by_id), or null.
+const qb::Struct* findProfileGh4(const Globals& g, uint32_t id);
 
 // Every playable body: one Member per musician_body entry with a profile
 // (every character, outfit and style; the bassist, drummer and singers),

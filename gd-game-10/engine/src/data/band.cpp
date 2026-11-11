@@ -3,6 +3,8 @@
 #include "data/band.h"
 
 #include <list>
+#include <map>
+#include <cstring>
 #include <mutex>
 
 #include <algorithm>
@@ -12,9 +14,12 @@
 #include <stdexcept>
 
 #include "data/disc.h"
+#include "data/inflate.h"
 #include "data/pak.h"
 #include "data/qbkey.h"
 #include "script/globals.h"
+
+#include <SDL3/SDL_log.h>
 
 namespace band {
 namespace {
@@ -28,6 +33,8 @@ uint32_t keyOf(const qb::Value* v) {
 std::string strOf(const qb::Value* v) {
     return v && (v->type == qb::Type::String || v->type == qb::Type::WString) ? v->str : std::string();
 }
+
+const qb::Struct* structOf(const qb::Value* v) { return v && v->type == qb::Type::Struct && v->st ? v->st.get() : nullptr; }
 
 int intOf(const qb::Value* v, int fallback) {
     if (!v) return fallback;
@@ -126,6 +133,7 @@ const qb::Struct* bodyDesc(const Globals& g, uint32_t id) { return findDesc(g, K
 const qb::Struct* instrumentDesc(const Globals& g, uint32_t id) { return findDesc(g, K("musician_instrument"), id); }
 
 std::vector<Member> chooseBand(const Globals& g, const std::string& zone, uint32_t songKey) {
+    if (globalArray(g, K("Preset_Musician_Profiles_Locked"))) return chooseBandGh4(g, songKey);
     std::vector<Member> out;
     if (const qb::Value* d = g.find(K("disable_band")); intOf(d, 0) == 1) return out;
     // Two players (create_band, current_num_players = 2): Guitarist from the
@@ -209,6 +217,237 @@ std::vector<Member> chooseBand(const Globals& g, const std::string& zone, uint32
     }
     if (!none)
         if (const qb::Struct* p = findProfile(g, singer)) out.push_back(makeMember(g, Role::Vocalist, K("vocalist"), p));
+    return out;
+}
+
+// ---- gh4 (World Tour engine) ----
+
+namespace {
+
+const qb::Struct* songStruct(const Globals& g, uint32_t songKey) {
+    for (const char* name : {"gh_songlist_props", "gh3_songlist_props", "permanent_songlist_props"})
+        if (const qb::Struct* props = globalStruct(g, K(name)))
+            if (const qb::Value* s = g.field(*props, songKey); s && s->type == qb::Type::Struct && s->st) return s->st.get();
+    return nullptr;
+}
+
+// A CAS part array's desc by desc_id (CAS_Full_Body, CAS_Guitar_Body, ...).
+const qb::Struct* casDesc(const Globals& g, uint32_t partArray, uint32_t id) {
+    if (!id || id == K("none")) return nullptr;
+    if (const qb::Array* a = globalArray(g, partArray))
+        for (const qb::Value& e : a->values)
+            if (e.type == qb::Type::Struct && e.st && keyOf(g.field(*e.st, K("desc_id"))) == id) return e.st.get();
+    return nullptr;
+}
+
+std::string meshOf(const Globals& g, const qb::Struct& desc) { return strOf(g.field(desc, K("mesh"))); }
+
+// The instrument parts a part plays with [C data modifiable_preset_musician_instrument_parts; I: by part].
+const std::vector<const char*>& instrumentParts(uint32_t part) {
+    static const std::vector<const char*> guitar = {"CAS_Guitar_Body", "CAS_Guitar_Neck", "CAS_Guitar_Head", "CAS_Guitar_Pickguards",
+                                                    "cas_guitar_bridges", "CAS_Guitar_Knobs", "CAS_Guitar_Pickups"};
+    static const std::vector<const char*> bass = {"CAS_Bass_Body", "CAS_Bass_Neck", "CAS_Bass_Head", "CAS_Bass_Pickguards",
+                                                  "cas_bass_bridges", "CAS_Bass_Knobs", "CAS_Bass_Pickups"};
+    static const std::vector<const char*> drum = {"CAS_Drums", "CAS_Drums_Sticks"};
+    static const std::vector<const char*> vocals = {"CAS_Mic", "CAS_Mic_Stand"};
+    static const std::vector<const char*> none;
+    if (part == K("guitar") || part == K("rhythm")) return guitar;
+    if (part == K("bass")) return bass;
+    if (part == K("drum")) return drum;
+    if (part == K("vocals")) return vocals;
+    return none;
+}
+
+bool isInstrumentPart(uint32_t key) {
+    for (uint32_t p : {K("guitar"), K("bass"), K("drum"), K("vocals")})
+        for (const char* n : instrumentParts(p))
+            if (K(n) == key) return true;
+    return false;
+}
+
+std::string pakOfName(const Disc* disc, const std::string& name) {
+    (void)disc;
+    return "DATA/COMPRESSED/PAK/" + name + ".pak.xen";
+}
+
+}  // namespace
+
+const qb::Struct* findProfileGh4(const Globals& g, uint32_t id) {
+    if (!id) return nullptr;
+    for (const char* arr : {"Preset_Musician_Profiles_Locked", "Preset_Musician_Profiles_Modifiable"})
+        if (const qb::Array* a = globalArray(g, K(arr)))
+            for (const qb::Value& e : a->values)
+                if (e.type == qb::Type::Struct && e.st && keyOf(e.st->find(K("name"))) == id) return e.st.get();
+    return nullptr;
+}
+
+bool memberGh4(const Globals& g, const qb::Struct& profile, uint32_t object, uint32_t part, uint32_t songKey, Member& m) {
+    const qb::Struct* app = structOf(profile.find(K("appearance")));
+    if (!app) return false;
+    m = Member{};
+    m.gh4 = true;
+    m.object = object;
+    m.part = part;
+    m.profile = &profile;
+    const uint32_t nameKey = keyOf(profile.find(K("name")));
+    m.profileName = qbkey::names().get(nameKey);
+    m.role = part == K("bass") ? Role::Bassist : part == K("drum") ? Role::Drummer : part == K("vocals") ? Role::Vocalist : Role::Guitarist;
+    if (object == K("bassist")) m.role = Role::Bassist;
+    if (object == K("drummer")) m.role = Role::Drummer;
+    if (object == K("vocalist")) m.role = Role::Vocalist;
+    // The body: CAS_Full_Body (the talent: one mesh with its skeleton), else
+    // every body part with a mesh [C data car_rocker_full_body.qb, scripts
+    // get_body_key_from_appearance].
+    const qb::Struct* body = nullptr;
+    if (const qb::Struct* fb = structOf(app->find(K("CAS_Full_Body")))) body = casDesc(g, K("CAS_Full_Body"), keyOf(fb->find(K("desc_id"))));
+    bool female = false;
+    std::string skeleton;
+    if (body) {
+        m.meshes.push_back(meshOf(g, *body));
+        skeleton = qbkey::names().get(keyOf(body->find(K("skeleton"))));
+        female = intOf(body->find(K("is_female")), 0) == 1;
+    } else {
+        if (const qb::Struct* ph = structOf(app->find(K("cas_physique")))) female = keyOf(ph->find(K("desc_id"))) == K("FemalePhysique");
+        skeleton = female ? "GH_Rocker_Female" : "GH_Rocker_Male";
+        for (const qb::Item& it : app->items) {
+            if (!it.name || isInstrumentPart(it.name) || it.value.type != qb::Type::Struct || !it.value.st) continue;
+            if (const qb::Struct* d = casDesc(g, it.name, keyOf(it.value.st->find(K("desc_id")))))
+                if (std::string mesh = meshOf(g, *d); !mesh.empty()) m.meshes.push_back(mesh);
+        }
+    }
+    if (m.meshes.empty() || m.meshes.front().empty()) return false;
+    // The skeleton: the body's, as the global pak keeps it (`<name>_original`;
+    // a drummer's `<name>_Drummer`) [C data ZONES/global.pak; I: the accessory
+    // bones merged on top at run time are not added].
+    m.skeleton = 0;
+    if (m.role == Role::Drummer) m.skeleton = qbkey::key(skeleton + "_Drummer");
+    m.body = qbkey::key(skeleton + "_original");
+    if (!m.skeleton) m.skeleton = m.body;
+    // The instrument: the appearance's parts for the part, song_specific_instrument_data.<song>.<name> over them [C data].
+    std::unordered_map<uint32_t, const qb::Struct*> parts;
+    for (const qb::Item& it : app->items)
+        if (it.name && it.value.type == qb::Type::Struct && it.value.st) parts[it.name] = it.value.st.get();
+    const qb::Struct* songSt = songKey ? songStruct(g, songKey) : nullptr;
+    if (const qb::Struct* ssid = globalStruct(g, K("song_specific_instrument_data")))
+        if (const qb::Struct* forSong = structOf(g.field(*ssid, songKey)))
+            if (const qb::Struct* forMe = structOf(g.field(*forSong, nameKey)))
+                for (const qb::Item& it : g.expand(*forMe))
+                    if (it.name && it.value.type == qb::Type::Struct && it.value.st) parts[it.name] = it.value.st.get();
+    for (const char* n : instrumentParts(part)) {
+        auto it = parts.find(K(n));
+        if (it == parts.end()) continue;
+        if (const qb::Struct* d = casDesc(g, K(n), keyOf(it->second->find(K("desc_id")))))
+            if (std::string mesh = meshOf(g, *d); !mesh.empty()) m.meshes.push_back(mesh);
+    }
+    // The anims: the body's anim_struct, the song's version of it
+    // (<struct>_<song name>, its _alt when the song uses alt anim structs)
+    // and its member for the part (bass / rhythm drop to guitar) [C script
+    // get_anim_struct_member].
+    const uint32_t animStruct = body ? keyOf(body->find(K("anim_struct"))) : K(female ? "car_female_anim_struct" : "car_male_anim_struct");
+    const std::string asName = qbkey::names().get(animStruct);
+    const uint32_t member = part ? part : K("frontend");
+    auto pick = [&](const qb::Struct* st) -> const qb::Struct* {
+        if (!st) return nullptr;
+        if (const qb::Struct* x = structOf(st->find(member))) return x;
+        if (member == K("bass") || member == K("rhythm")) return structOf(st->find(K("guitar")));
+        return nullptr;
+    };
+    if (songSt && part) {
+        const std::string songName = strOf(songSt->find(K("name")));
+        uint32_t k = qbkey::key(asName + "_" + songName);
+        if (intOf(songSt->find(K("use_alt_anim_structs")), 0) == 1 && globalStruct(g, qbkey::key(asName + "_" + songName + "_alt")))
+            k = qbkey::key(asName + "_" + songName + "_alt");
+        m.animPart = pick(globalStruct(g, k));
+        if (const std::string mocap = strOf(songSt->find(K("mocap_anim_pak"))); !mocap.empty()) m.animPaks.push_back(pakPath(mocap));
+    }
+    if (!m.animPart) m.animPart = pick(globalStruct(g, animStruct));
+    if (m.animPart)
+        if (const uint32_t pk = keyOf(m.animPart->find(K("pak")))) m.animPaks.push_back(pakOfName(nullptr, qbkey::names().get(pk)));
+    return true;
+}
+
+std::vector<Member> chooseBandGh4(const Globals& g, uint32_t songKey) {
+    std::vector<Member> out;
+    if (!globalArray(g, K("Preset_Musician_Profiles_Locked"))) return out;
+    if (const qb::Value* d = g.find(K("disable_band")); intOf(d, 0) == 1) return out;
+    // band_builder_get_band_global / get_band_name: the song's band (cheats
+    // not read), else default_band (random characters: none drawn) [C scripts].
+    const qb::Struct* songSt = songStruct(g, songKey);
+    const qb::Struct* band = nullptr;
+    if (songSt)
+        if (const uint32_t b = keyOf(songSt->find(K("band")))) band = globalStruct(g, b);
+    if (!band) band = globalStruct(g, K("default_band"));
+    if (!band) return out;
+    // band_builder_add_players: player 1's character on its part (guitar
+    // unless drums / vocals); band_builder_add_cpu_characters: the drummer,
+    // the vocalist (James sings with a rhythm guitar, Lemmy with a bass), the
+    // bassist, the guitarist [C scripts].
+    const qb::Struct* p1 = globalStruct(g, K("player1_status"));
+    uint32_t p1Part = p1 ? keyOf(p1->find(K("part"))) : K("guitar");
+    if (p1Part != K("drum") && p1Part != K("vocals") && p1Part != K("bass")) p1Part = K("guitar");
+    uint32_t p1Char = p1 ? keyOf(p1->find(K("character_id"))) : 0;
+    auto bandOf = [&](const char* role) { return keyOf(band->find(K(role))); };
+    struct Want {
+        uint32_t object, part, id;
+    };
+    std::vector<Want> want;
+    const uint32_t partRole = p1Part == K("guitar") ? K("guitarist") : p1Part == K("bass") ? K("bassist") : p1Part == K("drum") ? K("drummer")
+                                                                                                                               : K("vocalist");
+    if (!findProfileGh4(g, p1Char)) p1Char = bandOf(p1Part == K("guitar") ? "guitarist" : p1Part == K("bass") ? "bassist"
+                                                       : p1Part == K("drum")                    ? "drummer"
+                                                                                                : "vocalist");
+    want.push_back({partRole, p1Part, p1Char});
+    auto has = [&](uint32_t object) {
+        for (const Want& w : want)
+            if (w.object == object) return true;
+        return false;
+    };
+    if (!has(K("drummer"))) want.push_back({K("drummer"), K("drum"), bandOf("drummer")});
+    if (!has(K("vocalist"))) {
+        const uint32_t v = bandOf("vocalist");
+        uint32_t real = K("vocals");
+        if (v == K("James") || v == K("James_ALT") || v == K("James_ZomB")) real = K("rhythm");
+        else if (v == K("lemmy")) real = K("bass");
+        want.push_back({K("vocalist"), real, v});
+    }
+    if (!has(K("bassist"))) want.push_back({K("bassist"), K("bass"), bandOf("bassist")});
+    if (!has(K("guitarist"))) want.push_back({K("guitarist"), K("guitar"), bandOf("guitarist")});
+    // RandomCharacter: band_builder_new_random_character makes a random CAS
+    // appearance (cas_set_random_appearance, by genre); the port takes a
+    // Preset_Musician_Profiles_Modifiable rocker allowed on the part (not a
+    // Metallica member), picked by the song and the part, each once
+    // [C script; I: the presets stand in for the randomizer, GD10-020].
+    std::vector<uint32_t> used;
+    auto randomFor = [&](uint32_t part) -> const qb::Struct* {
+        const qb::Array* a = globalArray(g, K("Preset_Musician_Profiles_Modifiable"));
+        if (!a) return nullptr;
+        std::vector<const qb::Struct*> c;
+        for (const qb::Value& e : a->values) {
+            const qb::Struct* p = structOf(&e);
+            if (!p) continue;
+            const uint32_t n = keyOf(p->find(K("name")));
+            const std::string nm = lower(qbkey::names().get(n));
+            if (nm.rfind("james", 0) == 0 || nm.rfind("rob", 0) == 0 || nm.rfind("kirk", 0) == 0 || nm.rfind("larsulrich", 0) == 0) continue;
+            if (std::find(used.begin(), used.end(), n) != used.end()) continue;
+            bool ok = false;
+            if (const qb::Value* ap = p->find(K("allowed_parts")); ap && ap->type == qb::Type::Array && ap->arr)
+                for (const qb::Value& x : ap->arr->values) ok = ok || x.key == (part == K("rhythm") ? K("guitar") : part);
+            const qb::Struct* app = structOf(p->find(K("appearance")));
+            if (ok && app && !app->items.empty()) c.push_back(p);
+        }
+        if (c.empty()) return nullptr;
+        uint32_t h = songKey ^ (part * 2654435761u);
+        h ^= h >> 15, h *= 2246822519u, h ^= h >> 13;
+        return c[h % c.size()];
+    };
+    for (const Want& w : want) {
+        const qb::Struct* prof = findProfileGh4(g, w.id);
+        if (!prof && w.id == K("RandomCharacter")) prof = randomFor(w.part);
+        if (!prof) continue;
+        used.push_back(keyOf(prof->find(K("name"))));
+        Member m;
+        if (memberGh4(g, *prof, w.object, w.part, songKey, m)) out.push_back(std::move(m));
+    }
     return out;
 }
 
@@ -308,9 +547,16 @@ void Library::load(const Disc& disc) {
     for (const PakEntry& e : global.entries()) {
         if (e.type != K(".ske")) continue;
         auto [p, size] = global.data(e);
-        skeletons_.emplace(e.name, anim::parseSkeleton(p, size));
+        try {
+            skeletons_.emplace(e.name, anim::parseSkeleton(p, size));
+        } catch (const std::exception& ex) {
+            SDL_Log("band: skeleton %s: %s", qbkey::names().get(e.name).c_str(), ex.what());
+        }
     }
-    perm_ = readClips(*Pak::shared(disc, "DATA/COMPRESSED/PAK/perm_anims.pak.xen"));
+    // gh4: perm_anims_in_game.pak (the hands' strums, frets and chords) [C data].
+    const char* perm = "DATA/COMPRESSED/PAK/perm_anims.pak.xen";
+    if (!disc.exists(perm)) perm = "DATA/COMPRESSED/PAK/perm_anims_in_game.pak.xen";
+    if (disc.exists(perm)) perm_ = readClips(*Pak::shared(disc, perm));
 }
 
 std::shared_ptr<Library> Library::shared(const Disc& disc) {
@@ -342,6 +588,163 @@ const ClipMap& Library::songClips(const Disc& disc, const std::string& song) {
 }
 
 namespace {
+
+// The CAS archive paks (cas_archive_paks: DATA/PAK/CAS/<name>.pak.xen, not
+// compressed): their entry tables, read once (a few KB each), so that a
+// part's .skin and its parent .tex are read alone (the paks hold 375 MB)
+// [C data cas_paks.qb; I: the engine's lookup is by name across them].
+struct CasEntry {
+    std::string pak;
+    uint64_t at = 0;  // file offset of the data
+    uint32_t size = 0, type = 0, parent = 0;
+};
+class CasArchive {
+public:
+    static CasArchive& shared(const Disc& disc) {
+        static std::mutex m;
+        static std::map<const Disc*, std::unique_ptr<CasArchive>> all;
+        std::lock_guard<std::mutex> lock(m);
+        auto& a = all[&disc];
+        if (!a) {
+            a = std::make_unique<CasArchive>();
+            a->index(disc);
+        }
+        return *a;
+    }
+    // The .skin (by its short name: the mesh path's base name) or the .tex (by full name key).
+    const CasEntry* skin(const std::string& meshPath) const {
+        std::string base = lower(meshPath);
+        if (const size_t sl = base.find_last_of("\\/"); sl != std::string::npos) base = base.substr(sl + 1);
+        if (const size_t dot = base.find('.'); dot != std::string::npos) base = base.substr(0, dot);
+        auto it = skins_.find(qbkey::key(base));
+        return it == skins_.end() ? nullptr : &it->second;
+    }
+    const CasEntry* byFull(uint32_t full) const {
+        auto it = full_.find(full);
+        return it == full_.end() ? nullptr : &it->second;
+    }
+    // Every .tex of the archive by full name (the guitar finishes).
+    const std::unordered_map<uint32_t, CasEntry>& all() const { return full_; }
+    static Bytes read(const Disc& disc, const CasEntry& e) {
+        Bytes b(e.size);
+        disc.readRange(e.pak, e.at, b.data(), b.size());
+        if (b.size() >= 16 && std::memcmp(b.data(), "GZ\0\0", 4) == 0) {
+            const uint32_t want = uint32_t(b[4]) << 24 | uint32_t(b[5]) << 16 | uint32_t(b[6]) << 8 | b[7];
+            Bytes out = inflateRaw(b.data() + 16, b.size() - 16);
+            if (out.size() != want) throw std::runtime_error(e.pak + ": GZ entry inflates to the wrong size");
+            return out;
+        }
+        return b;
+    }
+
+private:
+    void index(const Disc& disc) {
+        const qb::Value* dummy = nullptr;
+        (void)dummy;
+        static const char* const paks[] = {"cas_full_parts", "cas_globalpak", "cas_female_bodypak", "cas_male_bodypak", "cas_female_accpak", "cas_male_accpak",
+                                           "cas_female_torsopak", "cas_male_torsopak", "cas_female_legspak", "cas_male_legspak",
+                                           "cas_female_shoespak", "cas_male_shoespak", "cas_guitarpak", "cas_guitarpak_finishes_0",
+                                           "cas_guitarpak_finishes_1", "cas_guitarpak_finishes_2", "cas_guitarpak_nh", "cas_basspak",
+                                           "cas_basspak_finishes_0", "cas_basspak_finishes_1", "cas_basspak_finishes_2", "cas_basspak_nh",
+                                           "cas_drumspak", "cas_vocalspak", "cas_preset_texswaps", "cas_acc_bones", "cas_deform"};
+        for (const char* name : paks) {
+            const std::string path = std::string("DATA/PAK/CAS/") + name + ".pak.xen";
+            if (!disc.exists(path)) continue;
+            const uint64_t fileSize = disc.size(path).value_or(0);
+            Bytes head;
+            uint64_t pos = 0;
+            bool ended = false;
+            while (!ended && pos + 32 <= fileSize) {
+                if (pos + 32 > head.size()) {
+                    const size_t chunk = size_t(std::min<uint64_t>(4096, fileSize - head.size()));
+                    const size_t old = head.size();
+                    head.resize(old + chunk);
+                    disc.readRange(path, old, head.data() + old, chunk);
+                    continue;
+                }
+                auto u = [&](size_t o) {
+                    return uint32_t(head[o]) << 24 | uint32_t(head[o + 1]) << 16 | uint32_t(head[o + 2]) << 8 | head[o + 3];
+                };
+                const size_t o = size_t(pos);
+                const uint32_t type = u(o);
+                if (type == K(".last") || type == K("last")) break;
+                CasEntry e;
+                e.pak = path;
+                e.at = pos + u(o + 4);
+                e.size = u(o + 8);
+                e.type = type;
+                e.parent = u(o + 24);
+                const uint32_t full = u(o + 16), shortName = u(o + 20);
+                if (e.at + e.size <= fileSize) {
+                    full_.emplace(full, e);
+                    if (type == K(".skin")) skins_.emplace(shortName, e);
+                }
+                pos += 32;
+            }
+        }
+    }
+    std::unordered_map<uint32_t, CasEntry> skins_, full_;
+};
+
+std::unique_ptr<Model> loadModelGh4(const Disc& disc, Library& lib, const Member& m, std::string& error) {
+    auto model = std::make_unique<Model>();
+    model->member = m;
+    model->skeleton = lib.skeleton(m.skeleton);
+    if (!model->skeleton) model->skeleton = lib.skeleton(m.body);
+    if (!model->skeleton) model->skeleton = lib.skeleton(K("GH_Rocker_Male_original"));
+    const std::string who = m.profileName.empty() ? std::string(roleName(m.role)) : m.profileName;
+    if (!model->skeleton) {
+        error = who + ": no skeleton " + qbkey::names().get(m.body);
+        return nullptr;
+    }
+    const CasArchive& cas = CasArchive::shared(disc);
+    std::vector<uint32_t> texDone;
+    for (const std::string& mesh : m.meshes) {
+        const CasEntry* e = cas.skin(mesh);
+        if (!e) {
+            if (mesh == m.meshes.front()) {
+                error = who + ": " + mesh + " is not in the CAS paks";
+                return nullptr;
+            }
+            SDL_Log("band: %s: %s is not in the CAS paks", who.c_str(), mesh.c_str());
+            continue;
+        }
+        try {
+            const Bytes b = CasArchive::read(disc, *e);
+            Part part;
+            part.pak = e->pak;
+            part.scene = scene::parse(b.data(), b.size(), scene::Kind::Skin);
+            model->parts.push_back(std::move(part));
+            if (e->parent && std::find(texDone.begin(), texDone.end(), e->parent) == texDone.end())
+                if (const CasEntry* t = cas.byFull(e->parent)) {
+                    texDone.push_back(e->parent);
+                    const Bytes tb = CasArchive::read(disc, *t);
+                    for (gh3tex::Texture& tx : gh3tex::decodeTexDict(tb.data(), tb.size()))
+                        if (tx.supported && !tx.levels.empty()) model->textures.emplace(tx.key, std::move(tx));
+                }
+        } catch (const std::exception& ex) {
+            if (mesh == m.meshes.front()) {
+                error = who + ": " + mesh + ": " + ex.what();
+                return nullptr;
+            }
+            SDL_Log("band: %s: %s: %s", who.c_str(), mesh.c_str(), ex.what());
+        }
+    }
+    for (const std::string& path : m.animPaks) {
+        if (!disc.exists(path)) {
+            SDL_Log("band: %s: %s is not on the disc", who.c_str(), path.c_str());
+            continue;
+        }
+        try {
+            for (auto& [k, c] : readClips(*Pak::shared(disc, path))) model->clips.emplace(k, c);
+        } catch (const std::exception& ex) {
+            SDL_Log("band: %s: %s: %s", who.c_str(), path.c_str(), ex.what());
+        }
+    }
+    for (const auto& [k, c] : lib.permClips()) model->clips.emplace(k, c);
+    return model;
+}
+
 std::unique_ptr<Model> loadModelUncached(const Disc& disc, const Globals& g, Library& lib, const Member& m, const std::string& song,
                                          std::string& error);
 }
@@ -356,12 +759,13 @@ struct Cached {
     int outfit, style;
     std::string song;
     std::shared_ptr<const Model> model;
+    std::vector<std::string> meshes, animPaks;  // gh4
 };
 std::mutex cacheMutex;
 std::list<Cached> modelCache;
 bool sameModel(const Cached& c, const Disc& disc, const Member& m, const std::string& song) {
     return c.disc == &disc && c.body == m.body && c.instrument == m.instrument && c.skeleton == m.skeleton && c.outfit == m.outfit &&
-           c.style == m.style && c.song == song;
+           c.style == m.style && c.song == song && c.meshes == m.meshes && c.animPaks == m.animPaks;
 }
 }  // namespace
 
@@ -386,7 +790,8 @@ std::unique_ptr<Model> loadModel(const Disc& disc, const Globals& g, Library& li
     std::lock_guard<std::mutex> lock(cacheMutex);
     for (const Cached& c : modelCache)
         if (sameModel(c, disc, m, song)) return model;  // another thread loaded it meanwhile
-    modelCache.push_front(Cached{&disc, m.body, m.instrument, m.skeleton, m.outfit, m.style, song, std::make_shared<const Model>(*model)});
+    modelCache.push_front(Cached{&disc, m.body, m.instrument, m.skeleton, m.outfit, m.style, song, std::make_shared<const Model>(*model), m.meshes,
+                                 m.animPaks});
     if (modelCache.size() > 8) modelCache.pop_back();
     return model;
 }
@@ -394,6 +799,8 @@ std::unique_ptr<Model> loadModel(const Disc& disc, const Globals& g, Library& li
 namespace {
 std::unique_ptr<Model> loadModelUncached(const Disc& disc, const Globals& g, Library& lib, const Member& m, const std::string& song,
                                          std::string& error) {
+    if (m.gh4) return loadModelGh4(disc, lib, m, error);
+    (void)g;
     auto model = std::make_unique<Model>();
     model->member = m;
     model->skeleton = lib.skeleton(m.skeleton);

@@ -37,6 +37,9 @@ public:
     bool startWith(const Disc& disc, const Globals& g, const venue::Venue* v, const Chart& chart, const std::vector<band::Member>& members,
                    const venue::PerfTimeline* perf, double startMs, std::string& error);
     bool attach(gfx::RenderDevice& device, std::string& error);
+    // attach a member at a time (the venue's attach steps, one a frame:
+    // docs/render.md "Loading without a stutter"): 1 done, 0 more, -1 failed.
+    int attachStep(gfx::RenderDevice& device, std::string& error);
     void advance(double ms);
     // The player's note judged at `ms` (a 60 Hz step): the player's band member's missed-note strum.
     void playerNote(double ms, bool hit);
@@ -120,6 +123,7 @@ public:
                     const venue::LightShow& show);
 
 private:
+    size_t attached_ = 0;  // members attachStep uploaded
     std::shared_ptr<band::Library> lib_;  // band::Library::shared
     std::shared_ptr<const Pak> globalPak_;  // the ragdolls' .rag files
     std::shared_ptr<const matlib::Library> shaderLib_;

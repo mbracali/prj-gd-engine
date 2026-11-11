@@ -41,6 +41,8 @@ public:
                const band::Library* shared, double startMs, std::string& error);
     // Uploads the peds and makes their render targets.
     bool attach(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Library> lib, std::string& error);
+    // attach a ped at a time (one a frame): 1 done, 0 more, -1 failed.
+    int attachStep(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Library> lib, std::string& error);
     void shutdown();
     // Processes the peds' animation events up to song time `ms`.
     void advance(double ms);
@@ -59,6 +61,8 @@ public:
     bool lightersOn(double t) const;
 
 private:
+    size_t attached_ = 0;
+    bool attachBegun_ = false;
     struct Ped {
         uint32_t name = 0, card = 0;
         std::unique_ptr<band::Model> model;

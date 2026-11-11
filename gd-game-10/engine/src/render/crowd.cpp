@@ -157,12 +157,25 @@ bool Crowd::start(const Disc& disc, const Globals& g, const venue::Venue& v, con
 }
 
 bool Crowd::attach(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Library> lib, std::string& error) {
-    dev_ = &dev;
-    view_.setLibrary(std::move(lib));
-    view_.setView(float(width_) / float(height_), true, true);
-    for (Ped& p : peds_) {
+    int r;
+    while ((r = attachStep(dev, lib, error)) == 0) {
+    }
+    return r > 0;
+}
+
+int Crowd::attachStep(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Library> lib, std::string& error) {
+    if (!attachBegun_) {
+        dev_ = &dev;
+        view_.setLibrary(std::move(lib));
+        view_.setView(float(width_) / float(height_), true, true);
+        attachBegun_ = true;
+        attached_ = 0;
+    }
+    if (attached_ >= peds_.size()) return 1;
+    {
+        Ped& p = peds_[attached_++];
         p.view = view_.add(dev, *p.model, error);
-        if (p.view < 0) return false;
+        if (p.view < 0) return -1;
         if (p.lighterModel) {
             std::string lerr;
             p.lighterView = view_.add(dev, *p.lighterModel, lerr);
@@ -171,9 +184,9 @@ bool Crowd::attach(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Library
         td.width = width_, td.height = height_;
         td.depth = true;
         p.target = dev.createTarget(td, error);
-        if (!p.target) return false;
+        if (!p.target) return -1;
     }
-    return true;
+    return attached_ >= peds_.size() ? 1 : 0;
 }
 
 void Crowd::shutdown() {
@@ -182,6 +195,7 @@ void Crowd::shutdown() {
             if (p.target) dev_->destroyTarget(p.target), p.target = {};
     view_.shutdown();
     dev_ = nullptr;
+    attachBegun_ = false, attached_ = 0;
 }
 
 // One pass of crowd_play_adjusting_random_anims: anim_set.idle.<skill>.<speed>,

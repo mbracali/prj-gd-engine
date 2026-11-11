@@ -151,17 +151,30 @@ std::unique_ptr<AccessorySim> Band::accessorySim(const Disc& disc, const Globals
 }
 
 bool Band::attach(gfx::RenderDevice& device, std::string& error) {
-    if (view_) return true;
-    view_ = std::make_unique<BandView>();
-    view_->setLibrary(shaderLib_);
-    for (Entry& e : members_) {
+    int r;
+    while ((r = attachStep(device, error)) == 0) {
+    }
+    return r > 0;
+}
+
+int Band::attachStep(gfx::RenderDevice& device, std::string& error) {
+    if (view_ && attached_ >= members_.size()) return 1;
+    if (!view_) {
+        view_ = std::make_unique<BandView>();
+        view_->setLibrary(shaderLib_);
+        attached_ = 0;
+    }
+    if (attached_ < members_.size()) {
+        Entry& e = members_[attached_];
         e.view = view_->add(device, *e.model, error);
         if (e.view < 0) {
             view_.reset();
-            return false;
+            attached_ = 0;
+            return -1;
         }
+        ++attached_;
     }
-    return true;
+    return attached_ >= members_.size() ? 1 : 0;
 }
 
 void Band::advance(double ms) {
@@ -211,7 +224,7 @@ void Band::drawShadow(double ms, const gh3shader::Globals& light, const venue::V
     evaluate(ms);
     std::vector<BandView::Instance> inst;
     for (const Entry& e : members_) {
-        if (!e.placed || e.hidden) continue;
+        if (!e.placed || e.hidden || e.view < 0) continue;
         BandView::Instance i;
         i.member = e.view;
         i.skin = &e.skin;
@@ -234,7 +247,7 @@ void Band::draw(double ms, const venue::CamPose& cam, const venue::Venue& v, con
     view_->setReuseSkinning(skinnedAt_ == ms);
     std::vector<BandView::Instance> inst;
     for (const Entry& e : members_) {
-        if (!e.placed || e.hidden) continue;
+        if (!e.placed || e.hidden || e.view < 0) continue;
         BandView::Instance i;
         i.member = e.view;
         i.skin = &e.skin;

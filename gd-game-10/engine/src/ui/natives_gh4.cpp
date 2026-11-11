@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -218,6 +220,66 @@ void addGh4Natives(qs::Vm& vm) {
     // boot's "optimal drumming" tip, boot_download_scan) [C script]; the port
     // reads no such kit as one [I].
     vm.addNative("isRBDrum", [](Vm&, ScriptRun&, qb::Struct&) { return false; });
+    // CAS build queue (cas_build_queue.qb, GD10-020): GetLogicFrame ->
+    // logicframe (the 60 Hz game frame; cas_queue_update waits
+    // cas_queue_min_frames_between_jobs between jobs: without it the wait
+    // never ended, cas_queue_current_job stayed set and the CAS screens'
+    // cas_queue_block / block_menu_input waited for ever) [C scripts; I: the
+    // frame counter's base].
+    vm.addNative("GetLogicFrame", [setLocal](Vm& v, ScriptRun& run, qb::Struct&) {
+        setLocal(run, K("logicframe"), Vm::makeInt(int32_t(v.clockMs() * 60.0 / 1000.0)));
+        return true;
+    });
+    // GenerateChecksumFromStruct {structname | struct} -> structure_checksum:
+    // a checksum of the struct's contents (the queue compares appearances by
+    // it) [C scripts; I: the port's own hash, compared only with itself].
+    vm.addNative("GenerateChecksumFromStruct", [setLocal](Vm& v, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* sv = Vm::param(p, K("structname"));
+        if (!sv) sv = Vm::param(p, K("struct"));
+        if (sv && (sv->type == qb::Type::Key || sv->type == qb::Type::KeyPtr)) sv = v.globals().find(sv->key);
+        uint32_t h = 2166136261u;
+        auto mix = [&h](uint32_t x) {
+            for (int i = 0; i < 4; ++i) h = (h ^ ((x >> (8 * i)) & 0xFF)) * 16777619u;
+        };
+        std::function<void(const qb::Value&, int)> hv = [&](const qb::Value& x, int depth) {
+            mix(uint32_t(x.type));
+            if (depth > 16) return;
+            switch (x.type) {
+            case qb::Type::Int: mix(uint32_t(x.i)); break;
+            case qb::Type::Float:
+            case qb::Type::Vector:
+            case qb::Type::Pair:
+                for (float f : x.f) {
+                    uint32_t u;
+                    std::memcpy(&u, &f, 4);
+                    mix(u);
+                }
+                break;
+            case qb::Type::String:
+            case qb::Type::WString:
+                for (char c : x.str) mix(uint8_t(c));
+                break;
+            case qb::Type::Struct:
+                if (x.st)
+                    for (const qb::Item& it : x.st->items) mix(it.name), hv(it.value, depth + 1);
+                break;
+            case qb::Type::Array:
+                if (x.arr)
+                    for (const qb::Value& e : x.arr->values) hv(e, depth + 1);
+                break;
+            default: mix(x.key); break;
+            }
+        };
+        if (sv) hv(*sv, 0);
+        setLocal(run, K("structure_checksum"), Vm::makeKey(h));
+        return true;
+    });
+    // CasCancelLoading / CASBlockForLoading / CasBlockForComposite: the
+    // port's character loads are not cancelled midway nor waited on here
+    // (the band view loads on its own) [C scripts; I].
+    vm.addNative("CasCancelLoading", [](Vm&, ScriptRun&, qb::Struct&) { return true; });
+    vm.addNative("CASBlockForLoading", [](Vm&, ScriptRun&, qb::Struct&) { return true; });
+    vm.addNative("CasBlockForComposite", [](Vm&, ScriptRun&, qb::Struct&) { return true; });
     // obj_getid: the element (object) the script runs on, as objid [C scripts].
     vm.addNative("obj_getid", [setLocal](Vm&, ScriptRun& run, qb::Struct&) {
         if (!run.object) return false;

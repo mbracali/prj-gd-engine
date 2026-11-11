@@ -152,7 +152,7 @@ float weightAt(const Play& p, double t) {
 }
 
 float clipTime(const Play& p, double t) {
-    return float(std::clamp((t - p.start) / 1000.0, 0.0, double(p.clip ? p.clip->duration : 0.0f)));
+    return float(std::clamp((t - p.start) / 1000.0 + double(p.offset), 0.0, double(p.clip ? p.clip->duration : 0.0f)));
 }
 
 // A degenerateblend node over `pose`: each clip's pose (over the bind pose for
@@ -292,8 +292,8 @@ void Rig::init(const anim::Skeleton& s) {
     }
 }
 
-void Node::play(const anim::Clip* c, double t, float blend) {
-    plays.push_back({c, t, blend});
+void Node::play(const anim::Clip* c, double t, float blend, float offset) {
+    plays.push_back({c, t, blend, offset});
     // Drop what a fully blended-in clip hides.
     for (size_t i = plays.size() - 1; i > 0; --i)
         if (plays[i].start + double(plays[i].blend) * 1000.0 <= t) {
@@ -342,8 +342,11 @@ const anim::Clip* Animator::clip(uint32_t key) {
     return c;
 }
 
+const qb::Struct* Animator::animProfile() const { return model_->member.gh4 ? model_->member.animPart : model_->member.profile; }
+
 const qb::Value* Animator::animSet() const {
-    const qb::Value* v = model_->member.profile ? model_->member.profile->find(K("anim_set")) : nullptr;
+    const qb::Struct* prof = animProfile();
+    const qb::Value* v = prof ? prof->find(K("anim_set")) : nullptr;
     const uint32_t k = keyOf(v);
     return k ? g_->find(k) : nullptr;
 }
@@ -368,7 +371,7 @@ bool Animator::init(const Setup& s, std::string& error) {
     armBlendOutDelay_ = numOf(g, "drummer_arm_blend_out_delay", 0.25f), twistRate_ = numOf(g, "drummer_twist_rate", 0.05f);
     const double strumLead = qbInt(g, K("strum_anim_lead_time"), 250), drumLead = qbInt(g, K("drum_anim_lead_time"), 150);
 
-    const qb::Struct* prof = model_->member.profile;
+    const qb::Struct* prof = animProfile();
     stance_ = nextStance_ = prof ? keyOf(prof->find(K("stance"))) : K("stance_a");
     if (!stance_) stance_ = nextStance_ = K("stance_a");
     if (s.stance) stance_ = nextStance_ = s.stance;
@@ -463,6 +466,30 @@ bool Animator::init(const Setup& s, std::string& error) {
             }
         }
     }
+    // gh4: Band_PlayClip {clip startframe}: the clip struct's anims.<member>
+    // from that frame, its arms.<member> (the song's mocap: <song>_S_01 for
+    // the singer and the bassist, _D_ the drummer, _G_ the guitarist) [C data
+    // <song>_performance, <song>_song_scripts.qb; I: the playback rules].
+    mocaps_.clear();
+    if (model_->member.gh4)
+        for (const qb::Struct* p : s.performance) {
+            const qb::Value* tv = p->find(K("time"));
+            const qb::Struct* params = structOf(p->find(K("params")));
+            if (!tv || !params || keyOf(p->find(K("scr"))) != K("band_playclip")) continue;
+            const qb::Struct* cs = structOf(g.find(keyOf(params->find(K("clip")))));
+            const qb::Struct* anims = cs ? structOf(cs->find(K("anims"))) : nullptr;
+            const uint32_t key = anims ? keyOf(anims->find(model_->member.object)) : 0;
+            if (!key || key == K("none")) continue;
+            Mocap mc;
+            mc.key = key;
+            mc.clip = clip(key);
+            if (!mc.clip) continue;
+            const qb::Value* sf = params->find(K("startframe"));
+            mc.startFrame = sf ? float(sf->number()) : 0.0f;
+            if (const qb::Struct* arms = structOf(cs->find(K("arms")))) mc.arms = structOf(arms->find(model_->member.object));
+            mocaps_.push_back(mc);
+            add(tv->number(), Ev::Mocap, int(mocaps_.size() - 1), 0, p);
+        }
     for (const qb::Struct* p : s.performance) {
         const qb::Value* tv = p->find(K("time"));
         const qb::Struct* params = structOf(p->find(K("params")));
@@ -479,7 +506,7 @@ bool Animator::init(const Setup& s, std::string& error) {
     const double t0 = s.startMs;
     now_ = t0;
     if (guitarLike()) {
-        const uint32_t strumSet = extendKey(role_ == band::Role::Bassist ? K("normal") : strumStyle_, "_Strums");
+        const uint32_t strumSet = extendKey(role_ == band::Role::Bassist && !model_->member.gh4 ? K("normal") : strumStyle_, "_Strums");
         if (const qb::Struct* ss = structOf(g.find(strumSet))) rightArm_.play(clip(keyOf(ss->find(K("no_strum_anim")))), t0, 0.2f);
         if (fretAnims_) leftArm_.play(clip(keyOf(fretAnims_->find(K(role_ == band::Role::Bassist ? "track_106" : "track_123")))), t0, fretBlend_);
         if (fingerAnims_) leftHand_.play(clip(keyOf(fingerAnims_->find(K("track_none")))), t0, 0.2f);
@@ -881,6 +908,26 @@ void Animator::handle(const Event& e) {
             schedule(t + (c ? double(c->duration) * 1000.0 : 0.0), Ev::FaceDone, 1, 0, faceGen_);
         }
         // Band_WalkToNode: not reproduced (docs/band.md "Gaps").
+        break;
+    }
+    case Ev::Mocap: {
+        // The mocap clip from its start frame (frames at 60 Hz [I]), the
+        // random loops after it; arms.<member>: strum / fret off turn the
+        // procedural arms off (the clip's own) [I].
+        const Mocap& mc = mocaps_[size_t(e.a)];
+        const float offset = std::min(mc.startFrame / anim::Clip::kFps, mc.clip->duration);
+        body_.play(mc.clip, t, 0.3f, offset);
+        bodyKey_ = mc.key;
+        ++bodyGen_;
+        ++stats_.bodyAnims;
+        int arms = 0;
+        if (mc.arms) {
+            const bool strumOff = keyOf(mc.arms->find(K("strum"))) == K("off");
+            const bool fretOff = keyOf(mc.arms->find(K("fret"))) == K("off") && keyOf(mc.arms->find(K("chord"))) == K("off");
+            arms = strumOff && fretOff ? 2 : strumOff ? 1 : 0;
+        }
+        if (guitarLike()) setArms(arms, t, 0.25f);
+        schedule(t + std::max(kFrameMs, double(mc.clip->duration - offset) * 1000.0), Ev::BodyDone, 0, 0, bodyGen_);
         break;
     }
     case Ev::BodyDone:
