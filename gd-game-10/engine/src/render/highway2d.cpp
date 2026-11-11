@@ -504,8 +504,9 @@ void Highway2D::stepBattle(double now, bool shaking) {
 }
 
 bool Highway2D::gemAt(int32_t noteMs, int fret, double now, float& x, float& y, float& scale) const {
+    if (startX_.size() < 5 || endX_.size() < 5 || accum_.empty() || d_.empty()) return false;  // init failed (gh4 tables, M4)
     const float v = depthOf(noteMs, now);
-    if (v < 0 || accum_.empty() || v > accum_.back()) return false;
+    if (v < 0 || v > accum_.back()) return false;
     const int lane = (lefty_ != fx_.leftyGems) ? 4 - fret : fret;
     float dx = 0, dy = 0;
     containerPos(now, dx, dy);

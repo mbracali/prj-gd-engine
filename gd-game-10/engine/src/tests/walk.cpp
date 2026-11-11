@@ -62,6 +62,8 @@ Walk::Walk(const std::string& name) : name_(name) {
         // A song joins the set list (pad_choose), Start plays it (gh4's custom set list) [C scripts].
         steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000});
         steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, "wait", C}, 20000});
+        steps_.push_back({"song", {}, 30000});
+        steps_.push_back({"song_over", {}, 600000});
         steps_.push_back({"uistate_never", {}, 15000});
     } else if (name == "quickplay" || name == "lose") {
         steps_ = boot;

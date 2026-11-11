@@ -121,10 +121,25 @@ void UiStates::handle(uint32_t event, const qb::Struct& data) {
         // event_params {event = menu_back data = {num_states = n}}; I].
         int count = 1;
         if (const qb::Value* n = data.find(K("num_states")); n && n->type == qb::Type::Int && n->i > 0) count = n->i;
-        do {
-            leave(stack_.back(), true);
-            stack_.pop_back();
-        } while (stack_.size() > 1 && (state ? stack_.back().state != state : --count > 0));
+        bool inStack = false;
+        for (const Entry& e : stack_) inStack = inStack || e.state == state;
+        if (state && inStack) {
+            // Back to that state: the ones above it go (none when it is the
+            // top: GuitarEvent_SongWon_Spawned's menu_back to uistate_gameplay) [I].
+            if (stack_.back().state == state) {
+                return;  // already there: nothing changes [I]
+            } else {
+                while (stack_.size() > 1 && stack_.back().state != state) {
+                    leave(stack_.back(), true);
+                    stack_.pop_back();
+                }
+            }
+        } else {
+            do {
+                leave(stack_.back(), true);
+                stack_.pop_back();
+            } while (stack_.size() > 1 && --count > 0);
+        }
         Entry& t = stack_.back();
         qb::Struct d = data;
         d.items.erase(std::remove_if(d.items.begin(), d.items.end(), [](const qb::Item& it) { return it.name == K("num_states") || it.name == K("state"); }),
