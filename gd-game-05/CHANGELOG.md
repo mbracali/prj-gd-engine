@@ -6,6 +6,11 @@ inside the Guitar Dream Universal Launcher's release
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-11-10
+
+### Added
+- Enhanced: a new Accessibility section (before Cheats) with Easy Chords: a chord counts when you press any of its frets (#67). Off by default. (guitar and bass)
+
 ### Fixed
 - Menu colours as on the original: the focused buttons are a deep orange
   again (not pale tan), the sub-menu labels light grey and white, and the

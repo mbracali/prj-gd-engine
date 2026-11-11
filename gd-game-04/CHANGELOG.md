@@ -5,7 +5,14 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [1.1.6] - 2026-11-10
+
+### Added
+- Enhanced: a new Accessibility section (before Cheats) with Easy Chords: a chord counts when you press any of its frets (#67). Off by default.
+
 ### Fixed
+- Career: the encore after a tier's songs, the boss after its tier and the tier's completion now happen as in the original (#84).
+- Keyboard: Require Strum: Off lets the frets strum, and the Whammy key works with a gamepad or guitar plugged in (#70).
 - Enhanced > Audio / Video Calibration with a large audio delay (wireless headphones, a TV soundbar): the highway now moves with the timing, as in gd01, so the notes reach the line when you hear them and register when played then (#69). With no calibration nothing changes.
 
 ## [1.1.5] - 2026-11-09
