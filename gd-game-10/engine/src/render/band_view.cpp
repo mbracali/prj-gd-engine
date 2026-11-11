@@ -188,11 +188,12 @@ bool BandView::prepare(gfx::RenderDevice& dev, const band::Model& model, std::un
         for (const band::Part& part : model.parts)
             for (const scene::Material& mat : part.scene.materials) {
                 if (gh3_.has(mat.shader) && gh3_.has(mat.shader, matlib::DynamicShadowReceiver)) continue;
-                gh3_.get(mat.shader);
-                gh3_.get(mat.shader, matlib::DynamicShadowReceiver);
-                if (spent()) return false;
+                // Asked ahead and settled a slice a frame (no-stutter rule):
+                // compiled here at once they took 0.75 s for a CAS band.
+                gh3_.request(mat.shader);
+                gh3_.request(mat.shader, matlib::DynamicShadowReceiver);
             }
-    return true;
+    return !gh3_.ready() || gh3_.settle();
 }
 
 int BandView::add(gfx::RenderDevice& dev, const band::Model& model, std::string& error,

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <memory>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -124,6 +125,7 @@ public:
 
 private:
     size_t attached_ = 0;  // members attachStep uploaded
+    std::unordered_map<uint32_t, gfx::TextureId> made_;  // the next member's textures (BandView::prepare)
     std::shared_ptr<band::Library> lib_;  // band::Library::shared
     std::shared_ptr<const Pak> globalPak_;  // the ragdolls' .rag files
     std::shared_ptr<const matlib::Library> shaderLib_;

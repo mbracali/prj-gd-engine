@@ -166,7 +166,10 @@ int Band::attachStep(gfx::RenderDevice& device, std::string& error) {
     }
     if (attached_ < members_.size()) {
         Entry& e = members_[attached_];
-        e.view = view_->add(device, *e.model, error);
+        // Its textures and programs a few ms a frame, then the member.
+        if (!view_->prepare(device, *e.model, made_, 6.0)) return 0;
+        e.view = view_->add(device, *e.model, error, &made_);
+        made_.clear();
         if (e.view < 0) {
             view_.reset();
             attached_ = 0;
