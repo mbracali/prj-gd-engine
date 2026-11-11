@@ -37,6 +37,11 @@ struct Element {
     bool dimsGiven = false;
     float justX = 0, justY = 0;            // -1 left / top .. 1 right / bottom; default centre [C 0x8221E0FC]
     float anchorX = -1, anchorY = -1;      // child_anchor [C 0x82218908]
+    // gh4: a desc element's own pos_anchor (where in its parent its pos counts
+    // from), used instead of the parent's child_anchor [I].
+    bool posAnchorGiven = false;
+    float posAnchorX = -1, posAnchorY = -1;
+    uint32_t desc = 0;  // gh4 descinterface: the uidesc_<name> global it was built from
     float ijustX = 0, ijustY = 0;          // internal_just (menus, text)
     float sx = 1, sy = 1, alpha = 1, rot = 0, z = 0;  // rot in degrees
     bool zGiven = false;  // without its own z_priority an element draws at its parent's [I]
@@ -120,6 +125,15 @@ public:
     // do (finish the name): the keyboard's Enter is Start there (FrontEnd::handle).
     bool startFinishesEntry(int device) const;
     Element* find(uint32_t id) const;
+    // gh4's task menus focus their menu after ui_create_ (ui/ui_states.cpp):
+    // the `focus` event to element `id`, if it exists; false if not.
+    bool focusElement(uint32_t id);
+    // gh4 descinterface (ui_desc.cpp): builds the uidesc_<desc> tree under
+    // `e`; the element named by a desc alias / prop path; se_setprops on a desc.
+    bool buildDesc(Element& e, const std::string& desc);
+    Element* descPath(Element& e, const qb::Value* path);
+    Element* descAlias(Element& e, uint32_t alias);
+    void descSetProps(Element& e, const qb::Struct& p);
     // DisplayLoadingScreen's picture is up (over everything).
     bool loadingScreenUp() const { return loadingTex_ != 0; }
     Element& root() { return *root_; }
@@ -220,6 +234,7 @@ private:
     gfx::RenderDevice& dev_;
     std::unique_ptr<Element> root_;
     std::unordered_map<uint32_t, Element*> byId_;
+    std::unordered_map<uint32_t, uint32_t> aliases_;  // gh4 AssignAlias: alias -> element id
     std::unordered_map<uint32_t, FontEntry> fonts_;
     std::vector<std::array<uint8_t, 4>> colorTab_;  // Default_Font_Colors
     Stats stats_;

@@ -162,6 +162,11 @@ const UiSystem::FontEntry* UiSystem::fontFor(uint32_t key) const {
 
 Element* UiSystem::find(uint32_t id) const {
     auto it = byId_.find(id);
+    if (it != byId_.end()) return it->second;
+    // gh4: an alias (AssignAlias id = <element> alias = <name>) [C scripts].
+    auto a = aliases_.find(id);
+    if (a == aliases_.end() || a->second == id) return nullptr;
+    it = byId_.find(a->second);
     return it == byId_.end() ? nullptr : it->second;
 }
 
@@ -296,6 +301,8 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         } else if (n == K("just")) readJust(v, e.justX, e.justY);
         else if (n == K("internal_just")) readJust(v, e.ijustX, e.ijustY);
         else if (n == K("child_anchor")) readJust(v, e.anchorX, e.anchorY);
+        else if (n == K("pos_anchor")) readJust(v, e.posAnchorX, e.posAnchorY), e.posAnchorGiven = true;
+        else if (n == K("hiddenlocal")) e.hidden = v.type == qb::Type::Key ? v.key == K("true") : v.number() != 0;
         else if (n == K("rgba") && v.type == qb::Type::Array && v.arr) {
             for (size_t k = 0; k < 4 && k < v.arr->values.size(); ++k) e.rgba[k] = uint8_t(std::clamp(int(v.arr->values[k].number()), 0, 255));
         } else if (n == K("alpha")) e.alpha = v.number();
@@ -692,6 +699,13 @@ void UiSystem::padEvent(uint32_t event, int device) {
         if (Element* e = find(id)) launch(e, event, data);
 }
 
+bool UiSystem::focusElement(uint32_t id) {
+    Element* e = find(id);
+    if (!e) return false;
+    launch(e, K("focus"), qb::Struct{});
+    return true;
+}
+
 bool UiSystem::startFinishesEntry(int device) const {
     // GH3's text entries take Start on the element that has the focus: the
     // band name (create_enter_band_name_menu: pad_start confirm_band_name),
@@ -1010,7 +1024,8 @@ void UiSystem::draw(Canvas& c) {
         if (e.hidden) continue;
         const Element& p = e.parent ? *e.parent : *root_;
         // Composition [C 0x8221BF88]: the parent's child_anchor, pos scaled by the parent.
-        const float ax = (p.anchorX + 1) / 2 * p.w * n.wsx, ay = (p.anchorY + 1) / 2 * p.h * n.wsy;
+        const float anX = e.posAnchorGiven ? e.posAnchorX : p.anchorX, anY = e.posAnchorGiven ? e.posAnchorY : p.anchorY;
+        const float ax = (anX + 1) / 2 * p.w * n.wsx, ay = (anY + 1) / 2 * p.h * n.wsy;
         const float offX = ax + e.x * n.wsx, offY = ay + e.y * n.wsy;
         const float pr = n.wrot * kDeg;
         const float wposX = n.cx + offX * std::cos(pr) - offY * std::sin(pr), wposY = n.cy + offX * std::sin(pr) + offY * std::cos(pr);
@@ -1463,6 +1478,43 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
         if (e) applyProps(*e, p, false);
         return e != nullptr;
     }
+    // gh4's element members: se_setprops (a desc's named props too),
+    // se_getprops, desc_resolvealias {name = <alias> [param = <local>]}.
+    if (method == K("se_setprops")) {
+        if (!e) return false;
+        if (e->desc) descSetProps(*e, p);
+        else applyProps(*e, p, false);
+        return true;
+    }
+    if (method == K("obj_spawnscript") || method == K("obj_spawnscriptnow")) {
+        // gh4: `<element> : obj_spawnscript <script> params = {...}` runs the
+        // script on the element (destroy_loading_screen) [C scripts].
+        if (!e) return false;
+        uint32_t scr = 0;
+        for (const qb::Item& it : p.items)
+            if (it.name == 0 && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr)) scr = it.value.key;
+        if (!scr) return false;
+        qb::Struct args;
+        if (const qb::Value* ps = qs::Vm::param(p, K("params")); ps && ps->st) args = *ps->st;
+        const uint32_t id = vm_.spawnOn(scr, args, obj);
+        if (id && method == K("obj_spawnscriptnow")) vm_.runNow(id);
+        return true;
+    }
+    if (method == K("se_getprops")) {
+        if (!e) return false;
+        qb::Struct q;
+        qs::Vm::set(q, K("id"), qs::Vm::makeKey(e->id));
+        return vm_.callNative(K("GetScreenElementProps"), run, q);
+    }
+    if (method == K("desc_resolvealias")) {
+        if (!e) return false;
+        const qb::Value* a = qs::Vm::param(p, K("name"));
+        Element* r = a ? descAlias(*e, a->key) : nullptr;
+        if (!r) return false;
+        const qb::Value* pn = qs::Vm::param(p, K("param"));
+        if (qb::Struct* l = locals(run)) qs::Vm::set(*l, pn && pn->key ? pn->key : K("resolved_id"), qs::Vm::makeKey(r->id));
+        return true;
+    }
     if (method == K("DoMorph")) {
         if (!e) return false;
         startMorph(*e, p);
@@ -1561,6 +1613,15 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
         }
         return false;
     }
+    // gh4: a global script called as a member runs on the element
+    // (`<id> : button_pill_apply_relative_scale ...`) [C scripts].
+    if (e) {
+        if (const qb::Value* g = vm_.global(method); g && g->type == qb::Type::Script) {
+            bool result = true;
+            vm_.run(method, p, &result, obj);
+            return result;
+        }
+    }
     handled = false;
     return false;
 }
@@ -1638,6 +1699,14 @@ void UiSystem::addNatives() {
         byId_[e->id] = raw;
         parent->children.push_back(std::move(e));
         applyProps(*raw, p, true);
+        // gh4: type = descinterface desc = '<name>': the uidesc_<name> tree,
+        // then the call's own desc props (loading_text = ...) [C data ui\uidesc_*.qb].
+        if (raw->type == K("descinterface")) {
+            const qb::Value* d = Vm::param(p, K("desc"));
+            const std::string dn = d ? (d->type == qb::Type::String ? d->str : qbkey::name(d->key)) : std::string();
+            if (!buildDesc(*raw, dn)) vm_.logOnce("ui: no desc " + dn);
+            else descSetProps(*raw, p);
+        }
         // The main menu's XBOX LIVE (ONLINE: no online play in the port) as
         // GH3 disables it in demo mode: create_main_menu's demo_mode_disable
         // = {rgba = [128 128 128 255] not_focusable} on its text and its
@@ -1688,6 +1757,13 @@ void UiSystem::addNatives() {
         } else {
             destroy(e);
         }
+        return true;
+    });
+    vm_.addNative("AssignAlias", [this](Vm&, ScriptRun&, qb::Struct& p) {
+        Element* e = resolve(Vm::param(p, K("id")));
+        const qb::Value* a = Vm::param(p, K("alias"));
+        if (!e || !a || !a->key) return false;
+        aliases_[a->key] = e->id;
         return true;
     });
     vm_.addNative("ScreenElementExists", [this](Vm&, ScriptRun&, qb::Struct& p) { return resolve(Vm::param(p, K("id"))) != nullptr; });

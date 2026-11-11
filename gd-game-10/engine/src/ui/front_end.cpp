@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/front_end.h"
 
+#include <string_view>
+
 #include "audio/sound_buss.h"
 
 #include <SDL3/SDL_log.h>
@@ -43,6 +45,7 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
     scene_ = std::make_unique<MenuScene>(disc_, globals_, *vm_, *ui_);
     scene_->addNatives();  // after the flow natives' stubs (PlayIGCCam, KillCamAnim)
     states = std::make_unique<UiStates>(*vm_);
+    states->focus = [this](uint32_t id) { return ui_->focusElement(id); };
     states->addNatives();  // last: the `ui` object's members before the composite objects'
 }
 
@@ -105,6 +108,36 @@ void FrontEnd::handle(const InputEvent& e) {
     case Action::Fret3: ev = "pad_option"; break;
     case Action::Fret4: ev = "pad_l1"; break;
     default: break;
+    }
+    // gh4: one button raises every event xenon_pad maps it to (A: pad_choose
+    // and pad_btn_bottom; B: pad_back, pad_circle, pad_btn_right; ...), the
+    // way SetButtonEventMappings {xenon = xenon_pad} sets them [C data
+    // menubuttonremap.qb; I: the C dispatch order]. Start keeps pad_start.
+    const char* button = nullptr;
+    switch (e.action) {
+    case Action::Up: button = "up"; break;
+    case Action::Down: button = "down"; break;
+    case Action::Left: button = "left"; break;
+    case Action::Right: button = "right"; break;
+    case Action::Confirm:
+    case Action::Fret0: button = std::string_view(ev ? ev : "") == "pad_start" ? nullptr : "a"; break;
+    case Action::Back:
+    case Action::Fret1: button = "b"; break;
+    case Action::Fret2: button = "y"; break;
+    case Action::Fret3: button = "x"; break;
+    case Action::Fret4: button = "left_trigger1"; break;
+    default: break;
+    }
+    const qb::Value* map = button ? vm_->global(qbkey::key("xenon_pad")) : nullptr;
+    if (map && map->arr) {
+        const uint32_t b = qbkey::key(button);
+        bool any = false;
+        for (const qb::Value& pair : map->arr->values) {
+            if (!pair.arr || pair.arr->values.size() != 2 || pair.arr->values[0].key != b) continue;
+            ui_->padEvent(pair.arr->values[1].key, e.player);
+            any = true;
+        }
+        if (any) return;
     }
     if (ev) ui_->padEvent(qbkey::key(ev), e.player);
 }
@@ -180,14 +213,12 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     // GD10_FLOWLOG=1: each flow state player 1 enters (ui_flow_manager_state[0]).
     static const bool flowLog = SDL_getenv("GD10_FLOWLOG") != nullptr;
     if (flowLog) {
-        const qb::Value* a = vm_->global(qbkey::key("ui_flow_manager_state"));
-        const uint32_t st = a && a->arr && !a->arr->values.empty() ? a->arr->values[0].key : 0;
+        const uint32_t st = states ? states->top() : 0;
         if (st != lastFlowState_) lastFlowState_ = st, SDL_Log("flow: %s", qbkey::name(st).c_str());
     }
     // The Glitches, once the boot has loaded or created the save (the first main menu).
     if (!glitchesDone_) {
-        const qb::Value* a = vm_->global(qbkey::key("ui_flow_manager_state"));
-        if (a && a->arr && !a->arr->values.empty() && a->arr->values[0].key == qbkey::key("main_menu_fs"))
+        if (states && states->top() == qbkey::key("uistate_mainmenu"))
             glitchesDone_ = true, (SDL_getenv("GD10_NO_GLITCHES") ? false : ensureGlitches(*vm_));  // (development aid: off)
     }
     // During a song GH3's scripts keep running (the attract mode's input
@@ -213,9 +244,15 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
 }
 
 std::string FrontEnd::flowState() const {
-    const qb::Value* a = vm_->global(qbkey::key("ui_flow_manager_state"));
-    if (!a || a->type != qb::Type::Array || !a->arr || a->arr->values.empty()) return "";
-    return qbkey::name(a->arr->values[0].key);
+    // gh4: the UI state machine's top state (ui/ui_states.h); the main menu
+    // and the options keep GH3's names for the port's code shared with gd04
+    // (help-bar items, Esc on the main menu) (D5). Metallica's
+    // ui_flow_manager_state is a leftover constant, not read.
+    const uint32_t top = states ? states->top() : 0;
+    if (!top) return "";
+    if (top == qbkey::key("uistate_mainmenu")) return "main_menu_fs";
+    if (top == qbkey::key("uistate_options")) return "options_select_option_fs";
+    return qbkey::name(top);
 }
 
 void FrontEnd::soundEvent(const char* event) {

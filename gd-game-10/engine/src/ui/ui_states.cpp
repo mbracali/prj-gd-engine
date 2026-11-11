@@ -71,6 +71,12 @@ void UiStates::enter(Entry& e, bool first) {
         vm_.run(K("ui_state_pak_load"), p);
     }
     call(e, "ui_create_");
+    // The task menu focuses its menu: the state's focus_id, else
+    // ui_task_menu_default_focus_id (current_menu) [C data uistatemachine.qb;
+    // I: when the C does it].
+    uint32_t fid = keyOf(e.params.find(K("focus_id")));
+    if (!fid) fid = keyOf(vm_.global(K("ui_task_menu_default_focus_id")));
+    if (fid && focus) focus(fid);
     // The anim-in script (the state's own, else ui_task_menu_default_anim_in_script) [I].
     uint32_t anim = keyOf(e.params.find(K("anim_in_script")));
     if (!anim) anim = keyOf(vm_.global(K("ui_task_menu_default_anim_in_script")));

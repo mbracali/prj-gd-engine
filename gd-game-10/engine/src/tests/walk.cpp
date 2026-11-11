@@ -28,11 +28,7 @@
 namespace {
 
 // The flow state player 1 is in (ui_flow_manager_state[0]).
-std::string flowState(FrontEnd& fe) {
-    const qb::Value* a = fe.vm().global(qbkey::key("ui_flow_manager_state"));
-    if (!a || a->type != qb::Type::Array || !a->arr || a->arr->values.empty()) return "";
-    return qbkey::name(a->arr->values[0].key);
-}
+std::string flowState(FrontEnd& fe) { return fe.flowState(); }  // gh4: the UI state machine's top (D5)
 
 }  // namespace
 

@@ -49,7 +49,14 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
     vm.addNative("NotCD", no);
     vm.addNative("CD", yes);
     // A local profile is signed in; Xbox Live is not (not in the port).
-    vm.addNative("CheckForSignIn", [](Vm&, ScriptRun&, qb::Struct& p) { return Vm::flag(p, K("local")); });
+    // gh4 passes the flag inside a struct (`CheckForSignin <signin_params>`
+    // with signin_params = {local}, ui_signin_check) [C script]: look inside.
+    vm.addNative("CheckForSignIn", [](Vm&, ScriptRun&, qb::Struct& p) {
+        if (Vm::flag(p, K("local"))) return true;
+        for (const qb::Item& it : p.items)
+            if (it.value.type == qb::Type::Struct && it.value.st && Vm::flag(*it.value.st, K("local"))) return true;
+        return false;
+    });
     for (const char* n : {"GameProfileSettingsFinished", "StartGameProfileSettingsRead", "RefreshSigninStatus", "ReAcquireControllers",
                           "ResumeControllerChecking", "UnBindGuitarControllerStatus", "SetInput", "SetMenuAutoRepeatTimes",
                           "StartRendering_C", "StopRendering_C", "SetScreen",

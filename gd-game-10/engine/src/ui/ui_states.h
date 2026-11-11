@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -35,6 +36,8 @@ public:
     uint32_t top() const { return stack_.empty() ? 0 : stack_.back().state; }
     std::string topBase() const;
     size_t depth() const { return stack_.size(); }
+    // Focuses a screen element (UiSystem::focusElement), set by the front end.
+    std::function<bool(uint32_t id)> focus;
 
 private:
     struct State {
