@@ -234,6 +234,10 @@ void UiStates::addNatives() {
             }
             if (!run.frames.empty()) {
                 if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
+                // ... and stack_size (ui_event_exists_in_stack repeats
+                // <stack_size> times: without it Music Studio's sign-in took
+                // the boot path to the drum tip) [C script].
+                Vm::set(*run.frames.back().locals, K("stack_size"), Vm::makeInt(int(stack_.size())));
                 Vm::set(*run.frames.back().locals, K("stack"), std::move(arr));
             }
             return true;

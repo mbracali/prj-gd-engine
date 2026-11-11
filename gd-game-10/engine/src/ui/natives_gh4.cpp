@@ -209,6 +209,10 @@ void addGh4Natives(qs::Vm& vm) {
         setLocal(run, K("sorted_songlist"), out);
         return true;
     });
+    // isRBDrum {controller}: a Rock Band drum kit on that controller (the
+    // boot's "optimal drumming" tip, boot_download_scan) [C script]; the port
+    // reads no such kit as one [I].
+    vm.addNative("isRBDrum", [](Vm&, ScriptRun&, qb::Struct&) { return false; });
     // obj_getid: the element (object) the script runs on, as objid [C scripts].
     vm.addNative("obj_getid", [setLocal](Vm&, ScriptRun& run, qb::Struct&) {
         if (!run.object) return false;

@@ -422,7 +422,10 @@ Walk::Walk(const std::string& name) : name_(name) {
         // seven items].
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "shot:menus_main@"}, 20000});
+        // GD10_WALK_MENUS=<digits>: only those items (e.g. "46").
+        const char* only = SDL_getenv("GD10_WALK_MENUS");
         for (int i = 0; i < 7; ++i) {
+            if (only && *only && !std::strchr(only, '0' + i)) continue;
             std::vector<Op> k = {"wait", "wait"};
             for (int d = 0; d < i; ++d) k.push_back(D);
             const std::string tag = "menus_" + std::to_string(i);
