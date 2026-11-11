@@ -107,7 +107,15 @@ Skeleton parseSkeleton(const uint8_t* d, size_t size) {
         if (b.mirror < 0) {
             need(b.mirror == -1 && b.mirrorName == 0, "ske: mirror");
         } else {
-            need(uint32_t(b.mirror) < n && s.bones[size_t(b.mirror)].name == b.mirrorName, "ske: mirror name");
+            need(uint32_t(b.mirror) < n, "ske: mirror index");
+            // gh4's Face_deform and GH_Male_Deform: Bone_Cheek_Lower_L names
+            // Bone_Cheek_Lower_R but indexes Bone_Cheek_R (19) [C data, the
+            // only such entry on the disc]: the name wins.
+            if (s.bones[size_t(b.mirror)].name != b.mirrorName) {
+                const int byName = s.find(b.mirrorName);
+                need(byName >= 0, "ske: mirror name");
+                b.mirror = byName;
+            }
         }
     }
     return s;

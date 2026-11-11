@@ -423,7 +423,7 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
                 for (uint32_t gk : in.lightGroups) serves = serves || gh3shader::groupLights(l.group, gk);
                 if (!serves) continue;
                 if (!l.createdAtStart && !(l.createdOn && show.flag(l.createdOn))) continue;
-                lin.push_back(gh3shader::lightIn(l, lights[i]));
+                lin.push_back(gh3shader::lightIn(l, lights[i], &v));
             }
             if (lin.empty()) {
                 // No venue (portraits): a neutral key light from the camera and an ambient fill.
