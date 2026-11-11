@@ -50,6 +50,8 @@ struct Member {
     std::vector<std::string> meshes;       // the parts' 'models/...skin' paths (body first)
     const qb::Struct* animPart = nullptr;  // the anim struct's member: anim_set, strum_anims, finger_anims, ...
     std::vector<std::string> animPaks;     // disc paths of the paks with its clips
+    bool female = false;                   // Band_IsFemale: is_female of the full body / FemalePhysique
+    uint32_t animStruct = 0;               // the body's anim_struct (car_male_anim_struct, ...)
 };
 
 // The band of a one-player song in `zone` (create_band with
@@ -84,12 +86,20 @@ std::vector<Member> chooseBandGh4(const Globals& g, uint32_t songKey);
 bool memberGh4(const Globals& g, const qb::Struct& profile, uint32_t object, uint32_t part, uint32_t songKey, Member& out);
 // gh4: a musician profile by its name key (find_profile_by_id), or null.
 const qb::Struct* findProfileGh4(const Globals& g, uint32_t id);
+// get_anim_struct_member's song struct (<anim_struct>_<song name>, its _alt)
+// looked up in the globals, else in `songFiles` (the song pak's QB, which a
+// song loads into the globals only later: load_songqpak): the member's
+// animPart and its pak. False when neither has it.
+bool songAnimPart(const Globals& g, const std::vector<qb::File>& songFiles, uint32_t songKey, Member& m);
 
 // Every playable body: one Member per musician_body entry with a profile
 // (every character, outfit and style; the bassist, drummer and singers),
 // and one per musician_instrument entry on a member of the matching type
 // (--chartest).
 std::vector<Member> everyBody(const Globals& g);
+// gh4: every locked preset talent (an appearance with CAS_Full_Body) on each
+// of its allowed_parts, as memberGh4 builds it for `songKey` (--chartest).
+std::vector<Member> everyTalentGh4(const Globals& g, uint32_t songKey);
 std::vector<Member> everyInstrument(const Globals& g);
 
 using ClipMap = std::unordered_map<uint32_t, std::shared_ptr<const anim::Clip>>;

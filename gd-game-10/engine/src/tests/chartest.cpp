@@ -49,6 +49,7 @@ std::string nameOf(uint32_t k) { return qbkey::names().get(k); }
 std::string label(const band::Member& m) {
     std::string s = m.profileName + " " + nameOf(m.body);
     if (m.instrument) s += " + " + nameOf(m.instrument);
+    if (m.gh4) s += " (" + nameOf(m.part) + ")";
     return s;
 }
 
@@ -126,7 +127,8 @@ struct Grid {
 };
 
 // One frame of a lone model through a camera 3.4 m in front of it (it faces +z).
-SDL_Surface* portrait(gfx::Renderer& r, const band::Model& model, const std::vector<bandanim::Mat34>& skin, float height) {
+SDL_Surface* portrait(gfx::Renderer& r, const band::Model& model, const std::vector<bandanim::Mat34>& skin, float height,
+                      const venue::CamPose* faceCam = nullptr) {
     BandView view;
     std::string err;
     const int id = view.add(r.device(), model, err);
@@ -154,6 +156,7 @@ SDL_Surface* portrait(gfx::Renderer& r, const band::Model& model, const std::vec
         if (const char* x = SDL_getenv("GD10_CHARTEST_X")) cam.pos[0] += float(std::atof(x));
         if (const char* y = SDL_getenv("GD10_CHARTEST_Y")) cam.pos[1] += float(std::atof(y));
     }
+    if (faceCam) cam = *faceCam;
     const float grey[4] = {0.18f, 0.18f, 0.2f, 1};
     r.beginFrame(grey);
     view.draw(cam, {in}, empty, none, show);
@@ -171,6 +174,10 @@ struct BodyResult {
 // Guitarist / bassist bodies whose handle_star_power anim (play_special_anim
 // Stance_A Starpower) played, and those without one (GD10-097).
 int g_spAnims = 0;
+// gh4 talents' face close-ups (the facial clips, the singer's lip sync).
+Grid* g_faces = nullptr;
+int g_faceMoves = 0, g_faceBodies = 0;
+int g_gh4MissingTex = 0;
 std::vector<std::string> g_spMissing;
 
 // Loads, checks, animates (and draws) one member.
@@ -194,7 +201,8 @@ BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, co
         for (const scene::Material& mat : p.scene.materials)
             for (uint32_t t : mat.textures)
                 if (!model->textures.count(t)) {
-                    ++missingTex;
+                    // gh4: keys no pak names (run-time CAS composites, engine maps [I]): counted apart.
+                    ++(m.gh4 ? g_gh4MissingTex : missingTex);
                     if (std::getenv("GD10_CHARTEST_VERBOSE"))
                         std::printf("  %s: material %08x texture %s missing\n", label(m).c_str(), mat.key, nameOf(t).c_str());
                 }
@@ -273,7 +281,8 @@ BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, co
     // body's anim set has the clip (the band's own bassist plays no Star
     // Power; the debug_only BoneMan bodies have none) [C script].
     const qb::Value* debugOnly = m.profile ? m.profile->find(K("debug_only")) : nullptr;
-    if (m.role == band::Role::Guitarist && !(debugOnly && debugOnly->number() == 1)) {
+    // gh4's talents: handle_star_power's anim is not in their song anim sets [I]: not checked.
+    if (m.role == band::Role::Guitarist && !m.gh4 && !(debugOnly && debugOnly->number() == 1)) {
         const int before = a.stats().bodyAnims;
         a.playSpecial(K("Stance_A"), K("Starpower"), t0 + double(frames) * kStepMs, 0.0f, 0);
         if (a.stats().bodyAnims > before) ++g_spAnims;
@@ -284,6 +293,68 @@ BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, co
     missingClips += int(a.missing().size());
     if (std::getenv("GD10_CHARTEST_VERBOSE"))
         for (uint32_t k : a.missing()) std::printf("  %s: clip %s missing\n", label(m).c_str(), nameOf(k).c_str());
+    // gh4: the face bones (bone_jaw .. bone_tongue) move with the facial
+    // clips (facial_anim_loop; the vocalist's Band_PlayFacialAnim lip sync,
+    // GHM_Singer_Male_<song>_1); close-ups of both into the faces grid.
+    if (m.gh4) {
+        const int head = model->skeleton->find(K("bone_head")), jaw = model->skeleton->find(K("Bone_Jaw"));
+        const int eyeL = model->skeleton->find(K("Bone_Eye_L")), eyeR = model->skeleton->find(K("Bone_Eye_R"));
+        double t = t0 + double(frames) * kStepMs;
+        auto faceShot = [&](const std::string& what) {
+            if (!r || !g_faces || head < 0) return;
+            // In front of the eyes (the model faces +z).
+            bandanim::Vec h = bandanim::xform(world[size_t(head)], {0, 0, 0});
+            float yaw = 0;
+            if (eyeL >= 0 && eyeR >= 0) {
+                const bandanim::Vec l = bandanim::xform(world[size_t(eyeL)], {0, 0, 0}), rr = bandanim::xform(world[size_t(eyeR)], {0, 0, 0});
+                const bandanim::Vec c{(l.x + rr.x) * 0.5f, (l.y + rr.y) * 0.5f, (l.z + rr.z) * 0.5f};
+                // Facing: the eyes' midpoint ahead of the head bone, level.
+                yaw = std::atan2(c.x - h.x, c.z - h.z);
+                h = {c.x, c.y - 0.01f, c.z};
+            }
+            if (std::getenv("GD10_CHARTEST_VERBOSE"))
+                std::printf("  %s: face camera on (%.3f %.3f %.3f)\n", label(m).c_str(), double(h.x), double(h.y), double(h.z));
+            venue::CamPose cam;
+            cam.pos = {h.x + 0.8f * std::sin(yaw), h.y, h.z + 0.8f * std::cos(yaw)};
+            cam.rot = {0, std::cos(yaw * 0.5f), 0, -std::sin(yaw * 0.5f)};
+            cam.fov = 25;
+            if (SDL_Surface* px = portrait(*r, *model, skin, hi[1], &cam)) {
+                g_faces->add(px, label(m) + " " + what);
+                SDL_DestroySurface(px);
+            }
+        };
+        faceShot("idle face");
+        if (jaw >= 0) {
+            ++g_faceBodies;
+            const uint32_t lip = m.role == band::Role::Vocalist ? qbkey::key("GHM_Singer_Male_" + chart.song + "_1") : 0;
+            if (lip) a.playFacial(lip, t);
+            // The face bones (Bone_Jaw .. bone_tongue) relative to the head
+            // over 3 s at 60 Hz: they must move (0.5 mm).
+            const int last = model->skeleton->find(K("bone_tongue"));
+            std::vector<bandanim::Mat34> w2, s2;
+            std::vector<bandanim::Vec> first;
+            float moved = 0;
+            for (int f = 0; f < 180; ++f) {
+                t += kStepMs;
+                a.advance(t);
+                a.evaluate(t, w2, s2);
+                const bandanim::Mat34& hm = w2[size_t(head)];
+                for (int b = jaw, i = 0; b <= std::max(jaw, last); ++b, ++i) {
+                    // In the head's frame (rigid: the transposed rotation).
+                    const bandanim::Vec q = bandanim::xform(w2[size_t(b)], {0.02f, 0.02f, 0.02f});
+                    const float dx = q.x - hm.m[3], dy = q.y - hm.m[7], dz = q.z - hm.m[11];
+                    const bandanim::Vec p{hm.m[0] * dx + hm.m[4] * dy + hm.m[8] * dz, hm.m[1] * dx + hm.m[5] * dy + hm.m[9] * dz,
+                                          hm.m[2] * dx + hm.m[6] * dy + hm.m[10] * dz};
+                    if (f == 0) first.push_back(p);
+                    else moved = std::max(moved, std::fabs(p.x - first[size_t(i)].x) + std::fabs(p.y - first[size_t(i)].y) + std::fabs(p.z - first[size_t(i)].z));
+                }
+            }
+            if (moved > 0.0005f) ++g_faceMoves;
+            else if (std::getenv("GD10_CHARTEST_VERBOSE")) std::printf("  %s: the face does not move\n", label(m).c_str());
+            world = w2, skin = s2;
+            faceShot(lip ? "lip sync" : "face +3 s");
+        }
+    }
     if (r && grid) {
         if (SDL_Surface* px = portrait(*r, *model, skin, hi[1])) {
             grid->add(px, label(m) + (res.ok ? "" : "  [FAIL " + res.why + "]"));
@@ -389,7 +460,7 @@ int runCharTest(const std::string& discPath) {
         return 2;
     }
     const char* songEnv = SDL_getenv("GD10_CHARTEST_SONG");
-    const std::string song = songEnv ? songEnv : "slowride";
+    const std::string song = songEnv ? songEnv : "entersandman";
     Chart chart;
     try {
         chart = loadChart(*disc, song);
@@ -434,7 +505,10 @@ int runCharTest(const std::string& discPath) {
     size_t verts = 0;
     {
         Grid bodies{shots ? shots : "", "bodies"};
-        const std::vector<band::Member> all = band::everyBody(g);
+        Grid faces{shots ? shots : "", "faces"};
+        g_faces = &faces;
+        std::vector<band::Member> all = band::everyBody(g);
+        if (all.empty()) all = band::everyTalentGh4(g, qbkey::key(chart.song));
         for (const band::Member& m : all) {
             if (only && label(m).find(onlyText) == std::string::npos) continue;
             const BodyResult r = testMember(*disc, g, lib, chart, m, frames, &renderer, &bodies, missingTex, missingClips, verts);
@@ -456,6 +530,13 @@ int runCharTest(const std::string& discPath) {
         }
         std::printf("chartest: %zu bodies: %d loaded, skinned and animated, %d not on the disc\n", all.size(), loaded, notOnDisc);
         std::printf("chartest: %d playable guitarist bodies play the Star Power anim (handle_star_power)\n", g_spAnims);
+        if (g_faceBodies) {
+            std::printf("chartest: %d of %d gh4 talents move their face (facial clips, lip sync); %d material textures no pak has\n", g_faceMoves,
+                        g_faceBodies, g_gh4MissingTex);
+            if (g_faceMoves != g_faceBodies) fail("a gh4 talent's face does not move");
+        }
+        faces.flush();
+        g_faces = nullptr;
         for (const std::string& who : g_spMissing) fail(who + ": no Starpower anim in Stance_A (handle_star_power)");
     }
     int instLoaded = 0, instMissing = 0;

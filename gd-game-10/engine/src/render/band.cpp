@@ -76,8 +76,12 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
     for (const band::Member& m : chosen)
         if (m.role == band::Role::Bassist && (m.profileName == "Morello" || m.profileName == "Slash")) bassGuitar = true;
 
-    members_.reserve(chosen.size());
-    for (const band::Member& m : chosen) {
+    // The song's anim struct (car_male_anim_struct_<song>[_alt]) lives in
+    // the song pak, not yet in the globals at this point [C data].
+    std::vector<band::Member> picked = chosen;
+    for (band::Member& m : picked) band::songAnimPart(g, songFiles_, qbkey::key(chart.song), m);
+    members_.reserve(picked.size());
+    for (const band::Member& m : picked) {
         Entry e;
         e.model = band::loadModel(disc, g, *lib_, m, chart.song, error);
         if (!e.model) return false;
@@ -87,6 +91,7 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
         s.chart = &chart;
         s.perf = perf;
         s.performance = perfEvents;
+        s.songFiles = &songFiles_;
         s.seed = m.object ^ qbkey::key(chart.song) ^ m.body;
         s.startMs = startMs;
         s.guitarPart = bassGuitar;

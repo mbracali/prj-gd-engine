@@ -104,6 +104,9 @@ public:
         const Chart* chart = nullptr;
         const venue::PerfTimeline* perf = nullptr;  // null: normal
         std::vector<const qb::Struct*> performance;  // the song's <song>_performance entries
+        // The song pak's QB (the Band_PlayClip clip structs; the globals get
+        // them only at load_songqpak) (may be null).
+        const std::vector<qb::File>* songFiles = nullptr;
         uint32_t seed = 1;
         double startMs = 0;  // when the member is created (the song's lead-in)
         bool guitarPart = true;  // the bassist plays the guitar part (song bassist Morello / Slash) [C script]
@@ -127,6 +130,9 @@ public:
     // `blend`: blendduration (play_win_anims / play_lose_anims: 0) [C scripts].
     void playSpecial(uint32_t stance, uint32_t anim, double ms, float blend = 0.2f, int disableArms = 2);
     void playClip(uint32_t clip, uint32_t stance, bool cycle, double ms);
+    // Band_PlayFacialAnim {anim} at `ms` (the singer's lip sync, a song's
+    // face clips): play_special_facial_anim [C script].
+    void playFacial(uint32_t anim, double ms);
     // play_outro: Strum / FretPos / FretFingers / Drum / Drum_cymbal /
     // event_iterator killed: no song event from `ms` on [C script].
     void endSongEvents(double ms);
@@ -191,7 +197,7 @@ private:
     void afterStanceBody(double t, bool stanceChanged);
     uint32_t queuedStance_ = 0;  // a stance change waiting behind the pending one
     void strum(int length, double t);
-    void facial(double t);
+    void facial(double t, float blend = 0);
     bool guitarLike() const { return role_ == band::Role::Guitarist || role_ == band::Role::Bassist; }
     // The struct with anim_set, strum_anims, finger_anims, fret_anims: GH3's
     // profile, gh4's anim struct member (band::Member::animPart).
@@ -228,6 +234,9 @@ private:
     const qb::Struct* fingerAnims_ = nullptr;
     const qb::Struct* fretAnims_ = nullptr;
     uint32_t bodyKey_ = 0;
+    // <member>_Info's facial_anims / facial_anims_default / facial_anim
+    // (setup_character_anims, Band_ChangeFacialAnims) [C scripts].
+    uint32_t facialAnims_ = 0, facialAnimsDefault_ = 0, facialAnim_ = 0;
     uint32_t bodyGen_ = 0, strumGen_ = 0, faceGen_ = 0, chordGen_ = 0, armGen_[2] = {0, 0};
     float bodyBlend_ = 0.2f;  // the next body clip's blend in (play_special_anim blendduration)
     float slowTempo_ = 75, medTempo_ = 115, fastTempo_ = 145;

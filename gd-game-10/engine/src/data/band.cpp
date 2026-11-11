@@ -316,6 +316,7 @@ bool memberGh4(const Globals& g, const qb::Struct& profile, uint32_t object, uin
         }
     }
     if (m.meshes.empty() || m.meshes.front().empty()) return false;
+    m.female = female;
     // The skeleton: the body's, as the global pak keeps it (`<name>_original`;
     // a drummer's `<name>_Drummer`) [C data ZONES/global.pak; I: the accessory
     // bones merged on top at run time are not added].
@@ -344,6 +345,7 @@ bool memberGh4(const Globals& g, const qb::Struct& profile, uint32_t object, uin
     // and its member for the part (bass / rhythm drop to guitar) [C script
     // get_anim_struct_member].
     const uint32_t animStruct = body ? keyOf(body->find(K("anim_struct"))) : K(female ? "car_female_anim_struct" : "car_male_anim_struct");
+    m.animStruct = animStruct;
     const std::string asName = qbkey::names().get(animStruct);
     const uint32_t member = part ? part : K("frontend");
     auto pick = [&](const qb::Struct* st) -> const qb::Struct* {
@@ -364,6 +366,52 @@ bool memberGh4(const Globals& g, const qb::Struct& profile, uint32_t object, uin
     if (m.animPart)
         if (const uint32_t pk = keyOf(m.animPart->find(K("pak")))) m.animPaks.push_back(pakOfName(nullptr, qbkey::names().get(pk)));
     return true;
+}
+
+bool songAnimPart(const Globals& g, const std::vector<qb::File>& songFiles, uint32_t songKey, Member& m) {
+    const qb::Struct* songSt = songKey ? songStruct(g, songKey) : nullptr;
+    if (!m.gh4 || !songSt || !m.part || !m.animStruct) return false;
+    auto find = [&](uint32_t k) -> const qb::Struct* {
+        if (const qb::Struct* st = globalStruct(g, k)) return st;
+        for (const qb::File& f : songFiles)
+            if (const qb::Value* v = f.find(k); v && v->type == qb::Type::Struct && v->st) return v->st.get();
+        return nullptr;
+    };
+    const std::string asName = qbkey::names().get(m.animStruct), songName = strOf(songSt->find(K("name")));
+    const qb::Struct* st = find(qbkey::key(asName + "_" + songName));
+    if (intOf(songSt->find(K("use_alt_anim_structs")), 0) == 1)
+        if (const qb::Struct* alt = find(qbkey::key(asName + "_" + songName + "_alt"))) st = alt;
+    if (!st) return false;
+    const qb::Struct* part = structOf(st->find(m.part));
+    if (!part && (m.part == K("bass") || m.part == K("rhythm"))) part = structOf(st->find(K("guitar")));
+    if (!part) return false;
+    m.animPart = part;
+    if (const uint32_t pk = keyOf(part->find(K("pak")))) {
+        const std::string path = pakOfName(nullptr, qbkey::names().get(pk));
+        if (std::find(m.animPaks.begin(), m.animPaks.end(), path) == m.animPaks.end()) m.animPaks.push_back(path);
+    }
+    return true;
+}
+
+std::vector<Member> everyTalentGh4(const Globals& g, uint32_t songKey) {
+    std::vector<Member> out;
+    const qb::Array* a = globalArray(g, K("Preset_Musician_Profiles_Locked"));
+    if (!a) return out;
+    for (const qb::Value& e : a->values) {
+        if (e.type != qb::Type::Struct || !e.st) continue;
+        const qb::Struct* app = structOf(e.st->find(K("appearance")));
+        if (!app || !structOf(app->find(K("CAS_Full_Body")))) continue;
+        const qb::Value* parts = e.st->find(K("allowed_parts"));
+        if (!parts || parts->type != qb::Type::Array || !parts->arr) continue;
+        for (const qb::Value& pv : parts->arr->values) {
+            const uint32_t part = keyOf(&pv);
+            const uint32_t object = part == K("bass") ? K("bassist") : part == K("drum") ? K("drummer") : part == K("vocals") ? K("vocalist")
+                                                                                                                         : K("guitarist");
+            Member m;
+            if (memberGh4(g, *e.st, object, part, songKey, m)) out.push_back(std::move(m));
+        }
+    }
+    return out;
 }
 
 std::vector<Member> chooseBandGh4(const Globals& g, uint32_t songKey) {

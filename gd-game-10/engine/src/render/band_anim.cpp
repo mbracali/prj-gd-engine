@@ -476,7 +476,11 @@ bool Animator::init(const Setup& s, std::string& error) {
             const qb::Value* tv = p->find(K("time"));
             const qb::Struct* params = structOf(p->find(K("params")));
             if (!tv || !params || keyOf(p->find(K("scr"))) != K("band_playclip")) continue;
-            const qb::Struct* cs = structOf(g.find(keyOf(params->find(K("clip")))));
+            const uint32_t clipKey = keyOf(params->find(K("clip")));
+            const qb::Struct* cs = structOf(g.find(clipKey));
+            if (!cs && s.songFiles)
+                for (const qb::File& f : *s.songFiles)
+                    if ((cs = structOf(f.find(clipKey)))) break;
             const qb::Struct* anims = cs ? structOf(cs->find(K("anims"))) : nullptr;
             const uint32_t key = anims ? keyOf(anims->find(model_->member.object)) : 0;
             if (!key || key == K("none")) continue;
@@ -521,7 +525,34 @@ bool Animator::init(const Setup& s, std::string& error) {
         disableArms_ = armsDisabled_ = 2;
         leftStrength_.set(0, t0, 0), rightStrength_.set(0, t0, 0);
     }
-    bodyIteration(t0);
+    // setup_character_anims: the anim struct member's facial_anims, also
+    // the default Band_ChangeFacialAnims' fa_type extends [C script].
+    if (model_->member.gh4) {
+        const qb::Struct* part = animProfile();
+        facialAnims_ = part ? keyOf(part->find(K("facial_anims"))) : 0;
+    } else if (const qb::Struct* set = structOf(animSet())) {
+        facialAnims_ = keyOf(set->find(K("facial_anims")));
+    }
+    if (facialAnims_ == K("none")) facialAnims_ = 0;
+    facialAnimsDefault_ = facialAnims_;
+    facialAnim_ = K("idle");
+    // drummer_start_anims with use_drummer_events = 0 (gh4): no stance loop
+    // (Band_ChangeStance ignores the drummer) but initial_drummer_anim:
+    // Drum_Lars_StandardLP_NoTempo for a Metallica band, else
+    // Drum_Andy_StandardLP_NoTempo (also when the Lars clip is absent),
+    // cycling [C script; I: is_current_band_metallica as "the drummer is Lars"].
+    const anim::Clip* drumLoop = nullptr;
+    uint32_t drumKey = 0;
+    if (role_ == band::Role::Drummer && model_->member.gh4 && [&] { const qb::Value* v = g_->find(K("use_drummer_events")); return v && v->number() == 0; }()) {
+        drumKey = model_->member.profileName.rfind("LarsUlrich", 0) == 0 ? K("Drum_Lars_StandardLP_NoTempo") : K("Drum_Andy_StandardLP_NoTempo");
+        if (!model_->clip(drumKey)) drumKey = K("Drum_Andy_StandardLP_NoTempo");
+        drumLoop = model_->clip(drumKey);
+    }
+    if (std::getenv("GD10_ANIMLOG"))
+        SDL_Log("anim: role %d: %zu mocap clips, facial_anims %s, anim_set %s", int(role_), mocaps_.size(), qbkey::name(facialAnims_).c_str(),
+                qbkey::name(keyOf(animProfile() ? animProfile()->find(K("anim_set")) : nullptr)).c_str());
+    if (drumLoop) playClip(drumKey, 0, true, t0);
+    else bodyIteration(t0);
     facial(t0);
     return true;
 }
@@ -776,6 +807,7 @@ void Animator::playClip(uint32_t clipKey, uint32_t stance, bool cycle, double t)
     if (guitarLike()) disableArms_ = nextDisableArms_ = 2;
     setArms(disableArms_, t, 0.25f);
     ++bodyGen_;
+    ++stats_.bodyAnims;
     body_.play(c, t, 0.2f);
     bodyKey_ = clipKey;
     scheduleClipEvents(clipKey, t);
@@ -823,19 +855,34 @@ void Animator::strum(int length, double t) {
     schedule(end, Ev::StrumDone, 0, 0, strumGen_);
 }
 
-// facial_anim_loop: anim_set.facial_anims.idle at random, one after another [C script].
-void Animator::facial(double t) {
+// facial_anim_loop: <member>_Info.facial_anims.<facial_anim> (idle when the
+// struct has no such entry) at random, one after another; none, a struct
+// that does not exist (an fa_type with no struct, e.g. the vocalist's
+// _eyesclosed on facial_anims_male_rocker) or one without idle: the loop
+// ends and the face keeps its last clip [C script].
+void Animator::facial(double t, float blend) {
     ++faceGen_;
-    const qb::Struct* set = structOf(animSet());
-    const qb::Struct* fa = set ? structOf(set->find(K("facial_anims"))) : nullptr;
-    const qb::Value* idle = fa ? fa->find(K("idle")) : nullptr;
-    if (!idle || idle->type != qb::Type::Array || !idle->arr || idle->arr->values.empty()) return;
-    const auto& v = idle->arr->values;
+    const qb::Struct* fa = facialAnims_ ? structOf(g_->find(facialAnims_)) : nullptr;
+    if (!fa || !fa->find(K("idle"))) return;
+    const qb::Value* arr = fa->find(facialAnim_);
+    if (!arr) arr = fa->find(K("idle"));
+    facialAnim_ = K("idle");
+    if (!arr || arr->type != qb::Type::Array || !arr->arr || arr->arr->values.empty()) return;
+    const auto& v = arr->arr->values;
     const anim::Clip* c = clip(keyOf(&v[random(uint32_t(v.size()))]));
-    face_.play(c, t, 0);
+    face_.play(c, t, blend);
     ++stats_.facials;
     // hero_wait_until_anim_finished, then Wait 1 gameframe [C script].
     schedule(t + (c ? double(c->duration) * 1000.0 : 0.0) + kFrameMs, Ev::FaceDone, 0, 0, faceGen_);
+}
+
+// play_special_facial_anim: the anim (no blend), then facial_anim_loop again [C script].
+void Animator::playFacial(uint32_t anim, double t) {
+    const anim::Clip* c = clip(anim);
+    ++faceGen_;
+    face_.play(c, t, 0);
+    ++stats_.facials;
+    schedule(t + (c ? double(c->duration) * 1000.0 : 0.0), Ev::FaceDone, 1, 0, faceGen_);
 }
 
 void Animator::handle(const Event& e) {
@@ -900,12 +947,24 @@ void Animator::handle(const Event& e) {
             idle.items.push_back(flag);
             playAnimEvent(idle, t);
         } else if (scr == K("band_playfacialanim")) {
-            // play_special_facial_anim: the anim, then the loop again [C script].
-            const anim::Clip* c = clip(keyOf(p->find(K("anim"))));
-            ++faceGen_;
-            face_.play(c, t, 0);
-            ++stats_.facials;
-            schedule(t + (c ? double(c->duration) * 1000.0 : 0.0), Ev::FaceDone, 1, 0, faceGen_);
+            playFacial(keyOf(p->find(K("anim"))), t);
+        } else if (scr == K("band_changefacialanims")) {
+            // Band_ChangeFacialAnims: ff_anims / mf_anims by the body's sex,
+            // else facial_anims_default extended by fa_type (ExtendCRC) or the
+            // default itself; then facial_anim_loop again with blend_duration
+            // (0.3 s) [C script].
+            const qb::Value* ff = p->find(K("ff_anims"));
+            const qb::Value* mf = p->find(K("mf_anims"));
+            if (ff || mf) {
+                facialAnims_ = keyOf(model_->member.female ? ff : mf);
+            } else if (const qb::Value* type = p->find(K("fa_type")); type && type->type == qb::Type::String) {
+                facialAnims_ = facialAnimsDefault_ ? extendKey(facialAnimsDefault_, type->str) : 0;
+            } else {
+                facialAnims_ = facialAnimsDefault_;
+            }
+            if (facialAnims_ == K("none")) facialAnims_ = 0;
+            const qb::Value* bd = p->find(K("blend_duration"));
+            facial(t, bd ? float(bd->number()) : 0.3f);
         }
         // Band_WalkToNode: not reproduced (docs/band.md "Gaps").
         break;
@@ -1047,7 +1106,8 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
     std::vector<anim::BonePose> tmp;
     Pose pose = rig_.bind;
     evalNode(rig_, body_, ms, pose, true, tmp);
-    evalNode(rig_, face_, ms, pose, false, tmp);
+    static const bool noFace = std::getenv("GD10_NO_FACE") != nullptr;  // development aid: the bind face
+    if (!noFace) evalNode(rig_, face_, ms, pose, false, tmp);
     if (guitarLike()) {
         const float l = leftStrength_.at(ms), r = rightStrength_.at(ms);
         evalDelta(rig_, leftArm_, ms, l, pose, tmp);
