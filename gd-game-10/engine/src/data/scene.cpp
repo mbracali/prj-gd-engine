@@ -187,6 +187,15 @@ std::vector<VertexElement> vertexDeclaration(uint32_t fl) {
 
 std::vector<std::array<uint32_t, 3>> Mesh::triangles() const {
     std::vector<std::array<uint32_t, 3>> tris;
+    if (quadList) {
+        // A quad (a, b, c, d) as (a, b, c) and (a, c, d).
+        for (size_t k = 0; k + 3 < indices.size(); k += 4) {
+            const uint32_t a = indices[k], b = indices[k + 1], c = indices[k + 2], d = indices[k + 3];
+            if (a != b && b != c && a != c) tris.push_back({a, b, c});
+            if (a != c && c != d && a != d) tris.push_back({a, c, d});
+        }
+        return tris;
+    }
     if (triangleList) {
         for (size_t k = 0; k + 2 < indices.size(); k += 3) {
             const uint32_t a = indices[k], b = indices[k + 1], c = indices[k + 2];
@@ -303,6 +312,10 @@ Scene parseGh4(const View& v, const uint8_t* data, size_t end, Kind kind) {
         Mesh m;
         m.sphere = v.floats<4>(mo);
         m.triangleList = true;
+        // +0x84: the primitive type, 4 (D3DPT_TRIANGLELIST) or 13 (D3DPT_QUADLIST:
+        // the crowd card meshes, 15 on the disc's zones, every one of them a
+        // multiple of 4 indices, 8 of them not of 3) [C data].
+        m.quadList = M(0x84) == 0xD;
         m.material = M(0x4C);
         m.vertexFlags = M(0x24);
         m.word10 = M(0x28), m.word18 = M(0x40), m.word58 = M(0x44), m.word68 = M(0x84), m.word78 = M(0x78);

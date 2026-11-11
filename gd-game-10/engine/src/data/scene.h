@@ -72,6 +72,7 @@ struct Mesh {
 
     std::vector<uint16_t> indices;  // triangle strips; 0x7fff restarts a strip (gh4: a triangle list)
     bool triangleList = false;      // gh4 scenes (docs/formats.md "Scenes")
+    bool quadList = false;          // gh4 mesh +0x84 = 13 (D3DPT_QUADLIST; else 4, a triangle list): the crowd cards
     std::vector<SkinGroup> skinGroups;
 
     std::vector<std::array<uint32_t, 3>> triangles() const;  // strips -> list, degenerate ones dropped

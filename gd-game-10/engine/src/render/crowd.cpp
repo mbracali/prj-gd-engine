@@ -3,7 +3,6 @@
 #include "render/crowd.h"
 
 #include <SDL3/SDL_log.h>
-#include <SDL3/SDL_stdinc.h>
 
 #include <algorithm>
 #include <cmath>
@@ -102,11 +101,20 @@ bool Crowd::start(const Disc& disc, const Globals& g, const venue::Venue& v, con
         blendMed_ = qbNumber(g, K("Crowd_BlendTime_Med"), 0.4f), blendFast_ = qbNumber(g, K("Crowd_BlendTime_Fast"), 0.2f);
         const qb::Struct* profiles = structOf(g.find(K("Crowd_Profiles")));
         const size_t n = arr->arr->values.size();
-        // style imposter_rendering (128 x 256), imposter_rendering_highres
-        // (256 x 512) with at most six peds on Xenon [C scripts
-        // create_crowd_models, tod_profiles.qb Default_TOD_Manager.styles].
-        width_ = n <= 6 ? 256 : 128;
-        height_ = width_ * 2;
+        // The atlas: imposter_rendering_highres_quad_base (1024 x 1024) with
+        // at most six peds on Xenon, else imposter_rendering_quad_base
+        // (768 x 768); each ped's cell: its HRViewportParams / ViewportParams
+        // rect [C scripts create_crowd_models, viewport_params].
+        const bool hires = n <= 6;
+        const qb::Struct* styles = structOf(g.find(K("viewport_params")));
+        auto style = [&](uint32_t k) { return styles ? structOf(g_->field(*styles, k)) : nullptr; };
+        if (const qb::Struct* base = style(hires ? K("imposter_rendering_highres_quad_base") : K("imposter_rendering_quad_base"))) {
+            if (const qb::Value* w = base->find(K("width"))) width_ = int(w->number());
+            if (const qb::Value* h = base->find(K("height"))) height_ = int(h->number());
+        } else {
+            width_ = height_ = hires ? 1024 : 768;
+        }
+        fov_ = qbNumber(g, K("crowd_ped_camera_fov"), 21.0f);
         for (size_t i = 0; i < n; ++i) {
             const qb::Struct* e = structOf(&arr->arr->values[i]);
             if (!e || e->find(K("remap_only"))) continue;
@@ -115,6 +123,14 @@ bool Crowd::start(const Disc& disc, const Globals& g, const venue::Venue& v, con
             p.card = keyOf(e->find(K("textureasset")));
             const std::string model = strOf(e->find(K("Model")));
             if (!p.card || model.empty()) continue;
+            // The cell: rect = [x0, y0, x1, y1] of the atlas [C data].
+            float rect[4] = {0.25f * float(i % 4), 0.5f * float((i / 4) % 2), 0.25f * float(i % 4 + 1), 0.5f * float((i / 4) % 2 + 1)};
+            if (const qb::Struct* st = style(keyOf(e->find(hires ? K("HRViewportParams") : K("ViewportParams")))))
+                if (const qb::Value* r = st->find(K("rect")); r && r->type == qb::Type::Array && r->arr && r->arr->values.size() == 4)
+                    for (size_t c = 0; c < 4; ++c) rect[c] = r->arr->values[c].number();
+            p.cell[0] = int(std::lround(rect[0] * float(width_))), p.cell[1] = int(std::lround(rect[1] * float(height_)));
+            p.cell[2] = int(std::lround((rect[2] - rect[0]) * float(width_))), p.cell[3] = int(std::lround((rect[3] - rect[1]) * float(height_)));
+            if (p.cell[2] <= 0 || p.cell[3] <= 0) continue;
             p.model = std::make_unique<band::Model>();
             p.model->skeleton = ske;
             if (!loadSkin(zone, modelKey(model), *p.model, error)) return false;
@@ -137,11 +153,13 @@ bool Crowd::start(const Disc& disc, const Globals& g, const venue::Venue& v, con
             if (const qb::Struct* prof = profiles ? structOf(profiles->find(p.name)) : nullptr)
                 p.animSet = structOf(g.find(keyOf(prof->find(K("anim_set")))));
             if (!p.animSet) p.animSet = structOf(g.find(K("crowd_animations")));
-            // pos = (-500, -200, 0) + (0, -100, 0) x index, Quat (0, 1, 0); roty
-            // turns it (obj_setorientation y) [C script; I: degrees, absolute].
+            // pos = (-500, -200, 0) + (0, -100, 0) x index, Quat (0, 1, 0)
+            // (180 degrees); a roty turns it to 180 + roty (obj_setorientation
+            // y; Cheat_SnobCrowd adds 180, not done) [C script create_crowd_models;
+            // I: degrees, absolute].
             p.pos = {-500.0f, -200.0f - 100.0f * float(i), 0.0f};
             const qb::Value* ry = e->find(K("roty"));
-            const bandanim::Quat q = ry ? yRot(ry->number()) : yRot(180.0f);
+            const bandanim::Quat q = yRot(180.0f + (ry ? ry->number() : 0.0f));
             bandanim::Xf xf{q, {p.pos[0], p.pos[1], p.pos[2]}};
             p.root = bandanim::matOf(xf);
             p.rng = 0x9E3779B97F4A7C15ull ^ (uint64_t(p.name) << 7) ^ i;
@@ -167,9 +185,13 @@ int Crowd::attachStep(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Libr
     if (!attachBegun_) {
         dev_ = &dev;
         view_.setLibrary(std::move(lib));
-        view_.setView(float(width_) / float(height_), true, true);
         attachBegun_ = true;
         attached_ = 0;
+        gfx::TargetDesc td;
+        td.width = width_, td.height = height_;
+        td.depth = true;
+        atlas_ = dev.createTarget(td, error);
+        if (!atlas_) return -1;
     }
     if (attached_ >= peds_.size()) return 1;
     {
@@ -180,19 +202,13 @@ int Crowd::attachStep(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Libr
             std::string lerr;
             p.lighterView = view_.add(dev, *p.lighterModel, lerr);
         }
-        gfx::TargetDesc td;
-        td.width = width_, td.height = height_;
-        td.depth = true;
-        p.target = dev.createTarget(td, error);
-        if (!p.target) return -1;
     }
     return attached_ >= peds_.size() ? 1 : 0;
 }
 
 void Crowd::shutdown() {
-    if (dev_)
-        for (Ped& p : peds_)
-            if (p.target) dev_->destroyTarget(p.target), p.target = {};
+    if (dev_ && atlas_) dev_->destroyTarget(atlas_);
+    atlas_ = {};
     view_.shutdown();
     dev_ = nullptr;
     attachBegun_ = false, attached_ = 0;
@@ -313,9 +329,14 @@ void Crowd::render(double ms, const venue::CamPose& cam, const venue::Venue& v, 
         q = {(at[0] + x[2]) / s, (at[1] + y[2]) / s, 0.25f * s, (x[1] - y[0]) / s};
     }
     view_.setTime(ms / 1000.0);
+    // The atlas cleared once (alpha 0: render_to_texture_with_alpha), then
+    // each ped into its cell [C data viewport_params].
     const float clear[4] = {0, 0, 0, 0};
+    d.setTarget(atlas_);
+    d.setViewport(0, 0, width_, height_);
+    d.clear(clear, true);
     for (Ped& p : peds_) {
-        if (!p.target || p.view < 0) continue;
+        if (p.view < 0) continue;
         bandanim::Pose pose = p.rig.bind;
         bandanim::evalBody(p.rig, p.body, ms, pose);
         bandanim::worldMatrices(p.rig, pose, p.world);
@@ -324,10 +345,9 @@ void Crowd::render(double ms, const venue::CamPose& cam, const venue::Venue& v, 
         venue::CamPose pc;
         pc.pos = {p.pos[0] - at[0] * 3.5f, p.pos[1] + 1.0f - at[1] * 3.5f, p.pos[2] - at[2] * 3.5f};
         pc.rot = q;
-        pc.fov = 20.0f;  // sethfov hfov = 20.0 [C]
-        d.setTarget(p.target);
-        d.setViewport(0, 0, width_, height_);
-        d.clear(clear, true);
+        pc.fov = fov_;  // sethfov hfov = $crowd_ped_camera_fov [C]
+        view_.setView(float(p.cell[2]) / float(p.cell[3]), true, true);
+        d.setViewport(p.cell[0], p.cell[1], p.cell[2], p.cell[3]);
         BandView::Instance in;
         in.member = p.lighters && p.lighterView >= 0 ? p.lighterView : p.view;
         in.skin = &p.skin;
@@ -337,31 +357,10 @@ void Crowd::render(double ms, const venue::CamPose& cam, const venue::Venue& v, 
     }
     d.setTarget(oldTarget);
     d.setViewport(vx, vy, vw, vh);
-    // Development aid: GD10_CROWD_DEBUG=1 draws the peds' views in the frame's corner.
-    static const bool debug = SDL_getenv("GD10_CROWD_DEBUG") != nullptr;
-    if (debug) {
-        int k = 0;
-        view_.setView(float(width_) / float(height_), true, false);
-        for (Ped& p : peds_) {
-            venue::CamPose pc;
-            pc.pos = {p.pos[0] - at[0] * 3.5f, p.pos[1] + 1.0f - at[1] * 3.5f, p.pos[2] - at[2] * 3.5f};
-            pc.rot = q;
-            pc.fov = 20.0f;
-            d.setViewport(vx + 120 * k++, vy, 120, 240);
-            BandView::Instance in;
-            in.member = p.view;
-            in.skin = &p.skin;
-            in.root = p.root;
-            in.lightGroups = {K("Crowd")};
-            view_.draw(pc, {in}, v, lights, show);
-        }
-        d.setViewport(vx, vy, vw, vh);
-        view_.setView(float(width_) / float(height_), true, true);
-    }
 }
 
 gfx::TextureId Crowd::texture(uint32_t card) const {
     for (const Ped& p : peds_)
-        if (p.card == card && p.target && dev_) return dev_->targetTexture(p.target);
+        if (p.card == card && atlas_ && dev_) return dev_->targetTexture(atlas_);
     return {};
 }

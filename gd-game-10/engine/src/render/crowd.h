@@ -23,11 +23,14 @@ struct Chart;
 // crowd_play_adjusting_random_anims in guitar_crowd.qb; docs/venues.md
 // "Crowd"): a few 3D crowd peds (<zone>_crowd_models: a skin of the zone
 // pak on the GH3_Ped skeleton, clapping hands from global.pak) stand far
-// below the venue, each rendered every frame by its own camera (20 degree
-// field of view, 3.5 m away, turned with the venue camera) into a 128 x 256
-// (six peds or fewer: 256 x 512) viewport texture that replaces one of the venue's tw_billboard cards
-// (CreateViewportTextureOverride): every card quad of the crowd shows one
-// of these renders. The peds dance their Crowd_Profiles anim set, picked by
+// below the venue, each rendered every frame by its own camera (21 degree
+// field of view, 3.5 m away, turned with the venue camera). gh4 renders
+// them into one atlas (crowd_base_viewport, crowd_atlas0.dds: 1024 x 1024
+// for six peds or fewer on Xenon, else 768 x 768), each ped into its own
+// cell (imposter_rendering[_highres]_quad<n>.rect: 4 columns x 2 rows);
+// the atlas replaces the cards' texture (CreateViewportTextureOverride) and
+// each card quad's coordinates pick a cell [C scripts create_crowd_models,
+// guitar_crowd_data.qb; data: the cards' uv0 span the cells]. The peds dance their Crowd_Profiles anim set, picked by
 // the rock meter (bad / normal / good) and the song's tempo.
 class Crowd {
 public:
@@ -80,7 +83,7 @@ private:
         std::unique_ptr<band::Model> lighterModel;  // the same ped with the right hand's lighter
         bool lighters = false;  // the state its anims follow
         double checkedAt = -1e18;  // the last game frame crowd_monitor_performance looked at
-        gfx::TargetId target;
+        int cell[4] = {0, 0, 0, 0};  // x, y, w, h in the atlas
     };
     const anim::Clip* pick(Ped& p, double t, float& blend);
     uint32_t random(Ped& p, uint32_t n);
@@ -92,7 +95,9 @@ private:
     std::vector<int32_t> fretbars_;
     float slowTempo_ = 75, medTempo_ = 115, fastTempo_ = 145;
     float blendTempo_ = 0.67f, blendBad_ = 0.5f, blendSpecial_ = 0.4f, blendSlow_ = 0.6f, blendMed_ = 0.4f, blendFast_ = 0.2f;
-    int width_ = 128, height_ = 256;  // the imposter viewport
+    int width_ = 1024, height_ = 1024;  // the atlas (crowd_base_viewport)
+    float fov_ = 21.0f;                  // crowd_ped_camera_fov
+    gfx::TargetId atlas_;
     std::vector<Ped> peds_;
     std::vector<std::pair<double, double>> lighterSpans_;
     gfx::RenderDevice* dev_ = nullptr;
