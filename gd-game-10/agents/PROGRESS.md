@@ -409,3 +409,72 @@ counted). Not done: cold driver caches still cost one program per frame
 (core OpenGL 3: up to ~100 ms each, gd10 cannot make it asynchronous);
 Vulkan pipelines are made by the core at first draw (one 66 ms frame on a
 cold RADV cache).
+
+## 2026-11-11 15:50 Owner's play, wave 1 (lead agent: GD10-033..038)
+
+Load times (GD10-034). Every run now logs `load: <phase> at <wall> ms
+(cpu <ms>)` for the start (SDL, window, disc and scripts, resident
+textures, front end, first frame), each flow state, and `load: song request
+to the song's start` (devaids/load_times.h). Measured (offscreen, NVIDIA,
+the machine shared with two other agents' builds; idle runs):
+- Start to the first frame: 1.47 s -> 1.25 s (global_sfx.pak, 0.44 s of
+  inflate, now read on a worker while the scripts load). On a busy machine
+  the same took 6-9 s of wall time for 2.4 s of CPU (disc reads waiting).
+- A song's request (its loading screen) to its start: at least 2 s (the
+  port's 2 s hold, GD10-040) -> 0.8-1.4 s (D23: gh4 has no minimum).
+- Boot to the main menu is the original's own waits: the legal screen 6 s
+  (ui_boot_legal_wait), the movies (skippable), the save check's 3 s + 1 s
+  (memcard_wait_for_timer, OPEN_QUESTIONS 6), the download scan's 1 s, the
+  main menu intro. The way back to the set list: the autosave's 3 s + 1 s.
+- Not found: no load done twice on the path (Pak::shared caches; zones,
+  venue, particles already on workers since GD10-032).
+
+PC wording (GD10-035, D24): every localized string (qs.pak, 10,847) is
+rewritten as it loads; `--scripttest` fails on any naming the console.
+Seen on the Save / Load screens ("Please don't turn off the system.").
+
+Universal menus (GD10-037): the Enhanced menu and GAMEPADS were already
+there from gd04's copy (Settings' ENHANCED pill, the main menu's GAMEPADS
+pill); their cheats were GH3's: now gh4's guitar_hero_cheats (D25). New
+`--walktest enhanced`: fresh save defaults, rows change values, export /
+load settings, two cheats; `--walktest gamepads` passes;
+enhanced_backends now reaches SETTINGS by keys. The mouse walk is GH3's
+(main_menu_options_text does not exist in gh4) and fails as before.
+
+Menu overlaps (GD10-038): the menus walk now shoots the main menu after
+each of the seven sub-menus: all eight shots are the same (no image left
+over). Not reproduced at the first level.
+
+Fixed on the way: `--song <id>` spun for ever in VenueStage::attach
+(hitch::slice refused every piece after the frame's first; hitch::AllAtOnce).
+
+Characters (GD10-033, characters agent, D30..D33): gh4 .ske (225 of 251:
+24 LZSS ragdoll skeletons, 2 mirror-name), .skin (2,166) and .ska (8,255)
+decoded (docs/formats.md); the band drawn and animated in songs (mocap clips
+from <song>_performance, loops, strums, frets, the drummer's kit),
+instruments from song_specific_instrument_data; band and crowd attached a
+member / ped a frame. CAS: GetLogicFrame, CASBlockForLoading and the other
+queue natives added (the queue should empty), no CAS screen walked and
+build_band_member_from_appearance unwritten: no CAS character in the menus.
+Not done: face / body deform, CAS texture compositing, ragdolls, the mocap
+cameras, Band_WalkToNode, the crowd checked only in passing.
+
+Screen effects (GD10-036, screen FX agent, D40..D42): gh4's uber pass
+(bloom2, dof3 near and far, noise2, bright_sat after the bloom, vignette,
+inkblotch) and the camera notes' profiles (One: Default, NoisyDefault,
+BW_Grainy, BW_Grungy). Before: GH3's chain, no grain, vignette or ink.
+CPU 0.11 ms a frame. Not done: godray (Metal_HotBlue only), camera notes
+101..108 (blur, flashes, fades), the CPU constants (VMX128), bloom2's
+equation.
+
+Checked by the lead (entersandman 30 s / 60 s, the characters agent's
+shots): the band is drawn (Rob's close-up with his bass, the drummer's kit),
+but many camera shots look at the stage floor or the members' feet and the
+venue reads very dark: the gh4 camera targets (mocap cameras, the shots'
+look-at nodes) are the next thing to check (GD10-033).
+
+Gate (16:11 tree, engine/build/lead, headless, scratch XDG): walks boot,
+quickplay (load window worst 26.5 ms, 0 over 50), menus, qp_pause,
+enhanced, gamepads passed; `--scripttest`, `--sfxtest`, `--venuetest`
+(entersandman, 10 venues) pass; `--selftest` 31 FAILED (as expected);
+`tools/fuzz_seeds.sh`: 13 / 13 passed.

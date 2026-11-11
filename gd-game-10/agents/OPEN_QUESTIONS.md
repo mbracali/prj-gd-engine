@@ -21,3 +21,9 @@ and is listed for the owner to confirm or change.
 5. Drums: flag 0x2000 is set only on Expert drum notes (1,012 of 2,201 in
    Master of Puppets, on kick and non-kick notes) [C data]; whether it is
    the Expert+ double kick is not confirmed in the XEX yet.
+6. Save-data messages (GD10-034): gh4's memcard scripts keep "Loading /
+   Saving content" up at least 3 s (memcard_wait_for_timer) and the
+   "successful" box 1 s, at the boot and after every song (about 4 s each);
+   the port keeps them, as the original [C script guitar_memcard.qb]. They
+   are console rules (storage messages shown 3 s); cutting them would make
+   the boot and the way back to the set list ~4 s shorter. Owner to decide.

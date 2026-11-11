@@ -228,3 +228,47 @@ tag cheat_index<i>, cheat_set_globals, exclude_option,
 refresh_autokick_cheat) and unlocks the cheat (unlock_Cheat_<name>).
 EXTRA LINE 6 TONES (not_toggle) and Superuser are not rows. Undo:
 ui/port_enhanced.cpp gh4Cheats / setCheat.
+
+## D30. gh4's band from band_builder's logic [I] (2026-11-11, characters agent)
+
+What: data/band.cpp chooseBandGh4 builds the song's band as band_builder
+does (the song struct's band, player 1's character on its part); a
+RandomCharacter band gets a Modifiable preset rocker per part until the CAS
+randomizer is in. Undo: data/band.cpp chooseBandGh4.
+
+## D31. CAS parts read entry by entry from the raw CAS paks [I]
+
+What: a header-only index of DATA/PAK/CAS (24+ paks, 375 MB); a part is the
+key of its mesh's base name [C data]; how the engine looks parts up is [I].
+
+## D32. Band_PlayClip mocap on the GH3 animator's body node [I]
+
+What: the clip plays from its start frame on the body node; the arms on or
+off as the clip struct says.
+
+## D33. Band and crowd attach one member / ped a frame
+
+What: textures and programs requested and settled a slice a frame (the
+quickplay walk's load window: 808 ms worst before, 29 ms after).
+
+## D40. gh4's screen effects through the uber pass [C shaders, I constants] (screen FX agent)
+
+What: 824B8460 sets a flag per effect (bloom2 / godray 1, dof3 2, noise2 4,
+bright_sat 8, vignette 0x10, inkblotch 0x20); 8251EC80 draws them in one
+pass, sys_uberscreenfx with the _Uber_ScreenFX template plus _bloom1 _dof1
+_noise1 _color1 _vignette1 _inkblot1 [C]. Order: DOF lerp, + bloom, colour
+matrix (bright_sat after the bloom), noise, vignette, ink. The constants the
+CPU writes (VMX128) are inferred: g_DOF0 = (nearEnd, nearEnd - nearBegin,
+farBegin, farEnd - farBegin), g_Color = (rgb, intensity), bloom2's matrix,
+blur widths, g_Random each frame, ink every intervala..intervalb s. Undo:
+render/screen_fx.cpp endUber / readEntry.
+
+## D41. Camera notes pick the TOD profile [C scripts]
+
+What: camera notes 81..127 (CameraCuts_SetNextScreenFx) swap the list for a
+Metal_*_tod_manager at the next cut, then the shot's DOF.
+
+## D42. The vignette mask is generated [I]
+
+What: sys_vignettemask names no texture on the disc: alpha x saturate((r -
+inner) / (outer - inner)). ScreenFlash's FlashBS stays a pass after the uber.
