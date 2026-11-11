@@ -152,8 +152,13 @@ bool FrontEnd::attractMode() const {
 }
 
 void FrontEnd::startPressed() {
-    // Start in a song: GH3's gh3_start_pressed (the pause menu's flow action) [C script guitar_pause.qb].
-    vm_->spawn(qbkey::key("gh3_start_pressed"), qb::Struct{});
+    // Start in a song: gh4's gameplay state gives root_window the pad_start
+    // handler handle_pause_event, which spawns gh3_start_pressed with
+    // from_handler: only then does pausegh3 open uistate_pausemenu [C scripts
+    // guitar_pause.qb, ui_gameplay]. GH3's discs: gh3_start_pressed itself.
+    const uint32_t h = qbkey::key("handle_pause_event");
+    if (const qb::Value* g = vm_->global(h); g && g->type == qb::Type::Script) vm_->spawn(h, qb::Struct{});
+    else vm_->spawn(qbkey::key("gh3_start_pressed"), qb::Struct{});
 }
 
 void FrontEnd::songEnded(const SongResult& r) {

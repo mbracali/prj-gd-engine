@@ -133,6 +133,12 @@ private:
     std::array<int, size_t(Action::Start) + 1> presses_{};
     int sideBase_ = 0, rightBase_ = 0;
     int seek_ = 0;  // setlist:<song> presses so far
+    // fuzz:<n> (the fuzz walk): presses left, the random state, when a menu
+    // was last seen focused and the presses made.
+    int fuzzLeft_ = -1;
+    uint32_t fuzzRng_ = 1;
+    double fuzzOkAt_ = -1;
+    int fuzzPresses_ = 0;
     unsigned adapter_ = 0;  // stickyaxis: the virtual adapter (SDL_JoystickID)
     bool expectQuit_ = false, quitSeen_ = false;
 };

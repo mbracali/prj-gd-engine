@@ -48,7 +48,25 @@ Walk::Walk(const std::string& name) : name_(name) {
         {"uistate_optimal_drum", {"wait", "wait", C}, 60000, true},
         {"main_menu_fs", {}, 60000},
     };
-    if (name == "qp4" || name == "quickplay") {
+    if (name == "qp_pause") {
+        // gh4 pause: Quickplay to a song, Esc pauses (the pause menu), Back
+        // resumes, Esc again, then the pause menu's items one by one.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", D, C}, 10000});
+        steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
+        steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000});
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000});
+        steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, "wait", C}, 20000});
+        steps_.push_back({"song", {Op("wait", 3000), "key:Escape"}, 30000});
+        steps_.push_back({"uistate_pausemenu", {"wait", "wait", "wait", "shot:pause_menu@", B}, 20000});
+        steps_.push_back({"song", {Op("wait", 2000), "key:Escape"}, 20000});
+        steps_.push_back({"uistate_pausemenu", {"wait", "wait", "wait", D, "wait", "shot:pause_1@", D, "wait", "shot:pause_2@", D, "wait",
+                                                "shot:pause_3@", D, "wait", "shot:pause_4@", D, "wait", "shot:pause_5@", "wait"}, 20000});
+    } else if (name == "qp4" || name == "quickplay") {
         // gh4 (Metallica) Quickplay (M4): the main menu's
         // QUICKPLAY (second item), single player, guitar, the set list.
         steps_ = boot;
@@ -436,6 +454,13 @@ Walk::Walk(const std::string& name) : name_(name) {
             steps_.push_back({"main_menu_fs", k, 30000});
         }
         steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "shot:menus_end@"}, 30000});
+    } else if (name == "fuzz") {
+        // Random menu presses from the main menu (GD10_SEED, GD10_FUZZ_PRESSES,
+        // default 300); then Back to the main menu.
+        const char* n = SDL_getenv("GD10_FUZZ_PRESSES");
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", Op(std::string("fuzz:") + (n && *n ? n : "300")), "wait", "wait", "wait", "wait", "backto:main_menu_fs"}, 20000});
+        steps_.push_back({"main_menu_fs", {"wait", "shot:fuzz_end@"}, 20000});
     } else if (name == "back") {
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
@@ -829,6 +854,18 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
             return out;
         }
     }
+    // The fuzz walk's check (fuzz:<n>): a focused menu or item and some text.
+    if (fuzzLeft_ > 0 && !songPlaying) {
+        bool focus = false;
+        for (const ui::Element* e : fe.ui().focusedElements())
+            if (e != &fe.ui().root()) focus = true;
+        if ((focus && !fe.ui().visibleTexts().empty()) || fe.ui().loadingScreenUp()) fuzzOkAt_ = now;
+        else if (fuzzOkAt_ >= 0 && now - fuzzOkAt_ > 8000) {
+            failed_ = true, failure_ = "no focused menu for 8 s at " + flowState(fe) + " after " + std::to_string(fuzzPresses_) + " presses";
+            SDL_Log("walk: FAILED: %s", failure_.c_str());
+            return out;
+        }
+    }
     const Step& s = steps_[step_];
     if (reachedAt_ < 0) {
         bool reached;
@@ -937,6 +974,36 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
                     out.push_back(Press{above ? Action::Up : Action::Down, op.player});
                 } else {
                     SDL_Log("walk: setlist on %s (tier %d, song %d)", op.act.substr(8).c_str(), tier, song);
+                }
+            } else if (op.act.rfind("fuzz:", 0) == 0) {
+                // "fuzz:<n>": n random menu presses (GD10_SEED), one each 350 ms.
+                // Confirm is skipped on the difficulty screen (no song starts).
+                // The check: some menu or item keeps the focus and some text
+                // is shown, never failing for 8 s in a row (menus that vanish
+                // or lose the focus; gd05's fuzz walk found such) [port check].
+                if (fuzzLeft_ == -1) {
+                    fuzzLeft_ = std::atoi(op.act.c_str() + 5);
+                    const char* seed = SDL_getenv("GD10_SEED");
+                    fuzzRng_ = seed && *seed ? uint32_t(std::strtoul(seed, nullptr, 10)) | 1u : 12345u;
+                    fuzzOkAt_ = now;
+                }
+                if (fuzzLeft_ > 0) {
+                    --fuzzLeft_;
+                    --key_;
+                    lastKey_ = now + 50.0;
+                    fuzzRng_ = fuzzRng_ * 1664525u + 1013904223u;
+                    static const Action acts[] = {Action::Up, Action::Down, Action::Down, Action::Up, Action::Confirm, Action::Confirm, Action::Back,
+                                                  Action::Left, Action::Right};
+                    Action a = acts[(fuzzRng_ >> 16) % 9];
+                    // No song or tutorial starts (they would need the pause menu to leave).
+                    if (a == Action::Confirm && (flowState(fe) == "uistate_select_difficulty" || flowState(fe) == "uistate_select_tutorial"))
+                        a = Action::Back;
+                    ++fuzzPresses_;
+                    if (SDL_getenv("GD10_WALKLOG")) SDL_Log("walk: fuzz %d at %s", int(a), flowState(fe).c_str());
+                    out.push_back(Press{a, op.player});
+                } else {
+                    SDL_Log("walk: fuzz: %d presses, the menus kept the focus", fuzzPresses_);
+                    fuzzLeft_ = -2;  // done
                 }
             } else if (op.act.rfind("backto:", 0) == 0) {
                 // "backto:<state>": Back (one press a second) until that screen
