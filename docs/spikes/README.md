@@ -25,6 +25,12 @@ newer one on the same topic replaces or merges.
 | [study_shader_ports.md](study_shader_ports.md) | 2026-10-28 | Worth it selectively: GH2 bloom/grade/DOF, GPU flare test and crowd cards fit GH1 (days each); normal/spec/env maps lack data. Proposes a shared `gd-engine-fx` library. | candidates in file |
 | [study_additive_music_menu.md](study_additive_music_menu.md) | 2026-11-10 | Do it (#58): a shared song library in gd-engine-core reads every installed disc in memory; each game keeps its list and adds the other games' songs in a separate section (GH3: DOWNLOADS tab), quickplay only, host rules, source HOPOs. Waves: GH1+GH2+Encore, then GH3, then RB. About 11 to 13 h of agent time. | GDALL-042 |
 | [colabs01.md](colabs01.md) | 2026-11-10 | Other recompilation projects (GH5, Band Hero, Warriors of Rock x3, Metallica, Van Halen) and msr2ds HDR: all are static recompilations of the original code, so we take knowledge, not code (5-15 % per game; the big savings come from our own engines per family); licences (MIT notice, re-wor none, msr2ds GPL); good features for every game; an HDR plan for gd-engine-core (8-10 h). Owner's take pending. | GDALL-043 |
+| [GD-GAME-10_KICKOFF.md](GD-GAME-10_KICKOFF.md) | 2026-11-10 | Kickoff: Guitar Hero: Metallica, the proof of concept and first game of the World Tour engine family (from gd-game-04); disc first look; M0-M10; owner's questions | GD10-001 |
+| [GD-GAME-15_KICKOFF.md](GD-GAME-15_KICKOFF.md) | 2026-11-10 | Kickoff: Guitar Hero: Van Halen as a delta on gd-game-10 | GD15-001 |
+| [GD-GAME-12_KICKOFF.md](GD-GAME-12_KICKOFF.md) | 2026-11-10 | Kickoff: Guitar Hero 5, parent of the GH5 engine family; the disc's CHNK compressed container; owner's questions | GD12-001 |
+| [GD-GAME-14_KICKOFF.md](GD-GAME-14_KICKOFF.md) | 2026-11-10 | Kickoff: Band Hero as a delta on gd-game-12 | GD14-001 |
+| [GD-GAME-17_KICKOFF.md](GD-GAME-17_KICKOFF.md) | 2026-11-10 | Kickoff: Guitar Hero: Warriors of Rock, last of the GH5 family (Quest mode powers) | GD17-001 |
+| [GDCORE-HDR_KICKOFF.md](GDCORE-HDR_KICKOFF.md) | 2026-11-10 | Kickoff: shared HDR output for every game in gd-engine-core (H0-H7, ~10 h) | GDCORE-012 |
 
 Each study ends with "Backlog candidates"; the IDs are given in
 [../tasks/gd-backlog.md](../tasks/gd-backlog.md) once the items are added there.

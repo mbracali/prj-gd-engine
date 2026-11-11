@@ -223,6 +223,7 @@ The universal backends every game can load (1.1.13 spec: [engine-backend-guideli
 | GDCORE-009 | Enhancement | ✅ | gd-game-03 behind the core: Graphics backend and Audio backend selectable (default local), Restart Now / Later, backend label | 15:48 -> 16:36 merged and tested; packages 17:34 (Linux, Steam Deck, Windows, Android verified, OpenAL + licences in every module) (graphics ~50 min, audio + menu ~40 min, in parallel). opengl3 within 0.05 % of local (off by 1); sdl3 = vulkan, 1.4-6.1 % (character edges); copyToTarget and opaque targets handled. Walks pass on local / opengl3, quickplay on sdl3 / vulkan (virtual KWin). Left: owner test, True HDR on the core; every backend pair and Restart Now played in the launcher (Linux, 11-06); launcher 1.1.13 | Owner 11-06 (1.1.13) |
 | GDCORE-010 | Enhancement | ✅ | gd-game-04 behind the core: Graphics backend and Audio backend selectable (default local), Restart Now / Later, backend label | 15:48 -> 17:14 merged and tested; packages 17:34 (Linux, Steam Deck, Windows, Android verified, OpenAL + licences in every module) (graphics ~77 min, audio + menu ~17 min, in parallel). Core gained occlusion queries (opengl3, vulkan). opengl3 = local bit-exact; vulkan 0.01-0.09 %; sdl3 draws the venue flares unoccluded (SDL_GPU has no occlusion queries). Song + sound effects through the core audio. Restart Now replays GH3's boot flow under a black screen to reach Enhanced. Walks pass on local / opengl3, quickplay on sdl3 / vulkan. Left: owner test, sdl3 flares; every backend pair and Restart Now played in the launcher (Linux, 11-06); launcher 1.1.13 | Owner 11-06 (1.1.13) |
 | GDCORE-011 | Enhancement | ✅ | Microphone input: an audio *input* (capture) interface next to `gd::core::audio::Output`, backends behind its factory (SDL3 capture; miniaudio capture), its self-test on null / dummy devices | For Rock Band's vocals (gd-game-05 kickoff, owner 11-09: "the microphone, through a new audio input interface in gd-engine-core, so every Rock Band game reuses it"). Only this changes in the core for gd-game-05. Done 11-09: `audio/include/gd/core/audio/input.h`, backends sdl3 and miniaudio, `gdcore_audio_input_selftest` passes on both null devices (docs/audio.md "Input (capture)") | Owner 11-09 (gd-game-05 kickoff) |
+| GDCORE-012 | Enhancement | ❌ kickoff written | Shared HDR for every game and backend: HDR10 PQ / scRGB, metadata following the chosen peak, SDR expansion with a knee, OLED gamma 2.2, UI in its own layer, Peak / Paper White / SDR Gamma / Highlight Boost rows, Steam Deck OLED preset | Kickoff: [docs/spikes/GDCORE-HDR_KICKOFF.md](../spikes/GDCORE-HDR_KICKOFF.md) (owner's answers pending), from [colabs01](../spikes/colabs01.md); ~10 agent hours; needs a Deck OLED / HDR monitor tester | Owner 11-10 |
 | GD01-290 | Bugfix | ✅ | Main guitarist's movement still weird: sometimes a force seems to pull him to a spot | Follows old B85 (docs/character_animation.md §5) Done (gd01 1.1.6): port-only standGuard / snapHome / hold-to-spot removed; the original pose hold (FUN_001958b0) holds where the walk ended; root motion ignores the phase snap. | Wave B 10-28 |
 | GD01-291 | Bugfix | ✅ | The strum icon is broken in half in every menu (as gd-game-02 #10) | Old B29 fixed the help bar's strum icon; it is back gd01 draws the asset exactly as the original (64×16 texture has a light / dark split, same in GH2): need the owner's screenshot or a reference before changing anything. | Wave B 10-28 Owner 11-02: fixed |
 | GD01-037 | Bugfix | ✅ | Weird glitches in the venues | Needs specifics (venue / moment); candidates in "Venue artifacts" below | Bugs 10-21 r1 B3 11-02: not reproduced in a frame sweep of Toxic Summer Fest and the big club (no see-through, no flat frames); the listed causes are fixed (GD01-249, 251, 252) |
@@ -1009,7 +1010,7 @@ universal launcher, not released on its own.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD10-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-10/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
+| GD10-001 | Original | 🟡 kickoff written | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | Kickoff: [docs/spikes/GD-GAME-10_KICKOFF.md](../spikes/GD-GAME-10_KICKOFF.md) (owner's answers pending); knowledge from [colabs01](../spikes/colabs01.md). `gd-game-10/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-11: Guitar Hero: Smash Hits (Xbox 360)
@@ -1023,7 +1024,7 @@ universal launcher, not released on its own.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD12-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-12/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
+| GD12-001 | Original | 🟡 kickoff written | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | Kickoff: [docs/spikes/GD-GAME-12_KICKOFF.md](../spikes/GD-GAME-12_KICKOFF.md) (owner's answers pending); knowledge from [colabs01](../spikes/colabs01.md). `gd-game-12/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-13: Lego Rock Band (Xbox 360)
@@ -1037,14 +1038,14 @@ universal launcher, not released on its own.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD14-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-14/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
+| GD14-001 | Original | 🟡 kickoff written | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | Kickoff: [docs/spikes/GD-GAME-14_KICKOFF.md](../spikes/GD-GAME-14_KICKOFF.md) (owner's answers pending); knowledge from [colabs01](../spikes/colabs01.md). `gd-game-14/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-15: Guitar Hero: Van Halen (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD15-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-15/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
+| GD15-001 | Original | 🟡 kickoff written | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | Kickoff: [docs/spikes/GD-GAME-15_KICKOFF.md](../spikes/GD-GAME-15_KICKOFF.md) (owner's answers pending); knowledge from [colabs01](../spikes/colabs01.md). `gd-game-15/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-16: Green Day: Rock Band (Xbox 360)
@@ -1058,7 +1059,7 @@ universal launcher, not released on its own.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD17-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-17/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
+| GD17-001 | Original | 🟡 kickoff written | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | Kickoff: [docs/spikes/GD-GAME-17_KICKOFF.md](../spikes/GD-GAME-17_KICKOFF.md) (owner's answers pending); knowledge from [colabs01](../spikes/colabs01.md). `gd-game-17/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-18: Rock Band 3 (Xbox 360)
