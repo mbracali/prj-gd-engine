@@ -6,6 +6,7 @@
 #include <SDL3/SDL_stdinc.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -22,7 +23,14 @@
 
 namespace gh3shader {
 
+namespace {
+std::atomic<const Disc*> lastDisc{nullptr};
+}  // namespace
+
+const Disc* libraryDisc() { return lastDisc.load(); }
+
 std::shared_ptr<const matlib::Library> library(const Disc& disc) {
+    lastDisc.store(&disc);
     static std::mutex mutex;
     static std::string cachedPath;
     static std::shared_ptr<const matlib::Library> cached;

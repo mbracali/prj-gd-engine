@@ -28,6 +28,9 @@ namespace gh3shader {
 // The disc's material library (cached; nullptr when the disc has none or
 // it does not parse, with the reason logged once).
 std::shared_ptr<const matlib::Library> library(const Disc& disc);
+// The disc library() last read from (the screen effects' sys textures in
+// ZONES/global.pak go with the library: screen_fx.cpp), or null.
+const Disc* libraryDisc();
 
 // The engine's float constants c64..c255 (one block, both stages) [C:
 // register numbers from the constant tables of all 4,981 shaders]; c64..c99

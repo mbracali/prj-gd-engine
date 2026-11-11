@@ -33,6 +33,11 @@ struct Bloom {  // simple_bloom (Function_8241BC20 parses, Function_8243D240 dra
     float falloff1 = 0, falloff2 = 0;
     bool materialFilter = false, autoLuminance = false;
     float distanceMod = 0;
+    // gh4's bloom2 (parsed by 825074F8 [C: the keys]): `cutoff` holds
+    // subtract, `strength` colormodulate (x its fourth value), drawn through
+    // _Bloom_SubtractModulate(Stencil) and the uber pass (docs/render.md).
+    bool gh4 = false;
+    float saturation = 1, thickness = 0;
 };
 
 struct Dof {  // dof (Function_8241EE68 parses, Function_824440F8 draws) [C params; the chain: screen_fx.cpp]
@@ -43,12 +48,39 @@ struct Dof {  // dof (Function_8241EE68 parses, Function_824440F8 draws) [C para
     // farblurbegin to farblurend in metres (a = strength x saturate((z -
     // begin) / (end - begin))), the near blur (nearblurbegin / end) not drawn [I].
     bool metres = false;
+    // dof3's near blur: nearblurbegin..nearblurend in metres (g_DOF0.xy) [C: the uber shader; I: the constants].
+    float nearBegin = 0, nearEnd = 0;
 };
 
 struct BrightSat {  // bright_sat
     bool on = false;
     float contrast = 1, brightness = 1, saturation = 1, hue = 1;
     float mix[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+};
+
+// gh4's noise2 (the uber pass's noise1: sys_noise tiled `uv` times, moved
+// each frame, g_Color = color / intensity) [C data, shader; I: the constants].
+struct Noise {
+    bool on = false;
+    float intensity = 0;
+    float color[4] = {0.5f, 0.5f, 0.5f, 0.5f};
+    float uv[2] = {8, 6};
+};
+
+// gh4's vignette (vignette1: lerp to colour by the sys_vignettemask texture) [C shader; I: inner / outer / alpha].
+struct Vignette {
+    bool on = false, aspect = false;
+    float inner = 0.5f, outer = 1, alpha = 0.5f;
+    float color[4] = {0, 0, 0, 0};
+};
+
+// gh4's inkblotch (inkblot1: sys_inkblot's colour x scratchcolor added, its
+// alpha x blotchcolor.a lerps to blotchcolor; the texture's placement moved
+// every intervala..intervalb s, rotated rotationa..rotationb degrees) [C data, shader; I: the motion].
+struct InkBlotch {
+    bool on = false;
+    float scratch[4] = {0, 0, 0, 0}, blotch[4] = {0, 0, 0, 0};
+    float intervalA = 0.06f, intervalB = 0.09f, xTiling = 1, yTiling = 1, rotA = 0, rotB = 0;
 };
 
 struct Params {
@@ -61,6 +93,13 @@ struct Params {
     // far_clip of the camera's params, default 400 (822BF1E0, 0x8200fa1c);
     // PlayIGCCam's cameras (the songs' cuts, the menus') give none [C].
     float cameraFar = 400.0f;
+    // gh4: an uberscreenfx entry composes bloom2, dof3, noise2, the first
+    // bright_sat, vignette and inkblotch in one pass (Function_8251EC80) [C].
+    bool uber = false;
+    Noise noise;
+    Vignette vignette;
+    InkBlotch ink;
+    bool godray = false;  // on in Metal_HotBlue: not drawn [open]
 };
 
 // One screen_FX entry (ScreenFX_AddFXInstance's params: Type dof /
@@ -72,6 +111,13 @@ void readEntry(const qb::Struct& e, Params& p, int& brightSlot);
 void readViewport(const Globals& g, uint32_t manager, Params& p);
 // venue_DOF set to a DOF_*_tod_manager's screen_FX[0] (CameraCuts_StartCallback).
 void readDof(const Globals& g, uint32_t manager, Params& p);
+// ApplyScreenFx effect = <next_screenfx> (the songs' camera notes 81..127,
+// CameraCuts_SetNextScreenFx): the TOD manager TOD_Proxim_Apply_<effect>
+// gives bg_viewport, Default_TOD_Manager for none / default [C scripts
+// guitar_cameras.qb, tod_proxims.qb].
+uint32_t effectManager(const Globals& g, uint32_t effect);
+// The viewport's params for a shot: its effect's manager (cached), then its dof.
+void readShot(const Globals& g, uint32_t effect, uint32_t dof, Params& p);
 
 class ScreenFx {
 public:
@@ -124,6 +170,24 @@ private:
     // The scene colour (or a quarter-size pass's result in sceneQ_) into quarterA_.
     void toQuarter(gfx::TextureId sceneColor);
     void bloomBlur(const Target& t, const Target& tmp, float gain);
+    // gh4's chain (p.uber): bloom2's and dof3's buffers, then _Uber_ScreenFX_<parts>.
+    void endUber(const Params& p, gfx::TextureId& cur, const Target*& curT, bool quarters, bool copies);
+    void passN(const gh3shader::Program* prog, const Target* dst, const gfx::TextureId* tex, int n, const gh3shader::Globals& g,
+               const float (*vs)[4], int vsCount, const float (*ps)[4], int psCount, uint32_t pointMask);
+    // sys_noise / sys_vignettemask / sys_inkblot (global_gfx.scn's materials), decoded on a worker.
+    void startSysTextures();
+    bool pollSysTextures();
+    Target bloomA_, bloomB_;
+    gfx::TextureId noiseTex_, vignetteTex_, inkTex_, black_;
+    struct SysTextures;
+    std::shared_ptr<SysTextures> sys_;
+    bool sysDone_ = false;
+    uint32_t frame_ = 0;
+    float vignetteFor_[4] = {-1, -1, -1, -1};  // inner, outer, alpha, aspect of vignetteTex_
+    bool sysVignette_ = false;                 // the disc's sys_vignettemask (else made from the params)
+    void makeVignette(const Vignette& v);
+    double inkNext_ = 0, inkClock_ = 0;
+    float inkMat_[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 0, 0}};
     void dofBlur(const Target& t, const Target& tmp, float radius);
 };
 
