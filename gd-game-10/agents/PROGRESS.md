@@ -26,3 +26,32 @@ stop at about 6 h whatever the milestone.
   offset", "streamall.fsb.xen: not an FSB3 bank", "guitar_startup did not
   start". `--formattest`: 18,202 failures by reason (formats.md "Not
   decoded yet").
+
+## 2026-11-11 02:25 M1-M3 (boot) and M4 (Quickplay song) reached in part
+
+Time so far: about 2 h 45 min of agent time (23:39 -> 02:25).
+
+Verified (fresh binary `engine/build/devv/gd10`, with FFmpeg from gd04's
+local prefix copied under engine/build/ffmpeg/linux):
+- `--walktest boot` -> "walktest boot: passed (UIstate_boot_movie_atvi >
+  ... > uistate_boot_iis > uistate_optimal_drum > main_menu_fs)", "black
+  frames: 0".
+- `--walktest qp4` (Quickplay, being built) reaches the main menu, game
+  mode, instrument, set list, picks a song (Albatross), difficulty Expert,
+  the song starts in z_Forum ("song Albatross (Albatross, Expert): 951
+  notes"), autoplays (streak 54, x4 at 70 s) and the original's YOU ROCK!
+  shows; the walk then waits on gameplay (results not reached).
+- `--selftest`: charts parse and autoplay (688 charts, 497,010 notes); 66
+  failures: 4 DLC songs without audio on the disc (expected), bass open
+  notes in the tapping check, 2 near misses, 5 virtual-controller input
+  checks (gd04 GH2/GH3 types, not looked at).
+- `--songaudiotest entersandman` decodes the three banks (9 stereo pairs).
+- `pak.py check` / `qb.py check` / `qbscript.py check`: 0 problems.
+- Screenshots looked at (git-ignored, agents/scratch/): press start,
+  main menu, drum tip pop-up, double-bass pop-up, difficulty pop-up, set
+  list (partial), the song (debug highway), YOU ROCK!.
+
+Not done / approximate: the highway (debug highway, D13), the venue is not
+drawn (scenes: "material name area not zero"), menu layouts off in places
+(skull art over the career / difficulty menus, set list song names empty),
+results screen, sound effects partly (XMA1 errors on streamall).

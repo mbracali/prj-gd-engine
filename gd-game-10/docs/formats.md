@@ -60,6 +60,58 @@ for `global`, 32 KiB for `qb`; `compress.toc.lst` gives the same sizes)
 - Result: `qb.py check` decodes all 1,544 .qb files to their last byte
   (38,466 sections, 8,853 scripts) [C].
 
+## GZ pak entries
+
+Some pak entries (.img 2,807 of 5,917, .tex 1,881, .skin 2,074, .ske 171,
+.rag 172) start `GZ\0\0`, u32 inflated size (big-endian),
+8 zero bytes, then a raw-deflate stream [C: every one inflates to its
+size]. `pak.py` and `Pak` unwrap them at load.
+
+## Fonts (.fnt)
+
+GH3's layout with one more f32 after `tracking` (1.0 in every font [C data];
+meaning I): every later field moves by 4 (glyph table at 0x200A8). The
+embedded texture's magic is 0x0A281100 (GH3 0x0A281102).
+
+## QS (localized strings)
+
+PAK/qs.pak.xen (English; qs_f/g/i/s/n for the other languages) holds .qs
+entries: UTF-16LE with a BOM, one line per string: 8 hex digits (the key),
+a space, the text in double quotes [C data]. QB type 0x1C and the script
+token 0x4E name a string by that key. Many strings start with `\L` (shown
+without it, I).
+
+## Script bytecode (gh4 additions)
+
+Every script on the disc tokenizes with GH3's table plus [C data]:
+0x4E a u32 localized-string key; 0x4F and 0x50 before a pair: a random
+float / integer in that range (meanings I from their uses).
+
+## Song audio (FSB4)
+
+DATA/MUSIC/<song>_1 .. _3.fsb.xen: FSB4 (48-byte header; 80-byte sample
+headers as FSB3 plus, for XMA, u32 0 x3, u32 size, u32 streams, u32
+entries, the seek table), each one sample of interleaved stereo XMA streams
+(8 / 6 / 4 channels), 48 kHz [C data]. Encrypted: plain = bit-reverse(stored)
+XOR key, the key made from the bank's name by 0x820E24F8 [C] (see
+data/fsb.cpp fsbKeyGh4). `<song>_preview.fsb.xen` uses another key (not
+done). streamall.fsb.xen is FSB4, not encrypted, 2,629 samples; its .dat as
+GH3's.
+
+## Charts (.mid.qb)
+
+Notes: (time, packed) int pairs, packed = flags << 16 | length (ms); flags
+0x1f frets, 0x20 open, 0x40 forced, 0x0f80 per-lane bits, 0x2000 (drums)
+[C data; meanings I]. Event arrays (*_notes: cameras, lightshow, crowd,
+drums, anim): (time, packed) pairs, packed = velocity << 24 | note << 16 |
+length. Star Power / tapping: (time, length, count) rows as GH3. Parts:
+song, rhythm, drum, aux, guitarcoop, rhythmcoop; five difficulties in the
+tuning tables (beginner .. expert).
+
+## UI descs (ui\uidesc_<name>.qb)
+
+See docs/ui.md.
+
 ## Not decoded yet (C++ `--formattest`, 2026-11-10)
 
 `.ska` (8,255), `.img` (2,548 "image version" + 259 short), `.wav` (2,466),
