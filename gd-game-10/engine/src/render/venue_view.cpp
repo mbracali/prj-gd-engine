@@ -899,7 +899,12 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
             if (vis == 0) continue;
             if (vis < 0 && !n.createdAtStart && !(n.createdOn && show.flag(n.createdOn))) continue;
         }
-        if (it.card && !overrides_.count(it.card)) continue;
+        // A crowd card without its picture (a CrowdOff shot, the peds not
+        // drawn yet) is not drawn: no texture would draw it black.
+        if (it.card) {
+            auto ov = overrides_.find(it.card);
+            if (ov == overrides_.end() || !ov->second) continue;
+        }
         if (it.housing >= 0 && !it.gh3) continue;  // model space: GH3's shaders only
         if (it.lodDist > 0) {
             const venue::Vec3 cc = centreOf(&it);
