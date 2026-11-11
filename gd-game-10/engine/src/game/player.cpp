@@ -22,6 +22,7 @@ uint8_t highest(uint8_t m) {
 }
 
 bool matches(uint8_t shape, const TrackNote& n) {
+    if (n.open) return shape == 0;  // gh4: strummed with no fret held [I]
     if (n.chord()) return Player::chordShape(shape, n.frets);  // a chord needs the exact shape (Easy Chords: a part of it)
     return highest(shape) == n.frets;
 }
@@ -203,7 +204,7 @@ void Player::updateSustain(double now, double dt, const FrameInput& in) {
     (void)dt;
     if (sus_.note < 0) return;
     const TrackNote& n = t_.notes[size_t(sus_.note)];
-    const bool held = n.chord() ? chordShape(in.frets, n.frets) : highest(in.frets) == n.frets;  // [C 0x8211C9D0]
+    const bool held = n.open ? in.frets == 0 : n.chord() ? chordShape(in.frets, n.frets) : highest(in.frets) == n.frets;  // [C GH3 0x8211C9D0; open: I]
     const int mult = st_.multiplier();
     // An overstrum since the sustain started: 0x8211C9D0 clears the flag and
     // takes the released path (whammy_off finished 0, the tail dead, no more

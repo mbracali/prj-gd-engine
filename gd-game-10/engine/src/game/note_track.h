@@ -16,6 +16,7 @@ struct TrackNote {
     int32_t time = 0;     // ms
     int32_t length = 0;   // ms, as charted
     uint8_t frets = 0;    // bit 0 green .. bit 4 orange
+    bool open = false;    // gh4: an open note (no fret held) [I]
     bool hopo = false;    // natural HOPO XOR the 0x20 flip
     bool sustain = false; // length > 0.5 x first beat [C 0x82102E28]
     int32_t holdMs = 0;   // the length to hold: length - whammy_shorten x first beat [C 0x82102E28]

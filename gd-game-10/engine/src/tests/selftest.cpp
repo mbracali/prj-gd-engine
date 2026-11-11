@@ -173,7 +173,10 @@ int runSelfTest(const std::string& discPath) {
             fail(s.name + ": " + e.what());
             continue;
         }
-        if (!disc->exists("DATA/MUSIC/" + s.name + ".fsb.xen")) fail(s.name + ": no DATA/MUSIC/" + s.name + ".fsb.xen");
+        // gh4: three banks <song>_1 .. _3 (GH3: one <song>.fsb.xen).
+        for (int b = 1; b <= 3; ++b)
+            if (!disc->exists("DATA/MUSIC/" + s.name + "_" + std::to_string(b) + ".fsb.xen"))
+                fail(s.name + ": no DATA/MUSIC/" + s.name + "_" + std::to_string(b) + ".fsb.xen");
         for (size_t p = 0; p < size_t(Part::Count); ++p) {
             for (int d = 0; d < kDifficulties; ++d) {
                 const auto& notes = c.parts[p].notes[size_t(d)];
@@ -183,7 +186,7 @@ int runSelfTest(const std::string& discPath) {
                         break;
                     }
                 for (const ChartNote& n : notes)
-                    if (n.frets == 0) {
+                    if (n.frets == 0 && !n.open) {
                         fail(s.name + " " + partName(Part(p)) + " " + difficultyName(d) + ": a note without frets");
                         break;
                     }

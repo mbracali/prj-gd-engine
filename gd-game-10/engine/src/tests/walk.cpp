@@ -36,9 +36,16 @@ Walk::Walk(const std::string& name) : name_(name) {
     const Action C = Action::Confirm, D = Action::Down, B = Action::Back;
     // Boot -> press any button -> save -> main menu -> Quickplay ->
     // difficulty -> setlist -> song -> results [C: flow_path.md].
+    // gh4's boot states (ui/ui_states.h): the movies skipped with A, press
+    // start, the drum tip pop-up (only without a save), the main menu [C
+    // scripts RegisterUIStates_Boot, ui_boot_* ; docs/ui.md].
     std::vector<Step> boot = {
-        {"bootup_press_any_button_fs", {C}, 30000},
-        {"bootup_using_guitar_controller_fs", {C}, 60000, true},  // only without a save [C data: flow_path.md]
+        {"UIstate_boot_movie_atvi", {"wait", C}, 30000, true},
+        {"UIstate_boot_movie_red_octane", {"wait", C}, 30000, true},
+        {"UIstate_boot_movie_neversoft", {"wait", C}, 30000, true},
+        {"UIstate_boot_movie_intro", {"wait", C}, 30000, true},
+        {"uistate_boot_iis", {"wait", "wait", C}, 60000},
+        {"uistate_optimal_drum", {"wait", "wait", C}, 60000, true},
         {"main_menu_fs", {}, 60000},
     };
     if (name == "quickplay" || name == "lose") {
@@ -715,7 +722,9 @@ Walk::Walk(const std::string& name) : name_(name) {
         // No black frame from the press-start screen's first picture to the
         // main menu (GD10-089: a render target made mid-frame, the backdrop's,
         // had the frame presented black).
-        steps_[0].keys.insert(steps_[0].keys.begin(), Op("probe:black"));
+        // gh4: from the press-start screen on (the boot movies fade through black).
+        for (Step& st : steps_)
+            if (st.state == "uistate_boot_iis") st.keys.insert(st.keys.begin(), Op("probe:black"));
         steps_.back().keys = {Op("check:no_black", 1000)};
     } else if (name == "uitest") {
         steps_ = boot;

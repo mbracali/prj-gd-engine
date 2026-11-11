@@ -73,6 +73,7 @@ NoteTrack buildTrack(const Chart& chart, Part part, int difficulty, const Tuning
         n.time = c.time;
         n.length = c.length;
         n.frets = c.frets;
+        n.open = c.open && !c.frets;
         // Natural HOPO [C 0x82104850-0x82104908]: a previous note, the gap
         // within the tolerance, a single fret, a different mask.
         bool natural = false;
