@@ -12,6 +12,7 @@
 #include <stdexcept>
 
 #include "data/qbkey.h"
+#include "data/qs.h"
 
 namespace qs {
 
@@ -166,7 +167,7 @@ struct Exec {
             const bool callable = vm.hasNative(n) || (vm.globals().find(n) && vm.globals().find(n)->type == qb::Type::Script);
             const Op next = i + 1 < t.size() ? t[i + 1].op : kEndOfLine;
             const bool operandFollows = next == kName || next == kArg || next == kStartStruct || next == kInlineStruct ||
-                                        next == kInlineStruct2 || next == kAllArgs;
+                                        next == kAllArgs;
             // Right after a comparison it is the operand, a key (`<arg> mode = restart_song`,
             // a script's name too) [C data: create_loading_screen].
             size_t pj = i;
@@ -249,7 +250,6 @@ struct Exec {
         case kStartStruct: return structLiteral();
         case kStartArray: return arrayLiteral();
         case kInlineStruct:
-        case kInlineStruct2:
             ++i;
             v.type = qb::Type::Struct;
             v.st = std::make_shared<qb::Struct>(*k.st);
@@ -258,6 +258,30 @@ struct Exec {
         case kRandom2:
         case kRandomNoRepeat:
         case kRandomPermute: return randomChoice();
+        case kLocalKey:
+            ++i;
+            v.type = qb::Type::String;
+            v.str = qs::text(k.u);
+            if (v.str.empty() && !qs::find(k.u)) v.str = qbkey::name(k.u);
+            return v;
+        case kRandomFloat:
+        case kRandomInt: {
+            // gh4: `0x4F (a, b)` a float in [a, b), `0x50 (a, b)` an integer
+            // in [a, b] [I: from their uses (wait 0x4F (2, 4) seconds,
+            // player = 0x50 (1, 4)); the XEX's rule to confirm].
+            const bool isInt = k.op == kRandomInt;
+            ++i;
+            skipNops();
+            if (i >= t.size() || t[i].op != kPair) return none();
+            const float a = t[i].f[0], b = t[i].f[1];
+            ++i;
+            const float lo = std::min(a, b), hi = std::max(a, b);
+            if (isInt) {
+                const int32_t il = int32_t(std::lround(lo)), ih = int32_t(std::lround(hi));
+                return Vm::makeInt(il + int32_t(vm.rng()() % uint32_t(ih - il + 1)));
+            }
+            return Vm::makeFloat(lo + float(vm.rng()() % 0x7ff9u) * (hi - lo) * 3.0525032e-05f);
+        }
         case kRandomRange:
         case kRandomRange2: {
             // random_range pair:(a, b): whole-number ends give an integer in
@@ -559,7 +583,7 @@ struct Exec {
                 for (const qb::Item& it : fr->locals->items) Vm::set(out, it.name, it.value);
             return;
         }
-        if (k.op == kInlineStruct || k.op == kInlineStruct2 || k.op == kStartStruct) {
+        if (k.op == kInlineStruct || k.op == kStartStruct) {
             qb::Value v = paramValue();
             if (v.st)
                 for (qb::Item it : vm.globals().expand(*v.st)) {
@@ -1355,7 +1379,7 @@ bool Vm::step(ScriptRun& run, int budget) {
             fr.pc = ex.i;
             continue;
         }
-        if (first.op == kInlineStruct || first.op == kInlineStruct2 || first.op == kStartStruct) {
+        if (first.op == kInlineStruct || first.op == kStartStruct) {
             // A line that is only a struct: the script's default parameters,
             // kept where the caller gave none [I: setup_setlisttags etc.];
             // also written out over lines (`{` ... `}`: add_text_to_column) [C data].

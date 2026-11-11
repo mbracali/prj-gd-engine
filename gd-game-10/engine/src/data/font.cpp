@@ -27,6 +27,8 @@ void zeros(const uint8_t* d, size_t a, size_t b, const char* what) {
     for (size_t i = a; i < b; ++i) need(d[i] == 0, what);
 }
 
+uint32_t be32at(const uint8_t* p) { return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3]; }
+
 constexpr size_t kMarker = 0x20054, kTexOffset = 0x200A0,
                  kGlyphs = 0x200A4, kGlyphSize = 0x24;
 
@@ -39,14 +41,19 @@ constexpr size_t kMarker = 0x20054, kTexOffset = 0x200A0,
 // (7 f32, 2 i32) at 0x200A4, as many as the maps reference; zeros up to the
 // 4 KiB-aligned texture.
 Font parseFont(const uint8_t* d, size_t size) {
-    need(size > kGlyphs, "fnt: short");
+    need(size > kGlyphs + 4, "fnt: short");
     ByteReader r(d, size);
     Font f;
+    // gh4 (Metallica) adds one f32 after `tracking` (1.0 in every font on
+    // the disc [C data]; meaning [I], kept as `scale`), which moves every
+    // later field by 4: glyph table at 0x200A8 instead of 0x200A4.
+    const size_t sh = (be32at(d + 0x14) == kGlyphs + 4 && be32at(d + 0x10) != kGlyphs) ? 4 : 0;
     f.vShift = int32_t(r.u32be());
     f.bearing = int32_t(r.u32be());
     f.tracking = int32_t(r.u32be());
+    if (sh) f.scale = f32be(r);
     f.lineHeight = f32be(r);
-    need(r.u32be() == kGlyphs, "fnt: glyph table offset");
+    need(r.u32be() == kGlyphs + sh, "fnt: glyph table offset");
     f.charMap.resize(65536);
     uint16_t maxIndex = 0;
     for (auto& v : f.charMap) {
@@ -57,13 +64,13 @@ Font parseFont(const uint8_t* d, size_t size) {
         v = r.u16be();
         maxIndex = std::max(maxIndex, v);
     }
-    need(r.pos() == kMarker && r.u32be() == 0x0001DEADu && r.u32be() == 0xFFFFFFFFu, "fnt: marker");
+    need(r.pos() == kMarker + sh && r.u32be() == 0x0001DEADu && r.u32be() == 0xFFFFFFFFu, "fnt: marker");
     f.spaceWidth = f32be(r);
-    zeros(d, r.pos(), kTexOffset, "fnt: reserved bytes");
-    r.seek(kTexOffset);
+    zeros(d, r.pos(), kTexOffset + sh, "fnt: reserved bytes");
+    r.seek(kTexOffset + sh);
     f.textureOffset = r.u32be();
     const size_t count = size_t(maxIndex) + 1;
-    const size_t glyphEnd = kGlyphs + kGlyphSize * count;
+    const size_t glyphEnd = kGlyphs + sh + kGlyphSize * count;
     need(glyphEnd <= f.textureOffset && f.textureOffset % 0x1000 == 0 && f.textureOffset + 0x5C < size,
          "fnt: texture offset");
     f.glyphs.resize(count);
@@ -82,7 +89,10 @@ Font parseFont(const uint8_t* d, size_t size) {
     // +0x1C = 0x28 (GPU header that follows); pixels at the next 4 KiB page
     // past tex + 0x5B (Function_8232B458: (tex + 0x105B) & ~0xFFF).
     r.seek(f.textureOffset);
-    need(r.u32be() == 0x0A281102u, "fnt: texture magic");
+    {
+        const uint32_t m = r.u32be();  // GH3 0x0A281102, gh4 0x0A281100 (class 0) [C data]
+        need(m == 0x0A281102u || m == 0x0A281100u, "fnt: texture magic");
+    }
     r.seek(f.textureOffset + 8);
     f.texWidth = r.u16be();
     f.texHeight = r.u16be();

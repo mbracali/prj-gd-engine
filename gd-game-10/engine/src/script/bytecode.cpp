@@ -14,7 +14,7 @@ enum class Kind : uint8_t { None, U32, F32, Vec2, Vec3, U16, U16x2, Str, WStr, R
 
 Kind kindOf(uint8_t op) {
     switch (op) {
-    case kEndOfLineNumber: case kName: case kInteger: case kHexInteger: case kEnum: case kJump: return Kind::U32;
+    case kEndOfLineNumber: case kName: case kInteger: case kHexInteger: case kEnum: case kJump: case kLocalKey: return Kind::U32;
     case kFloat: return Kind::F32;
     case kVector: return Kind::Vec3;
     case kPair: return Kind::Vec2;
@@ -23,11 +23,11 @@ Kind kindOf(uint8_t op) {
     case kString: return Kind::Str;
     case kLocalString: case kWideString: return Kind::WStr;
     case kRandom: case kRandom2: case kRandomNoRepeat: case kRandomPermute: return Kind::Random;
-    case kInlineStruct: case kInlineStruct2: return Kind::Struct;
+    case kInlineStruct: return Kind::Struct;
     case kChecksumTable: return Kind::Table;
     default: break;
     }
-    if (op <= kColon || op == kGlobal || op == kNotEqual) return Kind::None;
+    if (op <= kColon || op == kGlobal || op == kNotEqual || op == kRandomFloat || op == kRandomInt) return Kind::None;
     return Kind::Bad;
 }
 

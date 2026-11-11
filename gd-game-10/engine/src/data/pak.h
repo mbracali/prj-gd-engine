@@ -22,7 +22,12 @@ class Disc;
 struct PakEntry {
     uint32_t type = 0, offset = 0, size = 0, pakName = 0, fullName = 0, name = 0, parent = 0, flags = 0;
     size_t pos = 0;  // of the entry in the table
-    size_t dataOffset() const { return pos + offset; }
+    // gh4: a "GZ"-wrapped entry is inflated at load and appended to the
+    // buffer; its data then lies at `unpacked` and `size` is the inflated size
+    // (`packedSize` keeps the stored one).
+    size_t unpacked = SIZE_MAX;
+    uint32_t packedSize = 0;
+    size_t dataOffset() const { return unpacked != SIZE_MAX ? unpacked : pos + offset; }
 };
 
 class Pak {

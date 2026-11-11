@@ -79,6 +79,19 @@ def read_chnk(raw):
     return bytes(out)
 
 
+def gz(d):
+    """gh4 (Metallica): a pak entry may be wrapped as "GZ\\0\\0", u32 inflated
+    size, 8 zero bytes, then a raw-deflate stream (docs/formats.md, "GZ")."""
+    if d[:4] != b"GZ\0\0" or len(d) < 16:
+        return d
+    size = struct.unpack_from(">I", d, 4)[0]
+    o = zlib.decompressobj(-15)
+    out = o.decompress(d[16:]) + o.flush()
+    if len(out) != size or not o.eof:
+        raise ValueError("GZ entry inflates to %d of %d bytes" % (len(out), size))
+    return out
+
+
 class Entry:
     __slots__ = ("index", "pos", "type", "offset", "size", "pakname", "fullname", "name", "parent", "flags")
 
@@ -129,7 +142,7 @@ class Pak:
 
     def data(self, e):
         a = e.abs_offset()
-        return self.buf[a:a + e.size]
+        return gz(self.buf[a:a + e.size])
 
     def check(self):
         """Problems: entries outside the buffer, overlaps, no .last."""

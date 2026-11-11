@@ -98,7 +98,9 @@ OPS = {
     0x4B: ("$", None),
     0x4C: ("wstring2", "wstr"),
     0x4D: ("!=", None),
-    0x4E: ("qbstruct2", "qbstruct"),
+    0x4E: ("qskey", "u32"),  # gh4: a localized string key (QB type 0x1C) [I]
+    0x4F: ("op4f", None),  # gh4, before a pair / vector literal; meaning [I] (to find in the XEX)
+    0x50: ("op50", None),  # gh4; meaning [I] (to find in the XEX)
 }
 
 

@@ -6,13 +6,18 @@
 #include "data/disc.h"
 #include "data/pak.h"
 #include "data/qbkey.h"
+#include "data/qs.h"
 
 void Globals::add(const qb::File& file) {
-    for (const qb::Section& s : file.sections) values_[s.name] = s.value;
+    for (const qb::Section& s : file.sections) {
+        qb::Value& v = values_[s.name] = s.value;
+        qs::resolve(v);  // gh4: localized string keys read as their text
+    }
     ++files_;
 }
 
 void Globals::load(const Disc& disc) {
+    qs::load(disc);
     Pak pak = Pak::load(disc, "DATA/COMPRESSED/PAK/qb.pak.xen");
     constexpr uint32_t kQb = qbkey::key(".qb");
     for (const PakEntry& e : pak.entries()) {

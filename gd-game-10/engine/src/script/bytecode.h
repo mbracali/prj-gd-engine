@@ -27,7 +27,11 @@ enum Op : uint8_t {
     kShiftRight = 0x36, kRandom2 = 0x37, kRandomRange2 = 0x38, kNot = 0x39, kAnd2 = 0x3A, kOr2 = 0x3B,
     kSwitch = 0x3C, kEndSwitch = 0x3D, kCase = 0x3E, kDefault = 0x3F, kRandomNoRepeat = 0x40,
     kRandomPermute = 0x41, kColon = 0x42, kFastIf = 0x47, kFastElse = 0x48, kShortJump = 0x49,
-    kInlineStruct = 0x4A, kGlobal = 0x4B, kWideString = 0x4C, kNotEqual = 0x4D, kInlineStruct2 = 0x4E,
+    kInlineStruct = 0x4A, kGlobal = 0x4B, kWideString = 0x4C, kNotEqual = 0x4D,
+    // gh4 (Metallica) [C data: every script tokenizes; meanings I]: 0x4E a
+    // localized string key (u32, as QB type 0x1C); 0x4F / 0x50 before a pair:
+    // a random float / integer in that range.
+    kLocalKey = 0x4E, kRandomFloat = 0x4F, kRandomInt = 0x50,
 };
 
 struct Token {

@@ -8,12 +8,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <list>
 #include <mutex>
 
 #include <stdexcept>
 
 #include "data/disc.h"
+#include "data/inflate.h"
 #include "data/qbkey.h"
 
 namespace {
@@ -126,6 +128,21 @@ Pak Pak::fromBytes(Bytes buffer, size_t headerSize, std::string name) {
         p.entries_.push_back(en);
     }
     if (!p.ended_) throw std::runtime_error(p.name_ + ": no .last entry");
+    // gh4 (Metallica): "GZ\0\0", u32 inflated size, 8 zero bytes, then a
+    // raw-deflate stream (docs/formats.md, "GZ"; .img, .tex, .skin, .ske, .rag).
+    for (PakEntry& en : p.entries_) {
+        const uint8_t* d = p.buf_.data() + en.dataOffset();
+        if (en.size < 16 || std::memcmp(d, "GZ\0\0", 4) != 0) continue;
+        const uint32_t want = be32(d + 4);
+        Bytes out = inflateRaw(d + 16, en.size - 16);
+        if (out.size() != want) throw std::runtime_error(p.name_ + ": GZ entry inflates to the wrong size");
+        const size_t at = (p.buf_.size() + 15) & ~size_t(15);
+        p.buf_.resize(at);
+        p.buf_.insert(p.buf_.end(), out.begin(), out.end());
+        en.packedSize = en.size;
+        en.size = uint32_t(out.size());
+        en.unpacked = at;
+    }
     return p;
 }
 

@@ -49,6 +49,7 @@ target_sources(gd10 PRIVATE
   src/data/matlib.cpp
   src/data/pak.cpp
   src/data/qb.cpp
+  src/data/qs.cpp
   src/data/qbkey.cpp
   src/data/random_file.cpp
   src/data/havok.cpp
