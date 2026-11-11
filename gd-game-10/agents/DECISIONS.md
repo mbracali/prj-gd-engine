@@ -272,3 +272,129 @@ Metal_*_tod_manager at the next cut, then the shot's DOF.
 
 What: sys_vignettemask names no texture on the disc: alpha x saturate((r -
 inner) / (outer - inner)). ScreenFlash's FlashBS stays a pass after the uber.
+
+## D43. Mocap / moment cameras: camera lock targets play camera anims [C scripts, data; I where marked] (2026-11-11, lead)
+
+What: create_all_camera_lock_targets makes ghosts (Profile_Ven_Camera_Obj,
+skeleton GH4_Camera) that momentcamera_playanim places at a node and animates;
+a camera entry `lockto = <target> locktobone = bone_camera pos (0,0,0) quat
+(0,0,0)` sits on that bone [C]. Band_PlayClip's clip struct `cameras[i] {name
+anim}` plays on moment_cam_lock_target_<i+1> at <zone>_<name>, its
+`drummercameras[i]` on drummer_mocap_lock_target_<i+1> at the drummer's start
+(clipplaydrummercamera, drumCam_Params) [I: Band_PlayClip_CFunc's mapping;
+the anim from the clip's start frame]; start_drummer_cameras cycles
+Drum_Andy_StandardLP_C01 / _C02 [C]; <member>_mocap_lock_target_01 / 02 play
+the member's body loop's <loop>_c01 / _c02 in step with it at his start
+waypoint [I]. A target playing nothing at a cut is not picked [I] (its bone is
+at the world origin: the old "stage floor / feet" shots). The clip structs are
+read from the song pak (not in the globals at the venue's start).
+Undo: render/mocap_camera.cpp, venue_stage.cpp setLockLookup / setFollow.
+
+## D44. Transition camera anims [C scripts, data]
+
+What: <zone>_<Intro|FastIntro|Encore|Boss>_Transition's ScriptTable
+SpecialCamera_PlayAnim {obj anim} animates <zone>_<obj> (z_forum:
+TRG_Geo_Camera_Performance_DRUM01, ven_forum_camera_intro) from the zone pak;
+the intro's control script ccam_domorph locks to its bone_camera.
+Undo: MocapCameras::addTransition.
+
+## D45. CrowdOff hides the crowd models for the shot [C 0x822B4EA0, 0x822B4FC8]
+
+What: CameraCuts_StartCallback: StructureContains (entry, CrowdOff) ->
+enable_crowd_models_cfunc active = false. StructureContains searches the
+entry's items and unnamed struct includes only, not `params`: a CrowdOff inside
+params does not count. The crowd cards get an empty override (not drawn).
+Undo: venue_stage.cpp `off`.
+
+## D46. distfromlookat keeps the camera's distance to the framed bone [I]
+
+What: the authored pos is distfromlookat from the bone in the authoring pose
+[C data: e.g. z_tushino guitarist_closeup 2.83 m to bone_neck at 1.40 m];
+the camera keeps that distance on the ray that frames the bone at its
+screenoffset (the mocap moves members off their start nodes).
+Undo: CameraDirector::aim `dist`.
+
+## D47. CameraCuts_SpecialStepMove [C script]
+
+What: cam1, then stepTime s: pos = cam1.pos + (cam2.pos - cam1.pos) c +
+StepDir sin(c StepNum 360 deg), c 0..1; then cam2 over FinalRotTime
+(smooth); ccam_setsmoothing not applied [I]. Undo: Ctl::StepMove.
+
+## D50. gh4's light slots by the light's vertexlight / noSH flags [C] (2026-11-11)
+
+What: 824D7220: point / spot lights take g_PointLight (4) / g_SpotLight (5)
+slots only with `vertexlight` (flag 0x10); otherwise a point light is a
+directional one shining from it (SH x attenuation, a slot while fewer than
+four), a spot light SH only x clamp((P - pos) . dir, 0, 1); `noSH` (0x20)
+keeps it out of the SH (a vertexlight light past its slots with noSH is
+dropped). Flags from 8240F560: dynamic 0x4, shadow 0x8, vertexlight 0x10,
+noSH 0x20. ExcludeLevel / ExcludeBand / ExcludeCharacters are read by no
+code [C: no site builds their keys]. A point key light's direction from the
+light to the object is GH3's [I]. Undo: render/gh3_shader.cpp lightObject,
+lightIn (the venue argument).
+
+## D51. An object's light groups: lightgroup, lightgroup2.. [C] (2026-11-11)
+
+What: 823C9FD8 reads `lightgroup`, then "lightgroup%d" from 2 while
+present (at most 32); a light serves the object through any. `empty`
+names no group [I]. Undo: render/venue_view.cpp groupOf / groupsMore_.
+
+## D52. gh4's gamma ramp is the identity [C] (2026-11-11)
+
+What: 824558E8 builds ramp[i] = clamp(i x 256 x (0.6 x b + 0.7), 0, 65280)
+with b = 0x82849280 = 0.5 (no script changes it): the identity. D25's
+output curve stays as gd04's. Undo: none (no code change).
+
+## D60. Talent skeletons by full name [C data]
+What: band::Library keeps each global.pak .ske under its short and full name
+(GH_Rocker_Male_James and GH_Rocker_Male_James_original). The 24 LZSS
+skeletons of PAK/global_rag_skel decode (Neversoft LZSS, "LZSS" + u32 size)
+byte-identical to the `_original` ones. Undo: data/band.cpp Library::load.
+
+## D61. Facial anims from the anim struct member [C scripts]
+What: setup_character_anims' facial_anims / facial_anims_default (the
+anim struct member, the song's struct first), facial_anim_loop,
+Band_ChangeFacialAnims (ExtendCRC fa_type; a struct that does not exist ends
+the loop, the face keeps its last clip), Band_PlayFacialAnim. Face clips
+animate bones 63..92 (Bone_Jaw .. bone_tongue, their bone mask); rotations
+absolute, translations offsets from the bind [C data: offsets <= 1 cm].
+Undo: render/band_anim.cpp facial / band_changefacialanims.
+
+## D62. Song structs from the song pak [C data; I: load order]
+What: the song's `<anim_struct>_<song>[_alt]` and Band_PlayClip clip structs
+are looked up in the globals, else in the song pak's QB (the globals get
+them only at load_songqpak, after the band is created). Undo:
+data/band.cpp songAnimPart, render/band_anim.cpp Setup::songFiles.
+
+## D63. initial_drummer_anim [C script; I: is_current_band_metallica]
+What: with use_drummer_events = 0 the drummer cycles
+Drum_Lars_StandardLP_NoTempo (Lars) / Drum_Andy_StandardLP_NoTempo; the
+Metallica test is "the drummer's profile is LarsUlrich*". Undo:
+render/band_anim.cpp init (drumLoop).
+
+## D64. global_model_tex for the talents' missing textures [C data]
+What: a material texture the part's .tex lacks is taken from
+PAK/global_model_tex's dictionary (all 368 talent keys are there), decoded
+once per disc at band load. Undo: data/band.cpp globalModelTextures.
+
+## D65. gh4 accessory ragdolls [C data; I offsets]
+What: the full body desc's `ragdoll` key is the .rag entry's short name in
+PAK/global_rag_skel; "LZSS" packed Havok-5.5.0-r1 packfile (file version 5,
+contents in section 2, __types__ empty). Fixed offsets: hkpPhysicsData
+systems +0x0C; hkpPhysicsSystem rigidBodies +0x08, constraints +0x14;
+hkpRigidBody shape +0x10, name +0x70, material friction / restitution
++0x84 / +0x88, motion +0xD0 (type +8, transform +0x10, centerOfMassLocal
++0x90, damping +0xB4 / +0xB8, hkUFloat8 velocities +0xBC/+0xBD,
+inertiaAndMassInv +0xC0); hkpConstraintInstance data +0x0C, entities
++0x14 / +0x18, name +0x20; ragdoll atoms (transforms +0x10, motors +0xA0,
+angFriction +0xF0, twist +0xFC, cone +0x110, planes +0x124, ballSocket
++0x138), limited hinge (angMotor +0xA0, angFriction +0xB4, angLimit +0xC0,
+2dAng +0xD0, ballSocket +0xD4); atom type words checked. accessory_bones:
+Rocker_accessory_bones (ACC_Head 01..09, Torso, Legs). The same simulation
+as GH3's (render/band_ragdoll). Undo: data/havok.cpp Pack55,
+render/band.cpp accessorySim gh4 branch.
+
+## D66. Deform skeletons' mirror [C data]
+What: Face_deform / GH_Male_Deform: Bone_Cheek_Lower_L's mirror index is
+Bone_Cheek_R's while its mirror name is Bone_Cheek_Lower_R: the name wins.
+Undo: data/anim.cpp parseSkeleton.

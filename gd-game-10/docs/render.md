@@ -63,16 +63,22 @@ shader's constant table names the register.
   vertex colour + the vertex lights' sum. No shader reads both
   g_ambientLightColor and the SH [C data].
 
-## Lights (D17) [I where marked]
+## Lights (D17, D50, D51) [C: 824D7220, 8240F560, 823C9FD8]
 
-Candidates and ranking are GH3's (box, group, at most 32, luminance x
-intensity x attenuation, shadow lights x 50000) [C for GH3; I for gh4: the
-light set is VMX128 code not read]. The first directional light is the key
-light, the next three the specular slots and the SH (4/17, 8/17 l); the
-first four point lights go to g_PointLight, the first five spot lights to
-g_SpotLight (cone from hotspot / field as full angles, half of each against
-the cosine [I]); further point / spot lights into the SH as GH3's;
-ambient lights into c160 and SH0 [I]. Vertex colours 0..255 (no 2x).
+Candidates: the lights of the object's groups (`lightgroup`, then
+`lightgroup2`, `lightgroup3`, ...; `defaultgroup` lights everywhere, `band`
+for `alt_band`) whose box holds the object, and the dynamic ones, at most
+32, ranked by luminance (0.299, 0.587, 0.114) x intensity x group intensity
+x master intensity (1) x attenuation, x 50000 for `shadow` lights. By rank:
+directional lights take the four slots (key c161..c163, then c164..c169),
+all but the first also into the SH; a `vertexlight` point light takes a
+g_PointLight slot (four), a `vertexlight` spot light a g_SpotLight slot
+(five; cone from hotspot / field, full angles); other point lights are
+directional ones from the light (SH x attenuation, a slot while one is
+free), other spot lights SH only (x clamp((P - pos) . dir, 0, 1)); `noSH`
+keeps a light out of the SH. Ambient lights: c160 and SH0. The SH weights
+4/17, 8/17 are GH3's [I: SUB_824d7180 not read]. Light flags (8240F560):
+dynamic 0x4, shadow 0x8, vertexlight 0x10, noSH 0x20.
 
 ## Screen effects (D18, D40..D42)
 
@@ -155,6 +161,8 @@ second [I]. Before: z_Forum's StageGlows (20 m add quads, colour 0x6E6E6E,
   the sRGB decode and the BT.709 re-encode; gd10 keeps gd04's
   displayGammaRamp (GH3's identity ramp, 823BB830) on every backend [I for
   gh4: its ramp not read].
+  gh4's ramp (824558E8) is the identity too: i x 256 x (0.6 x 0.5 + 0.7)
+  [C]; its 1.8 / 1.3 values are stored, not applied.
 - D29 (gd05): material colour once, highlight from the first light: the
   original microcode runs as written, so both hold by construction.
 
@@ -193,12 +201,33 @@ GD10_VENUE_MESHLOG=1 (template, blend, flags per mesh), GD10_VENUE_SKIP=<templat
 GD10_PARTICLES_LOG=1 (with size, colour, blend, lit), GD10_PARTICLES_SKIP=<texture>,..,
 GD10_SCREENFX=<effect> (every shot takes that camera effect, e.g. InkBlotch_Red),
 GD10_SCREENFX_TIME=1 (the chain's CPU time), GD10_NO_SCREENFX / _PARTICLES / _PROJECTORS / _RAYTRACE.
+- GD10_LIGHTS_LOG=<ms> (every light's live values and each group's light
+  count, once, at the first venue frame past <ms>); GD10_XENOS_DUMP=1 also
+  logs each shader's constant table.
+
+## Cameras (D43..D47) [C where marked]
+
+The camera arrays and CameraCuts scripts are gd04's port (docs/venues.md in
+gd-game-04), with gh4's additions:
+- Camera lock targets (create_all_camera_lock_targets): ghosts with the
+  GH4_Camera skeleton that play camera anims; an entry `lockto = <target>
+  locktobone = bone_camera` sits on that bone (render/mocap_camera.cpp).
+  Band_PlayClip's `cameras` / `drummercameras`, start_drummer_cameras, the
+  members' loop cameras (<loop>_c01 / _c02) and the transitions'
+  SpecialCamera_PlayAnim drive them (D43, D44). A target playing nothing at
+  a cut is not picked [I].
+- CrowdOff on an entry hides the crowd for the shot (D45);
+  distfromlookat keeps the framing distance (D46); SpecialStepMove (D47).
+- screenoffset: x right, y down, half-screens; FOV horizontal (16:9) [C data].
+- GD10_CAMLOG=1 logs each shot (array, entry, name); =2 also each aimed
+  shot's authored framing, camera and bone.
 
 ## Open
 
-- The XEX's light set (which light takes which slot), and the values the
-  screen effects' instances put in their constants (VMX128 code; needs a
-  VMX128 decoding table of our own): the shaders are read, the constants [I].
+- Why venues read darker than the preview movies (GD10-040): ambient light
+  boxes, SUB_824d7180's SH, the light record's box (822FAC18) not read.
+- The values the screen effects' instances put in their constants (VMX128
+  code): the shaders are read, the constants [I].
 - Meadowlands at 90 s (Enter Sandman): a ring of 17 scripted spark glows
   (PH_RadialGlow_01, 0.2 -> 4 m, add, opaque) near the camera still veils
   the shot.

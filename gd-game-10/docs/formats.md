@@ -190,6 +190,24 @@ keys (0 or 2) [I], u32 their offset or -1, then the offsets of the Q data
 startframe}` in `<song>_performance`, the clip struct
 (`<song>_song_scripts.qb`) naming each member's anim, start node and arms.
 
+## gh4 character additions (2026-11-11, D60..D66)
+
+- Skeletons: global.pak's talent .ske entries: full name `<skeleton>_original`,
+  short name `<skeleton>`; the 24 of global_rag_skel are "LZSS", u32 size,
+  Neversoft LZSS of the same bytes. Face_deform / GH_Male_Deform: one mirror
+  index wrong (Bone_Cheek_Lower_L -> 19).
+- Ragdolls (.rag, gh4): "LZSS" + u32 size + LZSS of a Havok-5.5.0-r1
+  packfile (header version 5, contents section 2, empty __types__); layouts
+  as D65.
+- Animations: facial clips (perm_anims GH_Rocker_*Face*, song paks
+  GHM_Singer_Male_<Song>_N) animate bones 63..92 with a bone mask; T keys are
+  offsets from the bind (<= 1 cm), Q keys absolute.
+- Textures: talent materials also use PAK/global_model_tex.tex (eyes, skin
+  detail, environment maps).
+- Camera anims: <loop>_c01 / _c02, <song>_<S|B|G|D>_cNN_MM and the venues'
+  camera anims are 3-bone clips on GH4_Camera (ZONES/global.pak); bone_camera
+  is the camera (looks down its +z, D43).
+
 ## Raw CAS paks (DATA/PAK/CAS)
 
 Not compressed; GH3's 32-byte entry table; entry +16 = the key of the
