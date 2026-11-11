@@ -15,6 +15,9 @@ class Vm;
 // What the flow natives keep (natives_flow.cpp).
 struct FlowState {
     bool paused = false;
+    // SetButtonEventMappings block_menu_input / unblock_menu_input: the pads
+    // raise no menu events in between (FrontEnd::handle) [C scripts].
+    bool menuInputBlocked = false;
     bool saveExists = false;
     double timerMs = 0;
     struct Handler {

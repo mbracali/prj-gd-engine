@@ -370,6 +370,12 @@ Verified (clean build, headless, scratch XDG_DATA_HOME each):
   `--scripttest`: "every script tokenizes; boot ran (72 natives to
   write)" (SetButtonEventMappings is now a flow native, not core);
   `--sfxtest`: "every sound decodes".
+- Re-run on 22cdcbd (the stutter agent's commits) plus these changes
+  (engine/build/fz): walks boot, quickplay, menus, qp_pause passed;
+  selftest 31 FAILED (as expected), scripttest, sfxtest pass; fuzz 41 seeds:
+  40 passed, seed 17 ended on the band "two controllers" alert (its Back is
+  nullscript, the original's): the walk now leaves it with A; the 13
+  regression seeds then all passed.
 
 ## 2026-11-11 14:30 No stutter on loads (render agent, GD10-032)
 

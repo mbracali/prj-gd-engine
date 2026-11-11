@@ -175,6 +175,45 @@ void addCoreNatives(Vm& vm) {
                 if (r->type == id->key && r.get() != &run) r->finished = true;
         return true;
     });
+    // SetSpawnInstanceLimits max = n management = ignore_spawn_request /
+    // kill_oldest [checkwholecallstack], first in a spawned script or an
+    // event handler: with n others of that script running, the new one ends
+    // (ignore_spawn_request) or the oldest end (kill_oldest);
+    // checkwholecallstack also counts the runs that called it. Without it a
+    // second press during generic_blocking_execute_script's wait chose the
+    // item twice (game mode's TRAINING pushed select_tutorial twice: the
+    // fuzz walk's lost focus, GD10-020) [C names, scripts; I semantics].
+    vm.addNative("SetSpawnInstanceLimits", [](Vm& v, ScriptRun& run, qb::Struct& p) {
+        if (run.frames.size() != 1 || !run.frames.back().code) return true;  // called from another script: no limit
+        const uint32_t name = run.frames.back().code->name;
+        const int64_t max = std::max<int64_t>(1, int64_t(Vm::number(Vm::param(p, K("max")), 1)));
+        const bool whole = Vm::flag(p, K("checkwholecallstack"));
+        std::vector<ScriptRun*> others;
+        for (auto& r : v.runs()) {
+            if (r.get() == &run || r->finished) continue;
+            bool same = r->name == name;
+            if (!same && whole)
+                for (const Frame& f : r->frames)
+                    if (f.code && f.code->name == name) same = true;
+            if (same) others.push_back(r.get());
+        }
+        if (int64_t(others.size()) < max) return true;
+        const qb::Value* m = Vm::param(p, K("management"));
+        if (m && m->key == K("kill_oldest")) {
+            std::sort(others.begin(), others.end(), [](const ScriptRun* a, const ScriptRun* b) { return a->id < b->id; });
+            for (size_t k = 0; k + size_t(max) <= others.size(); ++k) others[k]->finished = true;
+        } else {
+            run.finished = true;  // ignore_spawn_request
+        }
+        return true;
+    });
+    // IsObjectScript: the script runs on an object (obj_spawnscript, an
+    // element's handler). Without it the extras' lyrics' spawned
+    // ui_select_song_section_preview never spawned
+    // practice_songpreview_monitor (no song_started,
+    // ui_song_extras_finished_load stayed 0 and Back did nothing, GD10-020)
+    // [C script; I: the object test].
+    vm.addNative("IsObjectScript", [](Vm&, ScriptRun& run, qb::Struct&) { return run.object != 0; });
     vm.addNative("ScriptIsRunning", [](Vm& v, ScriptRun&, qb::Struct& p) {
         const qb::Value* s = first(p);
         return s && v.running(s->key);
@@ -466,7 +505,7 @@ void addCoreNatives(Vm& vm) {
     // Memory and profiling calls of the console build: nothing to do on PC.
     for (const char* n : {"MemInitHeap", "PushMemProfile", "PopMemProfile", "StopRendering", "StartRendering",
                           "MemPushContext", "MemPopContext", "AddToStringLookup", "DisplayLoadingScreen", "hideloadingscreen",
-                          "SetButtonEventMappings", "ToggleMetrics", "SetScreenMode", "InitCOIM", "ProcessorMgr_Init", "PassMgr_Init",
+                          "ToggleMetrics", "SetScreenMode", "InitCOIM", "ProcessorMgr_Init", "PassMgr_Init",
                           "RegisterProcessorGroupDesc", "RegisterPassGroupDesc", "RegisterCompositeObjectDesc", "InitAnimCompressTable",
                           "InitAnimSystem", "InitLightManager", "engineconfig", "LaunchViewer", "AllocateDataBuffer", "InitAtoms",
                           "ScreenElementSystemInit", "SetShadowRenderingFlags", "SetShadowMapParams", "SetShadowProjectionTexture",

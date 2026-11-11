@@ -457,7 +457,7 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
             qbLoads->pop_front();
         }
     };
-    auto addQbs = [&disc, qbLoaded, qbLoads, drainQbs](Vm& v, ScriptRun& run, const std::string& path) {
+    auto addQbs = [&disc, qbLoaded, qbLoads, drainQbs](Vm& v, ScriptRun& run, const std::string& path, bool now) {
         drainQbs(v);
         if (!qbLoaded->insert(path).second) return;
         const Disc* d = &disc;
@@ -475,14 +475,14 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
             }
             return files;
         };
-        if (run.id == 0 && qbLoads->empty()) {
+        if ((run.id == 0 || now) && qbLoads->empty()) {
             for (const qb::File& f : read()) v.globals().add(f);
             return;
         }
         auto load = std::make_shared<QbLoad>();
         load->work = std::async(std::launch::async, read);
         qbLoads->push_back(load);
-        if (run.id == 0) {  // (a condition's run cannot wait: in now, after the ones before)
+        if (run.id == 0 || now) {  // (a condition's run cannot wait: in now, after the ones before)
             while (!load->added) {
                 qbLoads->front()->work.wait();
                 drainQbs(v);
@@ -517,7 +517,12 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
             // loading screen's movie [I: GH3 loads it asynchronously there too].
             if (v.loadingHoldUntil() >= 0) textures.loadPakAsync(disc, path);
             else textures.loadPak(disc, path);
-            addQbs(v, run, path);
+            // A screen's ui_paks (ui_state_pak_load, run by the UI state
+            // machine just before ui_create_<state>): in now, the screen's
+            // descs are in it (read on a worker, the options, backstage and
+            // head-to-head screens were made without them and had no focus:
+            // the menus and fuzz walks, GD10-020) [C uistatemachine; I].
+            addQbs(v, run, path, map->key == K("ui_paks"));
         };
         if (map->key == K("ui_paks")) {
             // gh4 UI paks (UIPaks, folder 'Pak/ui/'): DATA/COMPRESSED/PAK/<name>.pak.xen [C data].

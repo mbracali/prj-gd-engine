@@ -166,3 +166,33 @@ constant term + 4/17 of the key light at the system (clamped to 1);
 `max` caps the emit rate at max / mean life [C data: the flags; I: the
 models]. Undo: render/particles.cpp (lit, softEdge, max), gh3_shader
 spriteLight.
+
+## D20. Spawn instance limits and the menu input block [I] (2026-11-11)
+
+What: `SetSpawnInstanceLimits max = n management = ...`, first in a
+spawned script or a handler: with n other runs of that script alive (also
+runs that called it, with `checkwholecallstack`), ignore_spawn_request ends
+the new one, kill_oldest ends the oldest [C names, scripts; I semantics:
+0x8239A820 not read]. `SetButtonEventMappings block_menu_input` /
+`unblock_menu_input`: the pads raise no menu events in between (GetButtons
+Pressed still counts) [C scripts; I: what the XEX blocks]. Why: both were
+no-ops, so a second press during ui_select_practice_mode_choose's loading
+chose TRAINING again and left the tutorials list unfocused (the fuzz walk,
+GD10-020). Undo: script/natives_core.cpp SetSpawnInstanceLimits,
+ui/natives_flow.cpp SetButtonEventMappings, FrontEnd::handle.
+
+## D21. No Xbox LIVE blade: it closes at once [I] (2026-11-11)
+
+What: `NetSessionFunc func = showsigninui` spawns
+sysnotify_handle_unpause_console, as if the system's sign-in blade opened
+and was closed with no one signed in to LIVE; ui_signin_check's
+wait_for_blade_complete then ends and the LIVE warning comes back with its
+BACK [C scripts]. Why: Music Studio > GHTunes > Sign In waited forever on
+an empty screen. Undo: ui/natives_flow.cpp NetSessionFunc.
+
+## D22. No downloaded content folders: GetContentFolderState is free [I] (2026-11-11)
+
+What: the port opens no content folder (OpenContentFolder false), so
+GetContentFolderState returns contentfolderstate = free. Why: practice's
+section Back (ui_select_song_section_back) waits for free and never went
+back. Undo: ui/natives_flow.cpp GetContentFolderState.

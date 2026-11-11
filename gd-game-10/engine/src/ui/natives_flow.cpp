@@ -60,7 +60,7 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
     for (const char* n : {"GameProfileSettingsFinished", "StartGameProfileSettingsRead", "RefreshSigninStatus", "ReAcquireControllers",
                           "ResumeControllerChecking", "UnBindGuitarControllerStatus", "SetInput", "SetMenuAutoRepeatTimes",
                           "StartRendering_C", "StopRendering_C", "SetScreen",
-                          "PrintScriptInfo", "UnPauseSpawnedScript", "OnExitRun", "SetSpawnInstanceLimits", "ClearEventHandlerGroup",
+                          "PrintScriptInfo", "UnPauseSpawnedScript", "OnExitRun", "ClearEventHandlerGroup",
                           "ResetEventHandlersFromTable", "RequireParams", "EnableUserMusic", "MassiveInit", "English",
                           "ClearDataBuffer", "SetRandomSeeds", "SetSlomo", "LockDSP", "UnLockDSP", "KillCamAnim", "PlayIGCCam",
                           "SetViewportProperties", "ScreenFX_ClearFXInstances", "ScreenFX_UpdateFXInstanceParams",
@@ -80,11 +80,43 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
                           // Achievements_SongWon, send_leader_board_message].
                           "AddParam", "GetNetID", "CheckAndWriteMakerAchievement"})
         vm.addNative(n, yes);
-    for (const char* n : {"NetSessionFunc", "IsHost", "EnumContentFiles", "IsEnumContentFilesDamaged", "GetLatestContentIndexFile",
+    for (const char* n : {"IsHost", "EnumContentFiles", "IsEnumContentFilesDamaged", "GetLatestContentIndexFile",
                           "GetContentFolderIndexFromFile", "French", "German", "Spanish", "Italian", "IsCreated", "CompositeObjectExists",
                           "IsInNodeArray", "IsMovieInBuffer", "IsMoviePreLoaded", "GetGameProfileSetting"})
         vm.addNative(n, no);
     vm.addNative("EnumContentFilesFinished", yes);
+    // GetContentFolderState: no downloaded content folder is ever opened in
+    // the port (OpenContentFolder is false), so contentfolderstate = free.
+    // Unhandled, practice's section Back (ui_select_song_section_back waits
+    // for free) never went back (GD10-020) [C scripts; I].
+    vm.addNative("GetContentFolderState", [](Vm&, ScriptRun& run, qb::Struct&) {
+        if (qb::Struct* l = locals(run)) Vm::set(*l, K("contentfolderstate"), Vm::makeKey(K("free")));
+        return true;
+    });
+    // SetButtonEventMappings: block_menu_input / unblock_menu_input stop and
+    // restart the pads' menu events (FlowState::menuInputBlocked); the
+    // mapping tables themselves (xenon = xenon_pad) are read where the pads
+    // raise them (FrontEnd::handle) [C scripts ui_select_practice_mode_choose,
+    // sysnotify_handle_unpause, animate_in; I: what is blocked].
+    vm.addNative("SetButtonEventMappings", [&st](Vm&, ScriptRun&, qb::Struct& p) {
+        if (Vm::flag(p, K("block_menu_input"))) st.menuInputBlocked = true;
+        if (Vm::flag(p, K("unblock_menu_input"))) st.menuInputBlocked = false;
+        return true;
+    });
+    // NetSessionFunc: no Xbox LIVE in the port, false. func = showsigninui
+    // opens the system's sign-in blade; ui_signin_check then waits for it to
+    // close (wait_for_blade_complete: the flag sysnotify_handle_unpause sets
+    // as the system unpauses). The port has no blade: it closes at once with
+    // no one signed in to LIVE, so the warning comes back with its Back (Music
+    // Studio > GHTunes' Sign In kept the screen empty and without focus,
+    // GD10-020) [C scripts ui_signin_check, wait_for_sysnotify_unpause,
+    // sysnotify_handle_unpause_console; I].
+    vm.addNative("NetSessionFunc", [](Vm& v, ScriptRun&, qb::Struct& p) {
+        if (const qb::Value* f = Vm::param(p, K("func")); f && f->key == K("showsigninui"))
+            v.spawn(K("sysnotify_handle_unpause_console"), qb::Struct{});
+        return false;
+    });
+
     // GetDisplaySettings: a 16:9 frame (widescreen = 1) [I].
     vm.addNative("GetDisplaySettings", [](Vm&, ScriptRun& run, qb::Struct&) {
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("widescreen"), Vm::makeInt(1));
@@ -339,6 +371,10 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
         if (const qb::Value* d = Vm::param(p, K("data")); d && d->st) data = *d->st;
         ++st.broadcasts;
         st.lastBroadcast = t->key;
+        // A Block {type = ...} waiting for it goes on: begin_song's
+        // song_started ends ui_song_extras_load's block (without it the
+        // extras' lyrics never took Back, GD10-020) [C scripts].
+        v.launchEvent(t->key);
         if (st.onBroadcast) st.onBroadcast(t->key);
         for (const FlowState::Handler& h : st.handlers) {
             if (h.event != t->key) continue;

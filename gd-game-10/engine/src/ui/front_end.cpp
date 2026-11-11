@@ -87,6 +87,10 @@ void FrontEnd::handle(const InputEvent& e) {
     if (!e.down) return;
     ++pad.makes;
     pad.device = e.player;
+    // block_menu_input: no menu events until unblock_menu_input (a choose
+    // whose work waits, ui_select_practice_mode_choose: a second press chose
+    // TRAINING again and unfocused the tutorials list, GD10-020) [C scripts].
+    if (flow.menuInputBlocked) return;
     const char* ev = nullptr;
     switch (e.action) {
     case Action::Up: ev = "pad_up"; break;

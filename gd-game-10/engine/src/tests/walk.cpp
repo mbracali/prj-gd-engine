@@ -995,11 +995,16 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
                     static const Action acts[] = {Action::Up, Action::Down, Action::Down, Action::Up, Action::Confirm, Action::Confirm, Action::Back,
                                                   Action::Left, Action::Right};
                     Action a = acts[(fuzzRng_ >> 16) % 9];
-                    // No song, tutorial or jam session starts (they would need
-                    // the pause menu to leave: the jam band screen has no Back,
-                    // jam_band_quit_dialog is its pause menu's).
+                    // No song, tutorial, practice song or jam session starts
+                    // (they would need the pause menu to leave: the jam band
+                    // screen has no Back, jam_band_quit_dialog is its pause
+                    // menu's; practice's speed starts the section). No
+                    // character is made or edited either: the port builds no
+                    // CAS characters yet, cas_queue never empties and the CAS
+                    // screens' block_menu_input waits on it (GD10-020).
                     if (a == Action::Confirm && (flowState(fe) == "uistate_select_difficulty" || flowState(fe) == "uistate_select_tutorial" ||
-                                                 flowState(fe) == "UIstate_jam_select_song"))
+                                                 flowState(fe) == "UIstate_jam_select_song" || flowState(fe) == "uistate_practice_select_speed" ||
+                                                 flowState(fe) == "uistate_character_selection"))
                         a = Action::Back;
                     ++fuzzPresses_;
                     if (SDL_getenv("GD10_WALKLOG")) SDL_Log("walk: fuzz %d at %s", int(a), flowState(fe).c_str());
@@ -1019,7 +1024,25 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
                     }
                     --key_;
                     lastKey_ = now + 700.0;
-                    out.push_back(Press{Action::Back, op.player});
+                    // Screens the original leaves another way [C scripts]: the
+                    // cheat entry with Start (its B is the red fret,
+                    // ui_create_options_cheats_new); pop-ups without a
+                    // pad_back (create_popup_warning_menu with no
+                    // back_button_script) with their second item: the LIVE
+                    // sign-in warning's BACK, the set list's quit warning's
+                    // YES (to the main menu); the set list's set and double
+                    // bass pop-ups and the generic alert (its pad_back is
+                    // nullscript) with their only button, A
+                    // (ui_create_setlist_prompt, ui_create_double_bass_popup,
+                    // ui_create_generic_alert_popup).
+                    Action a = Action::Back;
+                    if (flowState(fe) == "uistate_options_cheats_new") a = Action::Start;
+                    else if (flowState(fe) == "UIstate_setlist_prompt" || flowState(fe) == "UIstate_double_bass_popup" ||
+                             flowState(fe) == "UIstate_generic_alert_popup")
+                        a = Action::Confirm;
+                    else if (flowState(fe) == "uistate_signin_warning" || flowState(fe) == "uistate_setlist_quit_warning")
+                        a = seek_ % 2 ? Action::Down : Action::Confirm;
+                    out.push_back(Press{a, op.player});
                 } else {
                     seek_ = 0;
                 }

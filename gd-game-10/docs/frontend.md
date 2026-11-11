@@ -63,7 +63,7 @@ XEX address; [I] = inferred.
 
 ## Screens (flow order)
 
-Counts: 21 screens looked at; 17 match (no difference seen), 2 differ, 2
+Counts: 22 screens looked at; 18 match (no difference seen), 2 differ, 2
 not reached; sub-screens of Backstage, Settings and Music Studio below the
 first level are not audited yet.
 
@@ -79,6 +79,7 @@ first level are not audited yet.
 | Head to Head | uistate_select_controller | art, help bar, Back | controller icons not checked |
 | Backstage | uistate_backstage | badge, typewriter items, highlight, help bar | - |
 | Practice (Backstage) | uistate_select_instrument | reached | - |
+| Tutorials (game mode > TRAINING) | uistate_select_tutorial | reached with focus; TRAINING's choose blocks the menu input until the tutorials list is up (SetButtonEventMappings), a second press no longer pushes the screen twice; Back (tutorials_event_back) goes back | list not audited |
 | Settings | uistate_options | items, highlight, help bar + ENHANCED | - |
 | Cheats | uistate_options_cheats | title, list, highlight on the focused item, snakes, scroll bar (the cheat bone hides: new_cheat_alpha) | - |
 | Music Studio | uistate_jam | sign-in, memcard, download scan, jam | jam screen itself not audited (band characters missing: CAS) |
@@ -98,5 +99,19 @@ first level are not audited yet.
 - `--walktest quickplay`: passes (boot to the results and back to the set list).
 - `--walktest qp_pause`: passes (Esc pauses, Back resumes, the pause items).
 - `--walktest fuzz` (300 seeded random presses, `GD10_SEED`; a menu must
-  keep the focus with text shown, never 8 s without; no song, tutorial or
-  jam session starts): passes on seeds 7, 99.
+  keep the focus with text shown, never 8 s without; no song, tutorial,
+  practice song or jam session starts, no character is made: CAS builds
+  are not in the port yet): `tools/fuzz_seeds.sh <gd10> <iso>` runs the
+  regression seeds (default, 7, 99 and the seeds that found the bugs
+  below); 41 seeds were run (default and the odd seeds 1..79; GD10_SEED
+  n and n|1 are the same walk).
+- Leaving screens after the fuzz (`backto:`): the cheat entry leaves with
+  Start (B is its red fret), pop-ups without a pad_back (LIVE sign-in
+  warning, set list quit warning) with their second item, the set and
+  double bass pop-ups and the generic alert (Back is nullscript) with A,
+  as the original.
+- Fixed from the fuzz walk (GD10-020): tutorials pushed twice and left
+  unfocused (block_menu_input, spawn instance limits: D20); GHTunes' Sign
+  In waited forever for the LIVE blade (D21); practice's section Back
+  waited on GetContentFolderState; the extras' lyrics never took Back
+  (IsObjectScript; BroadcastEvent did not end a Block on song_started).
