@@ -45,6 +45,7 @@
 #include "platform/disc_picker.h"
 #include "platform/paths.h"
 #include "render/canvas.h"
+#include "render/hitch.h"
 #include "render/core_backend.h"
 #include "render/venue_stage.h"
 #include "ui/port_draw.h"
@@ -202,6 +203,16 @@ private:
     bool running_ = true;
     bool restart_ = false;  // Enhanced's Restart Now: runApp starts the game again
     int exitCode_ = 0;
+    // The walks' no-stutter check (docs/guidelines/usual-bugs.md): every
+    // frame from a song's request (the loading screen) to 5 s into the song
+    // within GD10_HITCH_BUDGET ms of work (the present, which waits for a GPU
+    // other programs share, not counted; default 33; 0 off).
+    int loadCheckState_ = 0;  // 0 waiting, 1 in the window, 2 done
+    int loadCheckFrames_ = 0, loadCheckOver_ = 0;
+    double loadCheckWorst_ = 0;
+    std::string loadCheckWorstAt_;
+    void loadCheck(double frameMs);
+    bool loadCheckPassed();
     // A restart (Options::startScreen): GH3's boot screens passed unseen to
     // Enhanced Options (restartToEnhanced).
     bool restartNav_ = false;
@@ -1333,6 +1344,28 @@ void App::songEvent(const InputEvent& ev) {
     song_->handle(ev);
 }
 
+void App::loadCheck(double frameMs) {
+    if (!walk_ || !front_ || loadCheckState_ == 2) return;
+    if (loadCheckState_ == 0 && front_->songRequest.pending) loadCheckState_ = 1;
+    if (loadCheckState_ != 1) return;
+    ++loadCheckFrames_;
+    static const double budget = SDL_getenv("GD10_HITCH_BUDGET") ? std::atof(SDL_getenv("GD10_HITCH_BUDGET")) : 33.0;
+    if (budget > 0 && frameMs > budget) ++loadCheckOver_;
+    if (frameMs > loadCheckWorst_) loadCheckWorst_ = frameMs, loadCheckWorstAt_ = song_ ? "song" : front_->flowState();
+    if ((song_ && song_->songMs() >= 5000) || (!song_ && !front_->songRequest.pending)) {
+        loadCheckState_ = 2;
+        SDL_Log("load hitch check: %d frames from the song's request to 5 s in, worst %.1f ms of work (%s), %d over %.0f ms", loadCheckFrames_,
+                loadCheckWorst_, loadCheckWorstAt_.c_str(), loadCheckOver_, budget);
+    }
+}
+
+bool App::loadCheckPassed() {
+    if (!loadCheckOver_) return true;
+    SDL_Log("walktest: FAILED the no-stutter check: %d frames over GD10_HITCH_BUDGET during the song's load and start (worst %.1f ms on %s)",
+            loadCheckOver_, loadCheckWorst_, loadCheckWorstAt_.c_str());
+    return false;
+}
+
 void App::frame() {
     pollUserFiles();
     {
@@ -1377,7 +1410,11 @@ void App::frame() {
         } else if (input_.analogWhammy() || input_.shakeWhammyActive()) {
             song_->setWhammy(0, std::max(input_.whammyValue(), input_.whammyValue(0)));
         }
-        const bool more = song_->frame(canvas_, mixer_, textures_.get());
+        bool more;
+        {
+            hitch::Scope hs("song frame");
+            more = song_->frame(canvas_, mixer_, textures_.get());
+        }
         if (front_) front_->songClockMs = song_->songMs();
         if (front_ && song_->syncCheck().measured) {
             const SongScreen::SyncCheck& sc = song_->syncCheck();
@@ -1389,13 +1426,19 @@ void App::frame() {
             const uint64_t nowNs = SDL_GetTicksNS();
             const double dt = lastFrameNs_ ? double(nowNs - lastFrameNs_) / 1e6 : 0;
             lastFrameNs_ = nowNs;
-            front_->frame(canvas_, dt);
+            {
+                hitch::Scope hs("ui");
+                front_->frame(canvas_, dt);
+            }
             if (hooks_) hooks_->draw(canvas_, song_->songMs());
             if (front_->songPaused) pauseSeen_ = pauseSeen_ || front_->flow.paused;
         }
         overlay();
         captureMenuScreenshot(canvas_, double(SDL_GetTicksNS() - startNs_) / 1e6, song_->songMs());
-        canvas_.end();
+        {
+            hitch::Scope hs("present");
+            canvas_.end();
+        }
         if (front_ && front_->songOutro && !front_->songKill) {
             // A request for a song (or a won song's end the scripts never
             // tear down) ends it too [I: GH3's kill_gem_scroller always comes].
@@ -1488,11 +1531,15 @@ void App::frame() {
     }
     preloadDiscard_.erase(std::remove_if(preloadDiscard_.begin(), preloadDiscard_.end(), [](const auto& p) { return p->ready(); }),
                           preloadDiscard_.end());
-    if (textures_) textures_->poll();  // the zone textures read on a worker (TextureCache::loadPakAsync)
+    if (textures_) {
+        hitch::Scope hs("texture poll");
+        textures_->poll();
+    }  // the zone textures read on a worker (TextureCache::loadPakAsync)
     // The preloaded venue's uploads, a part a frame under the loading screen
     // (VenueStage::attachStep); on the song's first frame they held it ~300 ms.
     if (front_ && front_->songRequest.pending && songPreload_ && songPreload_->ready() && songPreload_->stage && !songPreload_->stage->attachDone()) {
         std::string aerr;
+        hitch::Scope hs("venue attach");
         songPreload_->stage->attachStep(canvas_.renderer().device(), *disc_, aerr);
         if (!aerr.empty()) SDL_Log("venue preload: %s", aerr.c_str());
     }
@@ -1541,6 +1588,7 @@ void App::frame() {
         if (setup.mode == GameMode::Boss) setup.difficulty[1] = rq.difficulty;  // the 1P menu sets both [C selected_difficulty]
         // A walk's sudden death ends: player 2's autoplay keeps its Death Drains.
         if (walk_ && rq.suddenDeath) setup.autoplayFires[1] = false;
+        hitch::Scope hs("song start");
         if (!info || !song_->start(*disc_, *globals_, *info, setup, autoplay, noFail, mixer_, err, textures_.get())) {
             SDL_Log("song: cannot start %s: %s", qbkey::name(front_->songRequest.song).c_str(), err.c_str());
             song_.reset();
@@ -1615,6 +1663,7 @@ void App::frame() {
         if (((!walk_ && !restartNav_ && !SDL_getenv("GD10_NO_MOVIES")) || SDL_getenv("GD10_WALK_MOVIES")) && listed)
             if (playMovie(*disc_, movie, canvas_, mixer_, input_) == MoviePlayer::Result::Quit) running_ = false;
         lastFrameNs_ = SDL_GetTicksNS();
+        hitch::frameBegin();  // the movie's own frames were its player's
         return;
     }
     if (front_ && !front_->songPlaying) {
@@ -1625,7 +1674,10 @@ void App::frame() {
         // The Enhanced backdrop, made once while the menus run (drawn unseen
         // under the first screen, which covers it).
         if (!backdrop_ && !backdropTried_ && front_->flowState() == "bootup_press_any_button_fs") prepareMenuBackdrop();
-        finishMenuBackdrop(false);
+        {
+            hitch::Scope hs("backdrop");
+            finishMenuBackdrop(false);
+        }
         if (ports_ && ports_->isOpen()) {
             // The port's screen over a venue with the band (gd02's backdrop:
             // App::menuBackdrop), GH3's scripts waiting meanwhile.
@@ -1648,7 +1700,10 @@ void App::frame() {
                     ++outroFrames_;
                 }
             }
-            front_->frame(canvas_, dt);
+            {
+                hitch::Scope hs("ui");
+                front_->frame(canvas_, dt);
+            }
             if (ports_) ports_->drawItems(canvas_, front_->flowState());
             if (restartNav_) canvas_.flush(), canvas_.fillRect(0, 0, kScreenW, kScreenH, SDL_Color{0, 0, 0, 255});  // the boot screens unseen
         }
@@ -1656,7 +1711,10 @@ void App::frame() {
         captureMenuScreenshot(canvas_, double(nowNs - startNs_) / 1e6, -1e9);  // no song
         // A frame that drew nothing (a screen gone, the next not drawn yet:
         // the song's end before the results) keeps the last picture (Canvas::end).
-        canvas_.end(true);
+        {
+            hitch::Scope hs("present");
+            canvas_.end(true);
+        }
         return;
     }
     canvas_.begin(SDL_Color{0, 0, 0, 255});
@@ -1844,6 +1902,7 @@ int App::run() {
     startNs_ = SDL_GetTicksNS();
     while (running_) {
         const uint64_t frameStart = SDL_GetTicksNS();
+        hitch::frameBegin();
         SDL_Event e;
         while (SDL_PollEvent(&e)) handleEvent(e);
         if (keys_) {
@@ -1893,6 +1952,7 @@ int App::run() {
                 }
             if (walk_->done() || walk_->failed()) {
                 exitCode_ = walk_->finish(*front_);
+                if (!loadCheckPassed() && exitCode_ == 0) exitCode_ = 1;
                 running_ = false;
             }
             walkKeyBot();
@@ -1921,6 +1981,8 @@ int App::run() {
         if (frameLog && spent > 25'000'000ull)
             SDL_Log("frame: %.1f ms at %.0f ms (%s)", double(spent) / 1e6, double(frameStart - startNs_) / 1e6,
                     front_ ? front_->flowState().c_str() : song_ ? "song" : "-");
+        hitch::frameEnd(front_ ? front_->flowState().c_str() : song_ ? "song" : "-");
+        loadCheck(hitch::lastWorkMs());
         if (spent < minNs) SDL_DelayNS(minNs - spent);
         if (stats) {
             ++statsFrames;
@@ -1934,6 +1996,7 @@ int App::run() {
     // Restart Now as a walk's last act: the walk is over (it goes on in the
     // restarted game's walk, runApp).
     if (restart_ && walk_ && front_) walk_->endAtRestart(), exitCode_ = walk_->finish(*front_);
+    hitch::report();
     song_.reset();
     outroSong_.reset();  // its venue's GPU objects before the device
     if (backdropWork_.valid()) backdropWork_.wait();

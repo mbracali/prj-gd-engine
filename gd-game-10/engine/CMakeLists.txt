@@ -77,6 +77,7 @@ target_sources(gd10 PRIVATE
   src/render/gh3_shader.cpp
   src/render/gl_device.cpp
   src/render/gem_materials.cpp
+  src/render/hitch.cpp
   src/render/highway2d.cpp
   src/render/hud2d.cpp
   src/render/hud2p.cpp
