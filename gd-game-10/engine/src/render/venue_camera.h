@@ -94,6 +94,7 @@ public:
         int index = 0;
         uint32_t name = 0, type = 0, script = 0;
         uint32_t dof = 0;  // its dof (a DOF_*_tod_manager global; 0: DOF_Off_TOD_Manager)
+        bool crowdOff = false;  // the entry's CrowdOff flag: enable_crowd_models_cfunc active = false [C script CameraCuts_StartCallback]
         uint32_t screenFx = 0;  // next_screenfx when it started (ApplyScreenFx; 0: none) [C script]
     };
     const Shot& shot() const { return shot_; }

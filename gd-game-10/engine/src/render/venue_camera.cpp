@@ -307,6 +307,7 @@ void CameraDirector::startShot(double t) {
     lastType_ = keyOf(entryField(e, K("type")));
     shot_.type = lastType_;
     shot_.name = keyOf(entryField(e, K("name")));
+    shot_.crowdOff = hasFlag(e, K("CrowdOff"));
     const uint32_t script = keyOf(e ? e->find(K("controlscript")) : nullptr);
     const qb::Struct* params = e && structOf(e->find(K("params"))) ? structOf(e->find(K("params"))) : e;
     shot_.script = script;
@@ -641,6 +642,20 @@ CamPose CameraDirector::aim(const CamPose& p, const Keyed& k0, const Keyed& k1, 
         const float l = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
         return l > 1e-9f ? Vec3{v[0] / l, v[1] / l, v[2] / l} : v;
     };
+    if (static const bool dbg = std::getenv("GD10_CAMLOG") && std::getenv("GD10_CAMLOG")[0] == '2'; dbg) {
+        // Development aid: where the bone sits with the authored rotation (x right, y down, half-screens).
+        static int lastCut = -1;
+        if (lastCut != cuts_) {
+            lastCut = cuts_;
+            const Vec3 r = rotate(p.rot, {-1, 0, 0}), u = rotate(p.rot, {0, 1, 0}), f = rotate(p.rot, {0, 0, 1});
+            const float z = want[0] * f[0] + want[1] * f[1] + want[2] * f[2];
+            const float x = want[0] * r[0] + want[1] * r[1] + want[2] * r[2], y = want[0] * u[0] + want[1] * u[1] + want[2] * u[2];
+            SDL_Log("camaim: %s fov %.0f so (%.2f %.2f) authored (%.2f %.2f) dist %.2f cam (%.2f %.2f %.2f) bone (%.2f %.2f %.2f)",
+                    qbkey::names().get(shot_.name).c_str(), p.fov, so[0], so[1], z > 0 ? x / z / th : 99.0f, z > 0 ? -y / z / tv : 99.0f,
+                    std::sqrt(want[0] * want[0] + want[1] * want[1] + want[2] * want[2]), p.pos[0], p.pos[1], p.pos[2], target[0], target[1],
+                    target[2]);
+        }
+    }
     const Vec3 a = norm(have), b = norm(want);
     const float d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     if (d < 0.2f) return p;  // behind or far off: keep the authored framing

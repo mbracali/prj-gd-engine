@@ -633,7 +633,9 @@ void VenueStage::draw(double ms) {
     shadowPass(ms, cam);
     if (crowd_) {
         crowd_->render(ms, cam, *venue_, lightState_, lights_);
-        for (uint32_t card : hide_) view_->setOverride(card, crowd_->texture(card));
+        // A CrowdOff shot: the crowd models off (their cards not drawn) [C script CameraCuts_StartCallback].
+        const bool off = !hasFixedCam_ && cameras_.shot().crowdOff;
+        for (uint32_t card : hide_) view_->setOverride(card, off ? gfx::TextureId{} : crowd_->texture(card));
     }
     view_->setTime(ms / 1000.0);
     {
