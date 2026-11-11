@@ -235,3 +235,48 @@ Not done: sub-screens below the first level (Extras, credits, calibration,
 audio, save/load, jam), career flow, text fit rules beyond the descs'
 values ([I]), cash rewards' Rock Rank title, sound cues per screen (logged
 only).
+
+## 2026-11-11 Original shaders on by default (rendering agent, GD10-010)
+
+About 4 h of agent time, own build dir `engine/build/gfx2`. Doc:
+`docs/render.md`; decisions D17..D19.
+
+Causes and fixes:
+- **Black venue with the original shaders**: gh4 moved the engine constants
+  [C data: the constant tables of all 4,981 shader records]: ambient c160,
+  key light c161..c163, specular slots c164..c169, SH c172..c175, new vertex
+  point / spot lights c176 / c192 with attenuations c248..c253, filter
+  passes c64..c99, g_TextureProjection0 c124. The port wrote GH3's c176..:
+  the pixel shaders read zeros. Registers remapped (xenos::objectSlot,
+  Globals c64..c255); the light set fills gh4's slots (D17 [I]); the
+  library is on by default (GD10_GH4_SHADERS=0 turns it off).
+- **Grey haze / white blobs** (with the approximation too): gh4 particle
+  quick materials carry `lighting`, `softedge` and `max`; the port drew
+  them unlit at full white with no cap. Lit, soft-edged, capped (D19 [I]).
+- **Screen FX**: gh4's profiles hold bloom2 / bright_sat / dof3 / noise2 /
+  uberscreenfx; only bright_sat was read and the passes' constants sat at
+  GH3's registers. bloom2 and dof3 now mapped on GH3's passes (D18 [I]);
+  noise2 / uberscreenfx not drawn.
+- **Meadowlands white floor**: gone with the original shaders (the floor is
+  lit by the stage lights).
+- Programs (receiver variants, FX passes) are compiled with the venue.
+
+Verified (engine/build/gfx2/gd10, headless, scratch XDG):
+- `--venuetest` z_forum (entersandman): 394 meshes with the original
+  shaders, 0 approximated, 60/240 fps identical; z_meadowlands, z_tushino,
+  z_justice, z_donnington shots looked at: lit, coloured, not black.
+- `--song entersandman --autoplay` shots at 10 / 25 / 50 / 61 / 79 / 85 /
+  90 s looked at, Star Power (cyan gems, lightning, x8) included; no frame
+  over 25 ms in the song (one at song time 0 in the direct `--song` mode).
+- Backends: local, Vulkan (RADV) and OpenGL3 (gd-engine-core) draw the same
+  frame; SDL3 GPU cannot present offscreen and fell back to local.
+- Gate: walks boot, quickplay, menus, qp_pause, fuzz passed; `--selftest`
+  31 failures (the expected DLC x3 + jamsession); `--scripttest`,
+  `--sfxtest` pass.
+
+Not done: the 90 s shot of Enter Sandman in Meadowlands is still veiled by
+a ring of scripted spark glows near the camera; the XEX's light set and
+bloom2 / dof3 / noise2 passes (VMX128 code); loading-screen frames of
+250-500 ms under play_song (the menu scene's synchronous load and the
+venue's shader compiles; not in the song); the highway / gems / HUD on the
+library's own templates (D15).

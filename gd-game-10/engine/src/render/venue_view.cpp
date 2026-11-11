@@ -366,6 +366,9 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
                     for (int k = 0; k < 16; ++k)
                         if ((gp->samplers >> k & 1) && !mm.tex[k]) mm.tex[k] = (gp->cubes >> k & 1) ? gh3_.whiteCube() : gh3_.white();
                     it.gh3 = gp;
+                    // The dynamic shadow's receiver variant compiled now, not
+                    // in the first frame that draws it (no compile stutter).
+                    if (it.mode == Mode::Opaque) (void)gh3_.get(mat->shader, matlib::DynamicShadowReceiver);
                     it.mat = int(mats_.size());
                     mats_.push_back(mm);
                 }

@@ -136,3 +136,33 @@ CAS_Guitar_Highway desc_id -> CAS_Highways_List (highway_pak,
 highway_texture) [C data]; with no character_id (a direct `--song`) the
 first Preset_Musician_Profiles_Modifiable entry (James) is used. Undo:
 ui/song_screen.cpp highwayTexture.
+
+## D17. gh4's light set: which light takes which register [I] (2026-11-11)
+
+What: the registers are gh4's [C data: constant tables; microcode]; which
+light fills them is GH3's light set extended [I: gh4's is VMX128 code not
+read]: key light = the first directional light (c161..c163), the next
+three the specular slots and the SH, the first four point lights
+g_PointLight (c176 + 4i, attenuation c248 / c249), the first five spot
+lights g_SpotLight (c192 + 4i, c250..c253, the fifth's c211), cone from
+hotspot / field as full angles; the rest into the SH as GH3's; ambient into
+c160 and SH0 (no shader reads both). docs/render.md "Lights". Undo:
+render/gh3_shader.cpp lightObject.
+
+## D18. gh4's screen effects drawn with GH3's passes [I] (2026-11-11)
+
+What: tod_profiles.qb's bloom2 / dof3 / bright_sat entries [C data] mapped
+on the chain gd04 built for GH3: bloom2 = simple_bloom's passes (subtract
+as the cutoff, colormodulate as the strength; saturation, thickness,
+equation not applied), dof3 = the far blur in metres; noise2, uberscreenfx,
+godray, vignette not drawn; GH3's chain order. docs/render.md "Screen
+effects". Undo: render/screen_fx.cpp readEntry.
+
+## D19. Lit and soft-edged particles [I] (2026-11-11)
+
+What: a quick material with `lighting` multiplies its colour by the SH's
+constant term + 4/17 of the key light at the system (clamped to 1);
+`softedge` fades over softedgescale metres in front of the scene depth;
+`max` caps the emit rate at max / mean life [C data: the flags; I: the
+models]. Undo: render/particles.cpp (lit, softEdge, max), gh3_shader
+spriteLight.

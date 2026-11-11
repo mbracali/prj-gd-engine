@@ -66,6 +66,11 @@ bool ScreenFx::init(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Librar
         shutdown();
         return false;
     }
+    // Every pass the chain can run, compiled with the venue (no compile in
+    // the first frame an effect turns on).
+    for (const char* t : {"_2D_DepthOfFieldNear", "_2D_Tex_NoViewport", "_2D_Cutoff"}) (void)gh3_.get(immediate_, t);
+    for (const char* t : {"_2D_Tex_BS_NoViewport", "_2D_ComposeBloom0"}) (void)gh3_.get(immediateAlt_, t);
+    for (const char* t : {"_2D_DownSample4x", "_2D_GaussianBlur7x7H", "_2D_GaussianBlur7x7V", "_2D_GaussianBlur7x7"}) (void)gh3_.get(filter_, t);
     return true;
 }
 
