@@ -13,7 +13,8 @@ template's Default technique (Opaque meshes with a dynamic shadow:
 DynamicShadowReciever), the Xenos microcode translated to GLSL as gd04 does
 (`render/xenos_glsl.cpp`). Programs are compiled when the venue is built
 (Default and the receiver variant) and the screen effects' passes when the
-chain is set up, not in the first frame that draws them.
+chain is set up, not in the first frame that draws them; how without a
+stutter: "Loading without a stutter" below.
 `GD10_GH4_SHADERS=0` (development aid) switches the library off: the
 approximation draws.
 
@@ -115,6 +116,34 @@ second [I]. Before: z_Forum's StageGlows (20 m add quads, colour 0x6E6E6E,
   gh4: its ramp not read].
 - D29 (gd05): material colour once, highlight from the first light: the
   original microcode runs as written, so both hold by construction.
+
+## Loading without a stutter (docs/guidelines/usual-bugs.md)
+
+`GD10_HITCHLOG=<ms>` logs each frame over `<ms>` with its screen and the
+scopes that took its time (`render/hitch.h`), the longest at exit. Every
+loader takes its uploads and compiles a piece at a time through
+`hitch::slice()` (pieces while the frame is under 8 ms, one piece a frame
+of all of them):
+
+- VenueView: `prepare` (a worker: zone, ad and housing textures decoded,
+  housing models read), then `initStep` once a frame: textures, programs,
+  sectors, the vertex and index buffers in 4 MB pieces. VenueStage calls
+  prepare in `start` (the preload's worker); particles likewise.
+- The menu scene reads its zone (`venue::load`) and prepares its view on
+  workers; nothing of a zone draws until its view and screen effects are in.
+- TextureCache::poll uploads a decoded pak in pieces; SetPakManCurrent
+  reads a zone pak's QB files on a worker while the script waits.
+- Programs: shared by every `gh3shader::Programs` of a device (compiled
+  once a run). Local OpenGL begins them in the driver's threads
+  (KHR_parallel_shader_compile) and `settle` finishes them a piece a frame;
+  gd-engine-core's Vulkan / OpenGL 3 compile in `settle`, one a piece.
+  Drivers keep their own disk caches across runs; a cold cache costs one
+  program per frame (NVIDIA: up to ~100 ms on core OpenGL 3, which gd10
+  cannot make asynchronous; Vulkan pipelines are made at first draw by
+  the core).
+
+The walks check it: every frame from a song's request to 5 s into it within
+`GD10_HITCH_BUDGET` ms of work (the present not counted; default 50).
 
 ## Development aids
 

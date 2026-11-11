@@ -325,3 +325,81 @@ Not done: results name placeholder (no gamertag), notes N/A / streak 0
 (detailed stats), black sides behind the results (venue); "Rock Rank"
 wraps and shrinks as measured (unconfirmed); credits, Extras sub-screens,
 calibration, audio, save/load, jam, career flow not audited.
+
+## 2026-11-11 13:40 Fuzz walk: menus that lost the focus (fuzz agent, GD10-020)
+
+Time: about 1 h 35 min of agent time (12:05 -> 13:40). Built from a clean
+export of HEAD plus these changes (the shared tree had another agent's
+render work in progress).
+
+Causes found (the fuzz walk, `GD10_SEED`), each fixed as the original:
+- Tutorials (game mode > TRAINING) unfocused: SetButtonEventMappings and
+  SetSpawnInstanceLimits were no-ops, so a second A during TRAINING's
+  loading chose it again; select_tutorial was pushed twice and the second
+  choose unfocused its list. Now block_menu_input / unblock_menu_input stop
+  the pads' menu events and the spawn limits hold (D20).
+- Music Studio > GHTUNES > Sign In: an empty screen for good, waiting for
+  the LIVE blade to close (no blade in the port): it now closes at once and
+  the warning comes back (D21).
+- Practice's section list: Back never went back (GetContentFolderState
+  unhandled; D22).
+- Extras > lyrics: Back did nothing: IsObjectScript was unhandled (the
+  preview monitor never started) and BroadcastEvent did not end a Block, so
+  ui_song_extras_load never saw song_started.
+- HEAD's 7c6c66d (zone QB files read on a worker) also took the screens'
+  ui_paks off the frame: ui_create_<state> ran before its desc was in, so
+  Settings, Backstage and Head to Head came up empty and unfocused (menus
+  walk failed on pure HEAD). A screen's ui_paks are read at once again
+  (ui/natives_game.cpp setCurrent); zones stay on the worker.
+- Walk only (the original has no Back there): cheat entry leaves with
+  Start; the LIVE warning and set list quit warning with their second item;
+  the set and double bass pop-ups with A. The fuzz no longer starts a
+  practice section or makes a character (CAS builds are not in the port:
+  cas_queue never empties and the CAS screens' block_menu_input waits on
+  it; open in GD10-020).
+
+Verified (clean build, headless, scratch XDG_DATA_HOME each):
+- fuzz: default seed and the odd seeds 1..79 (41 walks; n and n|1 are the
+  same walk): 41 passed. Before: the default seed failed now and then at
+  uistate_select_tutorial, and 20 of seeds 1..40 failed (tutorials,
+  sign-in, CAS save dialog, lyrics, bonus videos, cheats, practice).
+- `gd-game-10/tools/fuzz_seeds.sh <gd10> <iso>` runs the regression seeds
+  (default 7 99 1 3 5 11 17 23 27 31 39 73), all in the 41 above.
+- walks boot, quickplay, menus, qp_pause: passed.
+- `--selftest`: 31 FAILED (10 Death Magnetic DLC songs x3 + jamsession);
+  `--scripttest`: "every script tokenizes; boot ran (72 natives to
+  write)" (SetButtonEventMappings is now a flow native, not core);
+  `--sfxtest`: "every sound decodes".
+
+## 2026-11-11 14:30 No stutter on loads (render agent, GD10-032)
+
+Measured with the new `GD10_HITCHLOG=<ms>` (frames over it, with the
+scopes that took them) on the quickplay walk, local backend, NVIDIA.
+
+Before (idle machine; under the other agent's tests the same loads took
+2-10x): boot_iis 163 ms (zone textures uploaded at once, 1.3 s loaded),
+main menu 94 ms (menu scene view: textures, 30 program compiles, mesh,
+screen FX), play_song 411 ms (the menu scene's synchronous z_tushino) +
+260 ms (SetPakManCurrent's QB read) + 180 ms (the venue's upload) + 214 ms
+(particles' textures), back on the set list 77 ms (z_soundcheck again).
+
+Fixed: VenueView prepares on a worker and uploads / compiles / builds a
+slice a frame; particles likewise; the menu scene loads its zone and view on
+workers; TextureCache::poll in slices; zone QBs read on a worker while the
+script waits; programs shared per device (compiled once a run), begun in
+the driver's threads on local OpenGL (KHR_parallel_shader_compile), made a
+slice a frame on the core backends; one 8 ms load budget a frame
+(`hitch::slice`). docs/render.md "Loading without a stutter".
+
+After (gate run, 7 tests at once): the load window (song request to 5 s
+in) worst 14.3 ms of work; no load frame over 33 ms on the path; left over
+33: boot_iis 47 ms and set list 41 ms of ui work (script + layout at the
+screen's start, not a load), the song's first frame ~40 ms of ui
+(destroy_loading_screen and the HUD's elements) under load.
+
+Check: every walk fails when a frame from a song's request to 5 s into it
+takes more than `GD10_HITCH_BUDGET` ms of work (default 50; present not
+counted). Not done: cold driver caches still cost one program per frame
+(core OpenGL 3: up to ~100 ms each, gd10 cannot make it asynchronous);
+Vulkan pipelines are made by the core at first draw (one 66 ms frame on a
+cold RADV cache).
