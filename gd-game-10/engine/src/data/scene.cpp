@@ -308,9 +308,12 @@ Scene parseGh4(const View& v, const uint8_t* data, size_t end, Kind kind) {
         m.word10 = M(0x28), m.word18 = M(0x40), m.word58 = M(0x44), m.word68 = M(0x84), m.word78 = M(0x78);
         const uint32_t ni = M(0x5C) >> 16, nv = M(0x5C) & 0xFFFF;
         const bool skinned = (m.vertexFlags & 0x80) != 0;
-        if (skinned) fail("gh4 skinned meshes not decoded");
         m.decl = vertexDeclaration(m.vertexFlags);
-        m.stride = declStride(m.decl, 0);
+        // Skinned (flag 0x80): +0x10 holds stream 1 (colour, UVs), +0x7C the
+        // CPU-skinning block (GH3's, stream 0 inside) [C: every .skin on the disc].
+        if (skinned) need(declStride(m.decl, 0) <= 24, "gh4 skin stream 0 stride");  // in a 32-byte CPU vertex
+        m.stride = declStride(m.decl, skinned ? 1 : 0);
+        need((M(0x28) & 0xFF) == m.stride, "gh4 vertex stride word");
         need(M(0x1C) == m.stride * nv, "gh4 vertex block size");
         need(M(0x38) == 2 * ni, "gh4 index block size");
         const size_t vo = B + M(0x10) + 0x20, io = B + M(0x2C) + 0x20;
@@ -334,12 +337,56 @@ Scene parseGh4(const View& v, const uint8_t* data, size_t end, Kind kind) {
             if (has(7, k)) m.binormals[k].resize(nv);
         }
         if (has(10, 0)) m.colors.resize(nv);
-        if (has(1, 0)) m.blendWeights.resize(nv);
-        if (has(2, 0)) m.blendIndices.resize(nv);
+        if (has(1, 0) || skinned) m.blendWeights.resize(nv);
+        if (has(2, 0) || skinned) m.blendIndices.resize(nv);
         for (uint8_t k = 0; k < 8; ++k)
             if (has(5, k)) m.texcoords[k].resize(nv);
         for (uint32_t vi = 0; vi < nv; ++vi)
-            for (const VertexElement& e : m.decl) decodeElement(v, vo + size_t(vi) * m.stride + e.offset, e, m, vi);
+            for (const VertexElement& e : m.decl)
+                if (!(skinned && e.stream == 0)) decodeElement(v, vo + size_t(vi) * m.stride + e.offset, e, m, vi);
+        if (skinned) {
+            // 0xCAFEBAB4 x 4, group counts (0, 1-bone, 2-bone, 3-bone), then
+            // each group: u32 vertices, 4 bone bytes, u32 vertices again,
+            // 0xFACEF000 (GH3: 0xFACEF000, 0xFACEF001), its 32-byte vertices
+            // as GH3's (position, weights, packed vectors, 0xBAADF00D) [C data].
+            const size_t sk = B + M(0x7C);
+            v.check(sk, sk + 0x20);
+            for (int k = 0; k < 4; ++k) need(v.u32(sk + 4 * k) == 0xCAFEBAB4u, "gh4 no 0xCAFEBAB4");
+            uint32_t counts[4];
+            for (int k = 0; k < 4; ++k) counts[k] = v.u32(sk + 16 + 4 * k);
+            need(counts[0] == 0, "gh4 skin group count 0");
+            size_t q = sk + 0x20;
+            uint32_t vi = 0;
+            for (uint32_t nb = 1; nb <= 3; ++nb) {
+                for (uint32_t g = 0; g < counts[nb]; ++g) {
+                    v.check(q, q + 16);
+                    const uint32_t gn = v.u32(q);
+                    need(gn > 0 && gn <= nv - vi, "gh4 skin group size");
+                    need(v.u32(q + 8) == gn && v.u32(q + 12) == 0xFACEF000u, "gh4 skin group markers");
+                    SkinGroup sg;
+                    sg.count = gn;
+                    std::array<uint8_t, 4> bones{data[q + 4], data[q + 5], data[q + 6], data[q + 7]};
+                    for (uint32_t b = nb; b < 4; ++b) need(bones[b] == 0, "gh4 skin group bone padding");
+                    sg.bones.assign(bones.begin(), bones.begin() + nb);
+                    q += 16;
+                    v.check(q, q + 32 * size_t(gn));
+                    for (uint32_t k = 0; k < gn; ++k, ++vi, q += 32) {
+                        need(v.u32(q + 28) == 0xBAADF00Du, "gh4 skin vertex marker");
+                        m.positions[vi] = v.floats<3>(q);
+                        const uint32_t w = v.u32(q + 12);
+                        const float w0 = float(w & 0xFFFF) / 65535.f, w1 = float(w >> 16) / 65535.f;
+                        m.blendWeights[vi] = nb == 1   ? std::array<float, 4>{1, 0, 0, 0}
+                                             : nb == 2 ? std::array<float, 4>{w0, w1, 0, 0}
+                                                       : std::array<float, 4>{w0, w1, std::max(0.f, 1.f - w0 - w1), 0};
+                        m.blendIndices[vi] = bones;
+                        for (const VertexElement& e : m.decl)
+                            if (e.stream == 0 && e.usage != 0) decodeElement(v, q + e.offset + 4, e, m, vi);
+                    }
+                    m.skinGroups.push_back(std::move(sg));
+                }
+            }
+            need(vi == nv, "gh4 skin groups do not cover the vertices");
+        }
         for (const auto& p3 : m.positions)
             for (float x : p3) need(std::isfinite(x), "non-finite position");
         sc.meshes.push_back(std::move(m));
@@ -373,7 +420,17 @@ Scene parse(const uint8_t* data, size_t size, Kind kind) {
     size_t end = size;
     if (kind == Kind::Skin) {
         static const uint8_t trailer[16] = {1, 0x10, 0, 0xFE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10};
-        if (v.u32(0) == size - 0x34) fail("gh4 skins not decoded");
+        // gh4: the scene ends at the first word + 0x20, then a trailer: 02 14
+        // 00 FE, u32 count, u32 0x14 (its size), two words [I], then the count's
+        // deform records (CAS faces and bodies; not decoded) [C: every .skin on the disc].
+        static const uint8_t magic4[4] = {2, 0x14, 0, 0xFE};
+        if (size >= 0x34 && v.u32(0) <= size - 0x34 && std::memcmp(data + v.u32(0) + 0x20, magic4, 4) == 0) {
+            const size_t t = size_t(v.u32(0)) + 0x20;
+            need(v.u32(t + 8) == 0x14 && (v.u32(t + 4) != 0 || t + 20 == size), "bad gh4 skin trailer");
+            end = t;
+            need(isGh4(v, end), "gh4 skin layout");
+            return parseGh4(v, data, end, kind);
+        }
         need(v.u32(0) == size - 0x30, "skin trailer offset");
         need(std::memcmp(data + size - 16, trailer, 16) == 0, "bad skin trailer");
         end = size - 16;

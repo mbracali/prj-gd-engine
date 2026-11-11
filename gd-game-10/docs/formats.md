@@ -143,8 +143,61 @@ Gem_Set_01 parse to their meshes; the engine reads them, data/scene.cpp]:
   (0x20-byte descriptor), +0x38 its size, +0x4C material, +0x5C indices << 16
   | vertices; the pointer table follows at 0x90 x meshes.
 - **Indices**: triangle lists (GH3: strips with 0x7FFF restarts).
-- Skinned meshes (vertex flag 0x80; +0x78 a 0x1000-aligned block) and the
-  .skin trailer (first word = size - 0x34) are not decoded yet.
+- **Skinned meshes** (vertex flag 0x80) [C: every .skin on the disc decodes,
+  every character and instrument of DATA/PAK/CAS]: +0x10 holds stream 1
+  (colour, the 0x4000 bytes, UVs; its stride in the low byte of +0x28),
+  +0x7C (from the scene base, 0x1000-aligned, 0xEE fill before it) GH3's
+  CPU-skinning block: 0xCAFEBAB4 x 4, u32 group counts (0, 1-bone,
+  2-bone, 3-bone), each group u32 vertices, 4 bone bytes (skeleton
+  indices), u32 vertices again, 0xFACEF000 (GH3: 0xFACEF000, 0xFACEF001),
+  then its 32-byte vertices as GH3's (position, u32 weights w0 | w1 << 16,
+  stream 0's packed normal / tangent / binormal, 0xBAADF00D). Stream 0 may
+  be 16 or 24 bytes (vertex flags), always in a 32-byte vertex.
+- **.skin trailer**: the scene ends at the first word + 0x20; then 20 bytes
+  `02 14 00 FE`, u32 count, u32 0x14, two flag words [I], then (count != 0:
+  the CAS bodies, faces and accessories) deform records, not decoded [C].
+
+## Skeletons (.ske)
+
+GH3's tables (names, parents, mirror names / indices, flags, inverse bind
+matrices, translations, rotations) with: u32 at 4 = u16 file size, u16 bone
+count; the table offsets at 16..44 as GH3's, the translations at 0x80, the
+rotations at the next 0x80 boundary after them (zero fill), the rest packed
+[C: 225 of 251 .ske; the 24 of global_rag_skel.pak start "LZSS" (packed,
+not decoded); Face_deform and GH_Male_Deform fail GH3's mirror-name check].
+The characters' skeletons have 128 bones; the global pak keeps them as
+`<skeleton>_original` and `<skeleton>_Drummer` (the musician_body's
+skeleton name plus the suffix) [C data]; every talent .skin uses bones < 112.
+
+## Animations (.ska)
+
+File header: u32 file size, u32 0x20, two words [I], -1, -1, the bone mask's
+offset or -1, -1. Anim header at 0x20: u32 0x68 (GH3 0x48), u32 flags, f32
+duration, u16 bones, u16 Q keys, 4 x vec4 (GH3 2), u16 T keys, u16 custom
+keys (0 or 2) [I], u32 their offset or -1, then the offsets of the Q data
+(0x100), T data, Q track sizes (u16 per bone), T track sizes; zeros to 0x100.
+- Every non-empty track starts 16-aligned (0xDEAD fill), the sizes exclude it.
+- Q key: u16 frame (60 Hz), 3 x s16 / 32768 (x, y, z; w = sqrt(1 - |xyz|^2)):
+  GH3's uncompressed key; the 0x4000 compressed forms are not on the disc.
+- T key: f32 frame, 3 x f32 (16 bytes).
+- Flags 0x40: one pose (Q float quaternions, T vec4 with w 1; GH3 used
+  0x10000000, set on almost every gh4 clip).
+- Bone mask (flags 0x80000): u32 count, then the bits, as GH3's.
+[C: every one of the 8,255 .ska on the disc parses to its last frame
+(first key 0, last = duration x 60); names I]. A song's mocap clips
+(`<Song>_G_01`, `_B_`, `_D_`, `_S_` = guitarist, bassist, drummer, singer;
+`_cNN_` = 3-bone GH4_Camera clips) are played by `Band_PlayClip {clip
+startframe}` in `<song>_performance`, the clip struct
+(`<song>_song_scripts.qb`) naming each member's anim, start node and arms.
+
+## Raw CAS paks (DATA/PAK/CAS)
+
+Not compressed; GH3's 32-byte entry table; entry +16 = the key of the
+full path (`c:/gh4_1_burn/data/models/talent/jameshetfield.skin.xen`),
++20 the key of the base name without extension (`jameshetfield`), +24 the
+parent .tex's full key, flags 0x100. A part desc's `mesh` ('models/Talent/
+JamesHetfield.skin') is found by its base name across `cas_archive_paks`
+[C data; I: the engine's own lookup].
 
 ## Textures (.tex / .img)
 
@@ -167,7 +220,7 @@ table]. Fed GH3's way they draw black, so they are off for now.
 
 ## Not decoded yet (C++ `--formattest`, 2026-11-10)
 
-`.ska` (8,255), `.img` (2,548 "image version" + 259 short), `.wav` (2,466: decoded since, see above),
-`.skin` (2,166), `.tex` (1,891), `.ske` (251), `.rag` (200), `.hkc` (45),
+`.ska` (8,255: decoded since), `.img` (2,548 "image version" + 259 short), `.wav` (2,466: decoded since, see above),
+`.skin` (2,166: decoded since), `.tex` (1,891), `.ske` (251: 225 decoded since), `.rag` (200), `.hkc` (45),
 `.scn` (46), `.table` (46), `.fnt` (15), `.mdl` (14); the FSB used by
 `streamall.fsb.xen` (not FSB3). Each needs its gh4 layout.

@@ -56,15 +56,28 @@ int Skeleton::find(uint32_t nameKey) const {
 Skeleton parseSkeleton(const uint8_t* d, size_t size) {
     need(size >= 0x30 && be32(d, size, 0) == 0x00010030, "ske: header");
     need(be32(d, size, 8) == 0 && be32(d, size, 12) == 0, "ske: header");
-    const uint32_t n = be32(d, size, 4);
+    uint32_t n = be32(d, size, 4);
+    // gh4 (Metallica): u16 file size, u16 bone count; the tables from 0x80,
+    // the rotations at the next 0x80 boundary after the translations
+    // [C: every .ske on the disc but the LZSS-packed ragdoll skeletons].
+    const bool gh4 = (n >> 16) == size && size > 0x80;
+    if (gh4) n &= 0xFFFF;
     uint32_t off[8];
     for (int i = 0; i < 8; ++i) off[i] = be32(d, size, 16 + 4 * size_t(i));
     const uint32_t on = off[0], op = off[1], ofn = off[2], ofi = off[3], ofl = off[4], om = off[5],
                    ot = off[6], oq = off[7];
     need(n > 0 && n < 4096, "ske: bone count");
-    need(ot == 0x30 && oq == ot + 16 * n && om == oq + 16 * n && on == om + 64 * n && op == on + 4 * n &&
-             ofn == op + 4 * n && ofi == ofn + 4 * n && ofl == ofi + 4 * n,
-         "ske: table layout");
+    if (gh4) {
+        zeros(d, size, 0x30, 0x80, "ske: gh4 header tail");
+        need(ot == 0x80 && oq == ot + ((16 * n + 0x7F) & ~0x7Fu) && om == oq + 16 * n && on == om + 64 * n &&
+                 op == on + 4 * n && ofn == op + 4 * n && ofi == ofn + 4 * n && ofl == ofi + 4 * n,
+             "ske: gh4 table layout");
+        zeros(d, size, ot + 16 * n, oq, "ske: gh4 translation pad");
+    } else {
+        need(ot == 0x30 && oq == ot + 16 * n && om == oq + 16 * n && on == om + 64 * n && op == on + 4 * n &&
+                 ofn == op + 4 * n && ofi == ofn + 4 * n && ofl == ofi + 4 * n,
+             "ske: table layout");
+    }
     const size_t end = size_t(ofl) + n;
     need(((end + 3) & ~size_t(3)) == size, "ske: size");
     zeros(d, size, end, size, "ske: tail");
@@ -189,8 +202,112 @@ size_t decodePos(const uint8_t* d, size_t size, size_t p, size_t end, const PosK
 // keys (mod 65536), 2 x vec4, u16 T keys, u16 0, u32 -1, offsets of Q data,
 // T data, Q track sizes (u16 per bone), T track sizes; zeros to 0x80 [C: all
 // 18,747; pointer fix-up FUN_82420f90, decompressor Function_82421900].
+namespace {
+
+// gh4 (Metallica) .ska: file header u32 size, 0x20, two words [I], -1, -1,
+// the bone mask's offset or -1, -1; anim header at 0x20: u32 0x68, flags,
+// f32 duration, u16 bones, u16 Q keys, 4 x vec4, u16 T keys, u16 custom
+// keys (0 / 2) [I], u32 their offset or -1, the offsets of Q data (0x100),
+// T data, Q track sizes, T track sizes. Every track starts 16-aligned (0xDEAD
+// fill); a Q key is u16 frame + 3 x s16 / 32768 (GH3's uncompressed key; the
+// compressed forms are not on the disc), a T key f32 frame + 3 x f32; flags
+// 0x40: one pose (float quaternions, vec4 translations with w 1)
+// [C: every .ska on the disc parses to its last frame; I: names].
+Clip parseClipGh4(const uint8_t* d, size_t size) {
+    const size_t a = 0x20;
+    Clip c;
+    c.flags = be32(d, size, a + 4);
+    c.duration = bef(d, size, a + 8);
+    const uint16_t nb = be16(d, size, a + 0x0C);
+    for (int i = 0; i < 4; ++i) {
+        c.headerA[i] = bef(d, size, a + 0x10 + 4 * size_t(i));
+        c.headerB[i] = bef(d, size, a + 0x20 + 4 * size_t(i));
+    }
+    const uint32_t oq = be32(d, size, 0x78), ot = be32(d, size, 0x7C), oqs = be32(d, size, 0x80), ots = be32(d, size, 0x84);
+    need(oq == 0x100 && oq <= ot && ot <= oqs && oqs <= ots && ots + 2u * nb <= size, "ska: gh4 offsets");
+    c.singlePose = c.flags & 0x40;
+    c.bones.resize(nb);
+    size_t o = oq;
+    for (uint16_t b = 0; b < nb; ++b) {
+        const size_t n = be16(d, size, oqs + 2u * b);
+        if (!n) continue;
+        o = (o + 15) & ~size_t(15);
+        const size_t end = o + n;
+        need(end <= ot, "ska: gh4 q sizes");
+        auto& keys = c.bones[b].rot;
+        if (c.singlePose) {
+            need(n % 16 == 0, "ska: gh4 pose q size");
+            for (size_t p = o; p < end; p += 16) {
+                RotKey k;
+                for (int i = 0; i < 4; ++i) k.q[size_t(i)] = bef(d, size, p + 4 * size_t(i));
+                keys.push_back(k);
+            }
+        } else {
+            need(n % 8 == 0, "ska: gh4 q size");
+            for (size_t p = o; p < end; p += 8) {
+                const uint16_t t = be16(d, size, p);
+                need(!(t & 0x4000), "ska: gh4 compressed q key");
+                RotKey k;
+                k.frame = float(t);
+                float n2 = 0;
+                for (int i = 0; i < 3; ++i) {
+                    k.q[size_t(i)] = float(int16_t(be16(d, size, p + 2 + 2 * size_t(i)))) * (1.0f / 32768.0f);
+                    n2 += k.q[size_t(i)] * k.q[size_t(i)];
+                }
+                need(n2 <= 1.0001f, "ska: quaternion xyz longer than 1");
+                k.q[3] = std::sqrt(std::max(0.0f, 1.0f - n2));
+                keys.push_back(k);
+            }
+        }
+        o = end;
+    }
+    o = ot;
+    for (uint16_t b = 0; b < nb; ++b) {
+        const size_t n = be16(d, size, ots + 2u * b);
+        if (!n) continue;
+        o = (o + 15) & ~size_t(15);
+        const size_t end = o + n;
+        need(end <= oqs && n % 16 == 0, "ska: gh4 t sizes");
+        auto& keys = c.bones[b].pos;
+        for (size_t p = o; p < end; p += 16) {
+            PosKey k;
+            if (c.singlePose) {
+                for (int i = 0; i < 3; ++i) k.v[size_t(i)] = bef(d, size, p + 4 * size_t(i));
+            } else {
+                k.frame = bef(d, size, p);
+                for (int i = 0; i < 3; ++i) k.v[size_t(i)] = bef(d, size, p + 4 + 4 * size_t(i));
+            }
+            for (float x : k.v) need(std::isfinite(x), "ska: translation");
+            keys.push_back(k);
+        }
+        o = end;
+    }
+    const uint32_t m = be32(d, size, 24);
+    if (m != 0xFFFFFFFFu) {  // partial-animation bone mask: u32 count, bits
+        need(m + 4 <= size && be32(d, size, m) == nb && m + 4 + 4 * ((nb + 31u) / 32u) <= size, "ska: gh4 mask");
+        c.mask.resize(nb);
+        for (uint16_t i = 0; i < nb; ++i) c.mask[i] = (be32(d, size, m + 4 + 4 * (i / 32u)) >> (i % 32u)) & 1u;
+    }
+    const float frames = std::round(c.duration * Clip::kFps);
+    for (auto& tr : c.bones) {
+        auto check = [&](auto& keys) {
+            if (keys.empty() || c.singlePose) return;
+            need(keys.front().frame == 0.0f, "ska: first key not at 0");
+            for (size_t i = 1; i < keys.size(); ++i) need(keys[i].frame > keys[i - 1].frame, "ska: key order");
+            if (keys.size() > 1) need(keys.back().frame == frames, "ska: last key != duration");
+        };
+        check(tr.rot);
+        check(tr.pos);
+    }
+    return c;
+}
+
+}  // namespace
+
 Clip parseClip(const uint8_t* d, size_t size) {
     need(size >= 0x80, "ska: short");
+    if (size >= 0x100 && be32(d, size, 0) == size && be32(d, size, 4) == 0x20 && be32(d, size, 0x20) == 0x68)
+        return parseClipGh4(d, size);
     need(be32(d, size, 0) == 0 && be32(d, size, 4) == 0xFFFFFFFFu && be32(d, size, 8) == size &&
              be32(d, size, 12) == 0x20 && be32(d, size, 16) == 0xFFFFFFFFu && be32(d, size, 20) == 0xFFFFFFFFu &&
              be32(d, size, 28) == 0xFFFFFFFFu,
