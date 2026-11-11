@@ -105,3 +105,36 @@ Not done / approximate: the highway (debug highway, D13), the venue is not
 drawn (scenes: "material name area not zero"), menu layouts off in places
 (skull art over the career / difficulty menus, set list song names empty),
 results screen, sound effects partly (XMA1 errors on streamall).
+
+## 2026-11-11 09:10 Sound (GD10-030) and the launcher (GD10-031)
+
+Causes of "no sound": (1) gh4's FSB4 samples (streamall, song banks) are
+XMA2 packets (6-bit frame count), decoded as XMA1 -> FFmpeg "overflow in
+spectral RLE" / "would have to skip N bits"; (2) gh4's .wav (global_sfx,
+1,017) have no "fmt " chunk but a big-endian "XMA2" chunk after the data
+(docs/formats.md) -> every menu sound effect failed; (3) the boot movies
+are texture-slot movies (PlayMovieAndWait noblack), played without sound;
+(4) gh4 sound-event containers keep `sounds` as an array (vol dB, pitch
+semitones) and the rules in the container, and some events are scripts
+(Menu_Music_SE, Menu_Guitar_Lick_SFX: the menu music never started); (5)
+PlaySound's gh4 units (vol dB / vol_percent, pitch / pitch_percent,
+num_loops). The busses were not at 0.
+
+- Verified: `--sfxtest` -> "sound paks: 1017 .wav keys, 0 failed; banks: 1,
+  samples decoded: 2629, 3.6 hours of audio; every sound decodes" (fails on
+  a silent sample now).
+- Verified: `GD10_AUDIODUMP` + `--walktest quickplay` (dummy driver): sfx
+  device peaks 0.35 (licks, menu music Menu_Music_NoLeaf at -12.5 dB buss),
+  0.07 menus with music, 0.6-0.9 in the song (crowd); song device silent in
+  the menus, 0.55-0.69 during Albatross; no XMA errors in the log; 225 sounds
+  played, 0 lost. App run 40 s: boot movies' sound peaks 0.10-0.57.
+- Verified: `--songaudiotest entersandman` -> decoded (9 pairs as D8).
+- Launcher: build_module_10 (gd04's recipe), module_systems_10 every system,
+  verify_bundle checks gd10's FFmpeg; gd10 ready_to_play, completeness 0.1,
+  version unchanged. `build.sh all`: Linux, AppImage, Steam Deck, Windows,
+  Android each "complete (6 game module(s))". `--play gd10 --exit-after`
+  (GDUL_GAME_QUIT_AFTER=25000): Linux package exit 0 after 25.1 s (movie
+  sound dumped non-silent); Windows package under Proton wine, disc in
+  "Jogos Música": exit 0 after 25.1 s. Not tested: a Deck, an Android device,
+  macOS (not built).
+
