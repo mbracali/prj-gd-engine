@@ -586,6 +586,33 @@ bool UiSystem::lineProps(uint32_t id, float& w, float& h, float& sx, float& sy) 
     return true;
 }
 
+bool UiSystem::linePos(uint32_t id, bool summed, float& x, float& y) const {
+    auto it = lineIds_.find(id);
+    if (it == lineIds_.end()) return false;
+    const Element* e = find(it->second.first);
+    const FontEntry* fe = e ? fontFor(e->font) : nullptr;
+    if (!fe) return false;
+    const BlockFit b = blockFit(*fe, *e);
+    const float lineH = fe->f.lineHeight * e->lineSpacing * e->internalScale * b.sy;
+    const float total = lineH * float(b.lines.size());
+    const float top = std::max(0.0f, e->h - total) * (e->ijustY + 1) / 2;
+    // In the block's frame: x at its internal just, y the line's middle.
+    const float lx = e->w * (e->ijustX + 1) / 2, ly = top + lineH * (float(it->second.second) + 0.5f);
+    if (!summed) {
+        x = lx - e->w / 2, y = ly - e->h / 2;
+        return true;
+    }
+    if (!e->updated) {
+        x = y = 0;
+        return true;
+    }
+    const Frame f = frameOf(*e);
+    const float r = f.wrot * kDeg;
+    const float ox = lx * f.wsx, oy = ly * f.wsy;
+    x = f.cx + ox * std::cos(r) - oy * std::sin(r), y = f.cy + ox * std::sin(r) + oy * std::cos(r);
+    return true;
+}
+
 // text_case = upper: letters up, escape codes ("\\n", "\\c1", "\\b0") kept.
 std::string UiSystem::upperText(const std::string& in) {
     std::string out = in;
@@ -1231,31 +1258,7 @@ qb::Struct UiSystem::flattenParams(const qb::Struct& p) {
     return out;
 }
 
-const Element* UiSystem::descSpaceRoot(const Element* e) const {
-    for (; e && e != root_.get(); e = e->parent)
-        if (e->parent && e->parent->type == kDescInterface && !e->parent->children.empty() && e->parent->children[0].get() == e) return e;
-    return nullptr;
-}
-
-void UiSystem::descToScreen(const Element& r, float& x, float& y) const {
-    const Frame f = frameOf(r);
-    x = f.wx + (x - r.x) * (r.sx != 0 ? f.wsx / r.sx : 1), y = f.wy + (y - r.y) * (r.sy != 0 ? f.wsy / r.sy : 1);
-}
-
-void UiSystem::screenToDesc(const Element& r, float& x, float& y) const {
-    const Frame f = frameOf(r);
-    x = r.x + (x - f.wx) * (f.wsx != 0 ? r.sx / f.wsx : 1), y = r.y + (y - f.wy) * (f.wsy != 0 ? r.sy / f.wsy : 1);
-}
-
 void UiSystem::absoluteToLocal(const Element& e, float x, float y, float& lx, float& ly) const {
-    // In the space of e's desc (see descSpaceRoot); a desc's root takes it as its pos.
-    if (const Element* r = descSpaceRoot(&e)) {
-        if (r == &e) {
-            lx = x, ly = y;
-            return;
-        }
-        descToScreen(*r, x, y);
-    }
     const Element& p = e.parent ? *e.parent : *root_;
     const Frame f = e.parent && e.parent != root_.get() ? frameOf(p) : Frame{};
     const float pr = -f.wrot * kDeg;
@@ -1314,6 +1317,7 @@ void UiSystem::draw(Canvas& c) {
         const Node n = stack.back();
         stack.pop_back();
         const Element& e = *n.e;
+        e.updated = true;
         if (e.hidden) continue;
         const Element& p = e.parent ? *e.parent : *root_;
         // Composition [C 0x8221BF88]: the parent's child_anchor, pos scaled by the parent.
@@ -2156,6 +2160,17 @@ void UiSystem::addNatives() {
         return true;
     });
     vm_.addNative("GetScreenElementDims", [this](Vm&, ScriptRun& run, qb::Struct& p) {
+        // A text block's line (ui_options_cheats_focus sizes the highlight by it).
+        if (const qb::Value* idv = Vm::param(p, K("id")); idv && (idv->type == qb::Type::Key || idv->type == qb::Type::KeyPtr)) {
+            float w = 0, h = 0, sx = 1, sy = 1;
+            if (lineProps(idv->key, w, h, sx, sy)) {
+                if (qb::Struct* l = locals(run)) {
+                    Vm::set(*l, K("width"), Vm::makeInt(int32_t(w * sx)));
+                    Vm::set(*l, K("height"), Vm::makeInt(int32_t(h * sy)));
+                }
+                return true;
+            }
+        }
         Element* e = resolve(Vm::param(p, K("id")));
         if (!e) return false;
         layoutTree(*e);
@@ -2167,21 +2182,33 @@ void UiSystem::addNatives() {
         return true;
     });
     vm_.addNative("GetScreenElementPosition", [this](Vm&, ScriptRun& run, qb::Struct& p) {
+        // A text block's line: its centre, where the block's internal_just puts it [I].
+        if (const qb::Value* idv = Vm::param(p, K("id")); idv && (idv->type == qb::Type::Key || idv->type == qb::Type::KeyPtr)) {
+            float x = 0, y = 0;
+            if (linePos(idv->key, Vm::flag(p, K("summed")), x, y)) {
+                qb::Value v;
+                v.type = qb::Type::Pair;
+                v.f[0] = x, v.f[1] = y;
+                if (qb::Struct* l = locals(run)) Vm::set(*l, K("ScreenElementPos"), v);
+                return true;
+            }
+        }
         Element* e = resolve(Vm::param(p, K("id")));
         if (!e) return false;
         if (qb::Struct* l = locals(run)) {
             qb::Value v;
             v.type = qb::Type::Pair;
             v.f[0] = e->x, v.f[1] = e->y;
-            // `summed`: the pos point through every parent [C 0x823F5AA8 reads
-            // +0x1B0, 0x82375E08 sets it], in the desc's space (descSpaceRoot;
-            // ui_create_setlist_spawned places the icons from it in the row's
-            // own frame); mainmenu_focus puts the highlight there with pos =
-            // {absolute}.
+            // `summed`: the pos point on screen, the parent's corner + anchor +
+            // pos, cached by the element's update [C 0x823F5AA8 reads +0x1B0,
+            // 0x82375E08 sets it]. An element not updated yet gives (0, 0) [I:
+            // ui_create_setlist_spawned and ui_setlist_unfocus_song read the
+            // title just made and place the icons from it in the row's own
+            // frame; mainmenu_focus and ui_options_cheats_focus wait and put
+            // the highlight there with pos = {absolute}].
             if (Vm::flag(p, K("summed"))) {
                 const Frame f = frameOf(*e);
-                v.f[0] = f.wx, v.f[1] = f.wy;
-                if (const Element* r = descSpaceRoot(e)) screenToDesc(*r, v.f[0], v.f[1]);
+                v.f[0] = e->updated ? f.wx : 0, v.f[1] = e->updated ? f.wy : 0;
             }
             Vm::set(*l, K("ScreenElementPos"), v);
         }

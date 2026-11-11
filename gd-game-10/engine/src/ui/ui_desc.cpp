@@ -215,27 +215,29 @@ void UiSystem::descSetProps(Element& e, const qb::Struct& p) {
     const qb::Value* props = d ? d->find(K("props")) : nullptr;
     qb::Struct own;
     for (const qb::Item& it : p.items) {
-        const qb::Struct* match = nullptr;
+        // A name may be on several props: every one is set (new_cheat's
+        // new_cheat_alpha hides its color_bars and its input_cheats_bone,
+        // cheat_alpha three elements) [C data].
+        std::vector<const qb::Struct*> matches;
         if (it.name && props && props->arr)
             for (const qb::Value& pv : props->arr->values)
-                if (const qb::Struct* s = structOf(&pv); s && keyOf(s->find(K("name"))) == it.name) {
-                    match = s;
-                    break;
-                }
-        if (!match) {
+                if (const qb::Struct* s = structOf(&pv); s && keyOf(s->find(K("name"))) == it.name) matches.push_back(s);
+        if (matches.empty()) {
             if (it.name != K("desc") && it.name != K("type") && it.name != K("parent") && it.name != K("id")) own.items.push_back(it);
             continue;
         }
-        Element* target = descPath(e, match->find(K("path")));
-        const uint32_t prop = keyOf(match->find(K("target")));
-        if (!target || !prop) continue;
-        // A desc prop sets its one target; the element's flips stay [I].
-        qb::Struct one;
-        qs::Vm::set(one, prop, it.value);
-        qb::Item keep;
-        keep.value.type = qb::Type::Key, keep.value.key = K("preserve_flip");
-        one.items.push_back(keep);
-        applyProps(*target, one, false);
+        for (const qb::Struct* match : matches) {
+            Element* target = descPath(e, match->find(K("path")));
+            const uint32_t prop = keyOf(match->find(K("target")));
+            if (!target || !prop) continue;
+            // A desc prop sets its one target; the element's flips stay [I].
+            qb::Struct one;
+            qs::Vm::set(one, prop, it.value);
+            qb::Item keep;
+            keep.value.type = qb::Type::Key, keep.value.key = K("preserve_flip");
+            one.items.push_back(keep);
+            applyProps(*target, one, false);
+        }
     }
     if (!own.items.empty()) applyProps(e, own, false);
 }

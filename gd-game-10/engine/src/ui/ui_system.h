@@ -114,6 +114,7 @@ struct Element {
     // (UiSystem::drawCount): the mouse hit-tests what was drawn last.
     mutable float bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
     mutable uint64_t drawnIn = 0;
+    mutable bool updated = false;  // laid out by a draw (GetScreenElementPosition summed)
     // Its place in GH3's one draw list: (re)inserted when it becomes
     // visible or its z changes, in front of the older equals there, i.e.
     // drawn behind them [C 0x8238D7D0, 0x8238F6F8].
@@ -253,6 +254,7 @@ private:
     // their dims: ui_setlist_unfocus_song places the icons after the title).
     mutable std::unordered_map<uint32_t, std::pair<uint32_t, int>> lineIds_;
     bool lineProps(uint32_t id, float& w, float& h, float& sx, float& sy) const;
+    bool linePos(uint32_t id, bool summed, float& x, float& y) const;
     // SetText: "\m<n>" (a meta button) becomes "\b<glyph>" through
     // meta_button_map, "\_" a space [C 0x8231A2C8, 0x8228E0B0].
     // A text element's glyphs (its shadow with `shadowPass`) at the corner
@@ -278,16 +280,8 @@ private:
     // The local pos that puts e's pos point on screen point (x, y) (`pos =
     // {absolute (x, y)}`).
     void absoluteToLocal(const Element& e, float x, float y, float& lx, float& ly) const;
-    // A desc's root starts its own position space: its summed position is its
-    // own pos and its descendants' summed / absolute positions are in that
-    // space [C 0x82375E08: an element with flag 0x80000 copies its local
-    // transform; I: the flag is on a desc's root]. The nearest such root at
-    // or above e (nullptr: screen space).
-    const Element* descSpaceRoot(const Element* e) const;
     // A native's params with included (unnamed) structs merged in.
     static qb::Struct flattenParams(const qb::Struct& p);
-    void descToScreen(const Element& r, float& x, float& y) const;
-    void screenToDesc(const Element& r, float& x, float& y) const;
 
     qs::Vm& vm_;
     const Disc& disc_;
