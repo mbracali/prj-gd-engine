@@ -70,7 +70,8 @@ struct Mesh {
     std::vector<std::array<uint8_t, 4>> blendIndices;           // skins: bones of the vertex (unused = 0)
     std::vector<std::array<float, 4>> blendWeights;             // skins: weights (sum 1)
 
-    std::vector<uint16_t> indices;  // triangle strips; 0x7fff restarts a strip
+    std::vector<uint16_t> indices;  // triangle strips; 0x7fff restarts a strip (gh4: a triangle list)
+    bool triangleList = false;      // gh4 scenes (docs/formats.md "Scenes")
     std::vector<SkinGroup> skinGroups;
 
     std::vector<std::array<uint32_t, 3>> triangles() const;  // strips -> list, degenerate ones dropped
@@ -84,6 +85,7 @@ struct Scene {
     std::vector<Sector> sectors;
     std::vector<Mesh> meshes;
     std::vector<uint32_t> meshOrder;  // scene +0x48 table (a permutation of the meshes) [I: draw order]
+    bool gh4 = false;                 // World Tour engine layout (0xD0-byte materials, 0x90-byte meshes)
 };
 
 // Throws std::runtime_error on anything the disc's files never contain

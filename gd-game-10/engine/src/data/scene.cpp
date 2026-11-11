@@ -187,6 +187,13 @@ std::vector<VertexElement> vertexDeclaration(uint32_t fl) {
 
 std::vector<std::array<uint32_t, 3>> Mesh::triangles() const {
     std::vector<std::array<uint32_t, 3>> tris;
+    if (triangleList) {
+        for (size_t k = 0; k + 2 < indices.size(); k += 3) {
+            const uint32_t a = indices[k], b = indices[k + 1], c = indices[k + 2];
+            if (a != b && b != c && a != c) tris.push_back({a, b, c});
+        }
+        return tris;
+    }
     std::vector<uint32_t> run;
     auto flush = [&] {
         for (size_t k = 2; k < run.size(); ++k) {
@@ -206,6 +213,132 @@ std::vector<std::array<uint32_t, 3>> Mesh::triangles() const {
     return tris;
 }
 
+namespace {
+
+// gh4 (World Tour engine) scenes: the same file as GH3's with 0xD0-byte
+// material headers, 0x90-byte mesh records and triangle lists [C: every
+// zone .scn on the disc; docs/formats.md "Scenes"].
+Scene parseGh4(const View& v, const uint8_t* data, size_t end, Kind kind) {
+    Scene sc;
+    sc.kind = kind;
+    sc.gh4 = true;
+    const uint32_t nmat = v.u16(0x22);
+    const size_t mend = 0x20 + size_t(v.u32(0x24));
+    need(v.u32(0x28) == 0x10 && v.u32(0x2C) == kNone && mend <= end, "gh4 material header words");
+    size_t p = 0x30;
+    for (uint32_t i = 0; i < nmat; ++i) {
+        need(p + 0xD0 <= mend, "gh4 material past its section");
+        auto W = [&](size_t o) { return v.u32(p + o); };
+        need(v.allBytes(p + 8, p + 0x70, 0), "gh4 material name area not zero");
+        const uint32_t nA = W(0x78), oA = W(0x7C), nB = W(0x80), oB = W(0x84), nT = W(0x88), oT = W(0x8C);
+        const uint32_t msize = W(0x94);
+        need(nA < 0x1000 && nB < 0x1000 && nT < 0x1000, "gh4 material counts");
+        need(oA == 0xD0 && oB == oA + 16 * nA && oT == oB + 16 * nB, "gh4 material array offsets");
+        need(msize == align(oT + 4 * nT, 16) && W(0xB4) == msize && p + msize <= mend, "gh4 material size");
+        Material m;
+        m.key = W(0);
+        m.shader = W(0x70);
+        for (uint32_t k = 0; k < nA; ++k) m.constsA.push_back(v.floats<4>(p + oA + 16 * k));
+        for (uint32_t k = 0; k < nB; ++k) m.constsB.push_back(v.floats<4>(p + oB + 16 * k));
+        for (uint32_t k = 0; k < nT; ++k) m.textures.push_back(W(oT + 4 * k));
+        // GH3's +0xc8 .. +0xf0 words sit 0x30 earlier [I: same values seen].
+        m.c8 = W(0x98), m.cc = W(0x9C), m.d0 = W(0xA0), m.d4 = v.f32(p + 0xA4), m.d8 = W(0xA8), m.dc = W(0xAC);
+        m.e8 = W(0xB8), m.ec = W(0xBC), m.f0 = W(0xC0);
+        sc.materials.push_back(std::move(m));
+        p += msize;
+    }
+    need(p == mend, "gh4 materials do not fill their section");
+
+    const size_t s = mend;
+    need(v.u32(s) == 0xBABEFACEu, "no 0xBABEFACE");
+    const uint32_t pad = v.u32(s + 4);
+    need(pad >= 4 && pad % 4 == 0 && s + 8 + pad <= end && v.u32(s + 4 + pad) == 0xEA, "scene padding");
+    const size_t B = s + 8 + pad;
+    need(B + 0x90 <= end, "scene header past the end");
+    auto H = [&](size_t o) { return v.u32(B + o); };
+    sc.bmin = v.floats<3>(B);
+    sc.bmax = v.floats<3>(B + 0x10);
+    sc.sphere = v.floats<4>(B + 0x20);
+    need(H(0x30) == 0x000E0090, "gh4 scene header word");
+    const uint32_t nm = H(0x4C), ns = H(0x6C);
+    need(nm < 0x10000 && ns < 0x10000, "scene counts");
+    const size_t oGeom = 0x90 + 0x60 * size_t(ns), oMesh = H(0x80), oPtr = oMesh + 0x90 * size_t(nm);
+    const size_t oOrder = oPtr + 4 * size_t(nm);
+    need(H(0x70) == 0x90 && H(0x74) == oGeom && H(0x8C) == oPtr && H(0x48) == oOrder, "gh4 scene header offsets");
+    need(B + oOrder + 4 * size_t(nm) <= end, "scene tables past the end");
+    uint32_t total = 0;
+    for (uint32_t k = 0; k < ns; ++k) {
+        const size_t so = B + 0x90 + 0x60 * size_t(k), go = B + oGeom + 0x60 * size_t(k);
+        Sector sec;
+        sec.key = v.u32(so + 4), sec.flags = v.u32(so + 8), sec.index = v.u32(so + 0xC);
+        sec.sphere = v.floats<4>(so + 0x40);
+        sec.bmin = v.floats<3>(go + 0x10), sec.bmax = v.floats<3>(go + 0x20);
+        sec.firstMesh = v.u32(go + 0x48), sec.meshCount = v.u32(go + 0x4C), sec.geom5c = v.u32(go + 0x5C);
+        need(sec.firstMesh == total && sec.meshCount <= nm - total, "geom mesh range");
+        total += sec.meshCount;
+        sc.sectors.push_back(sec);
+    }
+    need(total == nm, "geoms do not cover the meshes");
+    std::vector<bool> seen(nm, false);
+    for (uint32_t i = 0; i < nm; ++i) {
+        uint32_t o = v.u32(B + oOrder + 4 * i);
+        need(o < nm && !seen[o], "mesh order table not a permutation");
+        seen[o] = true;
+        sc.meshOrder.push_back(o);
+    }
+    for (uint32_t i = 0; i < nm; ++i) {
+        const size_t mo = B + oMesh + 0x90 * size_t(i);
+        auto M = [&](size_t o) { return v.u32(mo + o); };
+        Mesh m;
+        m.sphere = v.floats<4>(mo);
+        m.triangleList = true;
+        m.material = M(0x4C);
+        m.vertexFlags = M(0x24);
+        m.word10 = M(0x28), m.word18 = M(0x40), m.word58 = M(0x44), m.word68 = M(0x84), m.word78 = M(0x78);
+        const uint32_t ni = M(0x5C) >> 16, nv = M(0x5C) & 0xFFFF;
+        const bool skinned = (m.vertexFlags & 0x80) != 0;
+        if (skinned) fail("gh4 skinned meshes not decoded");
+        m.decl = vertexDeclaration(m.vertexFlags);
+        m.stride = declStride(m.decl, 0);
+        need(M(0x1C) == m.stride * nv, "gh4 vertex block size");
+        need(M(0x38) == 2 * ni, "gh4 index block size");
+        const size_t vo = B + M(0x10) + 0x20, io = B + M(0x2C) + 0x20;
+        v.check(vo, vo + size_t(m.stride) * nv);
+        v.check(io, io + 2 * size_t(ni));
+        for (uint32_t k = 0; k < ni; ++k) {
+            uint16_t x = v.u16(io + 2 * k);
+            need(x < nv, "index out of range");
+            m.indices.push_back(x);
+        }
+        m.positions.resize(nv);
+        auto has = [&](uint8_t usage, uint8_t index) {
+            for (const VertexElement& e : m.decl)
+                if (e.usage == usage && e.index == index) return true;
+            return false;
+        };
+        if (has(0, 1)) m.positions2.resize(nv);
+        if (has(3, 0)) m.normals.resize(nv);
+        for (uint8_t k = 0; k < 2; ++k) {
+            if (has(6, k)) m.tangents[k].resize(nv);
+            if (has(7, k)) m.binormals[k].resize(nv);
+        }
+        if (has(10, 0)) m.colors.resize(nv);
+        if (has(1, 0)) m.blendWeights.resize(nv);
+        if (has(2, 0)) m.blendIndices.resize(nv);
+        for (uint8_t k = 0; k < 8; ++k)
+            if (has(5, k)) m.texcoords[k].resize(nv);
+        for (uint32_t vi = 0; vi < nv; ++vi)
+            for (const VertexElement& e : m.decl) decodeElement(v, vo + size_t(vi) * m.stride + e.offset, e, m, vi);
+        for (const auto& p3 : m.positions)
+            for (float x : p3) need(std::isfinite(x), "non-finite position");
+        sc.meshes.push_back(std::move(m));
+    }
+    (void)data;
+    return sc;
+}
+
+}  // namespace
+
 Scene parse(const uint8_t* data, size_t size, Kind kind) {
     View v{data, size};
     need(size >= 0x30, "file too small");
@@ -215,12 +348,14 @@ Scene parse(const uint8_t* data, size_t size, Kind kind) {
     size_t end = size;
     if (kind == Kind::Skin) {
         static const uint8_t trailer[16] = {1, 0x10, 0, 0xFE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10};
+        if (v.u32(0) == size - 0x34) fail("gh4 skins not decoded");
         need(v.u32(0) == size - 0x30, "skin trailer offset");
         need(std::memcmp(data + size - 16, trailer, 16) == 0, "bad skin trailer");
         end = size - 16;
     } else {
         need(v.u32(0) == 0, "first word not 0");
     }
+    if (v.u16(0x22) > 0 && v.u32(0x30 + 0x7C) == 0xD0 && v.allBytes(0x38, 0xA0, 0)) return parseGh4(v, data, end, kind);
 
     // Materials (Function_822B27E8, Function_822B2068).
     need(data[0x20] == 4 && data[0x21] == 0x10, "material header");

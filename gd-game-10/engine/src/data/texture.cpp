@@ -27,6 +27,8 @@ struct FormatInfo {
 constexpr FormatInfo kFormats[] = {
     {0x06, "8_8_8_8", 1, 4, 32, 0, 0},  {0x12, "DXT1", 4, 8, 4, 1, 2},  {0x13, "DXT3", 4, 16, 4, 2, 2},
     {0x14, "DXT5", 4, 16, 8, 5, 5},     {0x1F, "16_16_FLOAT", 1, 4, 32, 0, 0}, {0x31, "DXN", 4, 16, 8, 6, 6},
+    // gh4 (Metallica) also: 1_5_5_5 and 5_6_5, one 16-bit word a texel [C: Z_Forum.tex].
+    {0x02, "8", 1, 1, 8, 0, 0},         {0x03, "1_5_5_5", 1, 2, 16, 0, 0},  {0x04, "5_6_5", 1, 2, 16, 0, 0},
 };
 
 const FormatInfo& formatInfo(uint8_t gpu) {
@@ -79,7 +81,7 @@ Fetch parseFetch(const uint32_t w[6]) {
     if (!((w[5] >> 11) & 1)) fail("mips not packed");
     f.mipAddress = (w[5] >> 12) << 12;
     const FormatInfo& fi = formatInfo(f.fmt);
-    if (f.endian != (fi.blockW == 4 ? 1 : 2)) fail("endian");
+    if (fi.blockBytes != 1 && f.endian != (fi.blockW == 4 || fi.blockBytes == 2 ? 1 : 2)) fail("endian");
     if (f.dim == 0 || (f.dim == Dim2D && f.depth != 1) || (f.dim == DimCube && f.depth != 6)) fail("dimension");
     return f;
 }
@@ -200,7 +202,7 @@ uint8_t unorm(float v) { return uint8_t(std::clamp(std::lround(v * 255.0f), 0L, 
 Bytes readLevel(const uint8_t* d, size_t size, const Level& L, const Fetch& f, gfx::TexFormat& outFmt) {
     const FormatInfo& fi = formatInfo(f.fmt);
     const size_t bpb = size_t(fi.blockBytes);
-    const uint32_t lb = fi.blockBytes == 4 ? 2 : fi.blockBytes == 8 ? 3 : 4;
+    const uint32_t lb = fi.blockBytes == 1 ? 0 : fi.blockBytes == 2 ? 1 : fi.blockBytes == 4 ? 2 : fi.blockBytes == 8 ? 3 : 4;
     Bytes raw(size_t(L.wb) * size_t(L.hb) * bpb);
     for (int y = 0; y < L.hb; ++y)
         for (int x = 0; x < L.wb; ++x) {
@@ -210,7 +212,9 @@ Bytes readLevel(const uint8_t* d, size_t size, const Level& L, const Fetch& f, g
                                     : (size_t(y + L.oy) * size_t(L.pitch) + size_t(x + L.ox)) * bpb);
             if (o + bpb > size) fail("texel data outside the file");
             uint8_t* dst = &raw[(size_t(y) * size_t(L.wb) + size_t(x)) * bpb];
-            if (fi.blockW == 4)  // 16-bit big-endian words
+            if (bpb == 1)
+                dst[0] = d[o];
+            else if (fi.blockW == 4 || bpb == 2)  // 16-bit big-endian words
                 for (size_t k = 0; k < bpb; k += 2) dst[k] = d[o + k + 1], dst[k + 1] = d[o + k];
             else  // one 32-bit big-endian word
                 for (size_t k = 0; k < 4; ++k) dst[k] = d[o + 3 - k];
@@ -255,9 +259,18 @@ Bytes readLevel(const uint8_t* d, size_t size, const Level& L, const Fetch& f, g
     }
     for (size_t i = 0; i < size_t(L.w) * size_t(L.h); ++i) {
         const size_t src = (i / size_t(L.w)) * size_t(L.wb) + i % size_t(L.w);
-        const uint8_t* t = &raw[src * 4];  // little-endian word now: component k = byte k
         uint8_t comp[4];
-        if (f.fmt == 0x06) {
+        if (bpb == 1) {  // 8: one component
+            comp[0] = comp[1] = comp[2] = comp[3] = raw[src];
+        } else if (bpb == 2) {  // 1_5_5_5 / 5_6_5: X in the low bits [I: Xenos component order]
+            const uint16_t w = uint16_t(raw[src * 2] | raw[src * 2 + 1] << 8);
+            auto x5 = [](uint32_t c) { return uint8_t((c * 255 + 15) / 31); };
+            if (f.fmt == 0x03) {
+                comp[0] = x5(w & 31), comp[1] = x5((w >> 5) & 31), comp[2] = x5((w >> 10) & 31), comp[3] = (w >> 15) ? 255 : 0;
+            } else {
+                comp[0] = x5(w & 31), comp[1] = uint8_t((((w >> 5) & 63) * 255 + 31) / 63), comp[2] = x5(w >> 11), comp[3] = 255;
+            }
+        } else if (const uint8_t* t = &raw[src * 4]; f.fmt == 0x06) {
             std::copy_n(t, 4, comp);
         } else {  // 16_16_FLOAT, clamped to [0, 1]
             comp[0] = unorm(halfToFloat(uint16_t(t[0] | t[1] << 8)));

@@ -112,6 +112,30 @@ tuning tables (beginner .. expert).
 
 See docs/ui.md.
 
+## Scenes (.scn / .mdl / .skin)
+
+GH3's file (0xFAAABACA header, material section, 0xBABEFACE, scene header,
+sectors, geoms, meshes) with three changes [C: z_forum, z_forum_gfx,
+Gem_Set_01 parse to their meshes; the engine reads them, data/scene.cpp]:
+- **Materials**: 0xD0-byte headers (GH3 0x100): +0 key, +4 a second key
+  (name, I), +0x70 template, +0x78/+0x7C, +0x80/+0x84, +0x88/+0x8C the two
+  vec4 arrays and the texture keys (count, offset), +0x94 and +0xB4 the
+  size; GH3's +0xC8..+0xF0 words at +0x98..+0xC0 [I].
+- **Meshes**: 0x90-byte records: +0 sphere, +0x10 vertex block (from the
+  scene base; 0x20-byte descriptor first), +0x1C its size, +0x24 vertex
+  flags (GH3's declaration rule fits every stride), +0x2C index block
+  (0x20-byte descriptor), +0x38 its size, +0x4C material, +0x5C indices << 16
+  | vertices; the pointer table follows at 0x90 x meshes.
+- **Indices**: triangle lists (GH3: strips with 0x7FFF restarts).
+- Skinned meshes (vertex flag 0x80; +0x78 a 0x1000-aligned block) and the
+  .skin trailer (first word = size - 0x34) are not decoded yet.
+
+## Textures (.tex / .img)
+
+GH3's dictionary and image headers; besides DXT1/3/5, DXN, 8_8_8_8 and
+16_16_FLOAT, gh4 uses 8 (0x02), 1_5_5_5 (0x03) and 5_6_5 (0x04), 16-bit words with
+the 8in16 swap [C: Z_Forum.tex].
+
 ## Not decoded yet (C++ `--formattest`, 2026-11-10)
 
 `.ska` (8,255), `.img` (2,548 "image version" + 259 short), `.wav` (2,466),
