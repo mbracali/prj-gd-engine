@@ -622,6 +622,8 @@ void VenueStage::draw(double ms) {
         const auto* ls = &lightState_;
         const auto* show = &lights_;
         particles_->lightAt = [vv, ls, show](const venue::Vec3& at, float rgb[3]) { vv->lightAt(*ls, *show, at, rgb); };
+        particles_->sceneDepth = fx ? fx_.depthSnapshot() : gfx::TextureId{};
+        particles_->depthW = fx_.sceneW(), particles_->depthH = fx_.sceneH();
         particles_->draw(cam, ms);
     }
     // gd02's extras (EnhancedLights) work in GH2's space (z up, ~44 units a

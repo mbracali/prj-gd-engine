@@ -124,9 +124,9 @@ bool groupLights(uint32_t lightGroup, uint32_t objectGroup);
 // its coeff0..3 x intensity to the SH.
 void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, ObjectConstants& out);
 // The light a camera-facing sprite at `p` takes from an object's registers
-// (lit particles): SH0 (with the ambient) + half of the key light and of
-// each vertex light, attenuated and coned as the vertex shaders do [I: the
-// average over the sprite's normals].
+// (lit particles): the SH's constant term (with the ambient) and 4/17 of the
+// key light, the vertex point / spot lights left out [I: the average over
+// the sprite's normals; the quick material's lit shader not translated].
 gfx::Vec3 spriteLight(const ObjectConstants& oc, const gfx::Vec3& p);
 
 // The band's dynamic shadow for one frame (VenueStage::shadowPass), as the

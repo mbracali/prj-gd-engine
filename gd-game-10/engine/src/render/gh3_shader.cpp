@@ -307,27 +307,12 @@ void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, Object
 }
 
 gfx::Vec3 spriteLight(const ObjectConstants& ocIn, const gfx::Vec3& p) {
+    (void)p;
     ObjectConstants& oc = const_cast<ObjectConstants&>(ocIn);
     auto v3 = [&](int r) { const float* f = oc.reg(r); return gfx::Vec3{f[0], f[1], f[2]}; };
-    gfx::Vec3 out = v3(kRegShLight0) + v3(kRegDirLight0 + 1) * 0.5f;
-    for (int i = 0; i < 4; ++i) {
-        const gfx::Vec3 d = v3(kRegPointLight + 4 * i) - p;
-        const float att = std::clamp((oc.reg(kRegPointAtten)[i] - gfx::dot(d, d)) * oc.reg(kRegPointAtten + 1)[i], 0.0f, 1.0f);
-        out = out + v3(kRegPointLight + 4 * i + 1) * (0.5f * att);
-    }
-    for (int i = 0; i < 5; ++i) {
-        const int r = kRegSpotLight + 4 * i;
-        const gfx::Vec3 d = p - v3(r + 1);
-        const float d2 = gfx::dot(d, d), len = std::sqrt(d2);
-        const float* a = oc.reg(kRegSpotAtten);
-        const float attA = i < 4 ? a[i] : oc.reg(r + 3)[0], attB = i < 4 ? oc.reg(kRegSpotAtten + 1)[i] : oc.reg(r + 3)[1];
-        const float cx = i < 4 ? oc.reg(kRegSpotAtten + 2)[i] : oc.reg(r + 3)[2], cy = i < 4 ? oc.reg(kRegSpotAtten + 3)[i] : oc.reg(r + 3)[3];
-        const float att = std::clamp((attA - d2) * attB, 0.0f, 1.0f);
-        const float cosA = len > 0 ? gfx::dot(d, v3(r)) / len : 1.0f;
-        const float cone = std::clamp((cosA - cx) * cy, 0.0f, 1.0f);
-        out = out + v3(r + 2) * (0.5f * att * cone);
-    }
-    return out;
+    // The SH's constant term (the ambient and 4/17 of every light in it) and
+    // the key light as the SH would hold it.
+    return v3(kRegShLight0) + v3(kRegDirLight0 + 1) * (4.0f / 17.0f);
 }
 
 const gfx::VertexLayout& vertexLayout() {

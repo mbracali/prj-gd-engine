@@ -302,7 +302,8 @@ void ScreenFx::end(const Params& p, gfx::TargetId into) {
         const float n = p.nearZ, f = p.farZ;
         pc[0][2] = -(f - n) / (f * n), pc[0][3] = 1.0f / n;
         // m_vDepthOfFieldParams (gh4 c4; GH3 c54): (-, strength, (back - front) x far, front x far) [C].
-        pc[4][1] = d.strength, pc[4][2] = (d.backDist - d.frontDist) * p.cameraFar, pc[4][3] = d.frontDist * p.cameraFar;
+        const float scale = d.metres ? 1.0f : p.cameraFar;
+        pc[4][1] = d.strength, pc[4][2] = (d.backDist - d.frontDist) * scale, pc[4][3] = d.frontDist * scale;
         if (comp) pass(comp, &out, dev_->targetDepth(scene_.id), dev_->targetTexture(blurA->id), none, pc, 5, Blend::Alpha, true);
         cur = dev_->targetTexture(out.id), curT = &out;
     }
@@ -433,7 +434,7 @@ const qb::Value* screenFx(const Globals& g, uint32_t manager) {
 
 // The field offsets: Function_8241BC20 (simple_bloom), Function_8241EE68 (dof) [C data tod_profiles.qb].
 void readEntry(const qb::Struct& e, Params& p, int& brightSlot) {
-    const qb::Value* type = e.find(qbkey::key("Type"));
+    const qb::Value* type = e.find(qbkey::key("Type"));  // gh4 writes `type`: the same key
     if (!type) return;
     const bool on = num(e, "ON", 1) > 0;
     if (type->key == qbkey::key("simple_bloom")) {
@@ -454,12 +455,39 @@ void readEntry(const qb::Struct& e, Params& p, int& brightSlot) {
         // blurresolution: half 0, sixteenth 2, quarter 1 (8241F160) [C].
         if (const qb::Value* r = e.find(qbkey::key("blurresolution")))
             d.resolution = r->key == qbkey::key("half") ? 0 : r->key == qbkey::key("sixteenth") ? 2 : r->key == qbkey::key("quarter") ? 1 : d.resolution;
+    } else if (type->key == qbkey::key("dof3")) {
+        // gh4 (tod_profiles.qb's Default_TOD_Manager and the DOF_*_tod_manager
+        // cameras' entries) [C data; I: the far blur alone, its radius GH3's
+        // quarter-resolution 7x7 at 3 texels].
+        Dof& d = p.dof;
+        d.on = on;
+        d.metres = true;
+        d.strength = num(e, "strength", 0);
+        d.frontDist = num(e, "farblurbegin", 10), d.backDist = std::max(d.frontDist + 0.01f, num(e, "farblurend", 20));
+        d.blurRadius = 3.0f, d.resolution = 1;
+    } else if (type->key == qbkey::key("bloom2")) {
+        // gh4's bloom2 (parsed by 825074F8 [C: the keys]): materialfilter,
+        // subtract, colormodulate, saturation, thickness, equation [C data].
+        // Drawn with simple_bloom's passes: the stencil-marked materials
+        // (or the colour over `subtract`) blurred at a quarter, added x
+        // colormodulate [I: the executable's bloom2 passes are VMX128 code
+        // not read; saturation, thickness and equation are not applied].
+        Bloom& b = p.bloom;
+        b.on = on;
+        rgb(e, "subtract", b.cutoff, 1.0f);
+        rgb(e, "colormodulate", b.strength, 1.0f);
+        b.bloom1 = 1, b.bloom2 = 0, b.falloff1 = 1, b.falloff2 = 0;
+        b.materialFilter = num(e, "materialfilter", 0) > 0;
     } else if (type->key == qbkey::key("bright_sat") && brightSlot < 2) {
         BrightSat& bs = p.brightSat[brightSlot++];
         bs.on = on;
         bs.contrast = num(e, "Contrast", 1), bs.brightness = num(e, "Brightness", 1);
         bs.saturation = num(e, "saturation", 1), bs.hue = num(e, "hue", 1);
         rgb(e, "red_mix", bs.mix[0], 1), rgb(e, "green_mix", bs.mix[1], 1), rgb(e, "blue_mix", bs.mix[2], 1);
+        // gh4 writes each mix as three floats (red_mix_r, red_mix_g, ...) [C data].
+        const char* rows[3] = {"red_mix_", "green_mix_", "blue_mix_"};
+        for (int r = 0; r < 3; ++r)
+            for (int k = 0; k < 3; ++k) bs.mix[r][k] = num(e, (std::string(rows[r]) + "rgb"[k]).c_str(), bs.mix[r][k]);
     }
 }
 

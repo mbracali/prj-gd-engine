@@ -49,7 +49,7 @@ const char* kVertex = R"(
 layout(location = 0) in vec3 aPos;
 layout(location = 2) in vec4 aColor;
 layout(location = 3) in vec2 aUv;
-layout(std140) uniform GdParticleFrame { mat4 uViewProj; vec4 uParams; };
+layout(std140) uniform GdParticleFrame { mat4 uViewProj; vec4 uParams; vec4 uSoft; vec4 uClip; };
 out vec4 vColor;
 out vec2 vUv;
 void main() {
@@ -64,12 +64,24 @@ void main() {
 const char* kFragment = R"(
 in vec4 vColor;
 in vec2 vUv;
-layout(std140) uniform GdParticleFrame { mat4 uViewProj; vec4 uParams; };
+layout(std140) uniform GdParticleFrame { mat4 uViewProj; vec4 uParams; vec4 uSoft; vec4 uClip; };
 uniform sampler2D sTex;
+uniform sampler2D sDepth;
 out vec4 fragColor;
+// A window depth (0..1) as the distance along the view axis (the venue's
+// and the particles' projections give the same depth curve).
+float gdViewZ(float d) { return uClip.x * uClip.y / (uClip.y - d * (uClip.y - uClip.x)); }
 void main() {
     vec4 c = texture(sTex, vUv) * vColor;
     if (c.a < uParams.x) discard;
+    // softedge / softedgescale: the particle fades out where it nears the
+    // scene behind it (uSoft.x the scale in metres, 0 off) [C data; I: the fade].
+    if (uSoft.x > 0.0) {
+        float scene = gdViewZ(texture(sDepth, gl_FragCoord.xy * uSoft.yz).r);
+        float fade = clamp((scene - gdViewZ(gl_FragCoord.z)) / uSoft.x, 0.0, 1.0);
+        c.a *= fade;
+        if (uParams.z > 0.0) c.rgb *= fade;
+    }
     // The burn (ParticleQuickMaterialNoLighting, m_Burn): a' = (1 - burn) a,
     // rgb x a x a', drawn premultiplied [C].
     if (uParams.y > 0.0) {
@@ -98,7 +110,7 @@ gfx::ProgramDesc Particles::programDesc() {
     d.vertex = kVertex;
     d.fragment = kFragment;
     d.uniformBlocks = {"GdParticleFrame"};
-    d.samplers = {"sTex"};
+    d.samplers = {"sTex", "sDepth"};
     return d;
 }
 
@@ -820,6 +832,8 @@ void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t
             if (it.name == 0 && it.value.type == qb::Type::Key && it.value.key == K("burn"))
                 p.burn = std::max(0.0f, num(g_->field(*qm, K("burnvalue")), 0.0f));
             if (it.name == 0 && it.value.type == qb::Type::Key && it.value.key == K("lighting")) p.lit = true;
+            if (it.name == 0 && it.value.type == qb::Type::Key && it.value.key == K("softedge"))
+                p.softEdge = std::max(0.01f, num(g_->field(*qm, K("softedgescale")), 1.0f));
         }
     }
     if (rate >= 0) p.rate = rate, p.lifetime = 1e6f, p.burst = 0, p.delay = 0;  // a node's emitter
@@ -841,8 +855,13 @@ void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t
     s.seed = nextSeed_ = nextSeed_ * 6364136223846793005ull + 1442695040888963407ull;
     static const bool log = std::getenv("GD10_PARTICLES_LOG") != nullptr;
     if (log)
-        SDL_Log("particles: %.0f ms system at (%.2f %.2f %.2f): burst %d, rate %.0f for %.2f s, texture %s", t, pos[0], pos[1], pos[2],
-                s.p.burst, double(s.p.rate), double(s.p.lifetime), qbkey::names().get(s.p.texture).c_str());
+        SDL_Log("particles: %.0f ms system at (%.2f %.2f %.2f): burst %d, rate %.0f for %.2f s, texture %s, size %.2f..%.2f, "
+                "colour %08x, blend %d%s", t, pos[0], pos[1], pos[2], s.p.burst, double(s.p.rate), double(s.p.lifetime),
+                qbkey::names().get(s.p.texture).c_str(), double(s.p.w0), double(s.p.w1), s.p.color, s.p.blend, s.p.lit ? ", lit" : "");
+    // GD10_PARTICLES_SKIP=<texture>,...: leaves those systems out (development aid).
+    if (const char* skip = std::getenv("GD10_PARTICLES_SKIP");
+        skip && ("," + std::string(skip) + ",").find("," + qbkey::names().get(s.p.texture) + ",") != std::string::npos)
+        return;
     systems_.push_back(std::move(s));
     ++created_;
 }
@@ -965,6 +984,7 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
         float burn = 0;
         float alphaCut = 0;
         size_t first = 0, count = 0;
+        float softEdge = 0;
     };
     std::vector<Batch> batches;
     std::vector<PVtx> verts;
@@ -977,7 +997,7 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
         const Params& p = s.p;
         const double age = (ms - s.start) / 1000.0 - p.delay;
         if (age < 0) continue;
-        Batch b{p.texture, p.additive, p.blend, p.burn, p.alphaCut, verts.size(), 0};
+        Batch b{p.texture, p.additive, p.blend, p.burn, p.alphaCut, verts.size(), 0, p.softEdge};
         venue::Vec3 base = s.pos;
         if (s.member && !(bonePos && bonePos(s.member, s.bone, base))) continue;
         // A lit material: its colour x the light at the system (one value a
@@ -1260,9 +1280,16 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
         struct {
             float vp[16];
             float params[4];
+            float soft[4];
+            float clip[4];
         } u{};
         std::memcpy(u.vp, vp.m, sizeof u.vp);
-        u.params[0] = b.alphaCut, u.params[1] = b.burn;
+        u.params[0] = b.alphaCut, u.params[1] = b.burn, u.params[2] = b.blend == 5 ? 1.0f : 0.0f;
+        if (sceneDepth && depthW > 0 && depthH > 0 && b.softEdge > 0)
+            u.soft[0] = b.softEdge, u.soft[1] = 1.0f / float(depthW), u.soft[2] = 1.0f / float(depthH);
+        u.clip[0] = 0.05f, u.clip[1] = 4000.0f;
+        c.textures[1] = sceneDepth ? sceneDepth : white_;
+        c.samplers[1] = {gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
         c.uniforms[0] = {&u, sizeof u, 0};
         auto it = textures_.find(b.texture);
         c.textures[0] = it != textures_.end() ? it->second : white_;

@@ -39,6 +39,10 @@ struct Dof {  // dof (Function_8241EE68 parses, Function_824440F8 draws) [C para
     bool on = false;
     float backDist = 1, frontDist = 0, strength = 0, blurRadius = 0;
     int resolution = 1;  // blurresolution: 0 half, 1 quarter, 2 sixteenth [C 8241F160]
+    // gh4's dof3 (parsed by 82503388 [C: the key]): the far blur from
+    // farblurbegin to farblurend in metres (a = strength x saturate((z -
+    // begin) / (end - begin))), the near blur (nearblurbegin / end) not drawn [I].
+    bool metres = false;
 };
 
 struct BrightSat {  // bright_sat
