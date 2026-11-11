@@ -402,6 +402,9 @@ bool CameraDirector::native(Interp& in, const std::string& msg, std::vector<Valu
 
 bool CameraDirector::objectNative(Interp& in, scene::Object& o, const std::string& msg, std::vector<Value>& args, Value& r) {
     if (auto* c = o.as<scene::CamShot>()) {
+        // duration_seconds (worldbase.dta next_outro_camera, world_validate):
+        // its frames at 30 a second; a looping shot has none [I].
+        if (msg == "duration_seconds") return r = Value::real(c->looping ? 0.0f : c->lengthFrames() / 30.0f), true;
         if (msg == "get" && !args.empty()) {
             const std::string key = args[0].str();
             if (key == "duration") return r = Value::real(c->lengthFrames()), true;

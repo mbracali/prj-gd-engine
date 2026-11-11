@@ -5,6 +5,50 @@ Rock Band (Xbox 360) -> `gd05`. Kickoff: `docs/spikes/GD-GAME-05_KICKOFF.md`
 bottom. "Verified" lines quote the command and its output; "built only" and
 "not tested" are said explicitly.
 
+## Wave 06 (owner's 0.0.6 report, 2026-11-11, 14:50 -> ~18:30, me + 4 subagents)
+
+Each item: cause, fix, how verified.
+- **Inputs (GD05-056).** Cause [C, our code + his controllers.json]: his
+  guitar (1bad:0002) was saved at GAMEPADS None beside the keyboard as
+  player 1; Input::actionsOf drops every in-song control of a device
+  without a player but Start. Fix: a one-player song takes every device
+  (D35, D34 extended). Also: a pad's / guitar's Start on the title went
+  nowhere (splash_panel's {$this button_down kPad_X}: the panel's native
+  ButtonDown was missing); a gamepad after the keyboard in the menus hit
+  nothing (the watcher was fixed by the last device at song start; it now
+  follows the device that plays, D38). Verified: walks rb_guitar_play (a
+  virtual joystick that is his device: name, 1bad:0002, 11 buttons /
+  6 axes / hat, his SDL mapping; menus with the guitar, 86/87 hits, pause /
+  resume with Start / green, a sustain with the whammy, Overdrive by tilt,
+  a miss), rb_guitar_none (his exact assignment: keyboard P1, guitar None),
+  rb_pad_play (generic Xbox pad), rb_keys_play.
+- **Sound (GD05-057).** Misses were silent: RB has no PlayerMatcher
+  handlers; config/player.dta's player handler (miss $player_num $slot)
+  plays miss_gtr.cue / miss_bass / drum misses [C data] (D38). The guitar
+  stem mutes on a miss and comes back on hits (checked in rb_guitar_play).
+- **Missing shaders at band start (GD05-055).** $world was never set:
+  band_objects.dta start_shot could not find ProFilm_a.pp, so every shot
+  from the band's first drew with no post (D37); pp_blend_task added;
+  RB bloom gated off until ported (interim). The highway now rises at
+  intro.trig. Audit: no failed program / pipeline / variant on local GL,
+  core OpenGL 3, Vulkan (AMD, NVIDIA). Walk rb_band_start (fails with
+  missing_shaders 3 without the fix).
+- **Fret board (GD05-045).** tracksystem.milo's EventTriggers: hit flames,
+  smasher glow, burn, miss, phrase captured, Overdrive deploy (D40);
+  ParticleSys rev 36 grow before shrink. rb_fx_* counters in the device
+  walks (86 hits, 0 without a flame; 1 deploy with its visual).
+- **Dark items (GD05-054).** Band icons on the loading screen lit by their
+  directory's own environ (D36, p97 44 -> 215); audio sliders drawn
+  edge-on (slider.grp's turn, D39, p97 13 -> 150+); Calibrate opens.
+  LOADING: RB's draw path matched in the XEX (D39): the word is dark grey
+  until loading.tnm's 3 fps glint reaches it ~4.5 s in; the port's ~1 s
+  loads never show it. Owner's choice. Walk rb_bright: luma floors on main,
+  options, audio, solo, song list, difficulty, loading (icons, LOADING),
+  pause; fails without the fixes.
+- Left: RB bloom port, band overbright (GD05-042), RB's own HUD meters,
+  solo / fill / BRE lanes, the `options` walk (four downs reach COMMUNITY,
+  not in the gate), LOADING timing (owner).
+
 ## Final report, wave 05 (2026-11-10, about 4.5 h of agent time, 08:50 -> 13:20)
 
 The owner's wave 05 list (agents/WAVE05_REQUIREMENTS.md). Ledger
