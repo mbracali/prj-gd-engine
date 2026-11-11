@@ -1306,7 +1306,9 @@ public:
 std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& cls, const std::string& name) {
     if (cls == "GuitarTutorialPanel" || cls == "DrumTutorialPanel" || cls == "VocalsTutorialPanel") return std::make_unique<RbTutorialPanelObj>(ui, name, cls);
     if (cls == "OutfitConfigPanel") return std::make_unique<OutfitConfigPanelObj>(ui, name, cls);
-    if (cls == "AudioLatencyPanel" || name.rfind("calibrate_", 0) == 0) return std::make_unique<AudioLatencyPanelObj>(ui, name, cls);
+    // (not the calibrate_* screens: calibrate_av_chooser_screen was made a
+    // panel, so OPTIONS > CALIBRATE found no screen)
+    if (cls == "AudioLatencyPanel" || (name.rfind("calibrate_", 0) == 0 && cls != "UIScreen")) return std::make_unique<AudioLatencyPanelObj>(ui, name, cls);
     if (cls == "OutfitPanel") return std::make_unique<OutfitPanelObj>(ui, name, cls);
     if (cls == "CharPanel") return std::make_unique<CharPanelObj>(ui, name, cls);
     if (cls == "BandCreatePanel") return std::make_unique<BandCreatePanelObj>(ui, name, cls);

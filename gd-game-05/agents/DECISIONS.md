@@ -391,6 +391,68 @@ pattern). Each says what, why and how to undo it.
 - **Undo:** App::handleAction's `ev.player = 0`, Input::keyboardSlot's
   fallback.
 
+## D35
+- **What (2026-11-11, GD05-056):** D34 extended: in a one-player song a
+  device without a player (GAMEPADS' None, or a pad past the enabled
+  players) plays it too (Input::setOnePlayerSong). The owner's
+  controllers.json had his Rock Band guitar at None beside the keyboard as
+  player 1: the song took only its Start, every fret and strum was dropped.
+  In multiplayer songs None still means "the menus only".
+- **Also:** a script's {$panel button_down b p} runs the panel's
+  BUTTON_DOWN_MSG and then UIPanel's native ButtonDown (the title's
+  splash_panel turns Start into kPad_X): a pad's or guitar's Start did
+  nothing on the title [I].
+- **Undo:** Input::actionsOf's `!onePlayerSong_`, PanelObj::handleNative's
+  "button_down".
+
+## D36
+- **What (2026-11-11, GD05-054):** a RndDir that names an environ draws its
+  objects in it (RndDir `environ`, SyncProperty RB 0x821B3438) [C].
+  loading.milo's band icons (load_icon_*: intruments.env, a warm white point
+  light) were drawn in ornate_leader.grp's dim environ: icons p97 luma
+  44 -> 215. LOADING's grey is the label's own custom colour (normal
+  0x3b3b3b) under ornate_leader.env [C data].
+- **Undo:** UiView::drawObject's inline-directory environ block.
+
+## D37
+- **What (2026-11-11, GD05-055):** $world is the attached WorldDir (RB's
+  band_objects.dta start_shot finds ProFilm_a.pp / override_blender.pp
+  through it; unset, every shot from the band's first on drew with no
+  post). BandCamShots without a PostProc keep the selection and blend via
+  pp_blend_task (RB 0x8220A8A0 / PostProcBlendTask 0x8220A508). RB
+  PostProc bloom is not drawn until RB's alpha-mask bloom is ported (the
+  GH2 bright pass misread its fields: white blobs) [I]. The RB track is
+  hidden until intro.trig (ui/game.dta on_extend at 0, gem_track.dta
+  play_intro +0.55 s solo, 0.25 s x index + 0.05 s in a band), then
+  intro_anim.grp's camera_intro.tnm at 30 fps [I fps].
+- **Undo:** World attach's $world, postProcState's bloom gate,
+  RbTrackView::setIntroAt.
+
+## D38
+- **What (2026-11-11, GD05-056 / 057):** in a one-player song the watcher
+  follows the device that plays (a gamepad's every fret press strums; a
+  guitar's or the keyboard's strum), as D34 / D35 take every device. RB
+  has no PlayerMatcher handlers: a miss goes to config/player.dta's player
+  handler (miss $player_num $slot) -> miss_gtr.cue / miss_bass /
+  miss_kick.cue / miss_drum [C data]; the port only sent GH2's matcher,
+  so misses were silent.
+- **Undo:** App::playerAction's setControllerMode, gameCallbacks' K::Miss.
+
+## D39
+- **What (2026-11-11, GD05-054):** slider resource meshes are drawn through
+  their resource parents (slider_audio.milo's slider.grp turns the flat
+  quads to the camera; the port drew them edge-on: the audio sliders were
+  2-3 px, nearly black). ProfileMgr keeps the global-options pad and a flag
+  set by set_global_options_pad (RB 0x823D6280) [C]. `calibrate_*`
+  UIScreens stay screens (makeRbMetaClass made them panels). LOADING is
+  drawn as RB does (lit Lubalin, custom normal 0x3b3b3b, ornate_leader.env
+  ambient 0; RB 0x82213470, 0x822FE7B8, 0x827D6F00, 0x821AACC8): it
+  brightens only when loading.tnm's 3 fps glint reaches the word (~4.5 s
+  after the screen opens); the port's ~1 s loads never show it. Not
+  changed (a port choice for the owner).
+- **Undo:** UiView::drawStyleMeshes' slider world, rb_natives
+  global_options_pad_set, makeRbMetaClass's screen check.
+
 ## Owner: completeness 36% (2026-11-10)
 - **What:** the owner set Rock Band's completeness to 36% (game-info.yaml
   0.36, README, the site) after playing the build; the parity ledger

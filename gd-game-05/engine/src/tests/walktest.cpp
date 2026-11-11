@@ -171,6 +171,68 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         for (int i = 0; i < 3; ++i) key(SDLK_ESCAPE), wait(250);
         wait(3000);
         check("quit_missed");
+    } else if (scenario == "rb_bright") {
+        // GD05 0.0.6 owner report: text and icons darker than RB's. The
+        // menus, options, the song list, the difficulty card, the loading
+        // screen (LOADING, the band icons) and the pause screen.
+        at("splash_screen", 30000);
+        wait(1500);
+        press(kX);
+        at("main_screen");
+        wait(1500);
+        check("bright:main");
+        press(kDown), wait(300), press(kDown), wait(300), press(kDown), wait(300);  // OPTIONS
+        press(kX);
+        at("options_screen");
+        wait(1000);
+        check("bright:options");
+        press(kX);  // AUDIO SETTINGS: the four sliders (the INSTRUMENTS and BACKGROUND MUSIC ones drew near black)
+        at("options_audio_screen");
+        wait(1000);
+        check("bright:audio");
+        press(kTri);
+        at("options_screen");
+        wait(1000);
+        // The other options screens: GAMEPLAY, CHARACTER DATA, CALIBRATE.
+        const char* subs[3][2] = {{"options_gameplay_screen", "bright:gameplay"}, {"options_savedata_screen", "bright:savedata"},
+                                  {"calibrate_av_chooser_screen", "bright:calibrate"}};
+        for (int i = 0; i < 3; ++i) {
+            press(kDown), wait(300);
+            press(kX);
+            at(subs[i][0]);
+            wait(1000);
+            check(subs[i][1]);
+            press(kTri);
+            at("options_screen");
+            wait(1000);
+        }
+        press(kTri);
+        at("main_screen");
+        wait(1500);
+        for (int i = 0; i < 3; ++i) press(kUp), wait(300);  // back to SOLO
+        press(kX);
+        at("main_solomode_screen");
+        wait(800);
+        check("bright:solo");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(1500);
+        check("bright:songlist");
+        press(kX);
+        at("qp_seldiff_solo_screen");
+        wait(800);
+        check("bright:seldiff");
+        press(kX);
+        wait(1500);
+        check("bright:seldiff2");
+        press(kX);
+        check("bright:loading:loading_panel");  // the loading screens hold their transition: wait on the panel
+        at("game_screen", 60000);
+        wait(3000);
+        key(SDLK_ESCAPE);
+        at("pause_screen", 10000);
+        wait(800);
+        check("bright:pause");
     } else if (scenario == "rb_mouse") {
         // Wave 05 (GD05-036 / 037): the port's GAMEPADS button (bottom left)
         // stays on the main menu and every main menu button opens its menu
@@ -712,6 +774,19 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("endgame_waiting_screen", 150000);
         at("qp_endgame_screen", 20000);
         wait(1000);
+    } else if (scenario == "rb_band_start") {
+        // GD05-054: the song's first seconds (the band's entrance, the intro
+        // shot, the first shots and the track) draw nothing without its
+        // shader: no draw without its program or pipeline, no standard
+        // variant replaced by a simpler one, no band / venue mesh without its
+        // material, no RB shot left without a PostProc (render/device.h
+        // shaderaudit; GD05_SHADERLOG=1 names them). GD05_WALK_SHOTS: a shot
+        // every 500 ms (band_start_NN.bmp).
+        endMs_ = 20000;
+        rbQuickplay();
+        for (int i = 0; i < 30; ++i) wait(500), check("band_start_shot");
+        check("counter_max:missing_shaders:0");
+        at("endgame_waiting_screen", 90000);
     } else if (scenario == "quickplay") {
         endMs_ = 30000;  // the song ends early (the walk's end time; GD05_WALK_END overrides)
         if (const char* e = SDL_getenv("GD05_WALK_END")) endMs_ = float(std::atof(e));
@@ -795,6 +870,58 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         if (scenario == "rb_keys_play") {
             check("kb_play od", 150000);  // on to the first Overdrive deployed with Tab
             check("kb_hits");
+        }
+        expect_ = {"main_screen", "main_solomode_screen", "qp_selsong_screen", "qp_seldiff_solo_screen", "game_screen", "pause_screen", "game_screen"};
+    } else if (scenario == "rb_guitar_play" || scenario == "rb_guitar_none" || scenario == "rb_pad_play") {
+        // GD05-056: a song played with a device's own SDL events (a virtual
+        // joystick that is the owner's Harmonix Rock Band Guitar 1bad:0002:
+        // 11 buttons, 6 axes, a hat, his SDL mapping; or a generic Xbox 360
+        // pad): frets on its buttons, strum on the hat, whammy on axis 3,
+        // Overdrive by tilt (axis 4) / the pad's Back, pause on Start.
+        // rb_guitar_play works the menus with the guitar too; rb_guitar_none
+        // is the owner's controllers.json (the keyboard player 1, the guitar
+        // None): the one-player song still takes the guitar (D34).
+        autoplay_ = false;
+        const bool pad = scenario == "rb_pad_play", none = scenario == "rb_guitar_none";
+        auto checkS = [&](const std::string& what, double timeout = 0) { steps_.push_back({S::Check, what, 0, timeout}); };
+        // A button press on the device (SDL button / hat numbers of the device).
+        auto dev = [&](const std::string& what) { checkS("dev_set " + what + " 1"), wait(90), checkS("dev_set " + what + " 0"), wait(220); };
+        const std::string green = "b0", strumDown = "hat4", start = pad ? "b6" : "b7";
+        checkS(pad ? "dev_attach 045e:028e" : "dev_attach 1bad:0002:rbguitar");
+        at("splash_screen", 30000);
+        wait(500);  // the device settles (its first 300 ms are its rest values)
+        if (pad || none) key(SDLK_RETURN); else dev(start);
+        at("main_screen");
+        wait(1500);
+        if (none) checkS("dev_owner_players");
+        checkS("dev_players");
+        if (pad || none) {
+            key(SDLK_RETURN), at("main_solomode_screen"), key(SDLK_RETURN), at("qp_selsong_screen"), wait(500);
+            key(SDLK_DOWN), wait(300), key(SDLK_RETURN), at("qp_seldiff_solo_screen");
+            key(SDLK_RETURN), wait(1500), key(SDLK_RETURN);
+        } else {
+            dev(green), at("main_solomode_screen"), dev(green), at("qp_selsong_screen"), wait(500);
+            dev(strumDown), wait(300), dev(green), at("qp_seldiff_solo_screen");
+            dev(green), wait(1500), dev(green);  // guitar, then the difficulty
+        }
+        at("game_screen", 60000);
+        checkS(pad ? "dev_play pad 30" : "dev_play guitar 30", 90000);
+        check("dev_hits");
+        dev(start);  // pause
+        at("pause_screen", 10000);
+        wait(500);
+        if (pad) dev("b0"); else dev(green);  // RESUME (the focus)
+        at("game_screen", 10000);
+        checkS(pad ? "dev_play pad sustain" : "dev_play guitar sustain", 120000);  // held through a sustain, whammied
+        check("dev_hits");
+        checkS(pad ? "dev_play pad od" : "dev_play guitar od", 150000);  // Overdrive deployed by tilt / Back
+        check("dev_hits");
+        if (!pad) {
+            // Gems let pass and a wrong strum: the miss sound, the guitar
+            // stem muted; the next hits bring it back.
+            check("dev_play guitar miss", 60000);
+            check("dev_play guitar 8", 60000);
+            check("dev_audible");
         }
         expect_ = {"main_screen", "main_solomode_screen", "qp_selsong_screen", "qp_seldiff_solo_screen", "game_screen", "pause_screen", "game_screen"};
     } else if (scenario == "rb_fuzz") {
@@ -2379,6 +2506,99 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen.rfind("bright:", 0) == 0) {
+        // rb_bright: bright:<tag>[:<panel>] waits (loading screens: until
+        // the panel is up), saves the frame, prints each hit box's 97th
+        // percentile luma.
+        const std::string rest = s.screen.substr(7);
+        const size_t c = rest.find(':');
+        const std::string tag = rest.substr(0, c), panelName = c == std::string::npos ? std::string() : rest.substr(c + 1);
+        static double seenMs = -1;
+        ui::PanelObj* p = panelName.empty() ? ui.focusPanel() : ui.panel(panelName);
+        if (!p || !p->view || !p->up) {
+            if (stepStart_ >= 0 && nowMs - stepStart_ > 30000) return fail("bright: " + panelName + " never came up");
+            return;
+        }
+        if (seenMs < 0) seenMs = nowMs;
+        if (nowMs - seenMs < 600) return;
+        seenMs = -1;
+        const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+        const std::string path = std::string(dir ? dir : SDL_GetBasePath()) + "/bright_" + tag + ".bmp";
+        if (!ui.host().saveScreenshot(path)) return fail("bright: no screenshot");
+        SDL_Surface* raw = SDL_LoadBMP(path.c_str());
+        SDL_Surface* img = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        if (raw) SDL_DestroySurface(raw);
+        if (!img) return fail("bright: the screenshot does not load");
+        auto p97 = [&](float x0, float y0, float x1, float y1) {
+            std::vector<int> v;
+            const float sx = float(img->w) / 1280.0f, sy = float(img->h) / 720.0f;
+            for (int y = std::max(0, int(y0 * sy)); y < std::min(img->h, int(y1 * sy)); ++y)
+                for (int x = std::max(0, int(x0 * sx)); x < std::min(img->w, int(x1 * sx)); ++x) {
+                    const Uint8* px = static_cast<const Uint8*>(img->pixels) + y * img->pitch + x * 4;
+                    v.push_back((299 * px[0] + 587 * px[1] + 114 * px[2]) / 1000);
+                }
+            if (v.empty()) return -1;
+            std::sort(v.begin(), v.end());
+            return v[size_t(0.97 * double(v.size() - 1))];
+        };
+        std::printf("  bright %s on %s (panel %s):\n", tag.c_str(), ui.currentScreen().c_str(), p->name().c_str());
+        std::map<std::string, int> best;  // a component's brightest box
+        for (const gfx::UiView::Hit& h : p->view->hits()) {
+            const int v = p97(h.x0, h.y0, h.x1, h.y1);
+            std::printf("    %-28s %4.0f %4.0f %4.0f %4.0f  p97 %d\n", h.key.c_str(), h.x0, h.y0, h.x1, h.y1, v);
+            best[h.key] = std::max(best.count(h.key) ? best[h.key] : -1, v);
+        }
+        if (tag == "loading") {
+            // The four band icons (128 x 128 quads in load_icon_*), boxed
+            // through the frame's camera.
+            int dimmest = 255;
+            for (const char* m : {"guitar.mesh", "vox.mesh", "drummer.mesh", "bass.mesh"}) {
+                const std::string d = std::string("load_icon_") + (m[0] == 'g' ? "guitar" : m[0] == 'v' ? "vox" : m[0] == 'd' ? "drum" : "bass");
+                const scene::Object* o = p->view->findIn(d, m);
+                if (!o) return SDL_DestroySurface(img), fail(std::string("bright: no ") + m);
+                const float lo[3] = {-64, -64, 0}, hi[3] = {64, 64, 0};
+                const size_t n = p->view->hits().size();
+                p->view->addHit("icon", lo, hi, gfx::toMat4(p->view->pose().world(o)));
+                if (p->view->hits().size() == n) return SDL_DestroySurface(img), fail(std::string("bright: ") + m + " off the screen");
+                const gfx::UiView::Hit h = p->view->hits().back();
+                const int v = p97(h.x0, h.y0, h.x1, h.y1);
+                std::printf("    icon %-23s %4.0f %4.0f %4.0f %4.0f  p97 %d\n", m, h.x0, h.y0, h.x1, h.y1, v);
+                dimmest = std::min(dimmest, v);
+            }
+            best["band_icons"] = dimmest;
+            // LOADING: its box's top 60% (the gold trim runs under its foot).
+            for (const gfx::UiView::Hit& h : p->view->hits())
+                if (h.key == "loading.lbl") {
+                    best["loading_word"] = p97(h.x0, h.y0, h.x1, h.y0 + 0.6f * (h.y1 - h.y0));
+                    std::printf("    loading word                 p97 %d\n", best["loading_word"]);
+                }
+        }
+        SDL_DestroySurface(img);
+        // The floors: 0.0.6's dark spots measured after the fix, less a
+        // margin (the loading icons were 44, lit by the wrong environ; 215
+        // with intruments.env).
+        static const std::map<std::string, std::vector<std::pair<std::string, int>>> floors = {
+            {"main", {{"solo.btn", 190}, {"multi.btn", 190}, {"tutorial.btn", 190}, {"options.btn", 190}, {"community.btn", 190}}},
+            // The audio sliders were edge-on (2-3 px, 10..118; slider.grp's turn
+            // left out); the LOADING word, unlit until loading.tnm's glint
+            // reaches it, 25 (as RB lights it: a guard, not a fix).
+            {"audio", {{"instruments.sld", 120}, {"background.sld", 120}, {"crowd.sld", 120}, {"sfx.sld", 120}}},
+            {"options", {{"audio.btn", 170}, {"gameplay.btn", 80}, {"characterdata.btn", 80}, {"calibrate_av.btn", 80}, {"port_enhanced.btn", 75}}},
+            {"solo", {{"quickplay.btn", 150}, {"tour.btn", 80}}},
+            {"songlist", {{"ss_song.lst#0#list.lbl", 120}, {"ss_song.lst#2#list.lbl", 95}}},
+            {"seldiff", {{"player.lbl", 190}, {"guitar.lbl", 180}, {"choose_diff.lbl", 150}}},
+            {"seldiff2", {{"easy.btn", 115}, {"medium.btn", 125}, {"hard.btn", 120}, {"expert.btn", 120}}},
+            {"loading", {{"tip.lbl", 190}, {"band_icons", 150}, {"loading_word", 18}}},
+            {"pause", {{"pause_title.lbl", 220}, {"0.btn", 160}, {"4.btn", 110}}},
+        };
+        if (auto it = floors.find(tag); it != floors.end())
+            for (const auto& [key, floor] : it->second) {
+                auto b = best.find(key);
+                if (b == best.end()) return fail("bright " + tag + ": " + key + " was not drawn");
+                if (b->second < floor) return fail("bright " + tag + ": " + key + " p97 " + std::to_string(b->second) + " < " + std::to_string(floor));
+            }
+        return pass();
+    }
     if (s.screen.rfind("freebird ", 0) == 0) {
         // endgame_encore_panel: freebird set by {campaign encore_newly_unlocked
         // $freebird} (its $var by name), the focus on yes.btn, then
@@ -2589,6 +2809,13 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (overlap > 0.35f * h) return fail(rows[i].key + " runs into " + rows[i + 1].key);
             if (rows[i].x0 < cx0 - 1 || rows[i].x1 > cx1 + 1) return fail(rows[i].key + " outside the cloth");
         }
+        return pass();
+    }
+    if (s.screen == "band_start_shot") {  // rb_band_start's screenshots (GD05_WALK_SHOTS)
+        static int n = 0;
+        char name[32];
+        std::snprintf(name, sizeof name, "/band_start_%02d.bmp", n++);
+        if (const char* dir = SDL_getenv("GD05_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + name);
         return pass();
     }
     // counter_max:<key>:<max>: the game's counter stays at or under max.
@@ -2951,6 +3178,181 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         if (nowMs - stepStart_ > s.ms) return fail(od ? "Overdrive was never deployed with the keyboard" : "the song ended before the keyboard played its gems");
         return;
+    }
+    if (s.screen.rfind("dev_attach ", 0) == 0) {
+        adapter_ = Input::attachVirtualPad(s.screen.substr(11));
+        // A pad's triggers rest at the axis' bottom (SDL maps -32768..32767 to 0..32767).
+        if (SDL_Joystick* j = adapter_ && s.screen.find("rbguitar") == std::string::npos ? SDL_OpenJoystick(adapter_) : nullptr) {
+            SDL_SetJoystickVirtualAxis(j, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, -32768);
+            SDL_SetJoystickVirtualAxis(j, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, -32768);
+            SDL_UpdateJoysticks();
+        }
+        return adapter_ ? pass() : fail("no virtual device");
+    }
+    if (s.screen.rfind("dev_set ", 0) == 0) {
+        // "dev_set b<n> <0|1>": a button; "dev_set hat<v> <0|1>": the hat at v or centred.
+        SDL_Joystick* j = SDL_GetJoystickFromID(adapter_);
+        if (!j) return fail("the virtual device is not open");
+        const std::string what = s.screen.substr(8, s.screen.rfind(' ') - 8);
+        const bool on = s.screen.back() == '1';
+        if (what.rfind("hat", 0) == 0) SDL_SetJoystickVirtualHat(j, 0, on ? Uint8(std::atoi(what.c_str() + 3)) : SDL_HAT_CENTERED);
+        else SDL_SetJoystickVirtualButton(j, std::atoi(what.c_str() + 1), on);
+        return pass();
+    }
+    const std::string devId = "pad:" + std::to_string(adapter_);
+    if (s.screen == "dev_owner_players") {
+        // The owner's controllers.json: the keyboard player 1, the guitar None.
+        ui.input().setPlayer("keyboard", 0);
+        ui.input().setPlayer(devId, -1);
+        return pass();
+    }
+    if (s.screen == "dev_players") {
+        int slot = -2;
+        std::string profile;
+        for (const Input::Device& d : ui.input().devices()) {
+            std::printf("  device %s \"%s\" (%s): player %d\n", d.id.c_str(), d.name.c_str(), d.profile.c_str(), d.player + 1);
+            if (d.id == devId) slot = d.player, profile = d.profile;
+        }
+        if (slot == -2) return fail("the virtual device is not a gamepad");
+        if (scenario_ == "rb_guitar_none") return slot == -1 ? pass() : fail("the guitar is not None");
+        if (scenario_ == "rb_guitar_play" && profile != "Xbox 360 guitar") return fail("the Rock Band guitar is not typed an Xbox 360 guitar");
+        return slot == 0 ? pass() : fail("the device is not player 1");
+    }
+    if (s.screen.rfind("dev_play ", 0) == 0) {
+        // Plays player 1's gems with the device: frets held from 70 ms before
+        // a gem and a strum (the hat down for a frame) at it; a pad presses
+        // its frets at the gem (every press strums) and lets go after it or
+        // its sustain. "sustain": until a sustain was held 0.5 s with the
+        // whammy moved; "od": until Overdrive was deployed (tilt / Back).
+        const Player* pl = ui.host().gamePlayer(0);
+        if (!pl || !ui.host().gameLoaded() || ui.currentScreen() != "game_screen") return nowMs - stepStart_ > s.ms ? fail("no song to play") : void();
+        SDL_Joystick* j = SDL_GetJoystickFromID(adapter_);
+        if (!j) return fail("the virtual device is not open");
+        const bool pad = s.screen.rfind("dev_play pad", 0) == 0;
+        const std::string goal = s.screen.substr(s.screen.rfind(' ') + 1);
+        const bool od = goal == "od", sus = goal == "sustain", miss = goal == "miss";
+        if (miss) {
+            // No frets; one strum on the first gem (a wrong fret: a miss) and
+            // then nothing until three gems passed with the guitar muted.
+            if (devTarget_ < 0) devTarget_ = pl->passes() + 3, devReleaseMs_ = -1, devSustainSince_ = ui.host().gameTimeMs();
+            if (devStrumDown_) SDL_SetJoystickVirtualHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
+            const double t = ui.host().gameTimeMs();
+            const auto& gems = pl->chart().gems;
+            while (devGem_ < gems.size() && (gems[devGem_].ms < t - 60 || !gems[devGem_].ownedBy(0))) ++devGem_;
+            // A wrong fret (not the second gem's) held, then a strum at that gem.
+            const unsigned wrong = devGem_ < gems.size() ? ((gems[devGem_].frets & 1) ? 2u : 1u) : 1u;
+            for (const int f : {0, 1, 2, 3, 4}) {
+                static const int kGuitar[5] = {0, 1, 3, 2, 4};
+                SDL_SetJoystickVirtualButton(j, kGuitar[f], devReleaseMs_ < 0 && ((wrong >> f) & 1));
+            }
+            devHeld_ = 0;
+            if (devReleaseMs_ < 0 && nowMs - stepStart_ > 150 && devGem_ < gems.size() && t >= gems[devGem_].ms - 8)  // the hat let go frames ago
+                SDL_SetJoystickVirtualHat(j, 0, SDL_HAT_DOWN), devStrumDown_ = true, devReleaseMs_ = t;
+            if (pl->passes() >= devTarget_ && !pl->guitarAudible()) {
+                int sounds = 0;
+                for (const auto& [name, at] : ui.host().gameSfx())
+                    if (name.rfind("miss_", 0) == 0 && at >= devSustainSince_) ++sounds;  // miss_gtr.cue (config/player.dta)
+                std::printf("  device: %d gems passed, %d penalties, guitar stem muted, %d miss sound(s), rock meter %.2f, streak %d\n", pl->passes(), pl->penalties(), sounds,
+                            pl->rockMeter(), pl->streak());
+                if (devStrumDown_) SDL_SetJoystickVirtualHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
+                if (!sounds) {
+                    std::string heard;
+                    for (const auto& [name, at] : ui.host().gameSfx())
+                        if (at >= devSustainSince_ - 2000) heard += " " + name + "@" + std::to_string(int(at));
+                    std::printf("  sounds since:%s\n", heard.c_str());
+                }
+                devTarget_ = -1, devReleaseMs_ = -1, devSustainSince_ = -1;
+                return sounds > 0 ? pass() : fail("the wrong strum played no miss sound");
+            }
+            if (nowMs - stepStart_ > s.ms) return fail("missed gems did not mute the guitar stem");
+            return;
+        }
+        if (devTarget_ < 0) devTarget_ = devPlayed_ + std::atoi(goal.c_str()), devOdAsked_ = devWhammied_ = false, devSustainSince_ = -1;
+        const double t = ui.host().gameTimeMs();
+        // Last frame's strum and tilt end.
+        // (A hat let go and pressed again in one frame would be no event: the next strum waits a frame.)
+        const bool strumWait = devStrumDown_;
+        if (devStrumDown_) SDL_SetJoystickVirtualHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
+        if (devTilt_) SDL_SetJoystickVirtualAxis(j, pad ? 0 : 4, 0), SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_BACK, false), devTilt_ = false;
+        auto hold = [&](unsigned mask) {
+            for (int f = 0; f < 5; ++f) {
+                const bool on = (mask >> f) & 1;
+                if (on == bool((devHeld_ >> f) & 1)) continue;
+                if (!pad) {
+                    static const int kGuitar[5] = {0, 1, 3, 2, 4};  // A B Y X LB (the report's mapping)
+                    SDL_SetJoystickVirtualButton(j, kGuitar[f], on);
+                } else if (f == 0 || f == 3) {  // LT / RT (the virtual pad's axes 4 / 5)
+                    SDL_SetJoystickVirtualAxis(j, f == 0 ? SDL_GAMEPAD_AXIS_LEFT_TRIGGER : SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, on ? 32767 : -32768);
+                } else {
+                    static const int kPad[5] = {0, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, 0, SDL_GAMEPAD_BUTTON_SOUTH};
+                    SDL_SetJoystickVirtualButton(j, kPad[f], on);
+                }
+            }
+            devHeld_ = mask;
+        };
+        const auto& gems = pl->chart().gems;
+        while (devGem_ < gems.size() && (gems[devGem_].ms < t - 60 || !gems[devGem_].ownedBy(0))) ++devGem_;
+        if (pad && devReleaseMs_ >= 0 && t >= devReleaseMs_) hold(0), devReleaseMs_ = -1;
+        if (devGem_ < gems.size()) {
+            const Gem& g = gems[devGem_];
+            const bool sustain = !g.noSustain && g.durationMs > 0;
+            if (!pad) {
+                if (t >= g.ms - 70 && devHeld_ != g.frets) hold(g.frets);
+                if (t >= g.ms - 8 && !strumWait) {
+                    SDL_SetJoystickVirtualHat(j, 0, SDL_HAT_DOWN), devStrumDown_ = true;
+                    ++devGem_, ++devPlayed_;
+                }
+            } else if (t >= g.ms - 8) {
+                if (devHeld_) {
+                    hold(0);  // let go first: the next frame presses
+                } else {
+                    hold(g.frets);
+                    devReleaseMs_ = sustain ? g.ms + g.durationMs - 30 : g.ms + 40;
+                    ++devGem_, ++devPlayed_;
+                }
+            }
+        }
+        // The whammy while a sustain is held: right stick X (a guitar's bar from -32768; a pad's left stick).
+        const bool sustaining = pl->sustainGem() >= 0;
+        SDL_SetJoystickVirtualAxis(j, pad ? SDL_GAMEPAD_AXIS_LEFTX : 3, sustaining ? 20000 : pad ? 0 : -32768);
+        if (sustaining) {
+            if (devSustainSince_ < 0) devSustainSince_ = t;
+            devWhammied_ = devWhammied_ || pl->whammying();
+        } else {
+            devSustainSince_ = -1;
+        }
+        if (od && pl->starPowerReady() && !devOdAsked_) {
+            if (pad) SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_BACK, true);
+            else SDL_SetJoystickVirtualAxis(j, 4, 32767);  // tilt
+            devTilt_ = devOdAsked_ = true;
+        }
+        auto done = [&] {
+            hold(0), devTarget_ = -1, devReleaseMs_ = -1;
+            if (devStrumDown_) SDL_SetJoystickVirtualHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
+            SDL_SetJoystickVirtualAxis(j, pad ? SDL_GAMEPAD_AXIS_LEFTX : 3, pad ? 0 : -32768);
+            return pass();
+        };
+        if (od && pl->starPowerActive()) return std::printf("  device: Overdrive deployed at %.0f ms\n", t), done();
+        if (sus && devSustainSince_ >= 0 && t - devSustainSince_ > 500 && devWhammied_)
+            return std::printf("  device: sustain held from %.0f ms, whammy %.2f\n", devSustainSince_, pl->whammyBar()), done();
+        if (!od && !sus && devPlayed_ >= devTarget_) return done();
+        if (nowMs - stepStart_ > s.ms)
+            return fail(od ? "Overdrive was never deployed with the device" : sus ? "no sustain held with the whammy" : "the song ended before the device played its gems");
+        return;
+    }
+    if (s.screen == "dev_audible") {
+        const Player* pl = ui.host().gamePlayer(0);
+        return pl && pl->guitarAudible() ? pass() : fail("the guitar stem stayed muted after hits");
+    }
+    if (s.screen == "dev_hits") {
+        const Player* pl = ui.host().gamePlayer(0);
+        const int hit = pl ? pl->notesHit() : 0;
+        std::printf("  device: %d gems played, %d notes hit, score %d, x%d, streak %d, rock meter %.2f (player 1: %s)\n", devPlayed_, hit,
+                    pl ? pl->score() : 0, pl ? pl->multiplier() : 0, pl ? pl->streak() : 0, pl ? pl->rockMeter() : 0.0f,
+                    ui.input().playerDevice(0).c_str());
+        if (devPlayed_ < 10) return fail("the device played too few gems");
+        // 80%: a frame of a busy test machine can take a press out of the window.
+        return hit * 10 >= devPlayed_ * 8 ? pass() : fail("the device's frets and strums did not hit the notes");
     }
     if (s.screen == "kb_hits") {
         const Player* pl = ui.host().gamePlayer(0);

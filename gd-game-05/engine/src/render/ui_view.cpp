@@ -852,7 +852,20 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
             if (sub && owner == o.name) {
                 if (texRendered_.count(sub.get())) return;
                 pose_.setDirBase(sub.get(), &o);
+                // A RndDir with an environ draws its objects in it (RndDir's
+                // `environ`, SyncProperty RB 0x821B3438) [C]: loading.milo's
+                // four band icons (load_icon_*: intruments.env, a warm white
+                // point light) were drawn in ornate_leader.grp's dim one.
+                const auto* own = o.as<scene::DirObj>();
+                const scene::Environ* env = nullptr;
+                if (own->hasRnd && !own->rnd.environment.empty()) {
+                    env = sub->find<scene::Environ>(own->rnd.environment);
+                    if (!env) env = o.dir->resolve<scene::Environ>(own->rnd.environment);
+                }
+                const LightEnv saved = env ? r.lightEnv() : LightEnv{};
+                if (env) r.setLightEnv(cache_.lightEnv(*env, &pose_));
                 drawRoots(r, *sub);
+                if (env) r.setLightEnv(saved);
                 return;
             }
         return;
@@ -1211,8 +1224,10 @@ void UiView::drawStyleMeshes(MaterialRenderer& r, const scene::Object& c) {
         // A check box's / picture's mesh takes the component's place (the
         // component carries the same facing rotation the resource mesh has,
         // e.g. the video settings' lefty boxes) [I]; a slider's pod moves by
-        // its TransAnim under the slider.
-        const scene::Xfm world = slider ? scene::compose(podPose.local(m), cw) : cw;
+        // its TransAnim under the slider, through its resource parents
+        // (slider_audio.milo: slider.grp turns the XY quads to face the
+        // camera; the audio sliders have no turn of their own) [C data].
+        const scene::Xfm world = slider ? scene::compose(podPose.world(m), cw) : cw;
         drawMesh(r, cache_, *m, toMat4(world), tex ? &texPose : nullptr, mat);
         if (!m->verts.empty()) {
             float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};

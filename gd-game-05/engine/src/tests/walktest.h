@@ -219,6 +219,12 @@ private:
     unsigned kbHeld_ = 0;
     bool kbOdAsked_ = false;
     unsigned kbGreen_ = '1';  // an SDL_Keycode (SDLK_1)
+    // rb_guitar_play / rb_guitar_none / rb_pad_play: the device's own events.
+    size_t devGem_ = 0;
+    int devPlayed_ = 0, devTarget_ = -1;
+    unsigned devHeld_ = 0;
+    bool devStrumDown_ = false, devTilt_ = false, devOdAsked_ = false, devWhammied_ = false;
+    double devReleaseMs_ = -1, devSustainSince_ = -1;
 
     void runCheck(ui::UiManager& ui, const Step& s, double nowMs);
 };

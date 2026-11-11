@@ -6,6 +6,15 @@ inside the Guitar Dream Universal Launcher's release
 
 ## [Unreleased]
 
+### Fixed
+- A Rock Band guitar (or any controller) set to "None" in GAMEPADS now plays a one-player song; before, the song took only its Start and ignored every fret and strum.
+- A gamepad or guitar's Start works on the title screen.
+- A gamepad plays the song with its frets even after the keyboard was used in the menus.
+- Missed notes play the miss sound again (miss_gtr / miss_bass / drum misses from the original's player handlers).
+- The loading screen's band icons are lit by their own light (they were dark olive).
+- Options > Audio: the volume sliders show as full bars again (they were drawn edge-on, almost black); Options > Calibrate opens.
+- Venue shots get their film look again (ProFilm post-processing was never selected when the band appeared); the highway rises in at the song start as in the original.
+
 ## [0.0.6] - 2026-11-10
 
 ### Added
