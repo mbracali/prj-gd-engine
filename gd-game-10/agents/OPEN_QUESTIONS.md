@@ -16,7 +16,8 @@ and is listed for the owner to confirm or change.
    desc's root element: the desc's elements root is the descinterface
    element's child 0, not the element itself (as D14's reader builds it)
    [C script]. Until that and AttachHudWidget exist, GH3's HUD widgets
-   draw with gh4's images.
+   draw with gh4's images. Desc side done (D14, 2026-11-11): the desc's root
+   is now the descinterface element's child 0; AttachHudWidget is still to write.
 5. Drums: flag 0x2000 is set only on Expert drum notes (1,012 of 2,201 in
    Master of Puppets, on kick and non-kick notes) [C data]; whether it is
    the Expert+ double kick is not confirmed in the XEX yet.
