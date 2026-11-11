@@ -265,6 +265,7 @@ World::~World() {
     for (auto& [o, v] : objs_) interp_->tasks().killFor(v.get());
     interp_->unregisterName("world", world_.get());
     if (prevWorld_) interp_->registerAs("world", prevWorld_);
+    if (Value& w = interp_->var("world"); w.type == Value::Type::Object && w.object == world_.get()) w = prevWorldVar_;
     interp_->resolver = prevResolver_;
 }
 
@@ -304,6 +305,11 @@ void World::attach() {
     }
     prevWorld_ = interp_->findObject("world");
     interp_->registerObject(world_.get());
+    // $world: the world entered (WorldDir; band_objects.dta's start_shot
+    // finds ProFilm_a.pp / override_blender.pp through it: unset, every shot
+    // notified "postproc missing" and drew without them) [C data].
+    prevWorldVar_ = interp_->var("world");
+    interp_->var("world") = Value::obj(world_.get());
     prevResolver_ = interp_->resolver;
     interp_->resolver = [this](const std::string& name) -> ScriptObject* {
         if (prevResolver_)
@@ -799,7 +805,9 @@ Value World::native(const std::string& msg, std::vector<Value>& args, bool& hand
     // has nothing for yet: the beat (sinks get it), the camera's random seed
     // and categories (App::rbShots picks the shots), the crowd's VENUE moods
     // (the crowd keeps the game's excitement) [I].
-    if (msg == "downbeat" || msg == "camera_random_seed" || msg == "resync_categories" || msg.rfind("crowd_", 0) == 0)
+    // clear_lighting (worldbase.dta game_over, reached since $world is set,
+    // GD05-054): the song is over; the port keeps the last preset's lights [I].
+    if (msg == "downbeat" || msg == "camera_random_seed" || msg == "resync_categories" || msg.rfind("crowd_", 0) == 0 || msg == "clear_lighting")
         return Value::integer(0);
     // {world iterate <Class> $var body...}: the body per venue object of the class [C data].
     if (msg == "iterate" && args.size() >= 2) {

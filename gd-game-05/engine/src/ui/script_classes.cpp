@@ -866,6 +866,15 @@ bool PanelObj::handleNative(Interp& in, const std::string& msg, std::vector<Valu
                 if (gfx::ScenePose::endFrame(o.get()) > 0) view->setFrame(o->name, args[0].number());
         return r = Value::integer(0), true;
     }
+    // {$panel button_down <button> <player>}: the panel's BUTTON_DOWN_MSG
+    // (Interp::send ran it first), then UIPanel's native ButtonDown, the
+    // focused component [I: Hmx::Object::Handle falls through to the class].
+    // The title's splash_panel turns Start into kPad_X this way (ui/main.dta):
+    // a pad's or a guitar's Start went nowhere (GD05-056).
+    if (msg == "button_down" && !args.empty()) {
+        buttonDown(int(args[0].number()), args.size() > 1 ? int(args[1].number()) : 0);
+        return r = Value::integer(0), true;
+    }
     // RB's practice mode (M7, GD05-009): its vocal mode is not there yet.
     if (msg == "set_in_vocal_mode" && className() == "PracticePanel") return in.onStub(name(), msg, Value::integer(0)), r = Value::integer(0), true;
     // RB's MetaPanel: {$this meta_music} (meta.dta) [C data].

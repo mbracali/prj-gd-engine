@@ -819,6 +819,7 @@ void drawMesh(MaterialRenderer& r, SceneCache& cache, const scene::Mesh& mesh, c
     if (!mat) mat = mesh.dir->resolve<scene::Mat>(mesh.mat);
     const Mat4 bones[1] = {world};
     if (!mat) {
+        if (!mesh.mat.empty()) shaderaudit::note("mesh without its material", mesh.name + " (" + mesh.mat + ")");  // none named: the data's
         Material plain;
         r.draw(*g, bones, plain, {1});
         return;

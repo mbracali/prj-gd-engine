@@ -235,6 +235,10 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     gamemode->on("get", [modeValue](std::vector<Value>& a) { return modeValue(strArg(a, 0)); });
     // {gamemode intro_category}: the mode's (intro_category ...) (modes.dta) [C data].
     gamemode->on("intro_category", [modeValue](std::vector<Value>&) { return modeValue("intro_category"); });
+    // {gamemode win_camera} / {gamemode outro_camera}: the mode's shot
+    // categories for worldbase.dta's game_won / next_outro_camera [C data].
+    gamemode->on("win_camera", [modeValue](std::vector<Value>&) { return modeValue("win_camera"); });
+    gamemode->on("outro_camera", [modeValue](std::vector<Value>&) { return modeValue("outro_camera"); });
     gamemode->on("is_solo", [modeValue](std::vector<Value>&) { return Value::integer(modeValue("max_players").integerValue() == 1 ? 1 : 0); });
     gamemode->on("is_hth_arrangement", [modeValue](std::vector<Value>&) { return Value::integer(modeValue("player_arrangement").integerValue() == 1 ? 1 : 0); });
     gamemode->on("is_band_arrangement", [modeValue](std::vector<Value>&) { return Value::integer(modeValue("player_arrangement").integerValue() == 0 ? 1 : 0); });
@@ -324,6 +328,19 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
             applyVolumes();
             return Value::integer(0);
         });
+    }
+    // The pad that owns the system options (options.dta
+    // goto_system_option_screen): set_global_options_pad keeps the pad and
+    // sets a flag, global_options_pad_set returns the flag (ProfileMgr
+    // handler RB 0x823D6280: +0x18 pad, +0x14 flag) [C].
+    {
+        static bool padSet = false;
+        profiles->on("set_global_options_pad", [](std::vector<Value>& a) {
+            if (!a.empty()) opts["global_options_pad"] = a.back().integerValue();
+            padSet = true;
+            return Value::integer(0);
+        });
+        profiles->on("global_options_pad_set", [](std::vector<Value>&) { return Value::integer(padSet ? 1 : 0); });
     }
     profiles->on("get_default_song_to_taskmgr_ms", no);
     profiles->on("get_max_bands_per_char", [](std::vector<Value>&) { return Value::integer(10); });

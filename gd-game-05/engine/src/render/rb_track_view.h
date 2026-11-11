@@ -61,6 +61,10 @@ public:
     bool loaded() const { return track_ != nullptr; }
     const std::string& part() const { return part_; }
     void setLefty(bool lefty) { lefty_ = lefty; }
+    // The track's intro (gem_track.dta play_intro: intro.trig plays
+    // intro_anim.grp): the song time it starts; before it the track is
+    // retracted (not drawn). Unset: the track is out.
+    void setIntroAt(float songMs) { introAtMs_ = songMs; }
     // The players' layout (wave 02): the share of the screen the track
     // draws in (x, y, w, h from the top left), else its camera's own.
     void setScreenRect(const std::array<float, 4>& r) { layout_ = r, hasLayout_ = true; }
@@ -87,6 +91,7 @@ private:
     scene::Milo* track_ = nullptr;
     std::string part_;
     bool drums_ = false, lefty_ = false;
+    float introAtMs_ = -1e30f;
     const scene::Cam* cam_ = nullptr;
     std::array<float, 4> screenRect_{0, 0, 1, 1};
     gfx::ScenePose pose_;

@@ -87,6 +87,10 @@ public:
     bool hasCamera() const { return hasCamera_; }
     // The PostProc the shot selected (nullptr: reset_postproc).
     const scene::PostProc* postProc() const { return postProc_; }
+    // pp_blend_task's blend: the PostProc it blends from (nullptr: none) and
+    // how far (0 from, 1 postProc()).
+    const scene::PostProc* postProcFrom() const { return postProcBlend() < 1.0f ? blendFrom_ : nullptr; }
+    float postProcBlend() const;
     // Depth of field this frame (on: a focal target).
     struct Dof {
         bool on = false;
@@ -165,6 +169,10 @@ private:
     std::unordered_map<const scene::CamShot*, ShotState> state_;
     const scene::CamShot* current_ = nullptr;
     const scene::PostProc* postProc_ = nullptr;
+    const scene::PostProc* blendFrom_ = nullptr;  // pp_blend_task
+    double blendStart_ = 0;
+    float blendTime_ = 0;
+    int blendUnits_ = 0;
     gfx::Camera camera_;
     Framing last_;  // the camera of the last frame (the filter's screen test)
     bool hasCamera_ = false;

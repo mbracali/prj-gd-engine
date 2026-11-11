@@ -770,6 +770,7 @@ core::Pipeline CoreDevice::pipeline(const DrawCall& c, const CTarget& t) {
 void CoreDevice::draw(const DrawCall& c) {
     const CProgram* prog = programs_.get(c.program.id);
     CBuffer* vb = buffers_.get(c.vertices.id);
+    if (!prog && vb && c.count > 0) shaderaudit::note("draw without a program", backendId(backend_));
     if (!prog || !vb || !c.layout || c.count <= 0) return;
     const CTarget* t = boundTarget();
     if (!t) return;
@@ -791,7 +792,7 @@ void CoreDevice::draw(const DrawCall& c) {
     }
     if (!vr || (ib && !ir)) return;
     const core::Pipeline pl = pipeline(c, *t);
-    if (!pl) return;
+    if (!pl) return shaderaudit::note("pipeline failed", prog->name);
     ensurePass();
     dev_->bindPipeline(pl);
     dev_->bindVertexBuffers(0, &vr, 1);

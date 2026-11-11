@@ -724,6 +724,7 @@ void GlDevice::bindUniforms(int binding, const UniformData& u) {
 void GlDevice::draw(const DrawCall& c) {
     const GLuint* prog = programs_.get(c.program.id);
     const GlBuffer* vb = buffers_.get(c.vertices.id);
+    if (!prog && vb && c.count > 0) shaderaudit::note("draw without a program", "local");
     if (!prog || !vb || !c.layout || c.count <= 0) return;
     if (*prog != program_) gl::glUseProgram(program_ = *prog);
     applyState(c.state);

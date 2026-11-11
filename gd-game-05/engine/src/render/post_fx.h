@@ -67,6 +67,9 @@ struct PostProcState {
 // RndPostProc from a decoded scene object: textures resolved by the caller
 // (SceneCache::texture(&pp, pp.luminanceMap), empty when unnamed).
 PostProcState postProcState(const scene::PostProc& pp, TextureId luminanceMap, TextureId noiseMap = {});
+// PostProcBlendTask (RB 0x8220A508) [C]: `from` towards `to` by t (0..1);
+// the maps are the destination's from the start.
+PostProcState blendPostProc(const PostProcState& from, const PostProcState& to, float t);
 
 // Depth of field, set per frame by the camera director. GH2 [C]: a CamShot
 // with focal targets calls Rnd::SetDOF (vtable +0x70, DX 0x82302728) with

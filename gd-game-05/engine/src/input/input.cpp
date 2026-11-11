@@ -282,6 +282,36 @@ SDL_JoystickID Input::attachVirtualPad(const std::string& spec) {
         SDL_Log("virtual pad: expected <vendor>:<product>[:guitar] in hex, got '%s'", spec.c_str());
         return 0;
     }
+    if (spec.find(":rbguitar") != std::string::npos) {
+        // The owner's Harmonix Rock Band Guitar (Xbox 360, USB 1bad:0002) as
+        // Linux's xpad reports it: a plain pad of 11 buttons, 6 axes and a
+        // hat, the whammy (axis 3) and the triggers resting at -32768, with
+        // the SDL mapping of his controller report (GD05-056). Only the GUID
+        // differs (SDL's virtual bus).
+        SDL_VirtualJoystickDesc d;
+        SDL_INIT_INTERFACE(&d);
+        d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+        d.vendor_id = Uint16(vendor), d.product_id = Uint16(product);
+        d.naxes = 6, d.nbuttons = 11, d.nhats = 1;
+        d.name = "Harmonix Rock Band Guitar";
+        const SDL_JoystickID jid = SDL_AttachVirtualJoystick(&d);
+        if (!jid) {
+            SDL_Log("virtual pad: %s", SDL_GetError());
+            return 0;
+        }
+        char guid[64];
+        SDL_GUIDToString(SDL_GetJoystickGUIDForID(jid), guid, sizeof guid);
+        const std::string m = std::string(guid) +
+                              ",Harmonix Rock Band Guitar,a:b0,b:b1,x:b2,y:b3,back:b6,guide:b8,start:b7,leftstick:b9,"
+                              "rightstick:b10,leftshoulder:b4,rightshoulder:b5,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,"
+                              "leftx:a0,lefty:a1,rightx:a3,righty:a4,lefttrigger:a2,righttrigger:a5,";
+        if (SDL_Joystick* j = SDL_OpenJoystick(jid)) {  // the resting axes, before the game opens it
+            for (const int a : {2, 3, 5}) SDL_SetJoystickVirtualAxis(j, a, -32768);
+            SDL_UpdateJoysticks();
+        }
+        if (SDL_AddGamepadMapping(m.c_str()) < 0) SDL_Log("virtual pad mapping: %s", SDL_GetError());
+        return jid;
+    }
     const bool guitar = spec.find(":guitar") != std::string::npos;
     // ":dpadaxis=<v>": a pad whose D-pad left / right and up / down are its
     // axes 6 and 7 (as SDL's mappings give many adapters and guitars),
@@ -980,7 +1010,7 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
     for (size_t k = 0; k < 4; ++k)
         if (help[k] != p.helper[k]) {
             p.helper[k] = help[k];
-            if (p.slot >= 0 || !inGame() || kHelp[k] == Action::Back) emit(out, kHelp[k], help[k], ts, ControllerMode::Joypad, std::max(p.slot, 0));
+            if (p.slot >= 0 || !inGame() || onePlayerSong_ || kHelp[k] == Action::Back) emit(out, kHelp[k], help[k], ts, ControllerMode::Joypad, std::max(p.slot, 0));
         }
     curGuitar_ = curJoypad_ = curAnalog_ = false;
 }
@@ -988,14 +1018,15 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
 // The actions a device's held controls give, each at most once: a guitar's
 // strum also moves the menus (the other way round when lefty); Select and
 // the gyro are Star Power; a gamepad's frets take the lefty_joypad order.
-// A device without a player works the menus as player 1, and only pauses in a song.
+// A device without a player works the menus as player 1; in a song it only
+// pauses, unless the song has one player (D34, GD05-056: plays it).
 Input::ActionSet Input::actionsOf(const std::array<bool, size_t(Control::Count)>& held, bool joypad, int player) const {
     ActionSet a;
     const bool lefty = lefty_[size_t(std::max(player, 0) & 1)];
     const bool play = !joypad || gamepadPlay_;
     for (size_t c = 0; c < size_t(Control::Count); ++c) {
         if (!held[c]) continue;
-        if (player < 0 && inGame() && C(c) != C::Start && C(c) != C::GuitarStart) continue;
+        if (player < 0 && inGame() && !onePlayerSong_ && C(c) != C::Start && C(c) != C::GuitarStart) continue;
         auto on = [&](Action x) { a.on[size_t(x)] = true; };
         switch (C(c)) {
         case C::Green: case C::Red: case C::Yellow: case C::Blue: case C::Orange: {

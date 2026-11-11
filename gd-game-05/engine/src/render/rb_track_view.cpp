@@ -599,6 +599,21 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
     for (const char* n : {"bass_superstreak_plane.mesh", "spotlight_draw.grp", "unison_phrase_hit.grp", "smasher_fx.grp"})
         if (const scene::Object* o = obj(n)) pose_.setShowing(o, false);
     if (const scene::Object* o = obj(drums_ ? "guitar_draw.grp" : "drum_draw.grp")) pose_.setShowing(o, false);
+    // The intro (tracksystem.milo intro.trig -> intro_anim.grp, 30 frames a
+    // second [I: the rate]): camera_intro.tnm brings cameras.grp from 300
+    // down the track to 0 by frame 20 (an overshoot to -6 at 15) and
+    // intro_anim.anim shows static.grp from frame 0.1 [C data]. Retracted
+    // before it: not drawn (track_panel.dta set_track_in) [I].
+    if (introAtMs_ > -1e29f) {
+        const float f = (nowMs - introAtMs_) * 0.03f;
+        if (f < 0) {
+            if (sub) r.device().setViewport(vx, vy, vw, vh);
+            viewW_ = vw, viewH_ = vh;
+            return;
+        }
+        if (const scene::Object* ia = obj("intro_anim.grp")) pose_.setFrame(ia, std::min(f, 20.0f));
+        if (const scene::Object* st = obj("static.grp")) pose_.setShowing(st, f >= 0.1f);
+    }
     camera_.world = gfx::toMat4(pose_.world(cam_));
     camera_.yFov = cam_->yFov, camera_.nearPlane = cam_->nearPlane, camera_.farPlane = cam_->farPlane;
     camera_.aspect = float(viewW_) / float(viewH_);

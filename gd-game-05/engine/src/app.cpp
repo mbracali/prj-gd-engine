@@ -554,6 +554,12 @@ private:
     void drawRbNotices(float t);
     void drawRbTrack0(float t, float speed);
     int rbTrackFrames_ = 0;  // frames RB's instrument track drew (the walks)
+    // RB's track intro (ui/game.dta intro_start: on_extend at song time 0;
+    // intro_skip: at once) and each gem track's intro.trig delay
+    // (gem_track.dta play_intro: 0.55 s alone, 0.25 s x index + 0.05 s in a
+    // band) [C data].
+    float rbExtendMs_ = -1e30f;
+    float rbIntroAt(int index) const { return rbExtendMs_ + (seats_.empty() ? 550.0f : 250.0f * float(index) + 50.0f); }
     MenuMovie menuMovie_;       // the menus' background video (movie_panel)
     int songLoads_ = 0;         // songs loaded (the walks: a key must not reload the song, GD05-024)
     int menuVenueSounds_ = 0;   // venue sounds played before the first song (the walks: none at boot, GD05-023)
@@ -1425,6 +1431,7 @@ void App::beginSong() {
     extendAtMs_ = float(std::max(startMs, kTrackExtendMs));
     if (skipIntro_) extendAtMs_ = float(startMs) - 10000.0f;
     extendSent_ = skipIntro_;
+    rbExtendMs_ = skipIntro_ || practice ? float(startMs) : float(std::max(startMs, 0.0));
     controllersLive_ = false;
     heldBeforeLive_ = {};
     introSfx_ = 0;
@@ -1819,6 +1826,10 @@ void App::playerAction(const InputEvent& a) {
         return;
     }
     p->update(t);
+    // One player, every device (D35): a press of another kind of device
+    // (a gamepad after the keyboard worked the menus) switches the watcher.
+    if (a.down && (isFret(a.action) || a.action == Action::Strum) && !player2_ && seats_.size() <= 1 && a.mode != p->controllerMode())
+        p->setControllerMode(a.mode);
     if (rbBonus_ && p == player_.get() && isFret(a.action) && a.down) rbBonus_->codaStrike(fretOf(a.action), t);
     if (isFret(a.action)) {
         if (a.down) p->fretDown(fretOf(a.action), t);
@@ -2093,6 +2104,7 @@ void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events
 }
 
 void App::drawSeats(float t, float speed) {
+    int gemTrack = rbTrack_ && !vocal_ ? 1 : 0;  // gem_track_index
     for (RbSeat& st : seats_) {
         if (st.vocal) {
             VocalTrackView::State vs;
@@ -2113,6 +2125,7 @@ void App::drawSeats(float t, float speed) {
         pv.heldGem = p->sustainGem();
         pv.whammy = p->whammyBar();
         if (st.part == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
+        st.track->setIntroAt(rbIntroAt(gemTrack++));
         st.track->draw(canvas_.renderer(), *sceneCache_, *song_, pv, t + float(videoOffsetMs_), speed);
     }
 }
@@ -2320,7 +2333,12 @@ void App::gameCallbacks(int player, const std::vector<PlayerEvent>& events, size
     using K = PlayerEvent::Kind;
     switch (e.kind) {
     case K::Miss:
-        ui_->callScript(matcher, "miss", {num});
+        // RB has no matcher handlers: config/player.dta's player handlers
+        // take (miss $player_num $slot) and play miss_gtr.cue / miss_bass /
+        // miss_kick.cue / miss_drum by the track type [C data]; the port
+        // sent GH2's matcher only, so a miss was silent (GD05-057).
+        if (matcher && matcher->handler("miss")) ui_->callScript(matcher, "miss", {num});
+        else ui_->callScript(perf, "miss", {num, Value::integer(e.slot >= 0 ? e.slot : std::max(0, slot(e.gem)))});
         in.send(matcher, "gem_miss_callback", {Value::integer(e.slot >= 0 ? e.slot : slot(e.gem)), Value::integer(slot(e.gem)), Value::real(e.value)}, false);
         break;
     case K::Hit: {
@@ -2678,6 +2696,7 @@ void App::frameUi() {
     // (Each mode's game_screen: modes.dta's quick play / career, practice, the tutorials.)
     const std::string screen = ui_->currentScreen();
     input_.setInGame(player_ && begun_ && !paused_ && (screen == "game_screen" || screen == "practice_game_screen" || screen == "tut_script_screen"));
+    input_.setOnePlayerSong(player_ && !player2_ && seats_.size() <= 1);  // D34: every device plays it
     if (player_ && begun_) {
         const float t = songClock();
         updateSong(t);
@@ -2775,6 +2794,7 @@ void App::gameBegin() {
 }
 
 int App::gameCounter(int player, const std::string& key) const {
+    if (key == "missing_shaders") return gfx::shaderaudit::count();  // draws without their shader (render/device.h)
     if (key == "surface_overrides") return track_ ? track_->surfaceOverrides() : 0;
     if (key == "mixer_band_pct") return int(std::lround(bandVolume_ * 100));
     if (key == "mixer_guitar_pct") return int(std::lround(guitarVolume_ * 100));
@@ -2952,8 +2972,17 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
             // before the first shot, the static one's).
             if (director_ && director_->shot()) {
                 const scene::PostProc* pp = director_->postProc();
-                if (pp) r.post().select(gfx::postProcState(*pp, pp->luminanceMap.empty() ? gfx::TextureId{} : venueCache_->texture(pp, pp->luminanceMap)));
-                else r.post().reset();
+                auto ppState = [this](const scene::PostProc& p) {
+                    return gfx::postProcState(p, p.luminanceMap.empty() ? gfx::TextureId{} : venueCache_->texture(&p, p.luminanceMap));
+                };
+                if (pp) {
+                    gfx::PostProcState st = ppState(*pp);
+                    // pp_blend_task (band_objects.dta start_shot): from the last selection.
+                    if (const scene::PostProc* from = director_->postProcFrom()) st = gfx::blendPostProc(ppState(*from), st, director_->postProcBlend());
+                    r.post().select(st);
+                } else {
+                    r.post().reset();
+                }
                 const CameraDirector::Dof& d = director_->dof();
                 const gfx::Camera& c = director_->camera();
                 if (d.on && d.maxBlur > 0) r.post().setDof(gfx::DofState::fromShot(d.focus, d.blurDepth, d.maxBlur, c.nearPlane, c.farPlane));
@@ -3035,7 +3064,7 @@ void App::unloadVenue() {
 // GH2's play_sfx / synth play_sequence: the game's banks, then the venue's
 // (crowd_win, encore_yes... from the UI's scripts).
 void App::recordSfx(const std::string& name) {
-    if (begun_ && player_ && songSfx_.size() < 256) songSfx_.emplace_back(name, double(lastT_));
+    if (begun_ && player_ && songSfx_.size() < 8192) songSfx_.emplace_back(name, double(lastT_));
     if (sfxHistory_.size() >= 1024) sfxHistory_.erase(sfxHistory_.begin(), sfxHistory_.begin() + 512);
     sfxHistory_.push_back(name);
 }
@@ -3362,6 +3391,7 @@ void App::drawRbTrack0(float t, float speed) {
     // The drums' permuted lanes back to the chart's (kick = lane 0).
     if (parts_[0] == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
     rbTrack_->setLefty(input_.lefty(0));
+    rbTrack_->setIntroAt(rbIntroAt(0));
     rbTrack_->draw(canvas_.renderer(), *sceneCache_, *song_, pv, t + float(videoOffsetMs_), speed);
     ++rbTrackFrames_;
     drawRbNotices(t);
