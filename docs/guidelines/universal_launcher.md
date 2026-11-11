@@ -29,6 +29,14 @@ These win over anything older below.
 - **Window.** Every desktop build is windowed by default. Android has no
   window mode: leave its settings alone.
 - **Never forget a package** (below).
+- **Game list order** (owner, 2026-11-11): the playable games come first.
+  Every game with `ready_to_play: true` is listed before the others; within
+  each group the order is `gd-engine-launcher/games.yaml`'s (so gd-game-01,
+  02, 03, 04, 05, 10, then gd-game-06, 07, ...). `Catalog::load` sorts the
+  list once, so the desktop and Android list, its keyboard / gamepad / mouse
+  navigation, the first focus, `--list` and Explore all follow it. Anything
+  saved is keyed by game id, never by row. `ctest -R gdul_order`
+  (`tests/order/run_order.cmake`) checks it.
 
 ## Never forget a package
 

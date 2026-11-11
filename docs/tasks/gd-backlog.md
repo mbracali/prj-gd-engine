@@ -61,6 +61,7 @@ The Guitar Dream Universal Launcher (`gd-engine-launcher/`): every platform (Lin
 | GDUL-024 | Enhancement | ❌ | gd01: runtime handheld profile from GD_HOST_HANDHELD (today only the Deck download has gd01's Deck defaults) | Needs a gd01 change | Wave B 10-28 |
 | GDUL-025 | Enhancement | ❌ | An undefined-symbol check for the APK's modules (Linux modules get `ldd -r`) |  | Wave B 10-28 |
 | GDUL-026 | Enhancement | ❌ | build.sh prunes local_builds to the current and previous launcher versions by itself | docs/guidelines/general_guidelines.md "Packages" | Wave B 10-28 |
+| GDUL-027 | Enhancement | ✅ | List the playable games first: every `ready_to_play` game, then the others, each group in games.yaml's order (list, navigation, first focus, `--list`, Explore; Android too) | Done: `Catalog::load` (stable partition); `ctest -R gdul_order` (tests/order/run_order.cmake); [docs/guidelines/universal_launcher.md](../guidelines/universal_launcher.md) "Game list order" | Owner 11-11 |
 | GDUL-009 | Enhancement | ✅ | Spike: PS Vita homebrew | [docs/spikes/study_ps_vita.md](../spikes/study_ps_vita.md) | Wave B 10-28 |
 | GDUL-010 | Enhancement | ✅ | Spike: Nintendo 3DS homebrew | `docs/spikes/study_3ds.md` (being written; earlier [../spikes/study_3ds_old.md](../spikes/study_3ds_old.md): not viable) | Wave B 10-28 |
 | GDUL-011 | Enhancement | ✅ | Spike: iOS | [docs/spikes/study_ios.md](../spikes/study_ios.md); gd-game-01's iOS item is GD01-219 | Wave B 10-28 |
