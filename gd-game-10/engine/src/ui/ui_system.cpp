@@ -1502,7 +1502,10 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
     handled = true;
     ++stats_.memberCalls;
     if (method == K("SetProps")) {
-        if (e) applyProps(*e, p, false);
+        // gh4: a desc's named props too (create_popup_warning_text's
+        // PopupElement : setprops {PopupTitle_text PopupBody_text}) [C scripts].
+        if (e && e->desc) descSetProps(*e, p);
+        else if (e) applyProps(*e, p, false);
         return e != nullptr;
     }
     // gh4's element members: se_setprops (a desc's named props too),
@@ -1547,6 +1550,13 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
         if (const qb::Value* ps = qs::Vm::param(p, K("params")); ps && ps->st) args = *ps->st;
         const uint32_t id = vm_.spawnOn(scr, args, e->id);
         if (id && method == K("obj_spawnscriptnow")) vm_.runNow(id);
+        return true;
+    }
+    // gh4: `<element> : se_getparentid` -> parent_id [C scripts: the
+    // scrollbars', select controller's and setlist's callers read <parent_id>].
+    if (method == K("se_getparentid")) {
+        if (!e || !e->parent) return false;
+        if (qb::Struct* l = locals(run)) qs::Vm::set(*l, K("parent_id"), qs::Vm::makeKey(e->parent->id));
         return true;
     }
     if (method == K("se_getprops")) {
@@ -1839,7 +1849,8 @@ void UiSystem::addNatives() {
     vm_.addNative("SetScreenElementProps", [this](Vm&, ScriptRun&, qb::Struct& p) {
         Element* e = resolve(Vm::param(p, K("id")));
         if (!e) return false;
-        applyProps(*e, p, false);
+        if (e->desc) descSetProps(*e, p);  // a desc's named props too [I]
+        else applyProps(*e, p, false);
         return true;
     });
     vm_.addNative("DoScreenElementMorph", [this](Vm&, ScriptRun&, qb::Struct& p) {
@@ -1897,6 +1908,13 @@ void UiSystem::addNatives() {
             Vm::set(*l, K("rgba"), rgba);
             if (e->texture) Vm::set(*l, K("texture"), Vm::makeKey(e->texture));
         }
+        return true;
+    });
+    // se_getparentid without an object: the element the script runs on.
+    vm_.addNative("se_getparentid", [this](Vm&, ScriptRun& run, qb::Struct&) {
+        Element* e = run.object ? find(run.object) : nullptr;
+        if (!e || !e->parent) return false;
+        if (qb::Struct* l = locals(run)) Vm::set(*l, K("parent_id"), Vm::makeKey(e->parent->id));
         return true;
     });
     vm_.addNative("GetScreenElementChildren", [this](Vm&, ScriptRun& run, qb::Struct& p) {

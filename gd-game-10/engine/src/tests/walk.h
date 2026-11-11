@@ -118,6 +118,7 @@ private:
     int songsWithoutLoading_ = 0;
     std::string failure_;
     std::vector<std::string> log_;
+    std::vector<std::string> menuShots_;  // shot:<name> ops taken (the menus walk)
     // uitest: every flow state with a Create script, started in turn.
     bool uitest_ = false;
     std::vector<uint32_t> states_;

@@ -415,6 +415,24 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"song", {}, 60000});
         steps_.push_back({"song_over", {}, 900000});
         steps_.push_back({"career_newspaper_fs", {}, 60000});
+    } else if (name == "menus") {
+        // Every main menu item (CAREER .. MUSIC STUDIO), its screen and the
+        // first item under it, each saved (GD10_WALK_SHOTS), then Back to the
+        // main menu, which must come back each time [C: create_main_menu's
+        // seven items].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "shot:menus_main@"}, 20000});
+        for (int i = 0; i < 7; ++i) {
+            std::vector<Op> k = {"wait", "wait"};
+            for (int d = 0; d < i; ++d) k.push_back(D);
+            const std::string tag = "menus_" + std::to_string(i);
+            for (Op o : {Op(C), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("shot:" + tag + "a@"), Op(D), Op("wait"),
+                         Op(C), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("shot:" + tag + "b@"), Op(B), Op("wait"),
+                         Op("wait"), Op("wait"), Op("wait"), Op("backto:main_menu_fs")})
+                k.push_back(o);
+            steps_.push_back({"main_menu_fs", k, 30000});
+        }
+        steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "shot:menus_end@"}, 30000});
     } else if (name == "back") {
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
@@ -842,11 +860,11 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
         return out;
     }
     // Reached: its buttons one by one (a screen gets 1 s to build first).
-    // GD10_WALK_SHOTS=<dir>: every reached screen saved once, 1 s in (before
-    // its first button), as <dir>/<step>_<state>.bmp.
-    // A screen still under gh4's loading screen waits for it (up to 8 s).
-    const bool loadingUp = fe.ui().loadingScreenUp() || fe.ui().find(qbkey::key("loading_screen_container"));
-    if (!autoShot_ && now - reachedAt_ >= (loadingUp ? 8000.0 : 1000.0) && s.state != "song" && s.state != "song_over") {
+    // GD10_WALK_SHOTS=<dir>: every reached screen saved once, as
+    // <dir>/<step>_<state>.bmp, just before the walk's first real button (its
+    // "wait"s let the screen build; the button waits one frame for the shot).
+    const bool waitNext = key_ < s.keys.size() && s.keys[key_].act == "wait";
+    if (!autoShot_ && !waitNext && now - reachedAt_ >= 1000.0 && s.state != "song" && s.state != "song_over") {
         autoShot_ = true;
         if (const char* dir = SDL_getenv("GD10_WALK_SHOTS")) {
             char n[16];
@@ -858,6 +876,7 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
             SDL_Log("ui-dump of %s:", s.state.c_str());
             fe.ui().dump();
         }
+        return out;
     }
     if (key_ < s.keys.size()) {
         const Op& op = s.keys[key_];
@@ -915,6 +934,21 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
                     out.push_back(Press{above ? Action::Up : Action::Down, op.player});
                 } else {
                     SDL_Log("walk: setlist on %s (tier %d, song %d)", op.act.substr(8).c_str(), tier, song);
+                }
+            } else if (op.act.rfind("backto:", 0) == 0) {
+                // "backto:<state>": Back (one press a second) until that screen
+                // is up; 12 presses at most.
+                if (flowState(fe) != op.act.substr(7)) {
+                    if (++seek_ > 12) {
+                        failed_ = true, failure_ = "Back never reached " + op.act.substr(7) + " (at " + flowState(fe) + ")";
+                        SDL_Log("walk: FAILED: %s", failure_.c_str());
+                        return out;
+                    }
+                    --key_;
+                    lastKey_ = now + 700.0;
+                    out.push_back(Press{Action::Back, op.player});
+                } else {
+                    seek_ = 0;
                 }
             } else if (op.act.empty()) {
                 out.push_back(Press{op.a, op.player});
@@ -1384,7 +1418,15 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         return got == std::atof(kv.c_str() + eq + 1) ? true : fail("global " + kv);
     }
     if (starts("shot:")) {  // shot:<name>: the next frame saved as <GD10_WALK_SHOTS>/<name>.bmp
-        if (const char* dir = SDL_getenv("GD10_WALK_SHOTS")) Canvas::shotPath = std::string(dir) + "/" + rest("shot:") + ".bmp";
+        // "shot:<name>@": the name followed by the screen's state (gh4's UI stack top).
+        std::string n = rest("shot:");
+        if (!n.empty() && n.back() == '@') n.back() = '_', n += fe.flowState();
+        if (const char* dir = SDL_getenv("GD10_WALK_SHOTS")) Canvas::shotPath = std::string(dir) + "/" + n + ".bmp";
+        if (const char* d = SDL_getenv("GD10_UIDUMP"); d && std::strcmp(d, "walk") == 0) {
+            SDL_Log("ui-dump of %s:", n.c_str());
+            fe.ui().dump();
+        }
+        menuShots_.push_back(n);
         return true;
     }
     if (what == "dialog:savedir") {  // GD10_DIALOG: the user-file dialogs answered with the walk's save folder
