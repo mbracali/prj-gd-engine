@@ -102,6 +102,7 @@ public:
     // Throws std::runtime_error on data the disc never holds.
     void parse(const uint8_t* data, size_t size);
     bool empty() const { return templates_.empty(); }
+    bool gh4() const { return gh4_; }  // MATL v3 (Metallica)
 
     const Template* find(uint32_t key) const {
         auto it = byKey_.find(key);
@@ -112,6 +113,7 @@ public:
     const std::vector<Template>& templates() const { return templates_; }
 
 private:
+    bool gh4_ = false;
     std::vector<Template> templates_;
     std::unordered_map<uint32_t, size_t> byKey_;
     std::vector<Shader> shaders_;

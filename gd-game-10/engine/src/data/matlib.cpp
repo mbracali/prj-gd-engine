@@ -127,9 +127,14 @@ size_t parseShader(const View& v, size_t o, Shader& s) {
 void Library::parse(const uint8_t* data, size_t size) {
     templates_.clear(), byKey_.clear(), shaders_.clear();
     const View v{data, size};
-    if (size < 0x18 || std::memcmp(data, "MATL", 4) != 0 || v.u32(4) != 2) fail("not a MATL v2 file");
+    if (size < 0x18 || std::memcmp(data, "MATL", 4) != 0 || (v.u32(4) != 2 && v.u32(4) != 3)) fail("not a MATL v2 / v3 file");
+    // gh4 (Metallica) writes version 3: a 0x10-byte header (the shader base
+    // at +0x0c), count + 1 offsets, then the v2 template records [C data:
+    // every template's key is its name's checksum].
+    const bool v3 = v.u32(4) == 3;
+    gh4_ = v3;
     const uint32_t count = v.u32(8);
-    const size_t base = 0x18 + 4 * size_t(count);
+    const size_t base = (v3 ? 0x14 : 0x18) + 4 * size_t(count);
     std::unordered_map<std::string, size_t> byName;
     for (uint32_t i = 0; i < count; ++i) {
         const size_t e = base + 0x28 * size_t(i);
@@ -179,7 +184,7 @@ void Library::parse(const uint8_t* data, size_t size) {
     // The technique records (TechniqueRef) -> shader indices by file offset.
     std::unordered_map<size_t, int> byOffset;
     for (size_t i = 0; i < shaderOffsets.size(); ++i) byOffset[shaderOffsets[i]] = int(i);
-    const size_t shaderBase = base + v.u32(16);
+    const size_t shaderBase = base + v.u32(v3 ? 12 : 16);
     for (uint32_t i = 0; i < count; ++i) {
         const size_t e = base + 0x28 * size_t(i);
         const uint32_t n = v.u32(e + 0x18), at = v.u32(e + 0x1c);

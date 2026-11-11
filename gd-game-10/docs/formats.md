@@ -152,6 +152,19 @@ GH3's dictionary and image headers; besides DXT1/3/5, DXN, 8_8_8_8 and
 16_16_FLOAT, gh4 uses 8 (0x02), 1_5_5_5 (0x03) and 5_6_5 (0x04), 16-bit words with
 the 8in16 swap [C: Z_Forum.tex].
 
+## Material library (MaterialLibrary.bin.xen)
+
+MATL version 3: a 0x10-byte header ("MATL", 3, count, the shader base),
+count + 1 offsets, then GH3's v2 template records (name, key = the name's
+checksum, techniques) and the XDK shaders (0x102A1100 / 0x102A1101) [C:
+758 templates, 3,845 shaders; every template key checks]. GH3's template
+names (D_3ChkBox_Pass0, AnimatedTexture, Billboard_FastLit, ...). The
+vertex shaders' engine constants moved: g_PointLight c176 x 14, g_SpotLight
+c192 x 20, g_pointLightGroup0Attenuation* / g_spotLightGroup0Attenuation*
+c248..c253 (GH3: g_ambientLightColor c176 ...); g_World c216 and
+g_WorldViewProj c224 stay [C data: D_3ChkBox_Pass0_Default's constant
+table]. Fed GH3's way they draw black, so they are off for now.
+
 ## Not decoded yet (C++ `--formattest`, 2026-11-10)
 
 `.ska` (8,255), `.img` (2,548 "image version" + 259 short), `.wav` (2,466: decoded since, see above),

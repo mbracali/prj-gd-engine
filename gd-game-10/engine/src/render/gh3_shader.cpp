@@ -21,9 +21,10 @@ std::shared_ptr<const matlib::Library> library(const Disc& disc) {
     static std::mutex mutex;
     static std::string cachedPath;
     static std::shared_ptr<const matlib::Library> cached;
+    static bool off = false;  // gh4's library read and switched off (below)
     std::lock_guard<std::mutex> lock(mutex);
-    if (cached && cachedPath == disc.path()) return cached;
-    cached.reset();
+    if ((cached || off) && cachedPath == disc.path()) return cached;
+    cached.reset(), off = false;
     cachedPath = disc.path();
     // fxfiles\MaterialLibrary.bin.xen (Function_82384668) [C]; the disc
     // also holds a compressed copy under DATA/COMPRESSED/FXFILES.
@@ -33,6 +34,18 @@ std::shared_ptr<const matlib::Library> library(const Disc& disc) {
             const Bytes b = disc.read(path);
             auto lib = std::make_shared<matlib::Library>();
             lib->parse(b.data(), b.size());
+            // gh4 (MATL v3): the shaders parse, but their engine constants
+            // differ from GH3's (g_PointLight c176 x 14, g_SpotLight c192 x 20,
+            // attenuation terms c248..c253 [C data: the constant tables]) and
+            // are not fed yet: venues, the band and the screen effects drew
+            // black with them. Off (the approximations draw) unless
+            // GD10_GH4_SHADERS=1 (a development aid).
+            if (lib->gh4() && !(SDL_getenv("GD10_GH4_SHADERS") && SDL_getenv("GD10_GH4_SHADERS")[0] == '1')) {
+                SDL_Log("material library: gh4 (MATL v3), %llu templates; its shaders are off (GD10_GH4_SHADERS=1)",
+                        static_cast<unsigned long long>(lib->templates().size()));
+                off = true;
+                return nullptr;
+            }
             using ull = unsigned long long;
             SDL_Log("material library: %llu templates, %llu shaders", ull(lib->templates().size()), ull(lib->shaderCount()));
             cached = lib;
