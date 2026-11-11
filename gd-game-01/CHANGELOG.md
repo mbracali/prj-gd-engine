@@ -6,6 +6,18 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.12] - 2026-11-10
+
+### Added
+- Enhanced: a new Accessibility section (before Cheats) with Easy Chords: a chord counts when you press any of its frets (#67). Off by default.
+- Enhanced > Performance & Graphics: Disable Menu Transitions (off by default) (#76).
+- The band name can be typed on the keyboard (#76).
+
+### Fixed
+- Mouse: one highlight at a time when hovering the help bar; hovering a song lights its row; the Enhanced menu has one Back; the backend label no longer sits on SELECT; smooth help bar boxes; Sharper Text & Sprites makes the menu fonts crisper (#76).
+- True HDR in Steam Deck Gaming Mode through the Vulkan backend; the reason for falling back is logged and shown (#80).
+- The guitar's mute when a sustain is let go early matches GH1 exactly, now guarded by a self-test (#77).
+
 ## [1.1.11] - 2026-11-09
 
 ### Added
