@@ -564,6 +564,20 @@ std::string UiSystem::setText(const std::string& in) const {
     if (in.find('\\') == std::string::npos) return in;
     std::string out;
     const qb::Value* map = vm_.global(K("meta_button_map"));
+    // gh4: an array of {name map} (guitar, drum, pad); the default name's
+    // map (meta_button_map_default_name = guitar) [C data; I: the element's
+    // device picks another when metaremapenableauto is on].
+    if (map && map->arr && !map->arr->values.empty() && map->arr->values[0].st) {
+        const qb::Value* want = vm_.global(K("meta_button_map_default_name"));
+        const qb::Value* pick = nullptr;
+        for (const qb::Value& m : map->arr->values)
+            if (m.st) {
+                const qb::Value* nm = m.st->find(K("name"));
+                if (!pick || (want && nm && nm->key == want->key)) pick = m.st->find(K("map"));
+                if (want && nm && nm->key == want->key) break;
+            }
+        map = pick;
+    }
     for (size_t i = 0; i < in.size(); ++i) {
         if (in[i] != '\\' || i + 1 >= in.size()) {
             out += in[i];
@@ -610,8 +624,10 @@ void UiSystem::measureText(Element& e) const {
         e.h = std::max(e.givenH, lh * float(blockLines(*fe, e).size()));
         return;
     }
-    e.w = textWidth(*fe, utf16(e.text), e);
-    e.h = fe->f.lineHeight;
+    // gh4: a text element's internal_scale scales its text and dims
+    // (add_menu_frontend_item's items, 0.7) [I].
+    e.w = textWidth(*fe, utf16(e.text), e) * e.internalScale;
+    e.h = fe->f.lineHeight * e.internalScale;
 }
 
 void UiSystem::forget(Element* e) {
@@ -1323,7 +1339,7 @@ void UiSystem::drawElementText(Canvas& c, const Element& e, const FontEntry& fe,
     if (alpha == 0) return;
     const float r = wrot * kDeg, cs = std::cos(r), sn = std::sin(r);
     const bool block = e.type == kTextBlock;
-    const float is = block ? e.internalScale : 1.0f;
+    const float is = e.internalScale;  // text blocks and (gh4) text elements [I]
     const float sx = wsx * is, sy = wsy * is;
     auto P = [&](float lx, float ly, float u, float v, const std::array<uint8_t, 4>& col) {
         return Vertex{cx + lx * cs - ly * sn, cy + lx * sn + ly * cs, 0, u, v, col[0], col[1], col[2], alpha};

@@ -44,17 +44,19 @@ Font parseFont(const uint8_t* d, size_t size) {
     need(size > kGlyphs + 4, "fnt: short");
     ByteReader r(d, size);
     Font f;
-    // gh4 (Metallica) adds one f32 after `tracking` (1.0 .. 10.0 on the disc
-    // [C data]; meaning [I], kept as `scale`), which moves every
-    // later field by 4: glyph table at 0x200A8 instead of 0x200A4.
+    // gh4 (Metallica) adds one f32 in front (0.0 in every font on the disc
+    // [C data]; meaning [I], kept as `scale`), which moves every later field
+    // by 4: glyph table at 0x200A8 instead of 0x200A4. Then vShift (+4),
+    // bearing (+8), tracking (+0xC), line height (+0x10), all f32 [C
+    // 0x824D11B0 text width: bearing +8 / tracking +0xC unless font_spacing
+    // is given; 0x82454C78 draw: top = line height - (height - baseline) -
+    // vShift (+4)]. fontgrid_text_a8: vShift 10, bearing -3, tracking 3.
     const size_t sh = (be32at(d + 0x14) == kGlyphs + 4 && be32at(d + 0x10) != kGlyphs) ? 4 : 0;
-    // gh4 stores these three as f32 (whole numbers: bearing 10.0, tracking
-    // -3.0 in fontgrid_text_a8) [C data: every font on the disc].
     auto field = [&r, sh]() { return sh ? int32_t(std::lround(f32be(r))) : int32_t(r.u32be()); };
+    if (sh) f.scale = f32be(r);
     f.vShift = field();
     f.bearing = field();
     f.tracking = field();
-    if (sh) f.scale = f32be(r);
     f.lineHeight = f32be(r);
     need(r.u32be() == kGlyphs + sh, "fnt: glyph table offset");
     f.charMap.resize(65536);
@@ -86,7 +88,7 @@ Font parseFont(const uint8_t* d, size_t size) {
         }
         // gh4: f32 too (A, T, Y: 3.0 / -3.0 in fontgrid_text_a8; read as
         // integers they threw the glyph and the rest of the line off screen:
-        // "EASY" drawn as "E") [C data].
+        // "EASY" drawn as "E") [C data; 0x824D11B0 reads +0x1C / +0x20 as f32].
         g.xOffset = field();
         g.advanceAdjust = field();
     }
