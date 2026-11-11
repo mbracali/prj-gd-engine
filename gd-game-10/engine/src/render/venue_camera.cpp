@@ -319,7 +319,7 @@ void CameraDirector::startShot(double t) {
         const qb::Value* d = params ? params->find(K("dof")) : nullptr;
         if (!d && e) d = e->find(K("dof"));
         shot_.dof = keyOf(d);
-        if (camLog) SDL_Log("camera: entry %d, dof %08x", index, shot_.dof);
+        if (camLog) SDL_Log("camera: entry %d (%s), dof %08x", index, qbkey::names().get(shot_.name).c_str(), shot_.dof);
     }
     auto cam = [&](const char* n) { return readCam(params ? structOf(params->find(K(n))) : nullptr); };
     if (!script || script == K("CameraCuts_StaticCamControl")) {

@@ -176,6 +176,47 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
                 }
             }
         }
+        // <member>_mocap_lock_target_01 / 02: the member's loop's camera anims
+        // (<loop>_c01 / _c02, e.g. guit_kirk_..._c01) in step with his body
+        // clip, at his start waypoint [C data: the loops' _cNN companions,
+        // the cameras' lock targets; I: the C code pairing them].
+        {
+            const venue::Venue* vv = venue_.get();
+            mocap_.setFollow([b, vv](uint32_t tgt, double ms, const anim::Clip*& clip, float& sec, venue::Vec3& pos, venue::Quat& rot) {
+                static const struct {
+                    uint32_t target, member;
+                    const char *suffix, *node;
+                } kTargets[] = {
+                    {qbkey::key("guitarist_mocap_lock_target_01"), qbkey::key("guitarist"), "_c01", "_TRG_Waypoint_Guitarist_Start"},
+                    {qbkey::key("guitarist_mocap_lock_target_02"), qbkey::key("guitarist"), "_c02", "_TRG_Waypoint_Guitarist_Start"},
+                    {qbkey::key("bassist_mocap_lock_target_01"), qbkey::key("bassist"), "_c01", "_TRG_Waypoint_Bassist_Start"},
+                    {qbkey::key("bassist_mocap_lock_target_02"), qbkey::key("bassist"), "_c02", "_TRG_Waypoint_Bassist_Start"},
+                    {qbkey::key("vocalist_mocap_lock_target_01"), qbkey::key("vocalist"), "_c01", "_TRG_Waypoint_Vocalist_Start"},
+                    {qbkey::key("vocalist_mocap_lock_target_02"), qbkey::key("vocalist"), "_c02", "_TRG_Waypoint_Vocalist_Start"},
+                };
+                for (const auto& k : kTargets) {
+                    if (k.target != tgt) continue;
+                    b->evaluate(ms);
+                    for (const Band::Entry& e : b->members()) {
+                        if (!e.model || e.model->member.object != k.member) continue;
+                        uint32_t key = 0;
+                        double start = 0;
+                        float offset = 0;
+                        if (!e.anim.bodyAt(ms, key, start, offset)) return false;
+                        uint32_t c = key;  // ExtendCRC <loop> '_cNN'
+                        for (const char* p = k.suffix; *p; ++p) c = qbkey::detail::kTable[(c ^ uint8_t(qbkey::detail::lower(*p))) & 0xFF] ^ (c >> 8);
+                        clip = e.model->clip(c);
+                        const venue::Node* n = vv->node(vv->key(k.node));
+                        if (!clip || !n) return false;
+                        sec = offset + float((ms - start) / 1000.0);
+                        pos = n->pos, rot = n->rot;
+                        return true;
+                    }
+                    return false;
+                }
+                return false;
+            });
+        }
         venue::MocapCameras* mc = &mocap_;
         cameras_.setLockLookup([mc](uint32_t t, uint32_t bone, double ms, venue::Vec3& p, venue::Quat& q) { return mc->frame(t, bone, ms, p, q); },
                                [mc](uint32_t t, double ms) { return mc->animated(t, ms); });

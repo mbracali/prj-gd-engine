@@ -129,23 +129,41 @@ const MocapCameras::Seg* MocapCameras::at(uint32_t tgt, double ms) const {
     return last;
 }
 
-bool MocapCameras::animated(uint32_t tgt, double ms) const { return at(tgt, ms) != nullptr; }
+bool MocapCameras::animated(uint32_t tgt, double ms) const {
+    if (at(tgt, ms)) return true;
+    const anim::Clip* c = nullptr;
+    float sec = 0;
+    Vec3 p;
+    Quat q;
+    return follow_ && follow_(tgt, ms, c, sec, p, q) && c;
+}
 
 bool MocapCameras::frame(uint32_t tgt, uint32_t bone, double ms, Vec3& pos, Quat& rot) const {
-    const Seg* s = at(tgt, ms);
-    if (!s || !haveRig_) return false;
+    if (!haveRig_) return false;
+    if (const Seg* s = at(tgt, ms)) {
+        float sec = s->offset + float((ms - s->t) / 1000.0);
+        if (s->cycle && s->clip->duration > 0) sec = std::fmod(sec, s->clip->duration);
+        return sampleBone(*s->clip, sec, bone, s->pos, s->rot, pos, rot);
+    }
+    const anim::Clip* c = nullptr;
+    float sec = 0;
+    Vec3 p;
+    Quat q;
+    if (follow_ && follow_(tgt, ms, c, sec, p, q) && c) return sampleBone(*c, sec, bone, p, q, pos, rot);
+    return false;
+}
+
+bool MocapCameras::sampleBone(const anim::Clip& clip, float sec, uint32_t bone, const Vec3& at, const Quat& atRot, Vec3& pos, Quat& rot) const {
     const int b = rig_.find(bone);
     if (b < 0) return false;
-    float sec = s->offset + float((ms - s->t) / 1000.0);
-    if (s->cycle && s->clip->duration > 0) sec = std::fmod(sec, s->clip->duration);
     std::vector<anim::BonePose> tmp;
-    anim::sample(*s->clip, sec, tmp);
+    anim::sample(clip, sec, tmp);
     // The bone's chain from the root, in the rig's column-vector terms
     // (render/band_anim.cpp overrideInto's conventions).
     std::vector<int> chain;
     for (int i = b; i >= 0; i = rig_.parent[size_t(i)]) chain.push_back(i);
-    bandanim::Quat q{s->rot[0], s->rot[1], s->rot[2], s->rot[3]};
-    bandanim::Vec t{s->pos[0], s->pos[1], s->pos[2]};
+    bandanim::Quat q{atRot[0], atRot[1], atRot[2], atRot[3]};
+    bandanim::Vec t{at[0], at[1], at[2]};
     for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
         const size_t i = size_t(*it);
         bandanim::Xf l = rig_.bind[i];
@@ -153,7 +171,7 @@ bool MocapCameras::frame(uint32_t tgt, uint32_t bone, double ms, Vec3& pos, Quat
             if (tmp[i].hasRot) l.q = bandanim::qconj({tmp[i].rot[0], tmp[i].rot[1], tmp[i].rot[2], tmp[i].rot[3]});
             if (tmp[i].hasPos) {
                 const anim::Vec3& v = tmp[i].pos;
-                l.t = s->clip->singlePose ? bandanim::Vec{v[0], v[1], v[2]} : bandanim::Vec{l.t.x + v[0], l.t.y + v[1], l.t.z + v[2]};
+                l.t = clip.singlePose ? bandanim::Vec{v[0], v[1], v[2]} : bandanim::Vec{l.t.x + v[0], l.t.y + v[1], l.t.z + v[2]};
             }
         }
         const bandanim::Vec r = bandanim::qrot(q, l.t);

@@ -152,6 +152,16 @@ public:
     const std::vector<uint32_t>& missing() const { return missing_; }
     uint32_t stance() const { return stance_; }
     uint32_t bodyClip() const { return body_.plays.empty() || !body_.plays.back().clip ? 0 : bodyKey_; }
+    // The body clip playing at song time t (its key, start ms and offset s), as
+    // played so far (call after advancing to t); false before the first.
+    bool bodyAt(double t, uint32_t& key, double& start, float& offset) const {
+        for (auto it = bodyHist_.rbegin(); it != bodyHist_.rend(); ++it)
+            if (it->start <= t) {
+                key = it->key, start = it->start, offset = it->offset;
+                return true;
+            }
+        return false;
+    }
     // ped_animevents.<clip>: {time scr params} entries of the body clips
     // played, due by the last advance (the caller runs `scr` on the game's
     // VM and clears the list) [C data animevents / ped_animevents].
@@ -180,6 +190,12 @@ private:
     void schedule(double t, Ev kind, int a = 0, int b = 0, uint32_t gen = 0, const qb::Struct* params = nullptr);
     void handle(const Event& e);
     uint32_t random(uint32_t n);
+    struct BodyRec {
+        uint32_t key = 0;
+        double start = 0;
+        float offset = 0;
+    };
+    std::vector<BodyRec> bodyHist_;  // every body clip started (bodyAt)
     uint32_t scriptedClip_ = 0;  // playClip's clip (0: the random anims run)
     bool scriptedCycle_ = false;
     bool specialOnce_ = false;  // play_special_anim's clip playing: then Stance_A and the idle loop

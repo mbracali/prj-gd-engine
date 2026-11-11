@@ -40,6 +40,10 @@ public:
     // zone pak's anim where it stands [C scripts and data].
     void addTransition(const Venue& v, const Globals& g, const std::string& transition, double atMs, const ClipLookup& zoneClips);
     size_t segments() const { return segs_.size(); }
+    // A target whose anim follows something else (the members' loop cameras):
+    // the clip, the time into it and the frame it plays in; false: none.
+    using Follow = std::function<bool(uint32_t target, double ms, const anim::Clip*& clip, float& sec, Vec3& pos, Quat& rot)>;
+    void setFollow(Follow f) { follow_ = std::move(f); }
 
 private:
     struct Seg {
@@ -53,6 +57,8 @@ private:
     };
     const Seg* at(uint32_t target, double ms) const;
     std::vector<Seg> segs_;  // by start time
+    Follow follow_;
+    bool sampleBone(const anim::Clip& clip, float sec, uint32_t bone, const Vec3& at, const Quat& rot, Vec3& pos, Quat& outRot) const;
     bandanim::Rig rig_;
     bool haveRig_ = false;
 };

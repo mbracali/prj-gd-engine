@@ -352,6 +352,7 @@ const qb::Value* Animator::animSet() const {
 }
 
 bool Animator::init(const Setup& s, std::string& error) {
+    bodyHist_.clear();
     model_ = s.model;
     g_ = s.g;
     perf_ = s.perf;
@@ -647,7 +648,7 @@ void Animator::bodyIteration(double t) {
     if (c) {
         body_.play(c, t, bodyBlend_);
         bodyBlend_ = 0.2f;
-        bodyKey_ = key;
+        bodyKey_ = key; bodyHist_.push_back({key, body_.plays.back().start, body_.plays.back().offset});
         scheduleClipEvents(key, t);
         ++stats_.bodyAnims;
         schedule(t + std::max(kFrameMs, double(c->duration) * 1000.0), Ev::BodyDone, 0, 0, bodyGen_);
@@ -809,7 +810,7 @@ void Animator::playClip(uint32_t clipKey, uint32_t stance, bool cycle, double t)
     ++bodyGen_;
     ++stats_.bodyAnims;
     body_.play(c, t, 0.2f);
-    bodyKey_ = clipKey;
+    bodyKey_ = clipKey; bodyHist_.push_back({clipKey, body_.plays.back().start, body_.plays.back().offset});
     scheduleClipEvents(clipKey, t);
     scriptedClip_ = clipKey, scriptedCycle_ = cycle;
     schedule(t + std::max(kFrameMs, double(c->duration) * 1000.0), Ev::BodyDone, 0, 0, bodyGen_);
@@ -976,7 +977,7 @@ void Animator::handle(const Event& e) {
         const Mocap& mc = mocaps_[size_t(e.a)];
         const float offset = std::min(mc.startFrame / anim::Clip::kFps, mc.clip->duration);
         body_.play(mc.clip, t, 0.3f, offset);
-        bodyKey_ = mc.key;
+        bodyKey_ = mc.key; bodyHist_.push_back({mc.key, body_.plays.back().start, body_.plays.back().offset});
         ++bodyGen_;
         ++stats_.bodyAnims;
         int arms = 0;
