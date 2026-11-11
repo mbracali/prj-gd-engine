@@ -7,8 +7,8 @@ and when to start. Every section ends with an empty **Owner's take:** line for y
 
 | Game (our folder) | Repo(s) | Licence | What they are | We take | Saves on our port | Make it ours (1-10) | Our menus / behaviours (1-10) | Disc here |
 |---|---|---|---|---|---|---|---|---|
-| Guitar Hero 5 (gd-game-12) | ElGuslml/GH5Recomp | MIT | Static recompilation of the XEX, Windows only, beta | Knowledge: ~60 addresses, script ids, engine quirks, fixes | 8-10 % (70-80 % from our Band Hero port) | 8 | 3 (on our engine) | **No** |
-| Band Hero (gd-game-14) | ElGuslml/BandHRecomp | MIT | Same engine as GH5 (99.3 % of functions match) | Same as GH5, checkable on our disc | 10-15 % | 8 | 3 | Yes |
+| Guitar Hero 5 (gd-game-12) | ElGuslml/GH5Recomp | MIT | Static recompilation of the XEX, Windows only, beta | Knowledge: ~60 addresses, script ids, engine quirks, fixes (the repo Band Hero's was derived from) | 10-15 % | 8 | 3 (on our engine) | Yes (added 11-10) |
+| Band Hero (gd-game-14) | ElGuslml/BandHRecomp | MIT | Same engine as GH5 (99.3 % of functions match) | Same as GH5, checkable on our disc | 10-15 % (70-80 % from our GH5 port) | 8 | 3 | Yes |
 | Warriors of Rock (gd-game-17) | ElGuslml/GHWoRRecomp, Piscacho/Guitar-Hero-Warriors-of-Rock-PC, ronniecloud/re-wor | MIT, MIT, **none** | Three static recompilations | Piscacho's ~1,550 script-function map, addresses, clock drift, widescreen layering | 5-8 % (40-50 % from our GH3 engine) | 9 | 3 | Yes |
 | Metallica (gd-game-10) | ElGuslml/GHMetalRecomp | MIT | Static recompilation, v0.4.1 | 50 named addresses, 28 fix notes | 8-12 % | 10 | 2 | Yes |
 | Van Halen (gd-game-15) | ElGuslml/GHVanHRecomp | MIT | Copy of the Metallica repo with addresses moved | Metallica-to-Van Halen function map | 5-8 % (60-70 % from our Metallica port) | 10 | 2 | Yes |
@@ -20,7 +20,7 @@ Windows only. We *reimplement* the engines. Their output is machine-translated g
 `docs/legal.md`) forbid us to commit or ship. So **none of these projects can be imported as code**: what we gain is
 **knowledge** (addresses as Ghidra leads, formats, original-game bugs and their fixes, feature ideas), re-found on our
 own discs and written in our own words. That is why the savings are 5-15 % per game, not more. The big savings come
-from **our own engines**: GH3 (gd-game-04) for Warriors of Rock, and one engine per family (Band Hero then GH5,
+from **our own engines**: GH3 (gd-game-04) for Warriors of Rock, and one engine per family (GH5 then Band Hero,
 Metallica then Van Halen).
 
 **Engine families** (build order suggestion): World Tour engine = Metallica, Van Halen (and gd-game-07 World Tour);
@@ -140,10 +140,10 @@ jam-studio arrows slow), keyboard experimental, only GH5-format DLC adds songs (
 Code reuse: practically none; every `src/` file is guest-register/address hooking on the SDK. Only small ideas (hash
 lookup layout, Hor+ maths) could be adapted, with the MIT notice.
 
-**3. Head-start: ~8-10 % of a gd-game-12 port.** GH5 is the Neversoft engine after GH3/WT: our gd-game-04 (GH3, 0.96)
+**3. Head-start: ~10-15 % of a gd-game-12 port.** GH5 is the Neversoft engine after GH3/WT: our gd-game-04 (GH3, 0.96)
 already gives formats, QB VM and highway; their value is addresses, ids and engine quirks that save Ghidra hours on
-renderer/FX, timing, ultrawide, DLC. No gameplay rules, formats or menus are documented. We have **no GH5 disc**, so
-nothing can be verified for gd-game-12 directly.
+renderer/FX, timing, ultrawide, DLC. No gameplay rules, formats or menus are documented. The GH5 disc is now in `original_isos/`
+(Guitar Hero 5 (USA, Europe), added 2026-11-10): every address and id can be verified on our own XEX, as for Band Hero.
 
 **4. Not used.** The recompiler/generated code (distributes game code); ReXGlue SDK and NativeXRenderer (emulation
 layer, Vulkan/Windows only, BSD/LGPL/DLSS baggage, conflicts with our SDL3/Vulkan/OpenGL3 + miniaudio/OpenAL/FAudio
@@ -160,9 +160,9 @@ menus carry over).
 
 **7. Import plan (gd-game-12).**
 1. Record the study in `docs/spikes/` and the backlog (GDALL-043): facts only, our words, no names. Owner's take:
-2. Wait for gd-game-14 (same code base, 99.3 %): build GH5 as a delta on top of it. Owner's take:
-3. When the owner has a GH5 disc: extract, run our Ghidra headless flow, import their address list as labels (verify each). Owner's take:
-4. Port from gd-game-14: data layer, QB ids, renderer rules, ultrawide, high-FPS checklist; diff the 326/9005 scripts. Owner's take:
+2. Build GH5 first: it is the parent (their Band Hero repo is GH5's with `fixes-from-gh5.md`), so gd-game-14 becomes a delta of gd-game-12 (same code base, 99.3 %). Owner's take:
+3. Check our GH5 ISO's XEX against theirs (title, CRC); extract (never committed), run our Ghidra headless flow, import their address list as labels (verify each). Owner's take:
+4. Data layer from gd-game-04 (pak/qb/toc/FSB) adapted to the GH5-era formats; QB ids, renderer rules, ultrawide, high-FPS checklist. Owner's take:
 5. DLC loader from the shared STFS spec; test with an owner-owned GH5 package. Owner's take:
 6. Wire `GD12_MODULE` + `build_module_12`, game-info, self-tests, launcher listing. Owner's take:
 
@@ -194,7 +194,7 @@ Code reuse: same as GH5, effectively none.
 
 **3. Head-start: ~10-15 % of a gd-game-14 port.** Same knowledge as GH5 plus addresses we can verify on the disc we own,
 and the hard numbers on code/script overlap that justify one shared engine for 12+14. Gameplay, formats beyond DLC, menus,
-band/vocals/drums logic still have to be reimplemented. Practical bonus: gd-game-14 work becomes ~70-80 % of gd-game-12.
+band/vocals/drums logic still have to be reimplemented. Practical bonus: with GH5 built first, gd-game-12 covers ~70-80 % of gd-game-14 (diff the 326/9005 scripts).
 
 **4. Not used.** Same as GH5. Also: their per-game "copy everything and rename" structure (we would share one engine
 source between 12 and 14 instead).
@@ -205,7 +205,7 @@ reimplementation with their knowledge: **3/10**.
 **7. Import plan (gd-game-14).**
 1. Check our ISO's XEX (title 4156085C, CRC vs their USA one); extract to `gd-game-14/extracted/` (never committed). Owner's take:
 2. Ghidra headless on our XEX; apply their addresses as labels, verify each, log results in `docs/FINDINGS.md` [C]/[I]. Owner's take:
-3. Data layer from gd-game-04 (pak/qb/toc/FSB) adapted to the GH5-era formats; validate over the whole disc first. Owner's take:
+3. Start from gd-game-12 (GH5, built first): share its engine source, apply Band Hero's deltas (struct offsets, scripts, content); validate over the whole disc first. Owner's take:
 4. QScript VM + script ids from their docs; design high-FPS timing from their checklist (real clock, no 49.875 MHz). Owner's take:
 5. Renderer: one-frame scene, FX passes with 5 switches as Enhanced options, Hor+ ultrawide, shadow PCF scaled with map size, bloom at console resolution. Owner's take:
 6. Highway, band, venues, menus with our universal menus, GAMEPADS screen, help bar, backends (all gd-engine-core). Owner's take:
