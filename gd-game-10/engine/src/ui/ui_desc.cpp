@@ -176,7 +176,12 @@ bool UiSystem::descGetProp(Element& e, uint32_t name, qb::Value& out) {
         };
         if (prop == K("pos")) pair(t->x, t->y);
         else if (prop == K("scale")) pair(t->sx, t->sy);
-        else if (prop == K("dims")) pair(t->w, t->h);
+        else if (prop == K("dims")) {
+            // A menu's fitted dims now, not at the next draw (add_user_control_helper
+            // sizes each pill from its menu's dims right after making it) [I].
+            layoutTree(*t);
+            pair(t->w, t->h);
+        }
         else if (prop == K("alpha")) out = qs::Vm::makeFloat(t->alpha);
         else if (prop == K("rot_angle")) out = qs::Vm::makeFloat(t->rot);
         else if (prop == K("text")) out = qs::Vm::makeString(t->text);

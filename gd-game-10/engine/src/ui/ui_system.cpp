@@ -112,6 +112,9 @@ UiSystem::UiSystem(qs::Vm& vm, const Disc& disc, TextureCache& textures, gfx::Re
     loadFonts("DATA/COMPRESSED/ZONES/global.pak.xen");
     loadFonts("DATA/COMPRESSED/FONTS/text_a1.pak.xen");
     loadFonts("DATA/COMPRESSED/FONTS/debug.pak.xen");
+    // gh4's menu fonts (fontgrid_text_a6, fontgrid_title_a1, buttons_x360,
+    // ...): without them every menu fell back to text_a1 [C data ui_shared.pak].
+    loadFonts("DATA/COMPRESSED/PAK/ui_shared.pak.xen");
     // Default_Font_Colors: the \cN colour table [C data, docs/ui.md].
     if (const qb::Value* t = vm_.global(K("Default_Font_Colors")); t && t->arr)
         for (const qb::Value& c : t->arr->values) {
@@ -149,6 +152,13 @@ void UiSystem::loadFonts(const std::string& pakPath) {
     } catch (const std::exception& ex) {
         SDL_Log("ui: fonts in %s: %s", pakPath.c_str(), ex.what());
     }
+}
+
+// The buttons font: GH3's buttonsxenon, gh4's buttons_x360 (ui_shared.pak) [C data].
+const UiSystem::FontEntry* UiSystem::buttonsFont() const {
+    for (const char* n : {"buttonsxenon", "buttons_x360"})
+        if (auto it = fonts_.find(K(n)); it != fonts_.end()) return &it->second;
+    return nullptr;
 }
 
 const UiSystem::FontEntry* UiSystem::fontFor(uint32_t key) const {
@@ -328,6 +338,9 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
             e.fitH = v.key == K("clip bottom lines") ? 1 : v.key == K("clip top lines") ? 2 : v.key == K("expand dims") ? 3
                    : v.key == K("scale down if larger") ? 4 : v.key == K("scale to fit") ? 5 : 0;
         else if (n == K("scale_mode") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr)) e.scalePerAxis = v.key == K("per axis");
+        else if ((n == K("fit_major") || n == K("fit_minor")) && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr))
+            (n == K("fit_major") ? e.fitMajor : e.fitMinor) = (v.key == K("size dims to content") || v.key == K("fit content")) ? 1
+                : (v.key == K("fit content if larger") || v.key == K("expand if content larger")) ? 2 : 0;
         else if (n == K("text_case") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr)) e.upperCase = v.key == K("upper");
         else if (n == K("text")) e.text = setText(v.str);
         else if (n == K("shadow_offs")) readPair(v, e.shadowX, e.shadowY);
@@ -420,7 +433,7 @@ float UiSystem::textWidth(const FontEntry& fe, const std::u16string& s, const El
     // "\L" (2) take no room.
     const font::Font& f = fe.f;
     const FontEntry* buttons = nullptr;
-    if (auto it = fonts_.find(K("buttonsxenon")); it != fonts_.end()) buttons = &it->second;
+    buttons = buttonsFont();
     const float bearing = e.fontSpacingGiven ? 0.0f : float(f.bearing);
     const float track = e.fontSpacingGiven ? float(int(e.fontSpacing)) : float(f.tracking);
     float w = 0, best = 0;
@@ -831,6 +844,14 @@ void UiSystem::layoutMenu(Element& m) {
         } else {
             m.w = total, m.h = widest;
         }
+    } else if (m.fitMajor || m.fitMinor) {
+        // gh4: the dims follow the content along (major) / across (minor)
+        // when the desc asks, from the given dims [I].
+        auto fit = [](uint8_t mode, float given, float content) { return mode == 1 ? content : mode == 2 ? std::max(given, content) : given; };
+        float& along = vert ? m.h : m.w;
+        float& across = vert ? m.w : m.h;
+        along = fit(m.fitMajor, vert ? m.givenH : m.givenW, total);
+        across = fit(m.fitMinor, vert ? m.givenW : m.givenH, widest);
     }
     float cursor = vert ? (m.h - total) * (m.ijustY + 1) / 2 : (m.w - total) * (m.ijustX + 1) / 2;
     for (size_t i = 0; i < m.children.size(); ++i) {
@@ -843,7 +864,18 @@ void UiSystem::layoutMenu(Element& m) {
             c.x = cursor + sizes[i] / 2, c.y = (m.ijustY + 1) / 2 * m.h;
         }
         cursor += sizes[i] + m.spacingBetween;
+        // The place is from the menu's top-left; a child anchored elsewhere
+        // (gh4 descs' pos_anchor [0 0]: the helper pills) is moved to match [I].
+        const float anX = c.posAnchorGiven ? c.posAnchorX : m.anchorX, anY = c.posAnchorGiven ? c.posAnchorY : m.anchorY;
+        c.x -= (anX + 1) / 2 * m.w, c.y -= (anY + 1) / 2 * m.h;
     }
+}
+
+// Lays out the menus at and below e, innermost first (a menu's fitted dims
+// depend on its children's).
+void UiSystem::layoutTree(Element& e) {
+    for (auto& c : e.children) layoutTree(*c);
+    if (isMenu(e) && !e.locked) layoutMenu(e);
 }
 
 void UiSystem::scrollMenu(Element& s) {
@@ -1283,7 +1315,7 @@ void UiSystem::drawElementText(Canvas& c, const Element& e, const FontEntry& fe,
     // A space moves the pen by its width - bearing + tracking.
     const font::Font& f = fe.f;
     const FontEntry* buttons = nullptr;
-    if (auto it = fonts_.find(K("buttonsxenon")); it != fonts_.end()) buttons = &it->second;
+    buttons = buttonsFont();
     const float bearing = e.fontSpacingGiven ? 0.0f : float(f.bearing);
     const float track = e.fontSpacingGiven ? float(int(e.fontSpacing)) : float(f.tracking);
     const std::array<uint8_t, 4> base = shadowPass ? e.shadowRgba : e.rgba;
@@ -1388,7 +1420,7 @@ void UiSystem::drawText(Canvas& c, uint32_t font, const std::string& text, float
     const FontEntry* fe = fontFor(font);
     if (!fe || text.empty() || h <= 0) return;
     const FontEntry* buttons = nullptr;
-    if (auto it = fonts_.find(K("buttonsxenon")); it != fonts_.end()) buttons = &it->second;
+    buttons = buttonsFont();
     const font::Font& f = fe->f;
     // Laid out unscaled in x about the anchor, then squeezed by sx and
     // turned by rot about (x, y).
@@ -1454,7 +1486,7 @@ float UiSystem::textWidth(uint32_t font, const std::string& text, float h, float
     const font::Font& f = fe->f;
     const float k = h / std::max(1.0f, f.lineHeight);
     const FontEntry* buttons = nullptr;
-    if (auto it = fonts_.find(K("buttonsxenon")); it != fonts_.end()) buttons = &it->second;
+    buttons = buttonsFont();
     const std::u16string s = utf16(text);
     float w = 0;
     for (size_t i = 0; i < s.size(); ++i) {
@@ -1690,7 +1722,20 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
         if (named) return true;
         qb::Struct q;
         qs::Vm::set(q, K("id"), qs::Vm::makeKey(e->id));
-        return vm_.callNative(K("GetScreenElementProps"), run, q);
+        const bool ok = vm_.callNative(K("GetScreenElementProps"), run, q);
+        // Without names: every named prop of a desc too (add_user_control_helper
+        // reads <helper_pill_menu_dims> after `<id> : se_getprops`) [C script].
+        if (e->desc)
+            if (const qb::Value* d = vm_.global(e->desc); d && d->st)
+                if (const qb::Value* props = d->st->find(K("props")); props && props->arr)
+                    for (const qb::Value& pv : props->arr->values)
+                        if (pv.st)
+                            if (const qb::Value* nm = pv.st->find(K("name")); nm && nm->key) {
+                                qb::Value v;
+                                if (descGetProp(*e, nm->key, v))
+                                    if (qb::Struct* l = locals(run)) qs::Vm::set(*l, nm->key, v);
+                            }
+        return ok;
     }
     if (method == K("desc_resolvealias")) {
         if (!e) return false;
@@ -1977,7 +2022,7 @@ void UiSystem::addNatives() {
     vm_.addNative("GetScreenElementDims", [this](Vm&, ScriptRun& run, qb::Struct& p) {
         Element* e = resolve(Vm::param(p, K("id")));
         if (!e) return false;
-        if (isMenu(*e)) layoutMenu(*e);
+        layoutTree(*e);
         if (qb::Struct* l = locals(run)) {
             // int(dims x own scale) [C 0x82172310].
             Vm::set(*l, K("width"), Vm::makeInt(int32_t(e->w * e->sx)));

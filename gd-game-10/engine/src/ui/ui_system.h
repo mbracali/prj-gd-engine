@@ -80,6 +80,10 @@ struct Element {
     // 3 scale each line to fit; fitH 0 none, 1 clip bottom lines, 2 clip
     // top lines, 3 expand dims, 4 scale down if larger, 5 scale to fit.
     uint8_t fitW = 0, fitH = 0;
+    // gh4 menus' fit_major / fit_minor [C data; I rules]: 0 keep dims,
+    // 1 size dims to content / fit content, 2 fit content if larger /
+    // expand if content larger.
+    uint8_t fitMajor = 0, fitMinor = 0;
     bool scalePerAxis = false, upperCase = false;
     uint8_t blend = 0;  // a sprite's blend: 0 alpha, 1 add, 2 subtract (destination - source) [I: the setlist's shoeprints]  // text blocks: internal_scale, the dims' height before allow_expansion
     // Menus [C 0x82315AA0 / 0x82315B08]
@@ -219,6 +223,8 @@ private:
         gfx::TextureId tex;
     };
     const FontEntry* fontFor(uint32_t key) const;
+    const FontEntry* buttonsFont() const;
+    void layoutTree(Element& e);
     void loadFonts(const std::string& pakPath);
     void applyProps(Element& e, const qb::Struct& p, bool create);
     void setTexture(Element& e, uint32_t key);
