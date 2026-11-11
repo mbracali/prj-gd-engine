@@ -137,8 +137,27 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
     offsetMs_ = qbNumber(g, K("lightshow_offset_ms"), 100);
     fretbars_ = chart.fretbars;
     pyroTimes_.clear();
-    for (const ChartEvent& e : chart.lightshow)
-        if (e.note == 56) pyroTimes_.push_back(double(e.time) - offsetMs_);
+    // gh4: LightShow_NoteMapping's LightShow_PyroEvent notes (37 generic,
+    // 35..32 front_1..4, 31..28 top_1..4, 27..24 mid_1..4, 23..20 back_1..4)
+    // run the mapping's pyro_scripts.<type> (spawnscriptnow, performance)
+    // [C scripts lightshow.qb LightShow_PyroEvent; I: LightShow_GetPyroScript
+    // (821a3880) gives the mapping's pyro_scripts].
+    std::unordered_map<int, uint32_t> pyroNotes;
+    const qb::Struct* pyroScripts = structOf(map->find(K("pyro_scripts")));
+    if (pyroScripts)
+        if (const qb::Value* nm = g.find(K("LightShow_NoteMapping")); nm && nm->type == qb::Type::Array && nm->arr)
+            for (const qb::Value& e : nm->arr->values) {
+                const qb::Struct* st = structOf(&e);
+                if (!st || keyOf(st->find(K("scr"))) != K("LightShow_PyroEvent")) continue;
+                const qb::Struct* pp = structOf(st->find(K("params")));
+                const uint32_t type = pp ? keyOf(pp->find(K("type"))) : 0;
+                const uint32_t scr = type ? keyOf(pyroScripts->find(type)) : 0;
+                if (scr && scr != K("nullscript")) pyroNotes[int(num(st->find(K("midinote")), -1))] = scr;
+            }
+    for (const ChartEvent& e : chart.lightshow) {
+        if (e.note == 56 && pyroScript_) pyroTimes_.push_back({double(e.time) - offsetMs_, pyroScript_});
+        else if (auto it = pyroNotes.find(e.note); it != pyroNotes.end()) pyroTimes_.push_back({double(e.time) - offsetMs_, it->second});
+    }
     std::sort(pyroTimes_.begin(), pyroTimes_.end());
     // Drum_iterator_CFunc (0x821121D8): drum note 36 launches drumkick_left,
     // 48 drumkick_right, as it reaches them drum_anim_lead_time early (the
@@ -199,17 +218,28 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
     });
     for (const char* n : {"CameraCuts_SetHandCamParams", "enable_crowd_models_cfunc", "CameraCuts_CalcTime", "CameraCuts_WaitScript"})
         vm_->addNative(n, [](qs::Vm&, qs::ScriptRun&, qb::Struct&) { return true; });
-    vm_->addNative("IsCreated", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
-        const qb::Value* n = qs::Vm::positional(p);
+    // IsCreated / IsInNodeArray <node>: the node name is the first unnamed
+    // item, a key (Vm::positional skips keys as flags) [C scripts SafeCreate /
+    // SafeKill: `IsInNodeArray <nodename>`].
+    auto nodeArg = [](const qb::Struct& p) -> const qb::Value* {
+        for (const qb::Item& it : p.items)
+            if (it.name == 0) return &it.value;
+        return nullptr;
+    };
+    vm_->addNative("IsCreated", [this, nodeArg](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
+        const qb::Value* n = nodeArg(p);
         const venue::Node* node = n ? v_->node(keyOf(n)) : nullptr;
         if (!node) return false;
         // Create / Kill by the zone's scripts (SafeCreate / SafeKill) override createdatstart.
+        // A particleobject with a lifetime is gone once it has emitted for it
+        // (z_meadowlands' Topsparks: SafeCreate again at each pyro moment) [I].
+        if (auto em = nodeEmitters_.find(node->name); em != nodeEmitters_.end() && nodeExpired(em->second)) return false;
         if (auto it = visibility_.find(node->name); it != visibility_.end()) return it->second != 0;
         return node->createdAtStart;
     });
     // IsInNodeArray <node> (SafeCreate's guard): the zone has that node [C scripts].
-    vm_->addNative("IsInNodeArray", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
-        const qb::Value* n = qs::Vm::positional(p);
+    vm_->addNative("IsInNodeArray", [this, nodeArg](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
+        const qb::Value* n = nodeArg(p);
         return n && v_->node(keyOf(n)) != nullptr;
     });
     addObjectNatives();
@@ -264,8 +294,10 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
             visibility_[n->key] = 1;
             // A particleobject created (z_wikker's Z_Wikker_Start_DinoFlames):
             // it emits its emit_rate [C scripts; I: from the Create].
-            if (auto it = nodeEmitters_.find(n->key); it != nodeEmitters_.end() && !it->second.system)
+            if (auto it = nodeEmitters_.find(n->key); it != nodeEmitters_.end() && (!it->second.system || nodeExpired(it->second))) {
+                it->second.system = 0;
                 setEmitRate(n->key, it->second.ownRate, vmTime_);
+            }
         }
         return true;
     });
@@ -294,8 +326,14 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
         const qb::Value* gp = (e.params.type == qb::Type::Key || e.params.type == qb::Type::KeyPtr) ? g_->find(e.params.key) : &e.params;
         const qb::Struct* gs = structOf(gp);
         e.ownRate = gs ? num(g_->field(*gs, K("emit_rate")), 0) : 0;
+        // `lifetime` > 0 (z_meadowlands' Topsparks 0.5 s, created by its
+        // Pyro_Moments_Top_1 0.1 s apart): the node emits that long, then is
+        // gone; created at start, its emission is over under the loading
+        // screen [C data; I: the emitter's lifetime, not the particles'].
+        e.ownLife = gs ? num(g_->field(*gs, K("lifetime")), 0) : 0;
         nodeEmitters_[n.name] = e;
-        if (n.createdAtStart) setEmitRate(n.name, e.ownRate, startMs);
+        if (n.createdAtStart && e.ownLife > 0) nodeEmitters_[n.name].endsAt = startMs;
+        else if (n.createdAtStart) setEmitRate(n.name, e.ownRate, startMs);
     }
     if (!nodeEmitters_.empty()) SDL_Log("particles %s: %llu particle objects", v.zone.c_str(), static_cast<unsigned long long>(nodeEmitters_.size()));
     // The nodes' trigger scripts: a created node runs its triggerscript on
@@ -320,13 +358,13 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
     using ull = unsigned long long;
     // A mid-song start: the drum kicks and pyro notes before it are past.
     kickAt_ = size_t(std::lower_bound(kicks_.begin(), kicks_.end(), std::make_pair(startMs, uint32_t(0))) - kicks_.begin());
-    pyroAt_ = size_t(std::lower_bound(pyroTimes_.begin(), pyroTimes_.end(), startMs) - pyroTimes_.begin());
+    pyroAt_ = size_t(std::lower_bound(pyroTimes_.begin(), pyroTimes_.end(), std::make_pair(startMs, uint32_t(0))) - pyroTimes_.begin());
     SDL_Log("particles %s: %llu pyro notes (%s), %llu performance scripts", v.zone.c_str(), ull(pyroTimes_.size()),
-            pyroScript_ ? qbkey::names().get(pyroScript_).c_str() : "no pyro script", ull(perfScripts_.size()));
+            pyroScript_ ? qbkey::names().get(pyroScript_).c_str() : pyroNotes.empty() ? "no pyro script" : "pyro_scripts", ull(perfScripts_.size()));
     if (std::getenv("GD10_PARTICLES_LOG"))
-        for (double t : pyroTimes_) SDL_Log("particles: pyro at %.0f ms", t);
+        for (const auto& [t, scr] : pyroTimes_) SDL_Log("particles: pyro at %.0f ms: %s", t, qbkey::names().get(scr).c_str());
     if (triggers) SDL_Log("particles %s: %llu node trigger scripts", v.zone.c_str(), ull(triggers));
-    return pyroScript_ || !perfScripts_.empty() || triggers;
+    return !pyroTimes_.empty() || pyroScript_ || !perfScripts_.empty() || triggers;
 }
 
 float Particles::Axis::at(double t) const {
@@ -741,11 +779,12 @@ void Particles::setEmitRate(uint32_t node, float rate, double t) {
         if (e.system && s.seed == e.system) s.p.lifetime = float(std::max(0.0, (t - s.start) / 1000.0 - double(s.p.delay)));
     e.system = 0;
     if (rate <= 0) return;
-    create(e.pos, &e.params, t, rate);
+    create(e.pos, &e.params, t, rate, e.ownLife > 0 ? e.ownLife : 1e6f);
+    if (e.ownLife > 0) e.endsAt = t + double(e.ownLife) * 1000.0;
     if (!systems_.empty()) e.system = systems_.back().seed;
 }
 
-void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t, float rate) {
+void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t, float rate, float emitFor) {
     const qb::Value* pv = params;
     if (pv && (pv->type == qb::Type::Key || pv->type == qb::Type::KeyPtr)) pv = g_->find(pv->key);
     const qb::Struct* src = structOf(pv);
@@ -869,7 +908,7 @@ void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t
                 p.softEdge = std::max(0.01f, num(g_->field(*qm, K("softedgescale")), 1.0f));
         }
     }
-    if (rate >= 0) p.rate = rate, p.lifetime = 1e6f, p.burst = 0, p.delay = 0;  // a node's emitter
+    if (rate >= 0) p.rate = rate, p.lifetime = emitFor, p.burst = 0, p.delay = 0;  // a node's emitter
     // `max`: the most particles alive at once (z_forum's stage glows: 20 a
     // second for 1.2..1.7 s, max 10): the rate held to max / the mean life
     // [C data; I: the emitter's pool modelled as a steady rate].
@@ -971,13 +1010,12 @@ void Particles::step(double t) {
         vm_->launchEvent(type);
         ++drumKicks, leftKicks += type == K("drumkick_left");
     }
-    while (pyroAt_ < pyroTimes_.size() && pyroTimes_[pyroAt_] <= t) {
-        ++pyroAt_;
-        if (!pyroScript_) continue;
+    while (pyroAt_ < pyroTimes_.size() && pyroTimes_[pyroAt_].first <= t) {
+        const uint32_t scr = pyroTimes_[pyroAt_++].second;
         qb::Struct params;
         qs::Vm::set(params, K("performance"),
                     qs::Vm::makeKey(K(lastPerf_ == venue::Performance::Poor ? "poor" : lastPerf_ == venue::Performance::Good ? "good" : "medium")));
-        vm_->run(pyroScript_, params);
+        vm_->run(scr, params);
     }
     vm_->update(kStepMs);
 }

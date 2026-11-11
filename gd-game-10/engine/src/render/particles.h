@@ -142,7 +142,8 @@ private:
     };
     // A system; rate >= 0: a node's particleobject emitting `rate` a second
     // with no end and no burst (emitrate), else the params' own.
-    void create(const venue::Vec3& pos, const qb::Value* params, double t, float rate = -1);
+    // `rate` >= 0: a node's emitter at that rate, for `emitFor` seconds.
+    void create(const venue::Vec3& pos, const qb::Value* params, double t, float rate = -1, float emitFor = 1e6f);
 public:
     // The song scripts' CreateParticleSystem (the Star Power stage FX, the
     // finger flames): `member` / `bone` non-zero, the system follows that
@@ -204,7 +205,10 @@ private:
         uint64_t system = 0;  // the running system's seed (0: none)
         float rate = 0;
         float ownRate = 0;    // its params' emit_rate (createdatstart / Create)
+        float ownLife = 0;    // its params' lifetime: > 0, it emits that long a Create, then is gone
+        double endsAt = 1e300;  // when such an emission ends (the node no longer created)
     };
+    bool nodeExpired(const NodeEmitter& e) const { return e.ownLife > 0 && vmTime_ >= e.endsAt; }
     std::unordered_map<uint32_t, NodeEmitter> nodeEmitters_;
     struct Lock {
         uint32_t target = 0;
@@ -258,7 +262,9 @@ private:
     const venue::PerfTimeline* perf_ = nullptr;
     uint32_t pyroScript_ = 0;
     std::vector<uint32_t> perfScripts_;
-    std::vector<double> pyroTimes_;
+    // The pyro notes: (time, the zone script to run: GH3's pyro_script, or
+    // gh4's pyro_scripts.<type> by the note).
+    std::vector<std::pair<double, uint32_t>> pyroTimes_;
     // The drummer's kicks: (time, drumkick_left / _right) (Drum_iterator_CFunc).
     std::vector<std::pair<double, uint32_t>> kicks_;
     size_t kickAt_ = 0;
