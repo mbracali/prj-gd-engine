@@ -1017,6 +1017,7 @@ universal launcher, not released on its own.
 | GD10-005 | Original | 🟡 boot walk passes; --scripttest: 71 natives to write; audit not run | M3 gh4 UI state machine, descs, boot to the main menu | `gd-game-10/docs/ui.md` | Kickoff M3 |
 | GD10-006 | Original | 🟡 `--walktest quickplay` passes to the results and back; debug highway, no venue drawn | M4 proof of concept: Quickplay, one song on guitar in a venue | Next: gh4 scenes (venues, 3D gems), results score, set list names | Kickoff M4 |
 | GD10-010 | Original | 🟡 in progress | In-song visuals and gameplay: gh4 scenes (venue, 3D gems, highway skins), HUD, camera; judging rules from the XEX; keyboard / gamepad / guitar play a song | `gd-game-10/agents/PROGRESS.md` | Owner 11-11 |
+| GD10-020 | Original | 🟡 in progress | Front end: every menu and screen as the original (boot, main menu and sub-menus, instrument / difficulty / set list, loading, pause, results, rewards), text fitting, art, focus, sounds, mouse / keyboard / gamepad, Enhanced menu, GAMEPADS, help bar; walks with screenshots and a fuzz walk | `gd-game-10/docs/frontend.md` (audit) | Owner 11-11 |
 
 
 ## gd-game-11: Guitar Hero: Smash Hits (Xbox 360)
