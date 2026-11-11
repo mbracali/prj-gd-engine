@@ -52,6 +52,7 @@ struct Member {
     std::vector<std::string> animPaks;     // disc paths of the paks with its clips
     bool female = false;                   // Band_IsFemale: is_female of the full body / FemalePhysique
     uint32_t animStruct = 0;               // the body's anim_struct (car_male_anim_struct, ...)
+    const qb::Struct* fullBody = nullptr;  // the CAS_Full_Body desc (ragdoll_path, accessory_bones), null for a CAS body
 };
 
 // The band of a one-player song in `zone` (create_band with

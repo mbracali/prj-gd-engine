@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/band.h"
 
+#include <cstring>
+
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_stdinc.h>
 
@@ -128,9 +130,48 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
 // The ragdoll: the profile's ragdoll (ragdoll2 for outfit 2) from
 // global.pak, its accessory bodies simulated (ragdoll_setaccessorybones
 // accessory_bones = $Guitarist_accessory_bones) [C scripts].
+namespace {
+uint32_t keyOfValue(const qb::Value* v) { return v && (v->type == qb::Type::Key || v->type == qb::Type::KeyPtr) ? v->key : 0u; }
+}  // namespace
+
 std::unique_ptr<AccessorySim> Band::accessorySim(const Disc& disc, const Globals& g, const band::Member& m, const bandanim::Rig& rig,
                                                  std::shared_ptr<const Pak>& globalPak) {
-    if (!m.profile || SDL_getenv("GD10_NO_RAGDOLL")) return nullptr;
+    if (SDL_getenv("GD10_NO_RAGDOLL")) return nullptr;
+    // gh4: the full body desc's ragdoll (.rag in PAK/global_rag_skel, its
+    // entry's short name; ragdoll_path names it) and accessory_bones (Rocker_accessory_bones: the
+    // hair, torso and legs ACC bones) [C data; I: the same accessory ragdoll
+    // as GH3's, the vocalist_static_tree's ragdoll node].
+    if (m.gh4) {
+        if (!m.fullBody) return nullptr;
+        const qb::Value* rp = m.fullBody->find(K("ragdoll_path"));
+        const qb::Value* ab = g.find(keyOfValue(m.fullBody->find(K("accessory_bones"))));
+        if (!rp || rp->type != qb::Type::String || !ab || ab->type != qb::Type::Array || !ab->arr) return nullptr;
+        std::vector<uint32_t> bones;
+        for (const qb::Value& b : ab->arr->values) bones.push_back(b.key);
+        try {
+            if (!globalPak) globalPak = Pak::shared(disc, "DATA/COMPRESSED/PAK/global_rag_skel.pak.xen");
+            if (const PakEntry* re = globalPak->findType(keyOfValue(m.fullBody->find(K("ragdoll"))), K(".rag"))) {
+                auto [p, s] = globalPak->data(*re);
+                // gh4's .rag: "LZSS", u32 size, Neversoft's LZSS of a Havok 5.5.0 packfile [C data].
+                Bytes unpacked;
+                if (s >= 8 && std::memcmp(p, "LZSS", 4) == 0) {
+                    const size_t n = size_t(p[4]) << 24 | size_t(p[5]) << 16 | size_t(p[6]) << 8 | size_t(p[7]);
+                    unpacked = qb::lzss(p + 8, s - 8, n);
+                    p = unpacked.data(), s = unpacked.size();
+                }
+                const havok::Physics phys = havok::parse(p, s);
+                auto acc = std::make_unique<AccessorySim>();
+                if (acc->init(rig, phys, bones)) return acc;
+                SDL_Log("band: ragdoll %s: no accessory body", rp->str.c_str());
+            } else {
+                SDL_Log("band: ragdoll %s: not in global_rag_skel", rp->str.c_str());
+            }
+        } catch (const std::exception& ex) {
+            SDL_Log("band: ragdoll %s: %s", rp->str.c_str(), ex.what());
+        }
+        return nullptr;
+    }
+    if (!m.profile) return nullptr;
     uint32_t ragKey = 0;
     if (m.outfit == 2)
         if (const qb::Value* r2 = m.profile->find(K("ragdoll2")); r2 && (r2->type == qb::Type::Key || r2->type == qb::Type::KeyPtr)) ragKey = r2->key;

@@ -304,6 +304,7 @@ bool memberGh4(const Globals& g, const qb::Struct& profile, uint32_t object, uin
     std::string skeleton;
     if (body) {
         m.meshes.push_back(meshOf(g, *body));
+        m.fullBody = body;
         skeleton = qbkey::names().get(keyOf(body->find(K("skeleton"))));
         female = intOf(body->find(K("is_female")), 0) == 1;
     } else {
@@ -596,7 +597,13 @@ void Library::load(const Disc& disc) {
         if (e.type != K(".ske")) continue;
         auto [p, size] = global.data(e);
         try {
-            skeletons_.emplace(e.name, anim::parseSkeleton(p, size));
+            // gh4's talent skeletons: full name <skeleton>_original, short name
+            // <skeleton> (GH_Rocker_Male_James_original / GH_Rocker_Male_James)
+            // [C data ZONES/global.pak]: kept under both (by the short name
+            // alone, every talent fell back to GH_Rocker_Male_original and its
+            // mesh was skinned on the wrong bones: James' and Rob's hands).
+            auto sk = skeletons_.emplace(e.name, anim::parseSkeleton(p, size));
+            if (e.fullName && e.fullName != e.name) skeletons_.emplace(e.fullName, sk.first->second);
         } catch (const std::exception& ex) {
             SDL_Log("band: skeleton %s: %s", qbkey::names().get(e.name).c_str(), ex.what());
         }
@@ -734,6 +741,32 @@ private:
     std::unordered_map<uint32_t, CasEntry> skins_, full_;
 };
 
+// PAK/global_model_tex's dictionary, decoded once per disc.
+std::shared_ptr<const std::unordered_map<uint32_t, gh3tex::Texture>> globalModelTextures(const Disc& disc) {
+    static std::mutex mu;
+    static const Disc* forDisc = nullptr;
+    static std::shared_ptr<const std::unordered_map<uint32_t, gh3tex::Texture>> cache;
+    std::lock_guard<std::mutex> lock(mu);
+    if (forDisc == &disc && cache) return cache;
+    auto out = std::make_shared<std::unordered_map<uint32_t, gh3tex::Texture>>();
+    const char* path = "DATA/COMPRESSED/PAK/global_model_tex.pak.xen";
+    try {
+        if (disc.exists(path)) {
+            const auto pak = Pak::shared(disc, path);
+            for (const PakEntry& e : pak->entries()) {
+                if (e.type != K(".tex")) continue;
+                auto [p, n] = pak->data(e);
+                for (gh3tex::Texture& tx : gh3tex::decodeTexDict(p, n))
+                    if (tx.supported && !tx.levels.empty()) out->emplace(tx.key, std::move(tx));
+            }
+        }
+    } catch (const std::exception& ex) {
+        SDL_Log("band: %s: %s", path, ex.what());
+    }
+    forDisc = &disc, cache = out;
+    return cache;
+}
+
 std::unique_ptr<Model> loadModelGh4(const Disc& disc, Library& lib, const Member& m, std::string& error) {
     auto model = std::make_unique<Model>();
     model->member = m;
@@ -778,6 +811,19 @@ std::unique_ptr<Model> loadModelGh4(const Disc& disc, Library& lib, const Member
             SDL_Log("band: %s: %s: %s", who.c_str(), mesh.c_str(), ex.what());
         }
     }
+    // The materials' textures their own .tex lacks (the talents' eyes,
+    // skin detail and environment maps): global_model_tex.tex, the shared
+    // character textures of PAK/global_model_tex [C data: every such key of
+    // the talents is there].
+    std::vector<uint32_t> want;
+    for (const Part& p : model->parts)
+        for (const scene::Material& mat : p.scene.materials)
+            for (uint32_t t : mat.textures)
+                if (!model->textures.count(t) && std::find(want.begin(), want.end(), t) == want.end()) want.push_back(t);
+    if (!want.empty())
+        if (const auto global = globalModelTextures(disc))
+            for (uint32_t t : want)
+                if (auto it = global->find(t); it != global->end()) model->textures.emplace(t, it->second);
     for (const std::string& path : m.animPaks) {
         if (!disc.exists(path)) {
             SDL_Log("band: %s: %s is not on the disc", who.c_str(), path.c_str());

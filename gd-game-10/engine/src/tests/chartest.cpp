@@ -319,6 +319,11 @@ BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, co
             cam.rot = {0, std::cos(yaw * 0.5f), 0, -std::sin(yaw * 0.5f)};
             cam.fov = 25;
             if (SDL_Surface* px = portrait(*r, *model, skin, hi[1], &cam)) {
+                // GD10_CHARTEST_FACES=<dir>: each close-up at full size too (development aid).
+                if (const char* dir = SDL_getenv("GD10_CHARTEST_FACES")) {
+                    static int n = 0;
+                    SDL_SaveBMP(px, (std::string(dir) + "/face_" + std::to_string(n++) + ".bmp").c_str());
+                }
                 g_faces->add(px, label(m) + " " + what);
                 SDL_DestroySurface(px);
             }

@@ -429,7 +429,175 @@ Shape readShape(const Pack::Obj& s) {
 
 }  // namespace
 
+// gh4 (Metallica) .rag: Havok-5.5.0-r1 packfiles (file version 5) whose
+// __types__ section is empty, so no reflection: the band's ragdolls read
+// at fixed offsets [C data: every .rag of PAK/global_rag_skel; the offsets
+// are inferred from the values (names, transforms, masses, limits), I].
+class Pack55 {
+public:
+    Pack55(const uint8_t* d, size_t n) : d_(d), n_(n) {}
+    Physics parse() {
+        static const uint8_t magic[8] = {0x57, 0xE0, 0xE0, 0x57, 0x10, 0xC0, 0xC0, 0x10};
+        need(n_ >= 0xD0 && std::memcmp(d_, magic, 8) == 0, "no packfile magic");
+        need(be(8) == 0x786E6B68u && be(12) == 5 && be(20) == 3 && be(24) == 2, "5.5 packfile header");
+        for (uint32_t k = 0; k < 3; ++k) {
+            const size_t o = 0x40 + 0x30 * size_t(k);
+            start_[k] = be(o + 20);
+            for (int j = 0; j < 6; ++j) off_[k][j] = be(o + 24 + 4 * size_t(j));
+            need(size_t(start_[k]) + off_[k][5] <= n_, "section past the end");
+        }
+        need(off_[1][0] == 0 && off_[1][5] == 0, "5.5 __types__ not empty");
+        const uint32_t s = start_[2];
+        for (int kind = 0; kind < 3; ++kind) {
+            const uint32_t w = kind == 0 ? 2 : 3;
+            for (size_t o = s + off_[2][kind]; o + 4 * w <= s + off_[2][kind + 1]; o += 4 * w) {
+                const uint32_t r0 = be(o), r1 = be(o + 4), r2 = w == 3 ? be(o + 8) : 0;
+                if (r0 == kNone) continue;
+                if (kind == 0) local_[r0] = r1;
+                else if (kind == 1) need(r1 == 2, "5.5 global fixup section"), global_[r0] = r2;
+                else cls_[r0] = cstr(start_[0] + r2, start_[0] + off_[0][0]);
+            }
+        }
+        Physics ph;
+        ph.objects = cls_.size();
+        ph.fixups = local_.size() + global_.size();
+        for (auto& [a, c] : cls_) ph.objectClasses.push_back(c);
+        const uint32_t root = be(28);
+        need(clsAt(root) == "hkpPhysicsData", "contents class");
+        ph.contentsClass = "hkPhysicsData";
+        std::map<uint32_t, int> bodyIndex;
+        for (uint32_t sys : array(root + 0x0C)) {
+            need(clsAt(sys) == "hkpPhysicsSystem", "system class");
+            for (uint32_t rb : array(sys + 0x08)) {
+                need(clsAt(rb) == "hkpRigidBody", "rigid body class");
+                Body b;
+                b.name = str(rb + 0x70);
+                static const char* kMotion[10] = {"MOTION_INVALID", "MOTION_DYNAMIC", "MOTION_SPHERE_INERTIA", "MOTION_STABILIZED_SPHERE_INERTIA",
+                                                  "MOTION_BOX_INERTIA", "MOTION_STABILIZED_BOX_INERTIA", "MOTION_KEYFRAMED", "MOTION_FIXED",
+                                                  "MOTION_THIN_BOX_INERTIA", "MOTION_CHARACTER"};
+                const uint32_t mo = rb + 0xD0;  // hkpMaxSizeMotion
+                const uint8_t type = u8(mo + 8);
+                b.motion = type < 10 ? kMotion[type] : "MOTION_?";
+                for (int i = 0; i < 16; ++i) b.transform[size_t(i)] = f32(mo + 0x10 + 4 * uint32_t(i));
+                for (int i = 0; i < 3; ++i) {
+                    b.comLocal[size_t(i)] = f32(mo + 0x90 + 4 * uint32_t(i));  // sweptTransform.centerOfMassLocal
+                    b.invInertia[size_t(i)] = f32(mo + 0xC0 + 4 * uint32_t(i));
+                }
+                const float invMass = f32(mo + 0xCC);
+                b.mass = invMass != 0 ? 1.0f / invMass : 0.0f;
+                b.linearDamping = f32(mo + 0xB4), b.angularDamping = f32(mo + 0xB8);
+                // maxLinear / maxAngularVelocity are hkUFloat8 bytes (+0xBC, +0xBD): left 0 (the simulation's default) [I].
+                b.friction = f32(rb + 0x84), b.restitution = f32(rb + 0x88);
+                const uint32_t shape = ptr(rb + 0x10);
+                b.shape.className = shape ? clsAt(shape) : "";
+                b.shape.kind = Shape::Other;
+                bodyIndex[rb] = int(ph.bodies.size());
+                ph.bodies.push_back(std::move(b));
+            }
+            for (uint32_t ci : array(sys + 0x14)) {
+                need(clsAt(ci) == "hkpConstraintInstance", "constraint class");
+                Constraint c;
+                c.name = str(ci + 0x20);
+                const uint32_t dt = ptr(ci + 0x0C);
+                need(dt != 0, "constraint data");
+                const std::string k = clsAt(dt);
+                const uint32_t ea = ptr(ci + 0x14), eb = ptr(ci + 0x18);
+                c.bodyA = bodyIndex.count(ea) ? bodyIndex[ea] : -1;
+                c.bodyB = bodyIndex.count(eb) ? bodyIndex[eb] : -1;
+                // atoms at +0x10: hkpSetLocalTransformsConstraintAtom (type 2), transformA at +0x20, transformB at +0x60.
+                need(u16(dt + 0x10) == 2, "transforms atom");
+                for (int i = 0; i < 16; ++i) {
+                    c.transformA[size_t(i)] = f32(dt + 0x20 + 4 * uint32_t(i));
+                    c.transformB[size_t(i)] = f32(dt + 0x60 + 4 * uint32_t(i));
+                }
+                for (int i = 0; i < 3; ++i) c.pivotA[size_t(i)] = c.transformA[size_t(12 + i)], c.pivotB[size_t(i)] = c.transformB[size_t(12 + i)];
+                if (k == "hkpRagdollConstraintData") {
+                    // ragdollMotors (0x13) +0xA0, angFriction (0x11) +0xF0, twistLimit (0x0F) +0xFC,
+                    // coneLimit (0x10) +0x110, planesLimit (0x10) +0x124, ballSocket (5) +0x138.
+                    need(u16(dt + 0xA0) == 0x13 && u16(dt + 0xF0) == 0x11 && u16(dt + 0xFC) == 0x0F && u16(dt + 0x110) == 0x10 &&
+                             u16(dt + 0x124) == 0x10 && u16(dt + 0x138) == 5,
+                         "ragdoll atoms");
+                    c.type = "hkRagdollConstraintData";
+                    if (u8(dt + 0xF2)) c.maxFriction = f32(dt + 0xF8), c.frictionAxes = u8(dt + 0xF4);
+                    c.twistOn = u8(dt + 0xFE) != 0, c.twistAxis = u8(dt + 0xFF), c.twistRefAxis = u8(dt + 0x100);
+                    c.twistMin = f32(dt + 0x104), c.twistMax = f32(dt + 0x108), c.twistTau = f32(dt + 0x10C);
+                    c.coneOn = u8(dt + 0x112) != 0, c.coneAxisA = u8(dt + 0x113), c.coneAxisB = u8(dt + 0x114);
+                    c.coneAligned = u8(dt + 0x115) == 0;  // ZERO_WHEN_VECTORS_ALIGNED
+                    c.coneMax = f32(dt + 0x11C), c.coneTau = f32(dt + 0x120);
+                    c.planesOn = u8(dt + 0x126) != 0, c.planesAxisA = u8(dt + 0x127), c.planesAxisB = u8(dt + 0x128);
+                    c.planesAligned = u8(dt + 0x129) == 0;
+                    c.planesMin = f32(dt + 0x12C), c.planesMax = f32(dt + 0x130), c.planesTau = f32(dt + 0x134);
+                } else if (k == "hkpLimitedHingeConstraintData") {
+                    // angMotor (0x12) +0xA0, angFriction (0x11) +0xB4, angLimit (0x0E) +0xC0, 2dAng (0x0C) +0xD0, ballSocket (5) +0xD4.
+                    need(u16(dt + 0xA0) == 0x12 && u16(dt + 0xB4) == 0x11 && u16(dt + 0xC0) == 0x0E && u16(dt + 0xD0) == 0x0C &&
+                             u16(dt + 0xD4) == 5,
+                         "hinge atoms");
+                    c.type = "hkLimitedHingeConstraintData";
+                    if (u8(dt + 0xB6)) c.maxFriction = f32(dt + 0xBC), c.frictionAxes = u8(dt + 0xB8);
+                    c.twistOn = u8(dt + 0xC2) != 0;
+                    c.twistMin = f32(dt + 0xC4), c.twistMax = f32(dt + 0xC8), c.twistTau = f32(dt + 0xCC);
+                    c.hingeAxis = u8(dt + 0xD2);
+                } else {
+                    c.type = k;
+                }
+                ph.constraints.push_back(std::move(c));
+            }
+        }
+        return ph;
+    }
+
+private:
+    uint32_t be(size_t o) const {
+        need(o + 4 <= n_, "read past the end");
+        return uint32_t(d_[o]) << 24 | uint32_t(d_[o + 1]) << 16 | uint32_t(d_[o + 2]) << 8 | d_[o + 3];
+    }
+    size_t dataAt(uint32_t a, size_t n) const {
+        need(size_t(a) + n <= off_[2][0], "read past __data__");
+        return start_[2] + size_t(a);
+    }
+    uint32_t u32(uint32_t a) const { return be(dataAt(a, 4)); }
+    uint16_t u16(uint32_t a) const { const size_t o = dataAt(a, 2); return uint16_t(d_[o] << 8 | d_[o + 1]); }
+    uint8_t u8(uint32_t a) const { return d_[dataAt(a, 1)]; }
+    float f32(uint32_t a) const { const uint32_t u = u32(a); float f; std::memcpy(&f, &u, 4); return f; }
+    std::string cstr(size_t b, size_t end) const {
+        size_t e = b;
+        while (e < end && e < n_ && d_[e]) ++e;
+        need(e < end, "unterminated string");
+        return std::string(reinterpret_cast<const char*>(d_ + b), e - b);
+    }
+    std::string clsAt(uint32_t a) const {
+        auto it = cls_.find(a);
+        need(it != cls_.end(), "no object at a pointer");
+        return it->second;
+    }
+    // A pointer member: its fixup's target (0: null).
+    uint32_t ptr(uint32_t a) const {
+        need(u32(a) == 0, "pointer with a stored value");
+        if (auto it = local_.find(a); it != local_.end()) return it->second;
+        if (auto it = global_.find(a); it != global_.end()) return it->second;
+        return 0;
+    }
+    std::string str(uint32_t a) const {
+        const uint32_t t = ptr(a);
+        return t ? cstr(dataAt(t, 1), start_[2] + off_[2][0]) : std::string();
+    }
+    // An hkArray of object pointers: data pointer, size, capacity and flags.
+    std::vector<uint32_t> array(uint32_t a) const {
+        std::vector<uint32_t> out;
+        const uint32_t n = u32(a + 4), p = n ? ptr(a) : 0;
+        need(n == 0 || p != 0, "array data");
+        for (uint32_t i = 0; i < n; ++i) out.push_back(ptr(p + 4 * i));
+        return out;
+    }
+    const uint8_t* d_;
+    size_t n_;
+    uint32_t start_[3] = {}, off_[3][6] = {};
+    std::map<uint32_t, uint32_t> local_, global_;
+    std::map<uint32_t, std::string> cls_;
+};
+
 Physics parse(const uint8_t* data, size_t size) {
+    if (size >= 16 && data[12] == 0 && data[13] == 0 && data[14] == 0 && data[15] == 5) return Pack55(data, size).parse();
     Pack pk(data, size);
     pk.load();
     pk.checkAll();
