@@ -117,6 +117,7 @@ target_sources(gd10 PRIVATE
   src/tests/walk.cpp
   src/tests/selftest_play.cpp
   src/tests/sfxtest.cpp
+  src/tests/songaudiotest.cpp
   src/tests/venuetest.cpp
   src/ui/song_screen.cpp
   src/ui/song_hooks.cpp

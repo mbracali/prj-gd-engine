@@ -13,11 +13,12 @@
 
 class Disc;
 
-// A song's audio for the mixer: DATA/MUSIC/<song>.fsb.xen's three stereo
-// XMA1 stems, decoded while they play, as six channels: guitar L R,
-// rhythm L R, song L R (Stem below). The stems come from the bank's .dat
-// ("<song>_guitar", "<song>_rhythm", "<song>_song") [C data]; a missing
-// stem plays silence. Decoding runs on the mixer's worker thread.
+// A song's audio as three stereo stems (guitar, rhythm, the rest) for the
+// mixer. GH3: one bank, a stereo XMA sample per stem (<song>_guitar,
+// _rhythm, _song). gh4 (Metallica): three banks <song>_1 .. _3, each one
+// multichannel XMA sample of interleaved stereo streams (4 + 3 + 2 pairs),
+// every pair routed to a stem (kGh4Pairs, docs/audio.md) [C 0x820E6948:
+// the three banks; the pairs' instruments I].
 class SongStream : public AudioSource {
 public:
     enum Stem { Guitar = 0, Rhythm = 1, Song = 2, StemCount = 3 };
@@ -29,29 +30,34 @@ public:
     // Frames of the longest stem.
     uint32_t length() const { return length_; }
     // Starts the stems at song time `ms` instead of 0 (a mid-song start:
-    // GH3's starttime) before the first decode: each stem from the packet
-    // holding that time (an XMA packet header counts the frames, 512 samples
-    // each, that begin in it), the samples before it skipped.
+    // GH3's starttime) before the first decode.
     bool seek(double ms);
     const std::string& error() const { return error_; }
+    // GD10_PAIRGAIN-free check (tests): the RMS of each source pair over the
+    // next `frames` frames, decoding them (the stream moves on).
+    std::vector<float> pairRms(int frames);
 
 private:
-    struct StemState {
+    struct Source {
+        FsbBank bank;
         const FsbSample* sample = nullptr;
         XmaStream xma;
+        int channels = 2;
+        std::vector<int> pairStem;   // each stereo pair's stem (-1: dropped)
         uint64_t next = 0;           // next packet's byte offset in the sample data
-        std::vector<float> pending;  // decoded, not yet handed out (interleaved stereo)
+        std::vector<float> pending;  // decoded, not yet handed out (interleaved)
         size_t pendingAt = 0;
         bool ended = false;
         uint32_t produced = 0;       // frames handed out
         uint32_t skip = 0;           // decoded frames still to drop (seek)
     };
-    bool refill(StemState& s, size_t frames);
+    bool refill(Source& s, size_t frames);
+    size_t avail(const Source& s) const { return (s.pending.size() - s.pendingAt) / size_t(s.channels); }
 
     const Disc* disc_ = nullptr;
-    FsbBank bank_;
-    std::array<StemState, StemCount> stems_;
+    std::vector<std::unique_ptr<Source>> sources_;
     int rate_ = 44100;
     uint32_t length_ = 0;
+    bool gh4_ = false;
     std::string error_;
 };

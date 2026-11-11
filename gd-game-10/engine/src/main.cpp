@@ -29,6 +29,7 @@
 #include "tests/venuetest.h"
 #include "video/movie_player.h"
 #include "tests/sfxtest.h"
+#include "tests/songaudiotest.h"
 
 namespace {
 
@@ -51,6 +52,7 @@ void usage() {
         "  --scripttest         tokenize every script; run the boot script against the natives (GD10_UILOG=1 logs\n"
         "                       every unhandled call once)\n"
         "  --sfxtest            decode every sound of every FMOD bank (GD10_SFXTEST_LIMIT=<n>: the first n)\n"
+        "  --songaudiotest <song>  decode a song's banks, print each stereo pair's level every 5 s\n"
         "  --playmovie <name>   play one video (atvi, ns_logo, GH3_Intro, ...), then quit; GD10_MOVIE_DUMP=<f.yuv>\n"
         "                       decodes GD10_MOVIE_FRAMES (120) pictures headless; GD10_SKIP_MOVIES=1 skips videos\n"
         "  --shadertest [disc]  compile every shader on this GPU and report (with a disc: also GH3's material shaders; GD10_GLES=1: OpenGL ES)\n"
@@ -148,6 +150,7 @@ int run(int argc, char** argv) {
     std::string movie;
     bool audittest = false, formattest = false, shadertest = false, selftest = false, sfxtest = false, scripttest = false;
     bool venuetest = false, chartest = false;
+    std::string songAudio;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto value = [&]() -> std::string {
@@ -166,6 +169,7 @@ int run(int argc, char** argv) {
         else if (a == "--venuetest") venuetest = true;
         else if (a == "--chartest") chartest = true;
         else if (a == "--sfxtest") sfxtest = true;
+        else if (a == "--songaudiotest") songAudio = value();
         else if (a == "--scripttest") scripttest = true;
         else if (a == "--audittest") audittest = true;
         else if (a == "--out") opt.out = value();
@@ -192,6 +196,7 @@ int run(int argc, char** argv) {
     if (venuetest) return runVenueTest(opt.dataPath);
     if (chartest) return runCharTest(opt.dataPath);
     if (sfxtest) return runSfxTest(opt.dataPath);
+    if (!songAudio.empty()) return runSongAudioTest(opt.dataPath, songAudio);
     if (scripttest) return runScriptTest(opt.dataPath);
     if (audittest) return runAuditTest(opt.dataPath, opt.out);
     return runApp(opt);

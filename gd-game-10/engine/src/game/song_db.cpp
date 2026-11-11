@@ -37,8 +37,11 @@ uint32_t key(const Globals& g, const qb::Struct& st, const char* field) {
 
 bool SongDb::load(const Globals& g) {
     songs_.clear();
-    const qb::Value* list = g.find(qbkey::key("gh3_songlist"));
-    const qb::Value* props = g.find(qbkey::key("gh3_songlist_props"));
+    // gh4 (Metallica): gh_songlist / gh_songlist_props [C data songlist.qb]; GH3's names as a fallback.
+    const qb::Value* list = g.find(qbkey::key("gh_songlist"));
+    const qb::Value* props = g.find(qbkey::key("gh_songlist_props"));
+    if (!list) list = g.find(qbkey::key("gh3_songlist"));
+    if (!props) props = g.find(qbkey::key("gh3_songlist_props"));
     if (!list || list->type != qb::Type::Array || !props || props->type != qb::Type::Struct) return false;
     for (const qb::Value& k : list->arr->values) {
         if (k.type != qb::Type::Key) continue;

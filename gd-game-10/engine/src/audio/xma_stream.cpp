@@ -58,7 +58,8 @@ bool XmaStream::open(int version, int rate, int channels, std::string& error) {
     frames_ = 0;
     const AVCodec* codec = avcodec_find_decoder(version == 1 ? AV_CODEC_ID_XMA1 : AV_CODEC_ID_XMA2);
     if (!codec) return error = "this FFmpeg has no XMA decoder", false;
-    if (channels < 1 || channels > 2 || rate <= 0) return error = "unsupported XMA layout", false;
+    // GH3: mono / stereo streams; gh4: up to 4 interleaved stereo streams (8 channels).
+    if (channels < 1 || channels > 8 || (channels > 2 && channels % 2) || rate <= 0) return error = "unsupported XMA layout", false;
     Impl& m = *impl_;
     m.ctx = avcodec_alloc_context3(codec);
     m.pkt = av_packet_alloc();
@@ -77,8 +78,10 @@ bool XmaStream::open(int version, int rate, int channels, std::string& error) {
         x[4] = 1;  // XMAWAVEFORMAT: one stream ...
         x[8 + 17] = uint8_t(channels);  // ... of this many channels (FFmpeg's reading of it)
     } else {
-        x[0] = 1;  // XMA2WAVEFORMATEX extension: one stream, its channel mask
-        const uint32_t mask = channels == 1 ? AV_CH_FRONT_CENTER : AV_CH_FRONT_LEFT | AV_CH_FRONT_RIGHT;
+        x[0] = uint8_t((channels + 1) / 2);  // XMA2WAVEFORMATEX extension: streams (stereo each), the channel mask
+        const uint32_t mask = channels == 1 ? AV_CH_FRONT_CENTER
+                              : channels == 2 ? AV_CH_FRONT_LEFT | AV_CH_FRONT_RIGHT
+                                              : uint32_t(m.ctx->ch_layout.order == AV_CHANNEL_ORDER_NATIVE ? m.ctx->ch_layout.u.mask : 0);
         for (int i = 0; i < 4; ++i) x[2 + i] = uint8_t(mask >> (8 * i));
     }
     if (int e = avcodec_open2(m.ctx, codec, nullptr); e < 0) return error = "xma: " + avError(e), false;
