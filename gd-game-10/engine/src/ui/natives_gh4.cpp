@@ -37,11 +37,16 @@ qb::Struct* status(qs::Vm& vm, int player) {
         v->type = qb::Type::Struct;
         v->st = std::make_shared<qb::Struct>();
     }
-    if (v->st->items.empty()) {
+    // The defaults fill the fields the struct lacks: the song's status sync
+    // (ui/song_hooks.cpp) may have made it first with only the song's fields,
+    // and then is_local_client was missing: Progression_UpdateDetailedStatsForGig
+    // kept no stats and the results read a score of 0 [C scripts].
+    if (!v->st->find(qbkey::key("is_local_client"))) {
         for (const char* d : {"player_shared_defaults", ""}) {
             const std::string dn = *d ? d : "player" + std::to_string(player) + "_defaults";
             if (const qb::Value* def = vm.global(qbkey::key(dn)); def && def->st)
-                for (const qb::Item& it : vm.globals().expand(*def->st)) qs::Vm::set(*v->st, it.name, it.value);
+                for (const qb::Item& it : vm.globals().expand(*def->st))
+                    if (!v->st->find(it.name)) qs::Vm::set(*v->st, it.name, it.value);
         }
     }
     return v->st.get();

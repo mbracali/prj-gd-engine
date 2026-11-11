@@ -322,6 +322,13 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         else if (n == K("blend") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr))
             e.blend = v.key == K("add") ? 1 : (v.key == K("subtract") || v.key == K("sub")) ? 2 : 0;
         else if (n == K("font")) e.font = v.key;
+        else if (n == K("fit_width") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr))
+            e.fitW = v.key == K("expand dims") ? 1 : v.key == K("scale each line if larger") ? 2 : v.key == K("scale each line to fit") ? 3 : 0;
+        else if (n == K("fit_height") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr))
+            e.fitH = v.key == K("clip bottom lines") ? 1 : v.key == K("clip top lines") ? 2 : v.key == K("expand dims") ? 3
+                   : v.key == K("scale down if larger") ? 4 : v.key == K("scale to fit") ? 5 : 0;
+        else if (n == K("scale_mode") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr)) e.scalePerAxis = v.key == K("per axis");
+        else if (n == K("text_case") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr)) e.upperCase = v.key == K("upper");
         else if (n == K("text")) e.text = setText(v.str);
         else if (n == K("shadow_offs")) readPair(v, e.shadowX, e.shadowY);
         else if (n == K("shadow_rgba") && v.type == qb::Type::Array && v.arr) {
@@ -391,7 +398,7 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         }
     }
     if (newDimsW >= 0) {
-        e.w = newDimsW, e.h = newDimsH, e.givenH = newDimsH, e.dimsGiven = true;
+        e.w = newDimsW, e.h = newDimsH, e.givenH = newDimsH, e.givenW = newDimsW, e.dimsGiven = true;
         // GH3 turned new dims on a textured sprite into a scale [C GH3
         // 0x82219C78]; gh4 keeps them as the size (D6).
     }
@@ -401,6 +408,7 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         if (e.type == kSprite && e.texture && newDimsW >= 0) e.sx *= scaleX, e.sy *= scaleY;
         else e.sx = scaleX, e.sy = scaleY;
     }
+    if (e.upperCase && !e.text.empty()) e.text = upperText(e.text);
     if (e.type == kText || e.type == kTextBlock) measureText(e);
 }
 
@@ -456,6 +464,14 @@ std::vector<std::u16string> UiSystem::blockLines(const FontEntry& fe, const Elem
     // line's last space is dropped; a colour code carries over [C 0x8231B260].
     std::vector<std::u16string> lines(1);
     const std::u16string s = utf16(e.text);
+    if (e.fitW != 0) {
+        // Not wrap: "\\n" only breaks.
+        for (size_t i = 0; i < s.size(); ++i) {
+            if (s[i] == u'\\' && i + 1 < s.size() && s[i + 1] == u'n') lines.emplace_back(), ++i;
+            else lines.back().push_back(s[i]);
+        }
+        return lines;
+    }
     float lineW = 0;
     std::u16string colour;
     size_t i = 0;
@@ -480,6 +496,55 @@ std::vector<std::u16string> UiSystem::blockLines(const FontEntry& fe, const Elem
     }
     if (!lines.back().empty() && lines.back().back() == u' ') lines.back().pop_back();
     return lines;
+}
+
+UiSystem::BlockFit UiSystem::blockFit(const FontEntry& fe, const Element& e) const {
+    BlockFit b;
+    b.lines = blockLines(fe, e);
+    const float is = e.internalScale;
+    const float lineH = fe.f.lineHeight * e.lineSpacing * is;
+    // fit_height: clipping keeps the lines that fit (one at least) [I].
+    if ((e.fitH == 1 || e.fitH == 2) && e.h > 0 && lineH > 0) {
+        const size_t keep = std::max<size_t>(1, size_t(e.h / lineH + 0.01f));
+        if (b.lines.size() > keep) {
+            if (e.fitH == 1) b.lines.resize(keep);
+            else b.lines.erase(b.lines.begin(), b.lines.end() - long(keep));
+        }
+    }
+    // The block's scale: scale down if larger / scale to fit [I].
+    const float total = lineH * float(b.lines.size());
+    if (e.h > 0 && total > 0 && (e.fitH == 5 || (e.fitH == 4 && total > e.h))) {
+        b.sy = e.h / total;
+        if (!e.scalePerAxis) b.sx = b.sy;
+    }
+    // Each line's x scale: scale each line if larger / to fit [I].
+    for (const std::u16string& l : b.lines) {
+        float k = 1;
+        const float lw = textWidth(fe, l, e) * is * b.sx;
+        if (e.w > 0 && lw > 0 && (e.fitW == 3 || (e.fitW == 2 && lw > e.w))) k = e.w / lw;
+        b.lineScale.push_back(k);
+    }
+    return b;
+}
+
+// text_case = upper: letters up, escape codes ("\\n", "\\c1", "\\b0") kept.
+std::string UiSystem::upperText(const std::string& in) {
+    std::string out = in;
+    for (size_t i = 0; i < out.size(); ++i) {
+        const unsigned char ch = static_cast<unsigned char>(out[i]);
+        if (ch == '\\') {
+            ++i;  // the code letter stays
+            continue;
+        }
+        if (ch >= 'a' && ch <= 'z') out[i] = char(ch - 32);
+        // UTF-8 Latin-1 letters a-grave .. y-thorn (not the division sign) [I].
+        else if (ch == 0xC3 && i + 1 < out.size()) {
+            const unsigned char c2 = static_cast<unsigned char>(out[i + 1]);
+            if (c2 >= 0xA0 && c2 <= 0xBE && c2 != 0xB7) out[i + 1] = char(c2 - 0x20);
+            ++i;
+        }
+    }
+    return out;
 }
 
 std::string UiSystem::setText(const std::string& in) const {
@@ -521,7 +586,13 @@ void UiSystem::measureText(Element& e) const {
     const FontEntry* fe = fontFor(e.font);
     if (!fe) return;
     if (e.type == kTextBlock) {
-        if (!e.allowExpansion) return;
+        // fit_width = expand dims: the dims grow to the widest line [I].
+        if (e.fitW == 1) {
+            float wmax = 0;
+            for (const std::u16string& l : blockLines(*fe, e)) wmax = std::max(wmax, textWidth(*fe, l, e) * e.internalScale);
+            e.w = std::max(e.givenW, wmax);
+        }
+        if (!e.allowExpansion && e.fitH != 3) return;
         const float lh = fe->f.lineHeight * e.lineSpacing * e.internalScale;
         e.h = std::max(e.givenH, lh * float(blockLines(*fe, e).size()));
         return;
@@ -1226,8 +1297,10 @@ void UiSystem::drawElementText(Canvas& c, const Element& e, const FontEntry& fe,
         return Vertex{cx + lx * cs - ly * sn, cy + lx * sn + ly * cs, 0, u, v, col[0], col[1], col[2], alpha};
     };
     std::vector<std::u16string> lines;
+    BlockFit fit;
     if (block) {
-        lines = blockLines(fe, e);
+        fit = blockFit(fe, e);
+        lines = fit.lines;
     } else {
         lines.emplace_back();
         const std::u16string s = utf16(e.text);
@@ -1236,18 +1309,23 @@ void UiSystem::drawElementText(Canvas& c, const Element& e, const FontEntry& fe,
             else lines.back().push_back(s[i]);
         }
     }
-    const float lineH = f.lineHeight * e.lineSpacing;
+    const float lineH = f.lineHeight * e.lineSpacing * (block ? fit.sy : 1.0f);
     // A block's lines sit inside its dims by internal_just [I].
     float lineY = block ? std::max(0.0f, e.h / is - lineH * float(lines.size())) * (e.ijustY + 1) / 2 : 0;
+    float lsx = 1, lsy = 1;  // this line's glyph scale (fit_width / fit_height)
     std::vector<Vertex> verts;
     std::array<uint8_t, 4> col = base;
     auto quad = [&](std::vector<Vertex>& out, const font::Glyph& g, float x0, float y0, const std::array<uint8_t, 4>& cl) {
-        const Vertex a = P(x0 * sx, y0 * sy, g.u0, g.v0, cl), b = P((x0 + g.width) * sx, y0 * sy, g.u1, g.v0, cl);
-        const Vertex cc = P((x0 + g.width) * sx, (y0 + g.height) * sy, g.u1, g.v1, cl), d = P(x0 * sx, (y0 + g.height) * sy, g.u0, g.v1, cl);
+        const float gw = g.width * lsx, gy = (y0 - lineY) * lsy + lineY, gh = g.height * lsy;
+        const Vertex a = P(x0 * sx, gy * sy, g.u0, g.v0, cl), b = P((x0 + gw) * sx, gy * sy, g.u1, g.v0, cl);
+        const Vertex cc = P((x0 + gw) * sx, (gy + gh) * sy, g.u1, g.v1, cl), d = P(x0 * sx, (gy + gh) * sy, g.u0, g.v1, cl);
         out.insert(out.end(), {a, b, cc, a, cc, d});
     };
-    for (const std::u16string& line : lines) {
-        float pen = block ? (e.w / is - textWidth(fe, line, e)) * (e.ijustX + 1) / 2 : 0;
+    for (size_t li = 0; li < lines.size(); ++li) {
+        const std::u16string& line = lines[li];
+        // scale_mode proportional: a squeezed line keeps its aspect [I].
+        lsx = block ? fit.sx * fit.lineScale[li] : 1.0f, lsy = block ? (e.scalePerAxis ? fit.sy : lsx) : 1.0f;
+        float pen = block ? (e.w / is - textWidth(fe, line, e) * lsx) * (e.ijustX + 1) / 2 : 0;
         for (size_t i = 0; i < line.size(); ++i) {
             const FontEntry* gf = &fe;
             const font::Glyph* g = nullptr;
@@ -1277,12 +1355,12 @@ void UiSystem::drawElementText(Canvas& c, const Element& e, const FontEntry& fe,
                 ++i;
             }
             if (!g && line[i] == u' ') {
-                pen += f.spaceWidth + e.spaceSpacing - bearing + track;
+                pen += (f.spaceWidth + e.spaceSpacing - bearing + track) * lsx;
                 continue;
             }
             if (!g) g = &f.glyphFor(uint16_t(line[i]));
             const font::Font& gff = gf->f;
-            const float x0 = pen - float(g->xOffset) - bearing;
+            const float x0 = pen - (float(g->xOffset) + bearing) * lsx;
             const float y0 = lineY + gff.lineHeight - (g->height - g->baseline) - float(gff.vShift);
             if (button) {
                 // A button glyph: its own texture, white unless the text is
@@ -1296,7 +1374,7 @@ void UiSystem::drawElementText(Canvas& c, const Element& e, const FontEntry& fe,
             } else {
                 quad(verts, *g, x0, y0, col);
             }
-            pen = x0 + g->width + float(g->advanceAdjust) + track;
+            pen = x0 + (g->width + float(g->advanceAdjust) + track) * lsx;
         }
         lineY += lineH;
     }

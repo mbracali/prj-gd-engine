@@ -73,7 +73,14 @@ struct Element {
     bool shadow = false;
     float shadowX = 0, shadowY = 0;
     std::array<uint8_t, 4> shadowRgba{0, 0, 0, 255};
-    float internalScale = 1, givenH = 0;
+    float internalScale = 1, givenH = 0, givenW = 0;
+    // gh4 text blocks' fitting [C data: the descs' fit_width / fit_height /
+    // scale_mode / text_case values; I: their rules, ui_system.cpp blockFit]:
+    // fitW 0 wrap (default), 1 expand dims, 2 scale each line if larger,
+    // 3 scale each line to fit; fitH 0 none, 1 clip bottom lines, 2 clip
+    // top lines, 3 expand dims, 4 scale down if larger, 5 scale to fit.
+    uint8_t fitW = 0, fitH = 0;
+    bool scalePerAxis = false, upperCase = false;
     uint8_t blend = 0;  // a sprite's blend: 0 alpha, 1 add, 2 subtract (destination - source) [I: the setlist's shoeprints]  // text blocks: internal_scale, the dims' height before allow_expansion
     // Menus [C 0x82315AA0 / 0x82315B08]
     float regularSpace = 0, paddingScale = 1, spacingBetween = 0;
@@ -171,6 +178,7 @@ public:
     float textWidth(uint32_t font, const std::string& s, float h, float spacing = 0) const;
     // A script text's \m<n> button codes as the buttons font's glyphs (SetProps text) [C 0x8228E0B0].
     std::string setText(const std::string& s) const;
+    static std::string upperText(const std::string& s);  // text_case = upper
     // The focused elements: menus and their selected items (walk checks too).
     std::vector<Element*> focusedElements() const;
     // A GH3 texture (by key) stretched over x0..x1, y0..y1 in menu units,
@@ -218,6 +226,14 @@ private:
     float textWidth(const FontEntry& fe, const std::u16string& s, const Element& e) const;
     // A text block's lines, word-wrapped to its dims [C 0x8231B260].
     std::vector<std::u16string> blockLines(const FontEntry& fe, const Element& e) const;
+    // A text block's lines after fit_height's clipping, each line's x scale
+    // (fit_width) and the block's scale (fit_height), in internal_scale units.
+    struct BlockFit {
+        std::vector<std::u16string> lines;
+        std::vector<float> lineScale;
+        float sx = 1, sy = 1;
+    };
+    BlockFit blockFit(const FontEntry& fe, const Element& e) const;
     // SetText: "\m<n>" (a meta button) becomes "\b<glyph>" through
     // meta_button_map, "\_" a space [C 0x8231A2C8, 0x8228E0B0].
     // A text element's glyphs (its shadow with `shadowPass`) at the corner
