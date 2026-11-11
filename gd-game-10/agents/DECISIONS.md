@@ -398,3 +398,51 @@ render/band.cpp accessorySim gh4 branch.
 What: Face_deform / GH_Male_Deform: Bone_Cheek_Lower_L's mirror index is
 Bone_Cheek_R's while its mirror name is Bone_Cheek_Lower_R: the name wins.
 Undo: data/anim.cpp parseSkeleton.
+
+## D70. Crowd cards are quad lists by the mesh's primitive word [C data] (2026-11-11)
+
+What: data/scene.cpp reads gh4 mesh +0x84 (was word68, raw): 13 =
+D3DPT_QUADLIST, Mesh::quadList, triangles() splits each 4 indices into
+(a, b, c), (a, c, d). Every other gh4 mesh has 4.
+Why: on the disc's zones the 15 meshes with 13 are exactly the crowd
+cards; each has a multiple of 4 indices (8 of them not a multiple of 3);
+the cards are 4-vertex quads (positions2 = the quad's centre, the same for
+its 4 vertices, Billboard_FastLit's pivot).
+Undo: drop quadList; the cards draw as triangle-list shards.
+
+## D71. One crowd atlas, a cell per ped [C scripts / data] (2026-11-11)
+
+What: render/crowd.cpp makes one target the size of
+imposter_rendering_highres_quad_base (1024 x 1024; >6 peds:
+imposter_rendering_quad_base, 768 x 768), clears it once (alpha 0), draws
+each ped into its rect (HRViewportParams / ViewportParams .rect x the atlas
+size); texture(card) returns the atlas for every model's textureasset.
+Why: create_crowd_models: CreateViewport crowd_base_viewport (texture
+crowd_atlas0.dds) then per ped a viewport with ResourceViewport =
+crowd_base_viewport, no_resolve_colorbuffer, style quad<n>; all models
+share textureasset crowd_atlas0.dds; the cards' uv0 span u 0..0.74 in
+0.25 steps, v 0..0.99 in two halves.
+Undo: per-ped targets (only the first model's shows, stretched).
+
+## D72. Ped facing 180 + roty, camera hfov crowd_ped_camera_fov [C script] (2026-11-11)
+
+What: yaw = 180 + roty degrees (CreateFromStructure quat (0, 1, 0), then
+obj_setorientation y = 180 + roty when roty != 0); hfov 21.
+Why: create_crowd_models / guitar_crowd.qb (crowd_ped_camera_fov = 21).
+Checked: z_forum's AUDIENCE_R (a camera in the crowd looking out) shows
+faces, the intro wide view faces turned to the stage. [I: obj_setorientation's
+sign as GH3's port had it; apply_correction (roty = 0) not known.]
+Undo: yRot(roty).
+
+## D73. gh4 pyro notes; node emitters with a lifetime; SafeCreate (2026-11-11)
+
+What: render/particles.cpp: LightShow_NoteMapping's LightShow_PyroEvent
+entries map a lightshow note to pyro_scripts.<type> (nullscript skipped),
+run lightshow_offset_ms early with `performance` [C scripts lightshow.qb;
+I: LightShow_GetPyroScript 821a3880 returns the mapping's pyro_scripts].
+IsCreated / IsInNodeArray take the first unnamed item [C scripts
+misclightutils.qb]. A particleobject node whose params have lifetime > 0
+emits emit_rate for that long per Create and then counts as not created;
+createdatstart ones start expired [I: the emitter's lifetime; the Top_1
+moment SafeCreates them, which needs them gone].
+Undo: the ring of Topsparks emits for ever; no gh4 pyro.

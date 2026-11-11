@@ -478,3 +478,163 @@ quickplay (load window worst 26.5 ms, 0 over 50), menus, qp_pause,
 enhanced, gamepads passed; `--scripttest`, `--sfxtest`, `--venuetest`
 (entersandman, 10 venues) pass; `--selftest` 31 FAILED (as expected);
 `tools/fuzz_seeds.sh`: 13 / 13 passed.
+
+## 2026-11-11 20:00 Owner's wave 2: camera aim, venue lighting, characters, crowd and stage (lead + 4 agents, GD10-039..042)
+
+Camera aim (GD10-039, lead, D43..D47). Cause of the shots at the stage
+floor / the members' feet: gh4's mocap and moment cameras (`lockto =
+<camera lock target> locktobone = bone_camera`, pos / quat 0) had no lock
+target, so they sat at the world origin (in Enter Sandman every other cut:
+cameras_moments, drummer_mocap01). Now the camera lock targets play their
+camera anims on the GH4_Camera skeleton: Band_PlayClip's clip `cameras`
+(moment_cam_lock_target_N at <zone>_<node>) and `drummercameras`,
+start_drummer_cameras (Drum_Andy_StandardLP_C01 / C02), the members' loop
+cameras (<loop>_c01 / _c02 on <member>_mocap_lock_target_01 / 02), the
+intro / encore transitions' SpecialCamera_PlayAnim (z_forum's
+ven_forum_camera_intro). A lock target playing nothing at a cut is not
+picked [I]. Also: CrowdOff on a camera entry hides the crowd for the shot
+(StructureContains: entry level only [C 0x822B4EA0]; close-ups were shot
+through the crowd cards), distfromlookat keeps a close-up's distance to the
+bone (mocap moves the members), CameraCuts_SpecialStepMove (audience
+shots). Conventions checked against the data: screenoffset x right / y
+down, FOV horizontal. Looked at: z_forum (intro, moments, Kirk / Rob / Lars
+close-ups, guitarist mocap, audience, long shots, Star Power), z_meadowlands,
+z_tushino, z_justice, z_donnington at -8, 14.5, 30, 45, 60, 75 s: every
+shot frames what its data frames; no floor / feet shots left. Not done: FOV
+pulses, hand-cam amplitudes, per-shot shadow casters (render.md "Open").
+
+Venue lighting (GD10-040, lighting agents, D50..D52):
+The light set is Function_824D7220 [C: the ranking's 0.299 / 0.587 / 0.114
+and 50000 live at 0x82031428..34, read only there; its VMX128 read with
+tools/vmx128.py]. What changed:
+- Light slots (D50): a point or spot light takes a vertex shader slot
+  (g_PointLight / g_SpotLight) only when its node has `vertexlight` (record
+  flag 0x10). A point light without it is lit as GH3's: into the SH (x
+  attenuation) and a directional slot (it can be the key light); a spot
+  light without it goes into the SH only. `noSH` (flag 0x20) keeps a light
+  out of the SH. Before: every point / spot light took a vertex slot.
+- Light groups (D51): an object has `lightgroup`, then `lightgroup2`,
+  `lightgroup3`, ... (823C9FD8 formats "lightgroup%d"); a light serves it
+  through any of them. Before: lightgroup only (crowd billboards, z_justice's
+  statue, z_mop's seats / stage, z_stone's drum riser missed lights).
+- Checked, no change: candidates ranked by luminance x intensity x the
+  group's intensity x the master intensity (SetLightMasterIntensity,
+  0x82848338, 1.0 and never set by a script) x attenuation, x 50000 for
+  `shadow` lights; directional lights: the first four take the slots, the
+  rest into the SH; ambient into c160 and SH0; prt coeff0..3 x intensity
+  into the SH only for objects with the SH bit; spot cones from hotspot /
+  field as full angles (8240AF18: angle x pi / 360) [all C].
+- Display gamma (D52): gh4's ramp (824558E8) is i x 256 x (0.6 x 0.5 +
+  0.7) = identity, clamped to 65280; the per-channel 1.8 values
+  (0x82849290) and 1.3 (0x82849284) are only cached, never applied [C].
+- No texture on z_forum carries a fetch-constant exp_adjust [C data]: no
+  hidden 2x on light maps.
+
+Looked at (venuetest shots, entersandman, offscreen): z_forum, z_meadowlands,
+z_tushino, z_justice, z_donnington; in-song z_forum 20..95 s and
+z_meadowlands 88..92 s. Close shots of the band and stage got brighter
+(z_forum mean luminance per shot e.g. 0.154 -> 0.200, 0.081 -> 0.125);
+wide shots stay much darker than the venue preview movies (e.g. z_forum's
+arena wide shot 0.012; the movies 0.29..0.43 on z_forum, 0.08..0.21 on
+z_meadowlands / z_tushino). Enter Sandman's camera notes pick
+Metal_BlueTint (note 114 CoolBlue): the blue cast is the original's
+profile, its contrast 1.106 about 0.5 crushes the dark frame further.
+
+Not found yet (GD10-040 stays open): why the scene is that dark. Ruled
+out: the gamma ramp, texture exp_adjust, the light set's slot rules, a
+master / group intensity. Left to check: the light boxes for ambient
+lights (Z_Forum_LFX_L_Forum_Room01: intensity 1.5 but attenend 12.25, so
+GH3's box rule gives it to almost nothing), SUB_824d7180's SH weights (no
+4/17 or 8/17 constant in the XEX), the light record's box (8240F560 calls
+822FAC18), the light volumes / smoke the movies show.
+
+Meadowlands 90 s spark ring: not seen with the current cameras (the 90 s
+shot is now James's close-up); the ring systems are at y = 11.06 m in the
+rig, 0.2..4 m add glows.
+
+Second pass on the darkness (no code): render.md "Venue brightness": every
+term multiplies at its data value; z_forum's arena 0.013 vs 0.28..0.35 in
+venue_forum.bik; the cause is still open (leads: the 3D pass's render target
+/ resolve, a CPU constant scaling lightmaps / vertex colours, gamma).
+
+Character details (GD10-041, characters agent, D60..D66): the talents now
+stand on their own skeletons (global.pak keeps `<skeleton>_original` as the
+entry's full name, `<skeleton>` as its short name; the band looked them up by
+the short name only, so every talent fell back to GH_Rocker_Male_original:
+James' and Rob's hands stretched into loops, the faces torn open by the
+facial clips: fangs, the goatee's inner shell under the chin, the zombies'
+stitches flying). Faces: facial_anim_loop reads the anim struct member's
+facial_anims (the song's `<anim_struct>_<song>[_alt]`, which lives in the song
+pak: Kirk, Lars, James, Rob get facial_anims_male_<name>), Band_ChangeFacialAnims
+(fa_type, ff / mf anims), Band_PlayFacialAnim (the singer's lip sync
+GHM_Singer_Male_<Song>_N). Band_PlayClip clip structs are read from the song
+pak too (before: no mocap clip ever played in a song). The drummer loops
+initial_drummer_anim (Drum_Lars_StandardLP_NoTempo; use_drummer_events 0)
+instead of retrying a stance loop each frame. Missing textures (Kirk's eyes,
+skin detail, environment maps: 368 over the talents) come from
+PAK/global_model_tex. The accessory ragdolls (hair, braids, dreads) run from
+PAK/global_rag_skel's .rag (LZSS + Havok 5.5.0, no reflection: read at fixed
+offsets). Face_deform / GH_Male_Deform parse (one wrong mirror index).
+--chartest now loads every locked talent on each allowed part (24), shoots
+face close-ups (faces_NN.bmp) and checks the face bones move; default song
+entersandman (slowride is not on the disc).
+
+Looked at: chartest face close-ups of James (3 outfits, vocals / guitar,
+idle face and lip sync), Kirk (3), Rob (3, bass / guitar), Lars (3), Lemmy,
+King Diamond; entersandman z_forum in-song shots 60..96 s. Before: stretched
+hands (James, Rob, zombies), mouths torn with fang teeth and a dark shell
+under James' chin, Kirk's eyes white, no idle facial anims, no mocap. After:
+faces as authored (closed / talking mouths, teeth, goatee), Kirk's brown eyes,
+hands normal, hair and braids swing.
+
+Not done: CAS characters (face / body deform records of the .skin trailer,
+Face_deform / GH_Male_Deform sliders: talents have no deform records),
+facialhacksource's exact meaning (clips applied as rotations absolute,
+translations offsets), hkUFloat8 max velocities (default 200), eye blinks
+are part of the facial clips (no separate blink driver found in scripts).
+
+Crowd and pyro (GD10-042, crowd agent, D70..D73):
+- The crowd cards are quad lists: gh4 mesh +0x84 is the primitive type, 4
+  (triangle list) or 13 (D3DPT_QUADLIST); the 15 crowd card meshes of the
+  zones are 13, all a multiple of 4 indices (most not of 3). Read as
+  triangle lists they drew as shards across the crowd areas (z_tushino /
+  z_justice's "sticks", z_forum's black floor pieces). Now (a, b, c),
+  (a, c, d) per quad.
+- The crowd's peds render into one atlas (crowd_base_viewport ->
+  crowd_atlas0.dds, 1024 x 1024 for six peds or fewer on Xenon), each ped in
+  its cell (HRViewportParams / ViewportParams rect, 4 x 2 cells of
+  256 x 512); every crowd model shares the textureasset, the card quads' uv0
+  pick a cell. Before: one 256 x 512 target per ped and only crowd1's
+  shown, stretched over the whole atlas (z_forum's big orange hands).
+- The peds face 180 + roty (obj_setorientation y), hfov crowd_ped_camera_fov
+  (21); before roty alone and 20.
+- Every zone has <zone>_crowd_models (guitar_crowd_data.qb: z_meadowlands,
+  z_Stone, z_Tushino, z_Justice, z_MoP, z_Donnington, Z_Forum; not
+  z_icecave), not only z_meadowlands.
+- Pyro: gh4's LightShow_NoteMapping notes 37 (generic), 35..20
+  (front / top / mid / back _1.._4) run the mapping's pyro_scripts.<type>
+  (Enter Sandman on z_meadowlands: 19). Before: none ran (GH3's note 56 /
+  pyro_script only).
+- SafeCreate / SafeKill work: IsInNodeArray / IsCreated read the node name
+  as the first unnamed item (Vm::positional skipped it as a flag key), so
+  every SafeCreate was a no-op.
+- A particleobject with a lifetime (z_meadowlands' Topsparks /
+  Topsparks_Flashes, 0.5 s) emits that long per Create and is gone after;
+  created at start, its emission is over under the loading screen. Before:
+  the 34 nodes emitted for ever (the ring of 17 4 m glows at y = 11.06 m
+  veiling shots); now they fire with Pyro_Moments_Top_1 (Enter Sandman
+  27.4 s, 42.1 s, ...), 0.1 s apart round the ring.
+
+Checked (entersandman, shots s-4000 / s14500 / s35500, all eight venues;
+z_forum s-4000 and AUDIENCE_R 35.5 s at 1280 x 720; z_tushino s-4000 with
+the atlas filled red to see the card shapes; z_meadowlands 27.5 / 28 s).
+Not done: the crowd's lighting (the peds read very dark: lightgroup crowd),
+update_crowd_model_cam's turn sign and apply_correction (AddCrowdModelCam,
+a native), Cheat_SnobCrowd, the ped camera's pitch (SetViewportCameraOrient
+takes the venue camera's full at / up), the base viewport's mipmaps.
+
+Gate (HEAD 0f3dbcd, engine/build/m10, headless, scratch XDG): walks boot,
+quickplay (load window worst 26.1 ms, 0 over 50), menus, qp_pause, enhanced,
+gamepads passed; `--selftest` 31 FAILED (as expected); `--scripttest`,
+`--sfxtest`, `--venuetest` (entersandman, 10 venues) pass;
+`tools/fuzz_seeds.sh` 13 / 13 passed.

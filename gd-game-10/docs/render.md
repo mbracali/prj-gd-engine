@@ -222,14 +222,38 @@ gd-game-04), with gh4's additions:
 - GD10_CAMLOG=1 logs each shot (array, entry, name); =2 also each aimed
   shot's authored framing, camera and bone.
 
+## Venue brightness (GD10-040, open)
+
+z_forum's arena wide shot (venuetest, Enter Sandman) reads mean luminance
+0.013 (0.043 without the screen effects) against 0.28..0.35 in the disc's
+venue_forum.bik preview (meadowlands 0.215, tushino 0.188). No single
+missing term found: D_3ChkBox_Pass0 (222 of z_forum's 394 meshes) is
+diffuse x material colour x lightmap x (SH + key N.L) x vertex colour +
+vertex lights [C microcode], and the data are dark (arena vertex colours
+0.07..0.24, the stage lightmap mean 0.185, the Periph SH0 about 0.5);
+Metal_BlueTint's bright_sat takes another ~3x. Ruled out [C]: ambient lights
+add colour x intensity to c160 / SH0 unscaled (824D78E4); the light record
+(824D7330, 8240F8F0) has no extra scale; light boxes (8240F560 reads bv_pos /
+bv_size / bv_trans / bv_rot, `global`; only Periph_Ambient01 has one on
+z_forum, 233 m); SUB_824d7180 handles directional / point / spot only (its
+k0 / k1 at 0x82C7ADC0 / ADC4 have no immediate writer: 4/17, 8/17 stay [I]);
+no exp_adjust in the vertex fetches or textures; no gamma sign bits in the
+textures; the identity gamma ramp (D52). Leads [I]: the 3D pass's render
+target / resolve (82431888 maps EDRAM formats to resolve textures, among
+them A16B16G16R16F 0x1A22AB60: an FP16 surface exists; which pass uses it
+not tied; no sRGB A8R8G8B8 constant found), a CPU-set constant scaling the
+lightmap or vertex colour (2x "overbright"), the frame read as gamma
+(frame^(1/2.2) gives 0.144 / 0.353). Measurements and debug knobs:
+agents/scratch/m10_dark_notes.md (git-ignored).
+
 ## Open
 
-- Why venues read darker than the preview movies (GD10-040): ambient light
-  boxes, SUB_824d7180's SH, the light record's box (822FAC18) not read.
+- Why venues read darker than the preview movies (GD10-040): see "Venue
+  brightness".
 - The values the screen effects' instances put in their constants (VMX128
   code): the shaders are read, the constants [I].
-- Meadowlands at 90 s (Enter Sandman): a ring of 17 scripted spark glows
-  (PH_RadialGlow_01, 0.2 -> 4 m, add, opaque) near the camera still veils
-  the shot.
-- The arena floor in front of z_Forum's stage draws black (crowd area).
+- The crowd peds read very dark (their light group; see "Venue brightness").
+- Camera FOV pulses (CameraCutsEffect_FOVPulse: ccam_pulsefinalfov's curve
+  units), the hand cam's amplitudes (ccam_sethandcamparams), shadow casters
+  per shot (cameracuts_shadowcasters) not applied.
 - The highway / gems / HUD do not use the library's templates (D15).
