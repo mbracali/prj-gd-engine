@@ -44,7 +44,7 @@ void usage() {
         "  --formattest         parse every pak on the disc and every file in it to its end\n"
         "  --selftest           check the data (song list, every chart), auto-play every chart\n"
         "  --uitest             boot through the menus, then start every flow state's screen in turn (headless)\n"
-        "  --walktest <walk>    play through GH3's own menus: quickplay, lose, back, boot, mouse, gamepads,\n"
+        "  --walktest <walk>    play through GH3's own menus: quickplay, lose, back, boot, mouse, gamepads, enhanced,\n"
         "                       stickyaxis, touch, options, practice, store, hub, venues, career, career_quickplay, pause, pausequit, coop, faceoff, proface,\n"
         "                       battle, boss, boss_devil, boss_helper, vault, cheats, glitches, attract (headless:\n"
         "                       SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy)\n"

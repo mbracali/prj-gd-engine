@@ -356,9 +356,9 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
             }
         return true;
     };
-    // A loading screen up for less than 2 s: the start waits for the rest
-    // (the port loads at once; GH3's own loading took that long and more,
-    // GD10-040), whichever script starts the song (restart_gem_scroller,
+    // A loading screen up for less than Vm::kLoadingHoldMs (0 since D23: the
+    // original has no minimum): the start waits for the rest,
+    // whichever script starts the song (restart_gem_scroller,
     // create_attract_mode, training) [I].
     vm.addNative("start_gem_scroller", [startScroller, &fe](Vm& v, ScriptRun& run, qb::Struct& p) {
         // The script's Menu_Music_Off first: the menu music stops as the song

@@ -56,10 +56,11 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
         steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
         steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});  // as quickplay's (D23)
         steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000});
         steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
         steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
-        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000});
+        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000, true});
         steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, "wait", C}, 20000});
         steps_.push_back({"song", {Op("wait", 3000), "key:Escape"}, 30000});
         steps_.push_back({"uistate_pausemenu", {"wait", "wait", "wait", "shot:pause_menu@", B}, 20000});
@@ -74,11 +75,15 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
         steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
         steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        // The prompt can come before the set list is reached (its loading
+        // screen gone at once since D23), its double bass pop-up then too.
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
         steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000});
         steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
         steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
-        // A song joins the set list (pad_choose), Start plays it (gh4's custom set list) [C scripts].
-        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000});
+        // A song joins the set list (pad_choose), Start plays it (gh4's custom set list) [C scripts];
+        // optional: with the prompt first (D23) the first set list visit already started it.
+        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000, true});
         steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, "wait", C}, 20000});
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 600000});
@@ -449,7 +454,8 @@ Walk::Walk(const std::string& name) : name_(name) {
             const std::string tag = "menus_" + std::to_string(i);
             for (Op o : {Op(C), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("shot:" + tag + "a@"), Op("wait"),
                          Op(C), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("shot:" + tag + "b@"), Op(B), Op("wait"),
-                         Op("wait"), Op("wait"), Op("wait"), Op("backto:main_menu_fs")})
+                         Op("wait"), Op("wait"), Op("wait"), Op("backto:main_menu_fs"), Op("wait"), Op("wait"), Op("wait"), Op("wait"),
+                         Op("shot:" + tag + "c@")})  // the main menu again (GD10-038: images left over a screen)
                 k.push_back(o);
             steps_.push_back({"main_menu_fs", k, 30000});
         }
@@ -473,13 +479,37 @@ Walk::Walk(const std::string& name) : name_(name) {
         // pop-up's Restart Now clicked: the game starts again in this
         // process, back on Enhanced Options (enhanced_backends_restarted).
         steps_ = boot;
-        steps_.push_back({"main_menu_fs", {"click:menu:main_menu_options_text"}, 10000});
+        // gh4's SETTINGS: the main menu's fifth item, four downs (ONLINE is skipped).
+        steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", D, D, D, D, C}, 10000});
         steps_.push_back({"options_select_option_fs", {"click:item"}, 20000});
         steps_.push_back({"port_enhanced",
                           {"check:audio_now=local", "click:row:audio_backend", "click:option:1", "check:asking=1", B, "check:asking=0",
                            "check:enhanced:audio_backend=miniaudio", "click:row:graphics_backend", "click:option:0", "check:asking=0",
                            "click:row:audio_backend", "click:option:2", "check:asking=1", "click:ask:0"},
                           10000});
+    } else if (name == "enhanced") {
+        // GD10-037 (universal-menus.md 1.2.2): main menu -> SETTINGS -> the
+        // help bar's ENHANCED. A fresh save's defaults (Easy Chords off, Max
+        // FPS 60, HDR none, local backends); rows change their values (Max FPS
+        // 120, Easy Chords on, Film Grain); Export User Files, settings changed,
+        // Load User Settings brings them back; gh4's cheats (AIR INSTRUMENTS on
+        // and off, GEM COLOR's dropdown) set the game's globals; Back -> SETTINGS
+        // -> main menu.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", D, D, D, D, C}, 10000});
+        steps_.push_back({"options_select_option_fs", {"wait", "wait", "click:item"}, 20000});
+        steps_.push_back({"port_enhanced",
+                          {"check:enhanced:easy_chords=off", "check:enhanced:max_fps=60", "check:enhanced:hdr=none", "check:enhanced:graphics_backend=local",
+                           "check:enhanced:audio_backend=local", "shot:enhanced_top@", "click:row:max_fps", "click:option:1", "check:enhanced:max_fps=120",
+                           "click:row:easy_chords", "check:enhanced:easy_chords=on", "click:row:film_grain", "click:option:2",
+                           "check:enhanced:film_grain=medium", "shot:enhanced_accessibility@", "dialog:savedir", "click:row:export",
+                           "set:enhanced:max_fps=60", "set:enhanced:easy_chords=off", "click:row:load_settings", "check:enhanced:max_fps=120",
+                           "check:enhanced:easy_chords=on", "click:row:cheat_AirInstruments_3", "check:global:cheat_airinstruments=1",
+                           "click:row:cheat_AirInstruments_3", "check:global:cheat_airinstruments=2", "click:row:cheat_GemColor_11", "click:option:1",
+                           "shot:enhanced_cheats@", B},
+                          10000});
+        steps_.push_back({"options_select_option_fs", {"wait", "wait", B}, 20000});
+        steps_.push_back({"main_menu_fs", {}, 20000});
     } else if (name == "enhanced_backends_restarted") {
         // After Restart Now: straight back on Enhanced Options (no boot
         // screens), on OpenAL, with the walk's settings; Back leads to GH3's
@@ -511,7 +541,9 @@ Walk::Walk(const std::string& name) : name_(name) {
                            "check:enhanced:easy_chords=off", "click:row:easy_chords", "check:enhanced:easy_chords=on", "shot:enhanced_accessibility",
                            "dialog:savedir", "click:row:export", "set:enhanced:max_fps=60", "set:enhanced:easy_chords=off", "click:row:load_settings",
                            "check:enhanced:max_fps=120", "check:enhanced:easy_chords=on", "click:row:load_progress", "set:enhanced:audio_offset=40", "set:enhanced:video_offset=-20", "click:row:calibrate_reset", "check:enhanced:audio_offset=0", "check:enhanced:video_offset=0",
-                           "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=1", "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=2",
+                           // gh4's AIR INSTRUMENTS cheat on (cheat_set_globals: 1) and off (2) [C data guitar_hero_cheats].
+                           "click:row:cheat_AirInstruments_3", "check:global:cheat_airinstruments=1", "click:row:cheat_AirInstruments_3",
+                           "check:global:cheat_airinstruments=2",
                            "rclick"},
                           10000});
         steps_.push_back({"options_select_option_fs", {"click:help:BACK"}, 10000});
@@ -1633,7 +1665,7 @@ int Walk::finish(FrontEnd& fe) const {
         std::printf("\nuitest: every screen was started through the flow manager\n");
         return 0;
     }
-    // Every loading screen stayed up 2 s (GD10-040).
+    // Every loading screen stayed up kLoadingHoldMs (none since D23: as the original).
     const double shown = fe.vm().minLoadingShownMs();
     if (shown >= 0) std::printf("walk: loading screens up at least %.0f ms\n", shown);
     if (shown >= 0 && shown < qs::Vm::kLoadingHoldMs - 50) {

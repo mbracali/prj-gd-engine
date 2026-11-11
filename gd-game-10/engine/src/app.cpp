@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "app.h"
 #include "data/band.h"
+#include "devaids/load_times.h"
 #include "data/pak.h"
 
 #include <SDL3/SDL.h>
@@ -158,6 +159,7 @@ private:
     std::shared_ptr<std::unique_ptr<Chart>> backdropChartSlot_;
     std::future<std::string> backdropWork_;
     std::future<void> warmup_;  // the shared library's first load (loadData)
+    std::future<void> sfxWarm_;  // global_sfx.pak read while the scripts load (GD10-034)
     uint64_t backdropT0_ = 0;
     void finishMenuBackdrop(bool wait);
     std::unique_ptr<Chart> backdropChart_;
@@ -179,6 +181,9 @@ private:
     std::unique_ptr<SongScreen> song_;
     std::unique_ptr<TextureCache> textures_;
     std::unique_ptr<FrontEnd> front_;
+    loadtimes::Span songLoad_;       // GD10-034: the loading screen up to the song's start
+    bool firstFrameMarked_ = false;  // GD10-034: "load: first frame"
+    double songLoadHold_ = -1;       // the loading screen songLoad_ began with
     bool devDebugMenu_ = false;  // Enhanced > Developer Debug Menu last frame (GD10-041)
     bool hadDevice_[2] = {}, unplugReported_[2] = {};  // controller loss mid-song (GD10-042)
     std::unique_ptr<SongScreen> outroSong_;  // the ended song's venue, drawn during GH3's end transition
@@ -1202,6 +1207,19 @@ bool App::loadData(const std::string& path) {
         return false;
     }
     disc_->loadNames();
+    // The menus' sound effects (global_sfx.pak, ~0.45 s to inflate) read on a
+    // worker while the scripts and resident textures load; the front end's
+    // Sfx::addPak then finds it cached (GD10-034).
+    {
+        const Disc* d = disc_.get();
+        sfxWarm_ = std::async(std::launch::async, [d] {
+            try {
+                Pak::shared(*d, "DATA/COMPRESSED/ZONES/global_sfx.pak.xen");
+            } catch (const std::exception& ex) {
+                SDL_Log("sfx warm-up: %s", ex.what());
+            }
+        });
+    }
     try {
         globals_ = std::make_unique<Globals>();
         globals_->load(*disc_);
@@ -1592,6 +1610,7 @@ void App::frame() {
         // A walk's sudden death ends: player 2's autoplay keeps its Death Drains.
         if (walk_ && rq.suddenDeath) setup.autoplayFires[1] = false;
         hitch::Scope hs("song start");
+        songLoad_.end("song request to the song's start (the loading screen up)");
         if (!info || !song_->start(*disc_, *globals_, *info, setup, autoplay, noFail, mixer_, err, textures_.get())) {
             SDL_Log("song: cannot start %s: %s", qbkey::name(front_->songRequest.song).c_str(), err.c_str());
             song_.reset();
@@ -1750,6 +1769,7 @@ int App::run() {
         std::fprintf(stderr, "%s: cannot start SDL: %s\n", app::kProgram, SDL_GetError());
         return 2;
     }
+    loadtimes::mark("SDL started");
     // Enhanced > Graphics Backend (GDCORE-010, render/core_backend.h): local
     // (gd10's OpenGL device) or a gd-engine-core backend, decided before the
     // window: SDL3 GPU and Vulkan need a window made for their API (in the
@@ -1798,6 +1818,7 @@ int App::run() {
         SDL_Quit();
         return 2;
     }
+    loadtimes::mark("window and renderer");
     if (!mixer_.open(error)) SDL_Log("audio: %s (continuing without sound)", error.c_str());
     if (const char* k = SDL_getenv("GD10_KEYS")) keys_ = std::make_unique<MenuKeys>(k);
     // Walks keep their own settings (enhanced.json, controllers.json), fresh
@@ -1822,6 +1843,7 @@ int App::run() {
 
     const std::string path = options_.dataPath.empty() ? loadRememberedPath() : options_.dataPath;
     if (!path.empty()) loadData(path);
+    loadtimes::mark("disc and scripts");
     if (disc_) {
         // The global pak's textures (the highway, HUD and menu sprites live there) [C data].
         textures_ = std::make_unique<TextureCache>(canvas_.renderer().device());
@@ -1834,6 +1856,7 @@ int App::run() {
         const int ig = textures_->loadPak(*disc_, "DATA/COMPRESSED/ZONES/z_in_game.pak.xen");
         SDL_Log("textures: %d from global.pak, %d from axel_1.pak, %d from z_in_game.pak (%.0f ms)", n, a, ig,
                 double(SDL_GetTicksNS() - t0) / 1e6);
+        loadtimes::mark("resident textures");
     }
     if ((!options_.song.empty() || !options_.walk.empty()) && !disc_) {
         std::fprintf(stderr, "%s: %s\n", app::kProgram, message_.empty() ? "no disc image given" : message_.c_str());
@@ -1863,8 +1886,11 @@ int App::run() {
         }
     } else if (disc_ && textures_ && !SDL_getenv("GD10_NO_FRONTEND")) {
         // GH3's own front end, from its boot script.
+        if (sfxWarm_.valid()) sfxWarm_.wait();
         front_ = std::make_unique<FrontEnd>(*disc_, *globals_, *textures_, canvas_.renderer().device());
-        if (!front_->start()) {
+        const bool started = front_->start();
+        loadtimes::mark("front end started");
+        if (!started) {
             SDL_Log("front end: guitar_startup did not start");
             front_.reset();
         } else {
@@ -1985,6 +2011,13 @@ int App::run() {
             SDL_Log("frame: %.1f ms at %.0f ms (%s)", double(spent) / 1e6, double(frameStart - startNs_) / 1e6,
                     front_ ? front_->flowState().c_str() : song_ ? "song" : "-");
         hitch::frameEnd(front_ ? front_->flowState().c_str() : song_ ? "song" : "-");
+        if (!firstFrameMarked_) firstFrameMarked_ = true, loadtimes::mark("first frame");
+        // GD10-034: a song's load, from its loading screen (create_loading_screen) to its start.
+        if (front_ && !song_) {
+            const double hold = front_->vm().loadingHoldUntil();
+            if (hold >= 0 && hold != songLoadHold_) songLoad_.begin();  // a new loading screen
+            songLoadHold_ = hold;
+        }
         loadCheck(hitch::lastWorkMs());
         if (spent < minNs) SDL_DelayNS(minNs - spent);
         if (stats) {
@@ -2004,6 +2037,7 @@ int App::run() {
     outroSong_.reset();  // its venue's GPU objects before the device
     if (backdropWork_.valid()) backdropWork_.wait();
     if (warmup_.valid()) warmup_.wait();
+    if (sfxWarm_.valid()) sfxWarm_.wait();
     backdrop_.reset(), backdropPending_.reset(), backdropChart_.reset();  // the menu backdrop's too
     ports_.reset();
     hooks_.reset();

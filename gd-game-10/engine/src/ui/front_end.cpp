@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/front_end.h"
+
+#include "devaids/load_times.h"
 #include "ui/natives_gh4.h"
 #include "data/disc.h"
 
@@ -224,10 +226,12 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     if (!songPlaying && !songOutro && !flow.paused) songClockMs += dtMs;
 
     // GD10_FLOWLOG=1: each flow state player 1 enters (ui_flow_manager_state[0]).
+    // Always: "load: flow <state>" with its wall / CPU time (GD10-034's load times).
     static const bool flowLog = SDL_getenv("GD10_FLOWLOG") != nullptr;
-    if (flowLog) {
-        const uint32_t st = states ? states->top() : 0;
-        if (st != lastFlowState_) lastFlowState_ = st, SDL_Log("flow: %s", qbkey::name(st).c_str());
+    if (const uint32_t st = states ? states->top() : 0; st != lastFlowState_) {
+        lastFlowState_ = st;
+        if (flowLog) SDL_Log("flow: %s", qbkey::name(st).c_str());
+        loadtimes::mark(("flow " + qbkey::name(st)).c_str());
     }
     // The Glitches, once the boot has loaded or created the save (the first main menu).
     if (!glitchesDone_) {

@@ -821,10 +821,9 @@ bool Vm::callName(ScriptRun& run, uint32_t name, qb::Struct& params, bool& resul
             return true;
         }
         run.frames.push_back(std::move(f));
-        // The port loads in a moment where the Xbox 360 took seconds, so the
-        // loading screen (its tip, its jiggling text) flashed by: as
-        // gd-game-01..03, it stays up at least 2 s of the VM clock (GD10-040)
-        // [I]. The wait goes before the song starts (the native
+        // A loading screen stays up at least kLoadingHoldMs of the VM clock
+        // (GD10-040 had 2 s as gd-game-01..03; 0 since D23, as the original's
+        // destroy_loading_screen [C script]). The wait goes before the song starts (the native
         // start_gem_scroller: the 360 loaded the song under the loading
         // screen, the intro starts once it is loaded), else before
         // destroy_loading_screen.

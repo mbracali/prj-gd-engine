@@ -196,3 +196,35 @@ What: the port opens no content folder (OpenContentFolder false), so
 GetContentFolderState returns contentfolderstate = free. Why: practice's
 section Back (ui_select_song_section_back) waits for free and never went
 back. Undo: ui/natives_flow.cpp GetContentFolderState.
+
+## D23. No minimum time on the loading screen [C script] (2026-11-11)
+
+What: Vm::kLoadingHoldMs is 0 (was 2 s, GD10-040 as gd-game-01..03).
+gh4's destroy_loading_screen has no timer: the loading screen goes when the
+loads are done [C script loading_screen.qb]. Why: the owner found the loads
+too long (GD10-034); the hold made every song and zone load 2 s or more.
+Undo: script/vm.h kLoadingHoldMs.
+
+## D24. PC wording in the localized strings (2026-11-11)
+
+What: every qs.pak string goes through pcstrings::pcQsText as it loads:
+whole-string rewrites (gamer cards / tags, sign-in, guest, the restart
+notice, the cheats warning without achievements), then rules: Xbox 360
+Controller -> gamepad, Headset -> headset, the console -> the system,
+storage device -> save location, the Dashboard -> free disk space; a string
+still naming Xbox LIVE, the other console's network or gamer profiles says
+"Online play is not available in GD-Engine." (gd-game-04's wording). Button
+glyphs stay (guitar fret colours). `--scripttest` fails on any localized
+string naming the console. Undo: script/pc_strings.cpp pcQsText, data/qs.cpp.
+
+## D25. gh4's cheats in the Enhanced menu [C script] (2026-11-11)
+
+What: Cheats & enhancers lists guitar_hero_cheats' entries that have
+options (METALLICA COSTUMES, ALWAYS DRUM FILL, ..., HYPERGUITAR / BASS /
+DRUMS, GEM / FLAME / STAR COLOR, VOCAL FIREBALL): a check box for two
+options, a dropdown for more. Choosing one does what
+ui_options_cheat_toggle does (guitar_hero_cheat_index, the user_options
+tag cheat_index<i>, cheat_set_globals, exclude_option,
+refresh_autokick_cheat) and unlocks the cheat (unlock_Cheat_<name>).
+EXTRA LINE 6 TONES (not_toggle) and Superuser are not rows. Undo:
+ui/port_enhanced.cpp gh4Cheats / setCheat.

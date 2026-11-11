@@ -14,11 +14,13 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <map>
 #include <string>
 #include <vector>
 
 #include "data/qbkey.h"
+#include "data/qs.h"
 #include "render/canvas.h"
 #include "script/vm.h"
 #include "ui/front_end.h"
@@ -43,12 +45,30 @@ struct Item {
     int cheatIndex = -1;
 };
 
-// GH3's cheats [C data: guitar_hero_cheats, scripts/guitar/menu/
-// menu_cheats.qb]: name_text and unlock_pattern, one strummed chord per
-// entry, a bit per fret: 0x10000 green, 0x1000 red, 0x100 yellow, 0x10 blue,
-// 1 orange [I: Hyperspeed's pattern 1 16 1 256 ... is its published code
-// Orange Blue Orange Yellow ...].
-std::vector<Item> gh3Cheats(qs::Vm& vm) {
+// gh4's cheats [C data: guitar_hero_cheats, scripts/guitar/menu/states/
+// layouts/ui_options_cheats.qb]: each entry's options (OFF / ON, or more:
+// METALLICA COSTUMES, HYPERGUITAR 1..5, GEM COLOR ...) set globals
+// (cheat_set_globals); the chosen one is guitar_hero_cheat_index[i] and the
+// user_options tag cheat_index<i>; unlock_Cheat_<name> unlocks it
+// [C script ui_options_cheat_toggle, ui_create_options_cheats]. The row's
+// name is the options' prefix ("HYPERBASS: OFF": HYPERBASS), the options
+// what follows. Entries without options (EXTRA LINE 6 TONES) are not rows.
+std::string valueText(const qb::Value* v) {
+    if (!v) return {};
+    if (v->type == qb::Type::String || v->type == qb::Type::WString) return v->str;
+    return qstr::text(v->type == qb::Type::QsKey ? v->key : uint32_t(v->i));
+}
+
+std::string titleCase(std::string s) {
+    bool up = true;
+    for (char& ch : s) {
+        ch = up ? char(std::toupper(static_cast<unsigned char>(ch))) : char(std::tolower(static_cast<unsigned char>(ch)));
+        up = ch == ' ' || ch == '&';
+    }
+    return s;
+}
+
+std::vector<Item> gh4Cheats(qs::Vm& vm) {
     std::vector<Item> out;
     const qb::Value* list = vm.global(qbkey::key("guitar_hero_cheats"));
     if (!list || !list->arr) return out;
@@ -56,28 +76,26 @@ std::vector<Item> gh3Cheats(qs::Vm& vm) {
     for (const qb::Value& c : list->arr->values) {
         ++index;
         if (!c.st) continue;
-        const qb::Value* nt = qs::Vm::param(*c.st, qbkey::key("name_text"));
-        const qb::Value* pat = qs::Vm::param(*c.st, qbkey::key("unlock_pattern"));
-        if (!nt || !pat || !pat->arr) continue;
-        std::string name = nt->str, key = "cheat_";
-        bool up = true;
-        for (char& ch : name) {
-            key += ch == ' ' ? '_' : ch;
-            if (up) ch = char(std::toupper(static_cast<unsigned char>(ch)));
-            up = ch == ' ';
-        }
-        std::string code;
-        for (const qb::Value& v : pat->arr->values) {
-            const int bits = int(v.number());
-            std::string chord;
-            for (const auto& [bit, letter] : {std::pair<int, char>{0x10000, 'G'}, {0x1000, 'R'}, {0x100, 'Y'}, {0x10, 'B'}, {1, 'O'}})
-                if (bits & bit) chord += letter;
-            code += (code.empty() ? "" : " ") + chord;
-        }
+        const qb::Value* opts = qs::Vm::param(*c.st, qbkey::key("options"));
         const qb::Value* var = qs::Vm::param(*c.st, qbkey::key("var"));
-        Item it{Kind::Cheat, key, name, var != nullptr,
-                "The original cheat, on or off (unlocked if it was not). Its code, in Options > Cheats > Enter Cheat, one strum "
-                "per chord (G R Y B O: green, red, yellow, blue, orange): " + code + "."};
+        if (!opts || !opts->arr || opts->arr->values.size() < 2 || qs::Vm::flag(*c.st, qbkey::key("not_toggle"))) continue;
+        std::string name = valueText(qs::Vm::param(*c.st, qbkey::key("name_text")));
+        std::vector<Option> options;
+        for (size_t k = 0; k < opts->arr->values.size(); ++k) {
+            const qb::Value& o = opts->arr->values[k];
+            std::string t = o.st ? valueText(qs::Vm::param(*o.st, qbkey::key("text"))) : std::string();
+            if (const size_t colon = t.find(": "); colon != std::string::npos) {
+                if (k == 0) name = t.substr(0, colon);
+                t = t.substr(colon + 2);
+            }
+            options.push_back({std::to_string(k), titleCase(t)});
+        }
+        const qb::Value* nm = qs::Vm::param(*c.st, qbkey::key("name"));
+        std::string key = "cheat_" + (nm ? nm->str : std::to_string(index)) + "_" + std::to_string(index);
+        Item it{Kind::Cheat, key, titleCase(name), true,
+                "The original cheat (unlocked if it was not), as Options > Cheats sets it: its choices set the same game "
+                "values the cheats screen does."};
+        it.options = std::move(options);
         it.cheatVar = var ? var->key : 0, it.cheatIndex = index;
         out.push_back(std::move(it));
     }
@@ -258,7 +276,7 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "is missing or not valid keeps its value."},
         {Kind::Button, "load_progress", "Load User Progress", true,
          "Choose a GD10-user-progress.json file to load. It replaces your save and takes effect at once; a file that is "
-         "not a GH3 save is refused."},
+         "not a Guitar Hero: Metallica save is refused."},
         {Kind::Check, "no_fail", "No Fail Mode", true, "The rock meter cannot fail you: every song plays to the end."},
         {Kind::Check, "autoplay", "Autoplay", true, "The game plays every note of a song by itself, without a miss."},
         {Kind::Choice, "hopo_mode", "Forgiving Hammer-ons & Pull-offs", true,
@@ -266,12 +284,11 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "it arrives plays by itself.",
          {{"original", "Original"}, {"forgiving", "Forgiving"}}},
         {Kind::Check, "dev_debug_menu", "Developer Debug Menu", true,
-         "Developer cheats: GH3's own debug switch from its development kit (enable_button_cheats), off on a retail disc. "
-         "With this on, the pause menu offers GH3's DEBUG MENU (Unlock All, Repeat Last Song, Skip Into Song, Character "
-         "Select, Play Credits...) and the developers' button cheats work. Some of its entries only show debug output the "
-         "port does not draw."},
+         "Developer cheats: the original game's own debug switch from its development kit (enable_button_cheats), off on "
+         "a retail disc. With this on, the developers' menus and button cheats work where the game offers them. Some of "
+         "their entries only show debug output the port does not draw."},
     };
-    for (Item& c : gh3Cheats(vm)) k.push_back(std::move(c));
+    for (Item& c : gh4Cheats(vm)) k.push_back(std::move(c));
     return k;
 }
 
@@ -323,7 +340,7 @@ public:
         }
         if (b == PortButton::Left || b == PortButton::Right) {
             const int dir = b == PortButton::Right ? 1 : -1;
-            if (it.kind == Kind::Choice) {
+            if (it.kind == Kind::Choice || it.kind == Kind::Cheat) {
                 if (!it.ready) return ctx_.sound("error"), true;
                 const int n = int(it.options.size());
                 int i = optionIndex(it);
@@ -332,7 +349,7 @@ public:
                     if (it.options[size_t(i)].ok) break;
                 }
                 setValue(it, it.options[size_t(i)].value);
-            } else if (it.kind == Kind::Check || it.kind == Kind::Cheat) {
+            } else if (it.kind == Kind::Check) {
                 if (isOn(it) != (dir > 0)) activate();
             }
             return true;
@@ -504,15 +521,18 @@ private:
         return !v.empty() && v != "none" && v != "off";
     }
     bool isOn(const Item& it) const {
-        if (it.kind == Kind::Cheat) {  // GH3's own global: 1 on [C script toggle_cheat]
-            const qb::Value* v = ctx_.fe.vm().global(it.cheatVar);
-            return it.ready && v && v->number() == 1;
-        }
+        if (it.kind == Kind::Cheat) return it.ready && optionIndex(it) != 0;  // a gh4 cheat: its first option is OFF / NORMAL
         return it.ready && ctx_.store.get(it.key) == "on";
     }
     // A choice of exactly two values is shown and used as a check box (gd01).
-    static bool isToggle(const Item& it) { return it.kind == Kind::Choice && it.options.size() == 2; }
+    static bool isToggle(const Item& it) { return (it.kind == Kind::Choice || it.kind == Kind::Cheat) && it.options.size() == 2; }
     int optionIndex(const Item& it) const {
+        if (it.kind == Kind::Cheat) {  // guitar_hero_cheat_index[i] [C script ui_options_cheat_toggle]
+            const qb::Value* a = ctx_.fe.vm().global(qbkey::key("guitar_hero_cheat_index"));
+            const size_t i = size_t(std::max(0, it.cheatIndex));
+            const int k = a && a->arr && i < a->arr->values.size() ? int(a->arr->values[i].number()) : 0;
+            return k >= 0 && k < int(it.options.size()) ? k : 0;
+        }
         const std::string v = ctx_.store.get(it.key);
         for (size_t k = 0; k < it.options.size(); ++k)
             if (v == it.options[k].value) return int(k);
@@ -522,8 +542,42 @@ private:
         ctx_.store.set(key, v);
         if (ctx_.changed) ctx_.changed(key);
     }
+    // A gh4 cheat's option k, as ui_options_cheat_toggle sets it (unlocked
+    // first, as entering its code does) [C scripts ui_options_cheat_toggle,
+    // ui_create_options_cheats].
+    void setCheat(const Item& it, int k) {
+        qs::Vm& vm = ctx_.fe.vm();
+        const qb::Value* list = vm.global(qbkey::key("guitar_hero_cheats"));
+        const size_t i = size_t(std::max(0, it.cheatIndex));
+        if (!list || !list->arr || i >= list->arr->values.size() || !list->arr->values[i].st) return;
+        const qb::Struct& c = *list->arr->values[i].st;
+        const qb::Value* opts = qs::Vm::param(c, qbkey::key("options"));
+        if (!opts || !opts->arr || k < 0 || size_t(k) >= opts->arr->values.size()) return;
+        qb::Value* idx = vm.globals().ensure(qbkey::key("guitar_hero_cheat_index"));
+        if (idx && idx->arr && i < idx->arr->values.size()) idx->arr->values[i] = qs::Vm::makeInt(k);
+        qb::Struct& tags = vm.globalTags[qbkey::key("user_options")];
+        const qb::Value* nm = qs::Vm::param(c, qbkey::key("name"));
+        if (nm) qs::Vm::set(tags, qbkey::key("unlock_Cheat_" + nm->str), qs::Vm::makeInt(1));
+        qs::Vm::set(tags, qbkey::key("cheat_index" + std::to_string(i)), qs::Vm::makeInt(k));
+        const qb::Value& option = opts->arr->values[size_t(k)];
+        if (option.st)
+            if (const qb::Value* g = qs::Vm::param(*option.st, qbkey::key("globals"))) {
+                qb::Struct p;
+                qs::Vm::set(p, qbkey::key("globals"), *g);
+                vm.run(qbkey::key("cheat_set_globals"), p);
+            }
+        qb::Struct p;
+        qs::Vm::set(p, qbkey::key("option_struct"), option);
+        vm.run(qbkey::key("exclude_option"), p);
+        vm.run(qbkey::key("refresh_autokick_cheat"), qb::Struct{});
+    }
     void setValue(const Item& it, const std::string& v) {
         if (!it.ready) return ctx_.sound("error");
+        if (it.kind == Kind::Cheat) {
+            setCheat(it, std::atoi(v.c_str()));
+            rebuild();
+            return ctx_.sound("select");
+        }
         for (const Option& o : it.options)
             if (v == o.value && !o.ok) return ctx_.sound("error");
         const std::string before = ctx_.store.get(it.key);
@@ -544,21 +598,6 @@ private:
             ctx_.sound("select");
             return;
         case Kind::Separator: return;
-        case Kind::Cheat: {
-            if (!it.ready) return ctx_.sound("error");
-            // GH3's toggle_cheat (its timing windows for Easy Expert / Precision
-            // Mode); a locked cheat is unlocked first (2: off) [C script menu_cheats.qb].
-            qs::Vm& vm = ctx_.fe.vm();
-            if (const qb::Value* v = vm.global(it.cheatVar); !v || v->number() <= 0) vm.setGlobal(it.cheatVar, qs::Vm::makeInt(2));
-            qb::Struct p;
-            qs::Vm::set(p, qbkey::key("cheat"), qs::Vm::makeKey(it.cheatVar));
-            qs::Vm::set(p, qbkey::key("index"), qs::Vm::makeInt(it.cheatIndex));
-            qs::Vm::set(p, qbkey::key("id"), qs::Vm::makeKey(qbkey::key("port_enhanced_cheat")));
-            vm.run(qbkey::key("toggle_cheat"), p);
-            rebuild();
-            ctx_.sound("select");
-            return;
-        }
         case Kind::Check:
             if (!it.ready) return ctx_.sound("error");
             store(it.key, isOn(it) ? "off" : "on");
@@ -566,6 +605,7 @@ private:
             ctx_.sound("select");
             return;
         case Kind::Choice:
+        case Kind::Cheat:
             if (!it.ready) return ctx_.sound("error");
             if (isToggle(it)) return setValue(it, it.options[optionIndex(it) == 1 ? 0 : 1].value);
             dropdown_ = focus_;
@@ -644,12 +684,12 @@ private:
         const Color nameC = f ? kFocused : locked ? kDim : kNormal;
         // A long name next to a dropdown is drawn smaller to fit before it.
         float nameH = 23;
-        const float room = (it.kind == Kind::Choice && !isToggle(it) ? kDdX0 : kCtrlX1 - (it.kind == Kind::Button ? 130 : 40)) - kNameX - 14;
+        const float room = ((it.kind == Kind::Choice || it.kind == Kind::Cheat) && !isToggle(it) ? kDdX0 : kCtrlX1 - (it.kind == Kind::Button ? 130 : 40)) - kNameX - 14;
         if (const float w = d.width(it.name, 23); w > room - (locked ? 30 : 0)) nameH = std::max(15.0f, 23 * (room - (locked ? 30 : 0)) / w);
         d.text(it.name, kNameX + o, cy + 1, nameH, nameC, 0x21);
         if (locked) d.warning(kNameX + o + d.width(it.name, nameH) + 10, cy);
         const Color ctrl = locked ? kDim : f ? kFocused : kNormal;
-        const Kind shown = isToggle(it) || it.kind == Kind::Cheat ? Kind::Check : it.kind;
+        const Kind shown = isToggle(it) ? Kind::Check : it.kind == Kind::Cheat ? Kind::Choice : it.kind;
         switch (shown) {
         case Kind::Check:
             d.checkBox(kCtrlX1 + o, cy, isToggle(it) ? optionIndex(it) == 1 && !locked : isOn(it), ctrl, locked ? kDim : kGold);

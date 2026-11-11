@@ -214,7 +214,10 @@ private:
     static constexpr uint32_t kDestroyLoading = qbkey::key("destroy_loading_screen");
 
 public:
-    static constexpr double kLoadingHoldMs = 2000;
+    // No minimum: gh4's loading screen goes as soon as the loads are done
+    // (destroy_loading_screen has no timer) [C script]; the port's 2 s hold
+    // (GD10-040, gd01..03's) made every load 2 s or longer (D23, GD10-034).
+    static constexpr double kLoadingHoldMs = 0;
     // LaunchEvent from the C side (e.g. the drummer's drumkick_left): a
     // script waiting in `Block anytypes = [...]` on that type goes on.
     void launchEvent(uint32_t type) { ++eventSeq_[type]; }
@@ -224,7 +227,7 @@ public:
     }
     // How long destroy_loading_screen was held back in all (walk checks).
     double loadingHeldMs() const { return heldLoadingMs_; }
-    // When a loading screen put up now has been up 2 s (-1: none is up).
+    // When a loading screen put up now may go (kLoadingHoldMs after it; -1: none is up).
     double loadingHoldUntil() const { return loadingShownMs_ >= 0 ? loadingShownMs_ + kLoadingHoldMs : -1; }
     // The shortest time a loading screen was up (-1: none was).
     double minLoadingShownMs() const { return minLoadingShownMs_; }

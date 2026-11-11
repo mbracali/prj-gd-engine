@@ -7,7 +7,7 @@ Read this first in a new session, then `PROGRESS.md`, `DECISIONS.md`,
 
 | What | Where |
 |---|---|
-| Disc image | `original_isos/Guitar Hero - Metallica (USA, Europe) (En,Fr,De,Es,It).iso` (git-ignored) |
+| Disc image | `original_isos/X360 - Guitar Hero - Metallica (USA, Europe) (En,Fr,De,Es,It).iso` (git-ignored) |
 | Rip | `gd-game-10/extracted/` (`tools/xdvdfs.py extract <iso> gd-game-10/extracted`; 1,470 files, 7.2 GB) |
 | Name table | `gd-game-10/extracted/names.tsv` (`tools/qbkey.py --table gd-game-10/extracted/names.tsv`; 98,346 names) |
 | Ghidra project | `gd-game-10/ghidra/ghm.gpr` (program `default.xex`) |
@@ -35,7 +35,7 @@ Check the binary is newer than your edits (`ls -la --time-style=+%T .../gd10`).
 ## Tests (exact invocations; every run under timeout, one at a time)
 
 ```sh
-ISO="$PWD/original_isos/Guitar Hero - Metallica (USA, Europe) (En,Fr,De,Es,It).iso"
+ISO="$PWD/original_isos/X360 - Guitar Hero - Metallica (USA, Europe) (En,Fr,De,Es,It).iso"
 B=gd-game-10/engine/build/devv/gd10
 export SDL_GAMECONTROLLER_IGNORE_DEVICES=0x1bad/0x0002 SDL_JOYSTICK_IGNORE_DEVICES=0x1bad/0x0002 \
        SDL_AUDIO_DRIVER=dummy SDL_VIDEO_DRIVER=offscreen XDG_DATA_HOME=/tmp/gd10_xdg
