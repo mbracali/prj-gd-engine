@@ -6,7 +6,7 @@ body:
     id: game
     attributes:
       label: Game
-      options: [gd-game-01 (Guitar Hero, PS2), All games / engine]
+      options: [Guitar Hero 1, Guitar Hero 2, Guitar Hero 80s, Rock Band 1, Game Launcher]
     validations:
       required: true
   - type: textarea

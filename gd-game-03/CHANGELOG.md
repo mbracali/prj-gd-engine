@@ -5,6 +5,15 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-11-10
+
+### Added
+- Enhanced: a new Accessibility section (before Cheats) with Easy Chords: a chord counts when you press any of its frets (#67). Off by default.
+
+
+### Fixed
+- Enhanced > Audio / Video Calibration with a large audio delay (wireless headphones, a TV soundbar): the highway now moves with the timing, as in gd01, so the notes reach the line when you hear them and register when played then (#69). With no calibration nothing changes.
+
 ## [1.1.6] - 2026-11-09
 
 ### Added

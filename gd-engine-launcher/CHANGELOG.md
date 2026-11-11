@@ -1,5 +1,21 @@
 # Guitar Dream Universal Launcher: changes
 
+## 1.1.14
+
+Highlights
+- Rock Band (gd-game-05) is in, 36% complete: Solo and Band Quickplay, Solo Tour and Band World Tour, Score Duel, Tug of War, practice, tutorials, the Rock Shop and the character creator, on guitar, bass, drums and vocals (microphone), 2 to 4 players. Still rough in places.
+- New Accessibility section in every game's Enhanced menu with Easy Chords: a chord counts when you press any of its frets (off by default).
+- Guitar Hero III: the career's encores, bosses and tier progress now work.
+- Linux: the launcher also comes as an AppImage that AppManager / AppImageUpdate can keep up to date.
+- Calibration with wireless headphones or a soundbar now works in GH2, Rocks the 80s and GH3.
+
+Details
+- gd01 1.1.12: mouse and menu tweaks (one highlight at a time, song hover, one Back in Enhanced, smooth boxes, sharper fonts), Disable Menu Transitions, the band name typed on the keyboard, True HDR in Steam Deck Gaming Mode through Vulkan.
+- gd02 1.1.14, gd03 1.1.7: Easy Chords; a large audio calibration moves the highway with the timing, as GH1.
+- gd04 1.1.6: the career encore / boss / tier completion, the keyboard's Require Strum: Off and Whammy key, Easy Chords, the calibration fix.
+- gd05 0.0.6: Rock Band with its original menus (start of the game, colours, the song list's cloth, loading icons, GAMEPADS on the main menu), keyboard play, Easy Chords.
+- Android: the launcher asks for the microphone the first time it starts (Rock Band's vocals). gd-engine-core: microphone input and an opt-in Vulkan HDR swapchain.
+
 ## 1.1.13
 
 Highlights

@@ -65,6 +65,8 @@ public:
     bool beginScene();
     void endScene(const PostFrame& frame);
     std::string hdrStatus() const;
+    // The device's HDR swapchain (Renderer::deviceHdrSurface).
+    int deviceHdrSurface(std::string& reason) const;
     Image readPixels();
     std::vector<std::string> compileAllShaders(int& programs);
 

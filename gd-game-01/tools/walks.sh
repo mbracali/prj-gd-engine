@@ -15,7 +15,8 @@
 # Walks (all by default): selftest logo_skip band quickplay mouse enhanced
 # gamepads gamepads_pad store. song_end and career_win are run by name (each plays a whole song). "band" runs first when another walk needs its save.
 # The universal menus (universal_mechanisms.md) are covered by: logo_skip and
-# band (1.1.1 skips, 1.1.2 band naming), mouse (1.1.3, credits skip),
+# band (1.1.1 skips, 1.1.2 band naming, band_typing), mouse (1.1.3, credits skip,
+# song row hover, one Back in Enhanced),
 # enhanced (1.2.2 Modes, old enhanced.json, HDR, backends), gamepads / gamepads_pad (1.2.1).
 set -uo pipefail
 bin="$(realpath "$1")"
@@ -77,6 +78,19 @@ walk_band() {
   ok=$(( $(has band "goto_screen nameprof") && $(has band "goto_screen main") && $(json "$(save band)/career.json" "d['profiles'][0]['name'] == 'CD'") ))
   result band "$ok" "logos, movie (red) skipped; band named CD with up / down, green and Enter"
   [ "$ok" = 1 ] && seed="$work/band/xdg"
+  walk_band_typing
+}
+
+# NAME YOUR BAND with the keyboard (#76): letters typed straight in (H is
+# also a player 2 key: here it is a letter), Backspace deletes the last one,
+# Enter accepts the name "ROCKH".
+walk_band_typing() {
+  local keep="$seed"
+  seed=""
+  run band_typing 31000 "1500:keyReturn,9500:keyReturn,13000:keyReturn,17500:red,20500:keyReturn,23500:keyReturn,26000:keyR,26200:keyO,26400:keyC,26600:keyK,26800:keyBackspace,27000:keyK,27200:keyH,27400:keyReturn"
+  seed="$keep"
+  result band_typing "$(( $(has band_typing "goto_screen nameprof") && $(json "$(save band_typing)/career.json" "d['profiles'][0]['name'] == 'ROCKH'") ))" \
+    "band name typed on the keyboard, Backspace deletes, Enter accepts ROCKH"
 }
 
 walk_quickplay() {
@@ -99,18 +113,55 @@ walk_song_end() {
 }
 
 # Mouse only: OPTIONS, Enhanced Settings, collapse MODES and CONTROLS, the Resolution
-# dropdown (720p), BACK in the help bar, Enhanced again, its own "< Back",
+# dropdown (720p), its own "< Back", Enhanced again, "< Back" again,
 # then Credits, skipped with green (1.1.1).
 walk_mouse() {
   needs_band
-  run mouse 24000 "3000:click640_554,5500:click520_376,8000:click200_190,8500:click200_252,9000:click480_455,9300:keyUp,9400:keyUp,9500:keyUp,9700:keyReturn,10500:click460_684,13000:click520_376,15500:click150_606,18000:click600_564,21000:green" GD01_SKIP_BOOT=1
+  run mouse 24000 "3000:click640_554,5500:click520_376,8000:click200_190,8500:click200_252,9000:click480_455,9300:keyUp,9400:keyUp,9500:keyUp,9700:keyReturn,10500:click150_606,13000:click520_376,15500:click150_606,18000:click600_564,21000:green" GD01_SKIP_BOOT=1
   local backs
   backs=$(grep -c "goto_screen options" "$work/mouse.log")
   result mouse "$(( $(json "$(save mouse)/enhanced.json" "d['internal_res'] == '720'") && backs >= 4 && $(has mouse "goto_screen credits") ))" \
-    "clicks through Options and Enhanced, a dropdown, help-bar BACK, < Back, credits skipped"
+    "clicks through Options and Enhanced, a dropdown, < Back twice, credits skipped"
   # The main menu's GAMEPADS pill opens GAMEPADS on a click (#51).
   run mouse_gamepads 6000 "3000:hover560_685,3500:click560_685" GD01_SKIP_BOOT=1
   result mouse_gamepads "$(has mouse_gamepads "goto_screen gamepads")" "a click on the help bar's GAMEPADS opens GAMEPADS"
+  walk_mouse_highlight
+  walk_mouse_song_hover
+  walk_enhanced_one_back
+}
+
+# The song list (#76): the pointer on Smoke on the Water (row 3) highlights
+# it while the selection stays on the first song (no scroll); Down gives the
+# highlight back to the selection, which moves one row (to row 1).
+walk_mouse_song_hover() {
+  run mouse_song_hover 6000 "3000:keyDown,3300:keyReturn,4500:hover450_542,5000:keyDown" GD01_SKIP_BOOT=1
+  local seq
+  seq="$(grep -o "ui: hover row -*[0-9]*" "$work/mouse_song_hover.log" | tr '\n' '|')"
+  result mouse_song_hover "$(( $(has mouse_song_hover "goto_screen qp_selsong") && $([ "$seq" = "ui: hover row 3|ui: hover row -1|" ] && echo 1 || echo 0) ))" \
+    "the hovered song row takes the highlight, a key gives it back ($seq)"
+}
+
+# Enhanced Settings has one Back (#76): its own "< Back"; the help bar shows
+# no BACK (the pointer where it was lights nothing; SELECT still lights), and
+# Esc still goes back to OPTIONS.
+walk_enhanced_one_back() {
+  run enhanced_one_back 8000 "3000:click520_376,5000:hover490_687,5500:hover240_687,6000:hover640_200,6500:keyEscape" GD01_SKIP_BOOT=1 GD01_SCREEN=options
+  local seq
+  seq="$(grep -o "ui: highlight [a-z ]*" "$work/enhanced_one_back.log" | tr '\n' '|')"
+  result enhanced_one_back "$(( $(has enhanced_one_back "goto_screen enhanced_settings") && $(grep -c "goto_screen options" "$work/enhanced_one_back.log") >= 2 && \
+    $([ "$seq" = "ui: highlight help bar|ui: highlight menu focus|" ] && echo 1 || echo 0) ))" \
+    "no BACK in Enhanced's help bar, < Back and Esc still go back ($seq)"
+}
+
+# One highlight at a time (#76): the mouse on the help bar's BACK takes the
+# highlight from the menu's focus; a key press gives it back; the mouse on a
+# menu entry keeps it there.
+walk_mouse_highlight() {
+  run mouse_highlight 6000 "3000:hover490_687,3600:keyDown,4200:hover490_687,4800:hover640_340" GD01_SKIP_BOOT=1 GD01_SCREEN=options
+  local seq
+  seq="$(grep -o "ui: highlight [a-z ]*" "$work/mouse_highlight.log" | tr '\n' '|')"
+  result mouse_highlight "$([ "$seq" = "ui: highlight help bar|ui: highlight menu focus|ui: highlight help bar|ui: highlight menu focus|" ] && echo 1 || echo 0)" \
+    "help bar hover mutes the menu focus; a key or a menu hover gives it back ($seq)"
 }
 
 # Enhanced: a 1.1.6 enhanced.json (old values, XInput / Rock Band toggles)
@@ -126,9 +177,53 @@ walk_enhanced() {
   seed="$keep"
   result enhanced "$(json "$(save enhanced)/enhanced.json" "d['color_grade'] == 'sepia' and d['internal_res'] == '448' and d['bloom'] == '3x' and d['fps_counter'] is True and 'rockband' not in d and 'xinput' not in d and d['hdr'] == 'none'")" \
     "Good Old Days preset applied over a migrated 1.1.6 file"
+  walk_no_transitions
+  walk_easy_chords
   walk_enhanced_hdr
   walk_calibration_reset
   walk_enhanced_backends
+}
+
+# Enhanced > Disable Menu Transitions (#76): off by default (OPTIONS opens after
+# the original's out and in anims, about 1 s); Enhanced turns it on (the last
+# row of PERFORMANCE & GRAPHICS) and saves it; the next start loads it and
+# OPTIONS opens at once.
+walk_no_transitions() {
+  local keys="" keep="$seed" i ms_on ms_off
+  run nt_default 6000 "3000:click640_554" GD01_SKIP_BOOT=1
+  for i in $(seq 0 38); do keys+="$((2500 + i * 60)):keyDown,"; done
+  run nt_set 7000 "${keys}5500:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings
+  seed="$work/nt_set/xdg"
+  run nt_on 6000 "3000:click640_554" GD01_SKIP_BOOT=1
+  seed="$keep"
+  ms_off="$(sed -n 's/.*ui: screen options up after \([0-9]*\) ms.*/\1/p' "$work/nt_default.log" | head -1)"
+  ms_on="$(sed -n 's/.*ui: screen options up after \([0-9]*\) ms.*/\1/p' "$work/nt_on.log" | head -1)"
+  result no_transitions "$(( $(json "$(save nt_set)/enhanced.json" "d['no_menu_transitions'] is True and not d.get('no_shaky_cam', False)") && ${ms_off:-0} >= 900 && ${ms_on:-9999} < 100 ))" \
+    "off by default (${ms_off:-?} ms), Enhanced saves it, the next start loads it (${ms_on:-?} ms)"
+}
+
+# Enhanced > Accessibility > Easy Chords (GDALL-039): off on a fresh save (an
+# export says false); Enter turns it on (saved) and Export writes it; from a
+# fresh save again, Load User Settings with that file turns it on. Rows: 39
+# downs reach Disable Menu Transitions, then ACCESSIBILITY, Easy Chords,
+# CHEATS & ENHANCERS, Export User Files, Load User Settings.
+walk_easy_chords() {
+  local s keys="" keep="$seed" i
+  s="$work/easy_chords_seed" && rm -rf "$s" && cp -r "$seed" "$s"
+  printf '{}\n' > "$s/gd-engine/gd01/enhanced.json"
+  seed="$s"
+  for i in $(seq 0 40); do keys+="$((2500 + i * 60)):keyDown,"; done  # down to Easy Chords
+  mkdir -p "$work/ec_default" "$work/ec_on"
+  run ec_default 8000 "${keys}5200:keyDown,5400:keyDown,5600:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings GD01_DIALOG="$work/ec_default"
+  run ec_on 8000 "${keys}5200:keyReturn,5600:keyDown,5800:keyDown,6000:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings GD01_DIALOG="$work/ec_on"
+  run ec_load 8000 "${keys}5200:keyDown,5400:keyDown,5600:keyDown,5800:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings \
+    GD01_DIALOG="$work/ec_on/GD01-user-settings.json"
+  seed="$keep"
+  result easy_chords "$(( $(json "$work/ec_default/GD01-user-settings.json" "d['easy_chords'] is False") && \
+    $(json "$(save ec_on)/enhanced.json" "d['easy_chords'] is True") && \
+    $(json "$work/ec_on/GD01-user-settings.json" "d['easy_chords'] is True") && \
+    $(json "$(save ec_load)/enhanced.json" "d['easy_chords'] is True") ))" \
+    "off by default, Enter turns it on and saves it, Export writes it, Load User Settings brings it back"
 }
 
 # Enhanced > Graphics Backend / Audio Backend (GDCORE-006): a value the build
@@ -203,6 +298,11 @@ walk_enhanced_hdr() {
     run enhanced_frame 5000 "" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings GD01_FIXED_CLOCK=16.6667
     hashes+=("$(md5sum < "$work/enhanced_frame/shot.bmp" | cut -c1-32)")
   done
+  # #80: True HDR in Steam Deck Gaming Mode (gamescope) on OpenGL says why and what to change.
+  printf '%s\n' '{"bloom":"original","hdr":"true"}' > "$s/gd-engine/gd01/enhanced.json"
+  run enhanced_hdr_gamescope 3000 "" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings GAMESCOPE_WAYLAND_DISPLAY=gamescope-0
+  result enhanced_hdr_gamescope "$(has enhanced_hdr_gamescope "hdr: mode true - True HDR unavailable: in Steam Deck Gaming Mode (gamescope) OpenGL has no HDR; set Graphics Backend to Vulkan")" \
+    "True HDR under gamescope on OpenGL: fallback reason names the Vulkan backend"
   seed="$keep"
   result enhanced_hdr_frame "$([ "${hashes[0]}" = "${hashes[1]}" ] && [ "${hashes[0]}" != "${hashes[2]}" ] && echo 1 || echo 0)" \
     "fixed frame: HDR None identical to no HDR key, Emulated differs"

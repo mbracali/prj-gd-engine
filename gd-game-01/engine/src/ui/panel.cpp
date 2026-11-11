@@ -172,7 +172,9 @@ void Panel::drawComponent(const SceneObject& o, const Mat4& viewProj, const Mat4
             ts.wrapWidth = u.width;
         }
         if (u.kind != UiObj::Kind::Button && u.caps) ts.capsMode = 2;
-        rgb = st.colors[size_t(state(o.name))];
+        UiResources::State drawn = state(o.name);
+        if (focusMuted_ && drawn == UiResources::Focused) drawn = UiResources::Normal;
+        rgb = st.colors[size_t(drawn)];
     } else {
         tmpl = o.text.get();
         fontName = tmpl->font;

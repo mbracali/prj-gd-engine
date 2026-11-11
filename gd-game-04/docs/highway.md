@@ -440,7 +440,8 @@ note_hit01 A38B2820, note_hit_blue_01 9E700D1C; Particle_Spark01 44E7B154; whamm
   input_offset move together on the 360 (xenon_gem_offset = xenon_input_offset = -66 ms: the
   display's lag, both gems and judge earlier than the audio); lag_calibration moves the input
   only [C script gem_scroller]. The port keeps both platform values out (D7), so gems, judge and
-  audio meet at the note time; Enhanced's video_offset moves the drawing only (checked
+  audio meet at the note time; Enhanced's video_offset moves the drawing only, its audio_offset the
+  judge and the drawing together (#69, as gd01: `SongSetup::drawOffsetMs`) (checked
   2026-11-05: slowride 30310 ms without autoplay, the red / yellow gems on their buttons).
 - Intro: `move_highway_2d` (released by move_highway_camera_to_default at highway_start_time,
   fastintro -2000 ms after current_starttime): the gem container's y starts at 720; each game

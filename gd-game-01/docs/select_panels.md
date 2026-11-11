@@ -585,3 +585,48 @@ General ordering **[C]**:
 - The exact parenting performed by FUN_001da100 in guitar finalize is not confirmed.
 - That one poll equals one vsync (60 Hz) is assumed for the spin and idle speeds.
 - The order of the career guitar list from FUN_0013d898 (campaign category 3) is not documented here.
+
+## 8. Port additions to the menus (#76, GD01-316)
+These are the port's, not the original's ([I]):
+- **One highlight at a time.** While the mouse points at a help bar button
+  (CONTINUE, BACK, GAMEPADS, UP / DOWN), that pill is the only highlight: the
+  menu's focused entry, the song list's blue row, a slider and the native
+  panels' focus (Enhanced Settings, GAMEPADS) draw as normal ones
+  (`Panel::setFocusMuted`, `NativePanel::setFocusMuted`, `UiSystem::helpHovered`).
+  A key or pad press, or the mouse on a menu entry, gives the highlight back to
+  the focus. In Enhanced Settings a hovered `< Back` / Export / Import does the
+  same to the focused row. Walk `mouse_highlight`.
+- **Help bar boxes.** `help_box_mid` / `help_box_corner` (32 x 32, SrcAlpha
+  blend plus the PS2's alpha test) are drawn without the alpha test, so the
+  rounded ends have a smooth edge instead of a staircase on large screens.
+- **Sharper Text & Sprites** treats font sheets as glyphs: x4 up to 512 px and
+  their anti-aliased edges tightened (`enhanceImage(..., glyphs)`), so menu text
+  stays crisp. Off by default (Original Feel), as before.
+- **Enhanced > Disable Menu Transitions** (`no_menu_transitions`, off by
+  default): every screen opens at once, as the universal menus already do,
+  without the original's 500 ms out and in anims. Walk `no_transitions`.
+
+The rest of #76 (GD01-317), also the port's ([I]):
+- **Song row hover.** The pointer on a song list row turns that row blue (the
+  highlight); the selection stays where it is, because GH1's list keeps the
+  selected row in one slot (`song_list.md` 4) and moving it on a hover would
+  scroll the list under the pointer. A click selects the row; a key or pad
+  press, the wheel, or the pointer leaving the rows gives the highlight back
+  to the selection (`UiSystem::hoverList_` / `hoverRow_`). Walk `mouse_song_hover`.
+- **One Back in Enhanced Settings.** Its own `< Back` (universal-menus.md
+  1.2.2.1) is the only Back: the screen's `(own_back TRUE)` keeps the
+  Universal Access Buttons from adding BACK to the help bar; red and Esc still
+  go back. Walk `enhanced_one_back`.
+- **Backend indicator.** `Graphics: <name>` / `Audio: <name>` sat on the line
+  above the FPS counter and ran over the help bar's SELECT pill (it read as
+  part of the help bar). It is now bottom right, one per line, right of the
+  help bar (smaller when a "could not start" line would reach it).
+- **Typing the band name.** On a text entry (NAME YOUR BAND, renaming) a
+  printable key the entry's letters include is typed: it becomes the letter
+  being chosen, after the one before it is taken (only if the player picked
+  it), so the screen shows what was typed and Enter accepts it. Backspace
+  deletes as red does (after typing, down to the first letter). Keys bound to
+  a keyboard control (frets 1-5 by default, Tab) keep their control, so the
+  green fret still takes a letter (universal_mechanisms.md 1.1.2); the player
+  2 hot keys (H J K L ...) are letters there. Deleting a band stays in Options,
+  as in GH1. Walk `band_typing`.

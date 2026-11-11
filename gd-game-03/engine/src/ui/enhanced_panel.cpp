@@ -78,6 +78,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"no_fail", {"off", "on"}},
         {"autoplay", {"off", "on"}},
         {"hopo_mode", {"original", "forgiving"}},
+        {"easy_chords", {"off", "on"}},  // Accessibility (GDALL-039): off, as the original
         {"dev_key_cheats", {"off", "on"}},
         {"audio_offset", {}, -300, 500},
         {"video_offset", {}, -300, 500},
@@ -382,6 +383,11 @@ const std::vector<Item>& items() {
          "Turns every effect off at once, the original game's own too: its depth of field, every effect above and the "
          "camera's shake. The options above keep their values for when you turn "
          "this off."},
+        {Kind::Separator, "", "", true, ""},
+        {Kind::Section, "accessibility", "ACCESSIBILITY", true, "Ways to make the game easier to play on any controller."},
+        {Kind::Check, "easy_chords", "Easy Chords", true,
+         "A chord counts when you press any of its frets (one or more of them, none outside the chord). Off, "
+         "as the original: every fret of the chord."},
         {Kind::Separator, "", "", true, ""},
         {Kind::Section, "cheats", "CHEATS & ENHANCERS", true, "Your user files, the original game's cheats and more ways to bend the rules."},
         {Kind::Button, "export", "Export User Files", true,

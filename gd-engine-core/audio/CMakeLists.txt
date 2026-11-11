@@ -40,7 +40,7 @@ endif()
 include(FetchContent)
 set(GDCORE_AUDIO_LICENSES "${GDCORE_AUDIO_RUNTIME_DIR}/gdcore-licenses")
 
-add_library(gdcore_audio STATIC src/output.cpp)
+add_library(gdcore_audio STATIC src/output.cpp src/input.cpp src/sdl_input.cpp)
 target_include_directories(gdcore_audio PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(gdcore_audio PUBLIC cxx_std_17)
 target_compile_definitions(gdcore_audio PUBLIC GDCORE_HAS_AUDIO=1)
@@ -57,7 +57,7 @@ target_link_libraries(gdcore_audio PRIVATE Threads::Threads)
 # ---- miniaudio (vendored single header, public domain / MIT-0) ----
 if(GDCORE_AUDIO_MINIAUDIO)
   set(GDCORE_MINIAUDIO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/miniaudio)
-  target_sources(gdcore_audio PRIVATE src/miniaudio_output.cpp src/miniaudio_impl.c)
+  target_sources(gdcore_audio PRIVATE src/miniaudio_output.cpp src/miniaudio_input.cpp src/miniaudio_impl.c)
   target_include_directories(gdcore_audio PRIVATE ${GDCORE_MINIAUDIO_DIR})
   # Device IO and the low-level API only (decoders, node graph and engine
   # off until a game needs them).
@@ -229,4 +229,9 @@ if(GDCORE_AUDIO_SELFTEST AND NOT ANDROID)
   target_link_libraries(gdcore_audio_selftest PRIVATE gdcore_audio SDL3::SDL3)
   set_target_properties(gdcore_audio_selftest PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${GDCORE_AUDIO_RUNTIME_DIR})
   set_target_properties(gdcore_audio_selftest PROPERTIES EXCLUDE_FROM_ALL ON)
+  # The capture backends (gd/core/audio/input.h) on their null / dummy devices.
+  add_executable(gdcore_audio_input_selftest tests/input_selftest.cpp)
+  target_link_libraries(gdcore_audio_input_selftest PRIVATE gdcore_audio SDL3::SDL3)
+  set_target_properties(gdcore_audio_input_selftest PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${GDCORE_AUDIO_RUNTIME_DIR})
+  set_target_properties(gdcore_audio_input_selftest PROPERTIES EXCLUDE_FROM_ALL ON)
 endif()

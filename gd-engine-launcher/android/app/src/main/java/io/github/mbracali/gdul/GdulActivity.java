@@ -2,8 +2,12 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 package io.github.mbracali.gdul;
 
+import android.Manifest;
 import android.content.ClipData;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.os.Bundle;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
@@ -19,6 +23,19 @@ public class GdulActivity extends SDLActivity {
     @Override
     protected String[] getLibraries() {
         return new String[] { "SDL3", "main" };
+    }
+
+    // The microphone (Rock Band's vocals): asked the first time the app
+    // starts, never again (the owner, 2026-11-09); a "no" leaves vocals
+    // without a voice until it is allowed in the system settings.
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        SharedPreferences prefs = getSharedPreferences("gdul", MODE_PRIVATE);
+        if (prefs.getBoolean("mic_asked", false)) return;
+        prefs.edit().putBoolean("mic_asked", true).apply();
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO }, 1);
     }
 
     // A disc image chosen in the file dialog: keep the right to read it after

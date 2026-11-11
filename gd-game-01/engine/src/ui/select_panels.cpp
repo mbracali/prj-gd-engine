@@ -848,6 +848,7 @@ public:
     bool buttonDown(int button, int player) override {
         (void)player;
         if (rows_.empty()) return false;
+        hoverButton_ = -1;  // a key or pad press: the highlight goes back to the focused row (#76)
         if (cal_.phase != 0) return calibButton(button), true;
         if (ask_ >= 0) return askButton(button), true;
         const Item& it = item(focus_);
@@ -1201,6 +1202,14 @@ private:
             {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", true,
              "The original game shakes the camera on its close-up shots of the band, like a handheld camera. Turn this "
              "on for steady close-ups."},
+            {Kind::Check, "no_menu_transitions", "Disable Menu Transitions", true,
+             "The original game swings the camera and fades between menu screens (half a second each way). Turn this on "
+             "to change screens at once."},
+            {Kind::Separator, "", "", true, ""},
+            {Kind::Section, "accessibility", "ACCESSIBILITY", true, "Ways to make the game easier to play on any controller."},
+            {Kind::Check, "easy_chords", "Easy Chords", true,
+             "A chord counts when you press any of its frets (one or more of them, none outside the chord). Off, "
+             "as the original: every fret of the chord."},
             {Kind::Separator, "", "", true, ""},
             {Kind::Section, "cheats", "CHEATS & ENHANCERS", true, "Your user files, the original game's cheats and more ways to bend the rules."},
             {Kind::Button, "export", "Export User Files", true,
@@ -1269,7 +1278,7 @@ private:
         bottomButton(b, x0, x1);
         const std::array<float, 4> c = b == 0 ? std::array<float, 4>{1, 0.45f, 0.45f, 1} : b == 1 ? std::array<float, 4>{1, 0.86f, 0.35f, 1}
                                                                                               : std::array<float, 4>{0.45f, 0.95f, 0.5f, 1};
-        const bool h = hoverButton_ == b;
+        const bool h = hoverButton_ == b && !focusMuted_;
         quad(x0 + o, kBtnY0, x1 + o, kBtnY1, {c[0], c[1], c[2], h ? 0.4f : 0.2f});
         frame(x0 + o, kBtnY0, x1 + o, kBtnY1, h ? 3.0f : 1.5f, c);
         text("impactor.font", b == 0 ? "< Back" : b == 1 ? "Export" : "Import", (x0 + x1) * 0.5f + o, (kBtnY0 + kBtnY1) * 0.5f + 1, 21,
@@ -1458,7 +1467,8 @@ private:
         const Item& it = item(r);
         const float h = rowHeight(it), top = rowY(r), cy = top + h * 0.5f, o = offset_;
         if (top < kListTop - 1 || top + h > kListBottom + 1) return;
-        const bool f = r == focus_;
+        // One highlight at a time (#76): a hovered Back / Export / Import or help bar button takes it.
+        const bool f = r == focus_ && hoverButton_ < 0 && !focusMuted_;
         if (it.kind == Kind::Separator) {
             quad(kListX0 + o, cy - 1, kCtrlX1 + 8 + o, cy + 1, {0.3f, 0.3f, 0.34f, 1});
             return;
@@ -1522,7 +1532,7 @@ private:
         const std::string v = host_.enhancedValue(it.key);
         for (size_t k = 0; k < it.options.size(); ++k) {
             float oy = ddTop_ + float(k) * kDdRow;
-            bool hot = int(k) == ddFocus_;
+            bool hot = int(k) == ddFocus_ && !focusMuted_;
             if (hot) quad(x0 + 2, oy + 2, x1 - 2, oy + kDdRow - 2, {1, 0.86f, 0.2f, 0.18f});
             const bool ok = it.options[k].ok;
             text("impactor.font", ok ? std::string(it.options[k].label) : std::string(it.options[k].label) + " (not available yet)", x0 + 12,

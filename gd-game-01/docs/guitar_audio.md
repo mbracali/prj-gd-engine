@@ -29,6 +29,17 @@ Sink slot offsets are `8n + 0xc` in vtable `0x2fd648`.
 StopSlip frees the IOP slip voice (`FUN_0000321c`): the guitar copy is silent until the next SlipTo, i.e. the
 next hit (or, after an opponent's section, the next own gem's time while still in hit state).
 
+### Letting go of a sustain (#77, GD01-315) [C]
+
+`_v18` (`0x265df0`) mutes when `0.0 < remaining` (`remaining` = gem ms + duration ms − now, from `FUN_00264018`):
+no release tolerance at all (GH2 has none either, gd-game-02 FINDINGS "Sustains"). The duration is the MIDI
+note's full length (`FUN_002619d0` → `FUN_0025a8b8`, nothing trimmed), and about half of GH1's Expert sustains run
+right up to the next gem (0–1 ms before it). So in the original, letting go of such a sustain (or pressing a
+higher fret) even a few ms before the end silences the guitar until the next strum: a short cut, by design.
+Not muted: moving after the sustain's end, strumming the next gem while still holding (the hit ends the sustain
+without `_v18`), or moving and strumming in the same frame (the copy's state is read once per frame).
+gd01 does exactly this; `--selftest` checks it ("sustain audio self-test").
+
 ## Channel volume (`FUN_002660c0`) [C]
 
 `vol * (+0xdc ? f3 : 1) * (+0xe0 ? common_attenuation : 1) * f4 * (+0x10)`

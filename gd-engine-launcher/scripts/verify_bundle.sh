@@ -8,15 +8,17 @@
 # in gd-engine-games/manifest.json. Fails loudly otherwise. build.sh runs it on every build it assembles, the
 # gdul release workflow on every archive before it is uploaded.
 #
-# Usage: gd-engine-launcher/scripts/verify_bundle.sh <build folder | .zip | .tar.gz | .apk> [linux|steamdeck|windows|macos|android]
+# Usage: gd-engine-launcher/scripts/verify_bundle.sh <build folder | .zip | .tar.gz | .apk | .AppImage> [linux|steamdeck|windows|macos|android]
 #   (the system is read from the manifest when not given; steamdeck is checked
 #   as linux: every ready game's module and libraries, gd01's DLSS too)
 # GDUL_REQUIRE_DLSS=1 (or CI=true): gd01's DLSS library must be in a Linux download.
 # CI=true: a module whose exports cannot be read (no nm/objdump) fails too.
+# An .AppImage (Linux): unpacked with its own --appimage-extract; its update
+# information and the .zsync next to it are checked too.
 set -euo pipefail
 shopt -s inherit_errexit nullglob
 here="$(cd "$(dirname "$0")" && pwd)"
-[ $# -ge 1 ] || { sed -n '4,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] || { sed -n '4,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 target="$1" os="${2:-}"
 if [ -t 1 ]; then G=$'\e[32m' R=$'\e[31m' Y=$'\e[33m' N=$'\e[0m'; else G="" R="" Y="" N=""; fi
 problems=0
@@ -34,7 +36,14 @@ if [ -f "$target" ]; then
   case "$target" in
     *.tar.gz|*.tgz) tar -xzf "$target" -C "$tmp" ;;
     *.zip|*.apk) python3 -I -m zipfile -e "$target" "$tmp" ;;
-    *) echo "verify_bundle.sh: $target: not a folder, .zip, .tar.gz or .apk" >&2; exit 2 ;;
+    *.AppImage)
+      # Its runtime unpacks it (no FUSE needed) into squashfs-root/.
+      cp "$target" "$tmp/check.AppImage" && chmod +x "$tmp/check.AppImage"
+      (cd "$tmp" && ./check.AppImage --appimage-extract >/dev/null) ||
+        { echo "verify_bundle.sh: $target: cannot be unpacked (--appimage-extract)" >&2; exit 1; }
+      os="${os:-linux}" appimage_info="$("$tmp/check.AppImage" --appimage-updateinformation 2>/dev/null || true)"
+      rm -f "$tmp/check.AppImage" ;;
+    *) echo "verify_bundle.sh: $target: not a folder, .zip, .tar.gz, .apk or .AppImage" >&2; exit 2 ;;
   esac
   case "$target" in *.apk) os="${os:-android}" ;; esac
   root="$tmp"
@@ -76,7 +85,18 @@ apk=""
 bundle="$(dirname "$games")"  # the download's top folder (macOS: the app's Resources)
 case "$os" in
   windows) nonempty "$bundle/$exe.exe"; nonempty "$bundle/SDL3.dll" ;;
-  linux) nonempty "$bundle/$exe"; nonempty "$bundle/libSDL3.so.0" ;;
+  linux) nonempty "$bundle/$exe"; nonempty "$bundle/libSDL3.so.0"
+    if [ "${target%.AppImage}" != "$target" ]; then
+      # The AppImage's own parts: the program as AppRun, desktop file, icon,
+      # and update information pointing at its .zsync on the GitHub releases.
+      [ "$(readlink "$bundle/AppRun" 2>/dev/null)" = "$exe" ] || fail "AppRun (not a link to $exe)"
+      nonempty "$bundle/gdul.desktop"; nonempty "$bundle/gdul.png"
+      want_upd="gh-releases-zsync|mbracali|prj-gd-engine|latest|gdul-*-x86_64.AppImage.zsync"
+      [ "$appimage_info" = "$want_upd" ] || fail "update information '$appimage_info' (expected '$want_upd')"
+      [ -s "$target.zsync" ] || fail "$(basename "$target").zsync next to it (AppImageUpdate needs it)"
+      [ ! -s "$target.zsync" ] || grep -aqx "Filename: $(basename "$target")" "$target.zsync" ||
+        fail "$(basename "$target").zsync is not for $(basename "$target")"
+    fi ;;
   macos) nonempty "$bundle/../MacOS/$exe" ;;
   android)
     # The APK itself, or a build folder with the APK in it.
@@ -187,6 +207,16 @@ for gi in "${game_infos[@]}"; do
           linux) one_of "$id: lib$lib.so.N" "$libs/lib$lib".so.[0-9]* ;;
           macos) one_of "$id: lib$lib.N.dylib" "$libs/lib$lib".[0-9]*.dylib ;;
           android) one_of "$id: lib$lib.so" "$libs/lib$lib.so" ;;
+        esac
+      done
+      nonempty "$d/licenses/FFmpeg-LICENSE.LGPL-2.1.txt" ;;
+    05)  # FFmpeg with the build suffix _gd05 (Bink videos, XMA sound effects) and its LGPL notice
+      for lib in avformat avcodec avutil; do
+        case "$os" in
+          windows) one_of "$id: ${lib}_gd05-*.dll" "$libs/${lib}_gd05"-*.dll ;;
+          linux) one_of "$id: lib${lib}_gd05.so.N" "$libs/lib${lib}_gd05".so.[0-9]* ;;
+          macos) one_of "$id: lib${lib}_gd05.N.dylib" "$libs/lib${lib}_gd05".[0-9]*.dylib ;;
+          android) one_of "$id: lib${lib}_gd05.so" "$libs/lib${lib}_gd05.so" ;;
         esac
       done
       nonempty "$d/licenses/FFmpeg-LICENSE.LGPL-2.1.txt" ;;

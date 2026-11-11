@@ -10,7 +10,9 @@ Read this before working in this folder. It applies to every AI coding agent (Cl
 - Read the guidelines in `docs/guidelines/` before working (`general_guidelines.md`, `universal_launcher.md`: the GAMEPADS screen, Enhanced menu, mouse / Enter / touch and packaging, the same in every game, modelled on gd-game-01; `universal-behaviors.md`), and the single backlog `docs/tasks/gd-backlog.md` (section of this game). Update the backlog at the start and at the end of every task.
 
 ## This folder
-**Rock Band** (Xbox 360): not started (Guitar Dream version 0.0.0, not ready to play). Before writing code, plan it with the owner and model the folder on `gd-game-02`.
+**Rock Band** (Xbox 360), wave 01 in progress (Guitar Dream version in `game-info.yaml`). The plan made with the owner is the kickoff, [docs/spikes/GD-GAME-05_KICKOFF.md](../docs/spikes/GD-GAME-05_KICKOFF.md): read all of it first. Then `agents/CONTEXT.md` (build, tests, clocks), `agents/PROGRESS.md`, `agents/DECISIONS.md`, `agents/OPEN_QUESTIONS.md` and `docs/`.
+
+The engine is a renamed copy of gd-game-02's (DECISIONS.md D1): addresses in comments inherited from gd02 are Guitar Hero II's until re-confirmed; Rock Band's are written `RB 0x82...`.
 
 See `docs/platform/adding-a-game.md` at the repository root.
 

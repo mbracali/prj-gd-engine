@@ -175,7 +175,7 @@ public:
         const auto items = leftItems();
         for (int p = 0; p < kBoxes; ++p) drawBox(p, items);
         for (size_t i = 0; i < items.size(); ++i)
-            if (items[i].kind == Field::Back || items[i].kind == Field::Export || items[i].kind == Field::Import) drawBottom(items[i], int(i) == focus_);
+            if (items[i].kind == Field::Back || items[i].kind == Field::Export || items[i].kind == Field::Import) drawBottom(items[i], int(i) == focus_ && !focusMuted_);
         drawRight();
         if (dropdown_ >= 0) drawDropdown();
     }
@@ -456,7 +456,7 @@ private:
         frame(x0 + o, y0, x1 + o, y1, 2, pc);
         auto focusOf = [&](Field f) {
             for (size_t i = 0; i < items.size(); ++i)
-                if (items[i].kind == f && items[i].player == p) return editPlayer_ < 0 && int(i) == focus_;
+                if (items[i].kind == f && items[i].player == p) return editPlayer_ < 0 && int(i) == focus_ && !focusMuted_;
             return false;
         };
         // "Player N": the on / off switch.
@@ -531,7 +531,7 @@ private:
             const RRow& row = rows[r];
             float x0, y0, x1, y1;
             if (!rrect(int(r), x0, y0, x1, y1)) continue;
-            const bool f = int(r) == rfocus_;
+            const bool f = int(r) == rfocus_ && !focusMuted_;
             const float cy = (y0 + y1) * 0.5f + 1;
             switch (row.kind) {
             case RKind::Heading:
@@ -603,7 +603,7 @@ private:
         const std::string cur = value(dropItem_);
         for (size_t k = 0; k < opts.size(); ++k) {
             const float y0 = ddY_ + float(k) * kDdRow, cy = y0 + kDdRow * 0.5f + 1;
-            const bool f = int(k) == ddFocus_;
+            const bool f = int(k) == ddFocus_ && !focusMuted_;
             if (f) quad(ddX0_ + 2 + o, y0 + 1, ddX1_ - 2 + o, y0 + kDdRow - 1, {1, 0.86f, 0.2f, 0.2f});
             if (opts[k].value == cur && opts[k].ok) tick(ddX0_ + 8 + o, cy, kOn);
             text("impactor.font", fit(opts[k].label, 16, ddX1_ - ddX0_ - 40), ddX0_ + 30 + o, cy, 16, !opts[k].ok ? kDim : f ? kFocused : kNormal, 0x21);

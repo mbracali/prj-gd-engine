@@ -32,3 +32,9 @@ Tips for Gaming Mode
   (Guitar Hero II at once, back to Steam when you quit it). "--help" lists
   every option.
 - The launcher stays a window; in Gaming Mode Steam shows it full screen.
+- True HDR (Steam Deck OLED, Guitar Hero): in Gaming Mode turn HDR on in
+  Steam > Settings > Display, then in the game's Enhanced Options set HDR to
+  True HDR and Graphics Backend to Vulkan, and restart the game (OpenGL has
+  no HDR in Gaming Mode). In Desktop Mode, Plasma's HDR must be on
+  (System Settings > Display & Monitor). If it falls back to Emulated, the
+  game's log (gd01.log) and the HDR row's help say why.

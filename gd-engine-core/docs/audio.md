@@ -132,3 +132,37 @@ gd01 sets `nullDevice` when SDL's current audio driver is `dummy`, so
 3. Its null device in `gdcore_audio_selftest`'s run, this file's tables, and
    the Enhanced menu's id list (universal-menus.md). Games need no change.
    Out-of-tree backends can use `registerBackend()` instead.
+
+## Input (capture): microphones (GDCORE-011)
+
+`audio/include/gd/core/audio/input.h`: `gd::core::audio::Input`, the
+counterpart of `Output`, added for Rock Band's vocals (gd-game-05; owner,
+2026-11-09: one capture interface in the core so every Rock Band game reuses
+it).
+
+- `Input::open(InputSpec, PushCallback, error)`: `InputSpec` is the rate,
+  the channels (1 for a microphone), a frames hint, `nullDevice` (headless)
+  and `device` (an id from `inputDevices()`, empty = the default recording
+  device). The callback gets interleaved float frames on the backend's
+  thread. It opens paused; `start()`, `pause()`, `close()` (safe twice),
+  `spec()`, `latencyMs()`, `id()`, `name()` as the outputs'.
+- `createInput(id, error)`, `inputBackends()`, `availableInputs()`,
+  `inputDevices(id)` (what a GAMEPADS "Mic selection" lists),
+  `registerInputBackend()`.
+- No exceptions across it; a game falls back to "no microphone" and says so.
+
+| id | Library | How it records | Null device |
+|---|---|---|---|
+| `sdl3` | SDL3 (the core's dependency) | an `SDL_AudioStream` on the recording device; its put callback pushes the frames | SDL's `dummy` driver (silence in real time) |
+| `miniaudio` | miniaudio 0.11.25 (vendored) | an `ma_device` of type capture, f32 | a context with only `ma_backend_null` |
+
+OpenAL Soft and FAudio have no capture path the core uses: OpenAL's capture
+extension and XAudio2's lack of one make SDL3 and miniaudio the two
+backends. Android: SDL3 records through its Java layer and needs the
+`RECORD_AUDIO` permission in the APK (gd-game-05 OPEN_QUESTIONS Q2).
+
+Test: `gdcore_audio_input_selftest` (built with
+`--target gdcore_audio_input_selftest`): every capture backend on its null
+device: nothing pushed before start, frames in real time after it, nothing
+while paused, nothing after close, close twice, an unknown id fails;
+`--device` uses the real default recording devices.

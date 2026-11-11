@@ -52,7 +52,7 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
     vm.addNative("CheckForSignIn", [](Vm&, ScriptRun&, qb::Struct& p) { return Vm::flag(p, K("local")); });
     for (const char* n : {"GameProfileSettingsFinished", "StartGameProfileSettingsRead", "RefreshSigninStatus", "ReAcquireControllers",
                           "ResumeControllerChecking", "UnBindGuitarControllerStatus", "SetInput", "SetMenuAutoRepeatTimes",
-                          "StartRendering_C", "StopRendering_C", "SetScreen", "RegisterAtoms", "DeRegisterAtoms", "UpdateAtoms",
+                          "StartRendering_C", "StopRendering_C", "SetScreen",
                           "PrintScriptInfo", "UnPauseSpawnedScript", "OnExitRun", "SetSpawnInstanceLimits", "ClearEventHandlerGroup",
                           "ResetEventHandlersFromTable", "RequireParams", "EnableUserMusic", "MassiveInit", "English",
                           "ClearDataBuffer", "SetRandomSeeds", "SetSlomo", "LockDSP", "UnLockDSP", "KillCamAnim", "PlayIGCCam",

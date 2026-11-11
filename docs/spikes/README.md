@@ -23,6 +23,7 @@ newer one on the same topic replaces or merges.
 | [study_lg_tv.md](study_lg_tv.md) | 2026-10-28 | Sideloading works (Developer Mode + `ares-install`, or Homebrew Channel). A native SDL build is 2 to 4 weeks; no store route. Merges the first LG study. | candidates in file |
 | [study_samsung_tv.md](study_samsung_tv.md) | 2026-10-28 | Sideloading only as a WASM web app, with a per-TV certificate; no native route; the disc is out of the sandbox's reach. 2 to 3 months. Not now. Merges the first Samsung study. | candidates in file |
 | [study_shader_ports.md](study_shader_ports.md) | 2026-10-28 | Worth it selectively: GH2 bloom/grade/DOF, GPU flare test and crowd cards fit GH1 (days each); normal/spec/env maps lack data. Proposes a shared `gd-engine-fx` library. | candidates in file |
+| [study_additive_music_menu.md](study_additive_music_menu.md) | 2026-11-10 | Do it (#58): a shared song library in gd-engine-core reads every installed disc in memory; each game keeps its list and adds the other games' songs in a separate section (GH3: DOWNLOADS tab), quickplay only, host rules, source HOPOs. Waves: GH1+GH2+Encore, then GH3, then RB. About 11 to 13 h of agent time. | GDALL-042 |
 
 Each study ends with "Backlog candidates"; the IDs are given in
 [../tasks/gd-backlog.md](../tasks/gd-backlog.md) once the items are added there.

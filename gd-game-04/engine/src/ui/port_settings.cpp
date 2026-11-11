@@ -60,6 +60,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"autoplay", {"off", "on"}},
         {"dev_debug_menu", {"off", "on"}},
         {"hopo_mode", {"original", "forgiving"}},
+        {"easy_chords", {"off", "on"}},  // Accessibility (GDALL-039): off, as the original
         // Enable Cut Content removed (owner 11-05, GD04-110): off is its only
         // value, so a saved "on" is dropped on load and a set to on refused.
         {"cut_content", {"off"}},
