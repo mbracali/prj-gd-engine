@@ -138,3 +138,61 @@ num_loops). The busses were not at 0.
   "Jogos Música": exit 0 after 25.1 s. Not tested: a Deck, an Android device,
   macOS (not built).
 
+
+## 2026-11-11 08:00 -> 10:00 In-song visuals and judging (GD10-010)
+
+About 2 h of agent time. A Quickplay song is now drawn and played as gh4
+draws it: the venue, gh4's highway (skin, gems, now-bar buttons, tails),
+Star Power, the HUD (GH3's widgets with gh4's images).
+
+Causes of what was broken:
+- **No venue**: gh4 scenes changed three things (0xD0-byte materials,
+  0x90-byte mesh records, triangle lists instead of strips) and use 8 /
+  1_5_5_5 / 5_6_5 textures; a pak whose one scene failed lost all its
+  textures (global.pak: -1). docs/formats.md "Scenes", "Textures".
+- **Debug highway (D13)**: gh4's gems, buttons and tails are not sprites
+  but script-built materials (guitar_material.qb: grey textures of
+  z_in_game's basic_gems.tex tinted by the gem set's colours), the buttons
+  from button_up_models, the skin from the character's CAS highway; z_in_game
+  (linked by every venue) was never loaded. D15, D16.
+- **Judging**: the chart's 0x40 is "this note is a hammer-on" (the port
+  XORed it with its own natural rule, flipping nearly every HOPO); an open
+  note left no last-hit value, so a fretted HOPO after it could not be
+  tapped; two entries at one time are one chord (Master of Puppets hard).
+  D9 [C 0x8214EE70].
+- **Colours**: material words map 1:1 to GH3's (blend, alpha cut-off,
+  flags) [C data]; vertex colours span 0..255 (no 2x overbright); the
+  original shaders (MATL v3, now read) draw black with GH3's constants
+  (their lights moved to c176 / c192 / c248..), so the approximation draws.
+
+Judging rules from the XEX [C]: GuitarInputLogicInit 0x82141338 reads the
+same globals as GH3 (hammer_time_early / late 0.1, strum_before_forming,
+form_before_strumming, split_late_percent, star_power_sequence_bonus,
+ignore_strums_after_hammers, disallow_tolerance_strums); check_time_early
+0.116 / late 0.1 (guitar_tweaks.qb, per player through playerinfo);
+fretbar_update_hammer_on_tolerance_CFunc 0x8218D6B0 = GH3's formula;
+ProcessHammerOns 0x8214EE70 (jam songs) = the chart's HOPO rule. Still
+GH3's [I]: the multiplier steps, Star Power fill / drain, whammy.
+
+Verified (engine/build/gfx/gd10, headless, scratch XDG):
+- `--formattest`: .scn 46 / 46, .tex 2064 / 2069, .mdl 11 / 14 decode.
+- `--venuetest` (z_forum, entersandman): 394 meshes, 147 textures, 0 missing,
+  60 / 240 fps identical, shots looked at (arena, crowd, stage lit).
+- `--selftest`: 31 failures = 10 Death Magnetic DLC songs without audio
+  (x3) + jamsession; every disc chart autoplays (strum and tap passes).
+- `--song entersandman --autoplay` shots at 10 / 25 / 50 / 79 / 82 / 90 s
+  looked at: venue, highway skin, gems, stars, tails, Star Power (cyan
+  gems, lightning, x8), multiplier, rock meter.
+- `GD10_KEYBOT=1 --song entersandman` (real key events through the
+  keyboard bindings, Down strums): 98 of the first 100 notes hit.
+- `--walktest quickplay` passes; `GD10_FRAMELOG=1`: no frame over 25 ms
+  in the song; under play_song one 335 ms frame ("menu scene: z_tushino",
+  the menu scene's synchronous zone load) and one 92 ms (the venue's
+  upload on the main thread).
+
+Not done: the band, crowd and stage characters (gh4 .ske / skinned .skin /
+.ska not decoded: "ske: bone count"); gh4's own HUD (desc hud_1g +
+AttachHudWidget natives, see OPEN_QUESTIONS 4); the original shaders'
+light constants; drums (0x2000, Expert+ double kick, OPEN_QUESTIONS 5);
+the stage floor near the camera draws white under the approximation in
+z_Meadowlands; gamepads / guitars verified only by the input selftest.
