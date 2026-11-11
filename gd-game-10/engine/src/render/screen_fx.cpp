@@ -733,7 +733,7 @@ bool ScreenFx::pollSysTextures() {
     gfx::TextureId* slot[3] = {&noiseTex_, &vignetteTex_, &inkTex_};
     for (size_t k = 0; k < 3; ++k) {
         if (!t[k].key || t[k].levels.empty()) {
-            if (k != 1) SDL_Log("screen fx: sys texture %zu missing", k);
+            if (k != 1) SDL_Log("screen fx: sys texture %d missing", int(k));
             continue;
         }
         const std::vector<gfx::TexLevel> lv = t[k].texLevels();

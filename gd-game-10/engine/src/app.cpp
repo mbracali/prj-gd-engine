@@ -313,7 +313,7 @@ void App::walkKeyBot() {
         if (envBot && !walk_) {
             key(SDLK_DOWN, true), key(SDLK_DOWN, false);
             if (b.next % 100 == 0)
-                SDL_Log("keybot: %zu notes pressed, %d hit, %d missed, %d overstrums, score %d", b.next, m.player(0).stats().notesHit,
+                SDL_Log("keybot: %d notes pressed, %d hit, %d missed, %d overstrums, score %d", int(b.next), m.player(0).stats().notesHit,
                         m.player(0).stats().misses, m.player(0).stats().overstrums, int(m.player(0).stats().score));
         }
     }
@@ -481,7 +481,7 @@ void App::addVenueScriptCalls() {
     // current anim [C scripts Band_PlayAttackAnim, Band_PlayResponseAnim,
     // battle_trigger_on; owner 11-04 doc 2: the band never reacted].
     if (auto prevExists = vm.native(qbkey::key("CompositeObjectExists")))
-        vm.addNative("CompositeObjectExists", [this, venueSong, prevExists](Vm& v, ScriptRun& r, qb::Struct& p) {
+        vm.addNative("CompositeObjectExists", [venueSong, prevExists](Vm& v, ScriptRun& r, qb::Struct& p) {
             const qb::Value* n = Vm::param(p, qbkey::key("name"));
             // `CompositeObjectExists {$Guitarist}`: the name as a bare key (Hide_Band) [C scripts].
             for (const qb::Item& it : p.items)
