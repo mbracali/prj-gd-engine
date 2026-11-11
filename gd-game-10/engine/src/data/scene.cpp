@@ -266,12 +266,23 @@ Scene parseGh4(const View& v, const uint8_t* data, size_t end, Kind kind) {
     const size_t oOrder = oPtr + 4 * size_t(nm);
     need(H(0x70) == 0x90 && H(0x74) == oGeom && H(0x8C) == oPtr && H(0x48) == oOrder, "gh4 scene header offsets");
     need(B + oOrder + 4 * size_t(nm) <= end, "scene tables past the end");
+    // A scene without meshes (GO_NoHousing01.mdl: one sector, no geom
+    // record in the file) has nothing to draw [C data].
+    if (nm == 0) return sc;
+    // The geom records run from +0x74 to +0x7C: one per sector with meshes,
+    // the first ones (a flare .mdl: 2 sectors, 1 geom) [C data].
+    const size_t ngeom = H(0x7C) > oGeom ? (H(0x7C) - oGeom) / 0x60 : ns;
     uint32_t total = 0;
     for (uint32_t k = 0; k < ns; ++k) {
         const size_t so = B + 0x90 + 0x60 * size_t(k), go = B + oGeom + 0x60 * size_t(k);
         Sector sec;
         sec.key = v.u32(so + 4), sec.flags = v.u32(so + 8), sec.index = v.u32(so + 0xC);
         sec.sphere = v.floats<4>(so + 0x40);
+        if (k >= ngeom) {
+            sec.firstMesh = total, sec.meshCount = 0;
+            sc.sectors.push_back(sec);
+            continue;
+        }
         sec.bmin = v.floats<3>(go + 0x10), sec.bmax = v.floats<3>(go + 0x20);
         sec.firstMesh = v.u32(go + 0x48), sec.meshCount = v.u32(go + 0x4C), sec.geom5c = v.u32(go + 0x5C);
         need(sec.firstMesh == total && sec.meshCount <= nm - total, "geom mesh range");
