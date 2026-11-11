@@ -195,7 +195,9 @@ def disassemble(code, names):
             line.append(repr(val))
         elif op in (0x47, 0x48, 0x49):
             line.append("%s(+%d)" % (name, val))
-        elif op in (0x4A, 0x4E):
+        elif op == 0x4E:
+            line.append("qs:%08x" % val)
+        elif op == 0x4A:
             try:
                 r = qb.Reader(val)
                 items = r.struct(0)

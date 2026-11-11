@@ -14,7 +14,7 @@ class Disc;
 // text with a BOM, one line per string: `<8 hex digits key> "<text>"`
 // (docs/formats.md, "QS") [C data]. QB values of type 0x1C and the script
 // token 0x4E name a string by that key.
-namespace qs {
+namespace qstr {
 
 // Loads the English table (once; later calls add nothing). Never throws:
 // a missing pak leaves the table empty (logged).
@@ -29,4 +29,4 @@ size_t size();
 // with its text, so the UI code reads them as GH3's strings.
 void resolve(qb::Value& v);
 
-}  // namespace qs
+}  // namespace qstr

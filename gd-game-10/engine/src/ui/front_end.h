@@ -11,6 +11,7 @@
 #include "input/input.h"
 #include "script/vm.h"
 #include "ui/natives_flow.h"
+#include "ui/ui_states.h"
 #include "ui/ui_system.h"
 
 class Canvas;
@@ -39,6 +40,7 @@ public:
         int device = 0;
     } pad;
     FlowState flow;
+    std::unique_ptr<UiStates> states;  // gh4's UI state machine (ui/ui_states.h)
     Sfx sfx;
     // The controllers (device numbers 0..3) the scripts see as connected
     // (GetActiveControllers, a bit each; the app keeps it current) and

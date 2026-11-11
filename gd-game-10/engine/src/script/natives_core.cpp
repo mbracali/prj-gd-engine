@@ -434,6 +434,10 @@ void addCoreNatives(Vm& vm) {
         std::vector<std::pair<uint32_t, uint64_t>> seen;
         if (const qb::Value* a = Vm::param(p, qbkey::key("anytypes")); a && a->arr)
             for (const qb::Value& e : a->arr->values) seen.push_back({e.key, v.eventSeq(e.key)});
+        // gh4: Block {type = taskmenu_callback} (ui_event_block) until the UI
+        // state machine has handled the event (ui/ui_states.cpp) [I].
+        if (const qb::Value* t = Vm::param(p, qbkey::key("type")); t && (t->type == qb::Type::Key || t->type == qb::Type::KeyPtr))
+            seen.push_back({t->key, v.eventSeq(t->key)});
         if (seen.empty()) {
             run.waitFor = [] { return false; };
             return true;

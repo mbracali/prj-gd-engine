@@ -261,8 +261,8 @@ struct Exec {
         case kLocalKey:
             ++i;
             v.type = qb::Type::String;
-            v.str = qs::text(k.u);
-            if (v.str.empty() && !qs::find(k.u)) v.str = qbkey::name(k.u);
+            v.str = qstr::text(k.u);
+            if (v.str.empty() && !qstr::find(k.u)) v.str = qbkey::name(k.u);
             return v;
         case kRandomFloat:
         case kRandomInt: {

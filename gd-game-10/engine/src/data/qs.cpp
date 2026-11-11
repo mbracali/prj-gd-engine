@@ -11,7 +11,7 @@
 #include "data/pak.h"
 #include "data/qbkey.h"
 
-namespace qs {
+namespace qstr {
 namespace {
 
 std::unordered_map<uint32_t, std::string>& table() {
@@ -124,4 +124,4 @@ void resolve(qb::Value& v) {
     }
 }
 
-}  // namespace qs
+}  // namespace qstr

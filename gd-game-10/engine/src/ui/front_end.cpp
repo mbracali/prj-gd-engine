@@ -42,6 +42,8 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
     ui_->addMovieNatives();  // after the game natives' movie stubs
     scene_ = std::make_unique<MenuScene>(disc_, globals_, *vm_, *ui_);
     scene_->addNatives();  // after the flow natives' stubs (PlayIGCCam, KillCamAnim)
+    states = std::make_unique<UiStates>(*vm_);
+    states->addNatives();  // last: the `ui` object's members before the composite objects'
 }
 
 void FrontEnd::setZone(uint32_t zone) {
@@ -199,6 +201,7 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     const double vmStep = songPlaying && !songPaused ? kStepMs * double(songRequest.speed) : kStepMs;
     while (accum_ >= kStepMs && steps < 8) {
         accum_ -= kStepMs;
+        states->update();
         vm_->update(vmStep);
         ui_->update(kStepMs);
         scene_->update(kStepMs);

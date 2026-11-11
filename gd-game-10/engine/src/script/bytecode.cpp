@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "script/bytecode.h"
+
+#include "data/qs.h"
 #include "script/pc_strings.h"
 
 #include <cstring>
@@ -111,6 +113,7 @@ std::vector<Token> tokenize(const uint8_t* code, size_t n) {
             while (i % 4) ++i;
             need(len, t.at);
             t.st = qb::decodeStruct(code + i, len);
+            for (qb::Item& it : t.st->items) qstr::resolve(it.value);  // gh4 localized keys -> text
             pcstrings::applyToStruct(*t.st);  // PC wording (GD10-039)
             i += len;
             break;
