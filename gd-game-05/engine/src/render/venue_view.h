@@ -61,6 +61,10 @@ public:
     const gfx::SpotlightView& spotlights() const { return *spotlights_; }
     int particlesDrawn() const { return particles_; }
     size_t roots() const { return roots_.size(); }
+    // SpotlightDrawer proxies found in the venue and how many of them are
+    // still in the draw list (RB: none, GD05-069).
+    int spotlightDrawerProxies() const { return sdProxies_; }
+    int spotlightDrawerProxiesListed() const { return sdProxiesListed_; }
     const CrowdView& crowdView() const { return *crowdView_; }
     BandView& bandView() { return *bandView_; }
     // The Enhanced Options' venue extras (render/enhanced_lights.h): the
@@ -87,6 +91,7 @@ private:
     gfx::Camera camera_;
     const scene::CamShot* shot_ = nullptr;
     std::vector<Root> roots_;
+    int sdProxies_ = 0, sdProxiesListed_ = 0;
     // A proxy's milo: its own draw list (drawn at the proxy's transform).
     std::unordered_map<const scene::Object*, std::vector<Root>> proxyRoots_;
     gfx::ParticleSet particleSet_;

@@ -5518,6 +5518,12 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 const char* path = SDL_GetGamepadPathForID(ids[i]);
                 if (path && g_evdev.node == path && SDL_GetJoystickFromID(ids[i])) adapter_ = ids[i];
             }
+            // GD05-069: a SpotlightDrawer's proxy (every venue type's stage
+            // fog / smoke group) is its draw child, never drawn (RB
+            // 0x82299DD0 / 0x821B3A48, D79).
+            const int sdProxies = ui.host().gameCounter(0, "venue_sd_proxies"), sdListed = ui.host().gameCounter(0, "venue_sd_proxies_listed");
+            std::printf("  look: SpotlightDrawer proxies %d, in the draw list %d (RB: 0)\n", sdProxies, sdListed);
+            if (sdProxies < 1 || sdListed != 0) return fail("look: SpotlightDrawer proxies " + std::to_string(sdProxies) + ", drawn " + std::to_string(sdListed));
             SDL_free(ids);
         }
         if (adapter_) {

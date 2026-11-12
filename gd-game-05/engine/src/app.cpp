@@ -3069,6 +3069,9 @@ int App::gameCounter(int player, const std::string& key) const {
     }
     if (key == "spot_shadows") return venueView_ ? venueView_->spotlights().shadowsTotal() : 0;
     // Rock Band (wave 02): the vocals, the band on stage, the part played.
+    // GD05-069: SpotlightDrawer proxies (the stage fog) found / left in the venue's draw list.
+    if (key == "venue_sd_proxies") return venueView_ ? venueView_->spotlightDrawerProxies() : -1;
+    if (key == "venue_sd_proxies_listed") return venueView_ ? venueView_->spotlightDrawerProxiesListed() : -1;
     if (key == "vocal_notes_drawn") return vocalView_.notesDrawn();
     if (key == "vocal_lyrics_drawn") return vocalView_.lyricsDrawn();
     if (key == "vocal_score") return vocal_ ? vocal_->score() : 0;

@@ -39,9 +39,36 @@ const scene::Environ* dirEnv(const scene::Directory& d) {
     return d.resolve<scene::Environ>(own->rnd.environment);
 }
 
+// SpotlightDrawer rev 4's proxy (the record's last name; "" when unreadable).
+std::string spotlightDrawerProxy(const std::vector<unsigned char>& rec) {
+    auto u32 = [&](size_t p) {
+        return uint32_t(rec[p]) << 24 | uint32_t(rec[p + 1]) << 16 | uint32_t(rec[p + 2]) << 8 | uint32_t(rec[p + 3]);
+    };
+    if (rec.size() < 4 || u32(0) != 4) return {};
+    size_t pos = 4;
+    scene::Draw draw;
+    try {
+        scene::readDrawAt(rec, pos, draw);
+    } catch (const std::exception&) {
+        return {};
+    }
+    pos += 8 * 4;  // total, base_intensity, smoke_intensity, f32, color
+    std::string name;
+    for (int k = 0; k < 2; ++k) {
+        if (pos + 4 > rec.size()) return {};
+        const uint32_t n = u32(pos);
+        if (n > rec.size() - pos - 4) return {};
+        name.assign(reinterpret_cast<const char*>(rec.data() + pos + 4), n);
+        pos += 4 + n;
+    }
+    return name;
+}
+
 // A directory's draw list: its drawables less those its Groups draw, by
 // draw_order (stable: table order within one order).
-std::vector<const scene::Object*> drawList(const std::vector<const scene::Directory*>& dirs) {
+std::vector<const scene::Object*> drawList(const std::vector<const scene::Directory*>& dirs,
+                                          std::vector<const scene::Object*>* sdProxies = nullptr) {
+    static const bool sdLegacy = SDL_getenv("GD05_SD_PROXY_LEGACY") != nullptr;
     std::set<const scene::Object*> children;
     std::vector<const scene::Object*> all;
     // A TexRenderer's draw (rev 3: its draw, then its output texture) goes
@@ -51,6 +78,22 @@ std::vector<const scene::Object*> drawList(const std::vector<const scene::Direct
     std::set<const scene::Directory*> rendered;
     for (const scene::Directory* d : dirs)
         d->forEach([&](scene::Object& o) {
+            // A SpotlightDrawer lists its proxy as its draw child (RB
+            // ListDrawChildren 0x82299DD0 pushes the object's +0x5c; RndDir
+            // SyncObjects 0x821B3A48 then drops it from the draw list) and its
+            // DrawShowing is empty (vtable +0x10: 0x824A3138, blr) [C]: the
+            // proxy, every venue type's stage fog / smoke group, is never
+            // drawn (GD05-069). Record (Load 0x82299660, rev 4) [C]: u32 4,
+            // Draw, total, base_intensity, smoke_intensity, f32, color, then
+            // two object names, the proxy the second.
+            if (o.cls == "SpotlightDrawer" && o.dir) {
+                const std::string proxy = spotlightDrawerProxy(o.record);
+                if (const scene::Object* c = proxy.empty() ? nullptr : o.dir->resolve(proxy)) {
+                    if (!sdLegacy) children.insert(c);
+                    if (sdProxies) sdProxies->push_back(c);
+                }
+                return;
+            }
             if (o.cls != "TexRenderer" || !o.dir) return;
             for (const std::string& n : scene::recordNames(o.record)) {
                 if (const scene::Object* c = o.dir->resolve(n); c && c != &o) children.insert(c);
@@ -108,10 +151,14 @@ void VenueView::build() {
     // The chain: one draw list over every directory (FindObject's view).
     std::vector<const scene::Directory*> dirs;
     for (const auto& p : v.parts()) dirs.push_back(&p.milo->root());
-    for (const scene::Object* o : drawList(dirs)) {
+    std::vector<const scene::Object*> proxies;
+    for (const scene::Object* o : drawList(dirs, &proxies)) {
         const scene::Environ* env = o->dir ? dirEnv(*o->dir) : nullptr;
         roots_.push_back({o, env});
     }
+    // The walks' check (rb_look): every SpotlightDrawer proxy out of the list.
+    sdProxies_ = int(proxies.size()), sdProxiesListed_ = 0;
+    for (const Root& r : roots_) sdProxiesListed_ += int(std::count(proxies.begin(), proxies.end(), r.object));
     for (const auto& p : v.proxies()) {
         auto& list = proxyRoots_[p.object];
         for (const scene::Object* o : drawList({&p.milo->root()})) list.push_back({o, dirEnv(p.milo->root())});

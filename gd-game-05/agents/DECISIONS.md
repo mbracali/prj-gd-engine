@@ -1114,3 +1114,39 @@ pattern). Each says what, why and how to undo it.
   frames, in 10 of 10 runs of 8,744..14,209 frames, drummer stretch worst
   1.001 x bind (was 1.153..254).
 - **Undo:** GD05_BLENDER_LEGACY=1 (no blenders, rotate-to drivers added).
+
+## D79
+- **What (2026-11-12, GD05-069):** a SpotlightDrawer's proxy is never
+  drawn [C]. SpotlightDrawer (rev 4, Load RB 0x82299660: u32 4, Draw,
+  total, base_intensity, smoke_intensity, an unnamed f32 (250 in every
+  venue), color, then two object pointers; SyncProperty 0x82298FC8 names
+  only the first three) keeps the second pointer at +0x5c; its
+  ListDrawChildren (RndDrawable vtable +0x14, 0x82299DD0) pushes that
+  object, so RndDir SyncObjects (0x821B3A48: every drawable of the
+  directory and its sub-directories, then minus every drawable's
+  ListDrawChildren, then sorted by 0x821FF100) leaves it out of the
+  directory's draw list; the drawer's own DrawShowing (vtable +0x10) is
+  0x824A3138 (`blr`) in SpotlightDrawer and NgSpotlightDrawer, and
+  nothing else reads +0x5c (the Ng drawer's EndWorld 0x822AA340 draws the
+  queued beams, 0x822A9CC8 / 0x8229BB38). On the disc every venue type's
+  lighting milo has one drawer whose proxy is its stage fog / smoke:
+  small_club_lighting and arena_lighting stage_fog.grp, big_club_lighting
+  and theater_lighting stage_smoke.grp. render/venue_view.cpp drawList
+  reads the record and drops the proxy.
+- **Why:** those groups' additive fog (stage_fog02 / 03 and the others:
+  100..250-unit quads, black -> 0.65..0.88 grey -> black, 16..31 on screen)
+  were drawn over every shot: the "far too bright" venues (luma up to 2.7
+  times the movies').
+- **Measured (rb_look, 30 fixed shots, GD05_SD_PROXY_LEGACY=1 -> now,
+  same build; movies: luma 69.3, contrast 55.4, saturation 0.397):**
+  small_club_02 luma 131.7 -> 73.0, contrast 79.0 -> 68.8, saturation
+  0.152 -> 0.249; big_club_03 184.2 -> 52.4, 65.7 -> 61.7, 0.086 ->
+  0.309; arena_04 149.0 -> 81.0, 79.7 -> 78.5, 0.126 -> 0.191;
+  theater_02 65.9 -> 42.6, 69.7 -> 61.6, 0.270 -> 0.323. rb_look now
+  checks the venue's drawer proxies are out of the draw list (1 found,
+  0 listed; legacy: 1 listed, FAILED).
+- **Not done:** the drawer's total / base_intensity / smoke_intensity /
+  color (and the presets' drawer entries, 3 f32 per keyframe) are not
+  used: the Ng beam pass sets c82 = (base x 0.01, smoke x 0.01 x
+  (1 - base x 0.01)) (0x822A8E78) [meaning I].
+- **Undo:** GD05_SD_PROXY_LEGACY=1.

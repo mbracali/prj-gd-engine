@@ -1378,3 +1378,59 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   123.0 / 165.4 / 150.7 / 66.4, contrast +42 / +23 / +35 / +28 %,
   saturation 0.165 / 0.102 / 0.116 / 0.269) and rb_band_start (timed out
   on qp_endgame_screen under the load; OK when run alone right after).
+
+## 2026-11-12: venue brightness (fix8, GD05-069)
+
+- **Cause found [C]:** the stage fog is a SpotlightDrawer's proxy (D79).
+  RB's SpotlightDrawer lists its second object pointer (+0x5c) as its draw
+  child (ListDrawChildren 0x82299DD0), RndDir SyncObjects (0x821B3A48)
+  removes every listed child from the directory's draw list, and the
+  drawer's DrawShowing is an empty function (0x824A3138) in both
+  SpotlightDrawer and NgSpotlightDrawer: the proxy is never drawn. Each
+  venue type has one drawer, its proxy the stage fog / smoke group
+  (small club and arena stage_fog.grp, big club and theater
+  stage_smoke.grp): the additive fog the port drew over every shot.
+  Lead 1 of fix7 answered: the port's "everything not inside another
+  group" rule was right, the drawer is the "other group".
+- **Checked, as the port [C]:** blend modes (NgMat 0x827D4750: dest ZERO /
+  ONE, src ONE / ZERO, add ONE / ONE, srcAlpha SRCALPHA / INVSRCALPHA,
+  srcAlphaAdd SRCALPHA / ONE, multiply ZERO / SRCCOLOR; additive blends
+  get a black fog colour); light presets move lights with the same
+  quaternion maths (0x822BAAA8 -> 0x8238DE10, slerp 0x8238F3B8); the
+  directional upload (0x827D7090: -y row, w 0); gMultipliers (c5) =
+  (intensify + 1, emissive_multiplier) (0x827D4750; every venue mat's
+  emissive_multiplier is 1.0, so no change); the character pixel shaders
+  (diffuse x (ambient + sum of lights) x texture x c5.y, no rim term).
+  Presets' light colours reach 6.0 (char_rim) and 3.0 on band.env's
+  directional lights: the band is lit near white in close-ups, as the
+  data says (not changed). Lead 2 (emission) not needed for the fog; lead
+  3: the presets carry SpotlightDrawer entries (3 f32 per keyframe), not
+  particle switches.
+- **rb_look, same build, GD05_SD_PROXY_LEGACY=1 (before) -> now** (movies
+  luma 69.3, contrast 55.4, saturation 0.397; +-15 %):
+
+  | venue | luma | contrast | saturation |
+  |---|---|---|---|
+  | small_club_02 | 131.7 -> 73.0 (+5 %) | 79.0 -> 68.8 (+24 %) | 0.152 -> 0.249 |
+  | big_club_03 | 184.2 -> 52.4 (-24 %) | 65.7 -> 61.7 (+11 %) | 0.086 -> 0.309 |
+  | arena_04 | 149.0 -> 81.0 (+17 %) | 79.7 -> 78.5 (+42 %) | 0.126 -> 0.191 |
+  | theater_02 | 65.9 -> 42.6 (-39 %) | 69.7 -> 61.6 (+11 %) | 0.270 -> 0.323 |
+
+  Runs vary by a few points (arena_04 78.5 / 81.0, theater_02 47.1 /
+  42.6 in two runs). Not within 15 % in all four: what is left is not
+  one excess any more but a spread. Measured shares: without the band
+  (temporary switch) luma 53.4 / 36.3 / 73.1 / 18.1 (the band carries
+  20..30 points in close-ups); without the spotlight beams 59.5 / 36.1 /
+  77.3 / 32.9; arena_04's contrast comes from the sparks fountains drawn
+  in nearly every frame (fountain_01..03, blend srcAlphaAdd, 20..60
+  particles each; the win set sparks_fountain_blue_WIN* sits in
+  win_fx_draw_first.grp, showing, with emit rates 2..7 a frame unless an
+  anim sets them; what idles them in RB is not traced).
+- **The pause check** (black_bg.mat's rule, rb_look) now fails or passes
+  by the shot: it compares a frame before the pause with one during it,
+  and without the fog over everything the world under it changes between
+  the two (big_club_03 caught a blackout: 0 lit pixels; theater_02 1.85,
+  small_club_02 0.46; the legacy run also gave 0.66). A measurement
+  problem of the walk, not of the overlay (D57).
+- Screens: agents/scratch/fix8/compare.png (git-ignored): per venue
+  before | after | a disc movie frame.
