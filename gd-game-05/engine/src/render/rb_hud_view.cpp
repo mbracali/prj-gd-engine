@@ -158,7 +158,7 @@ void RbHudView::load(const GameData& data, scene::MiloLibrary& library) {
     if (float cx, cy, w; meterBox(0, cx, cy, w)) refMeter_ = {cx, cy, w};
     hiddenElems_ = {"guitar", "bass", "drum", "vocals", "guitar_effects", "bass_effects", "vocalist_volume",
                     "popup_help_01", "popup_help_02", "popup_help_03"};
-    reset(-1e30f);
+    reset(-1e30f, nullptr);
 }
 
 // track_configuration's update (track_paneldir.dta) [C data]: each object
@@ -211,7 +211,8 @@ void RbHudView::applyConfiguration(const std::string& name) {
     }
 }
 
-void RbHudView::reset(float introAtMs) {
+void RbHudView::reset(float introAtMs, const TempoMap* tempo) {
+    tempo_ = tempo;
     if (!panel_) return;
     pose_.clear();
     for (const auto& [owner, d] : panel_->root().subdirs)
@@ -879,8 +880,8 @@ void RbHudView::begin(gfx::Renderer& r, gfx::SceneCache& cache) {
 
 void RbHudView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const State& state, float nowMs) {
     if (!panel_) return;
-    if (nowMs < lastMs_ - 1000.0f) reset(introAtMs_);
     tempo_ = state.tempo;
+    if (nowMs < lastMs_ - 1000.0f) reset(introAtMs_, state.tempo);
     drive(state, nowMs);
     lastMs_ = nowMs;
     runTasks(nowMs);

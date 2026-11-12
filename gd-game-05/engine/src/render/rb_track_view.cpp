@@ -1259,6 +1259,7 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
         if (const scene::Object* o = obj(n)) pose_.setShowing(o, false);
     // The effects (GD05-045): reset at the song's start (and a restart),
     // then this frame's events and the running anims / particles.
+    tempo_ = &song.tempo;  // before the reset: never an older song's (GD05-086)
     if (lastFxMs_ < -1e29f || nowMs < lastFxMs_ - 1000.0f) {
         lastFxMs_ = nowMs;
         for (FxDir* fx : {&smashFx_[0], &smashFx_[1], &smashFx_[2], &smashFx_[3], &smashFx_[4], &trackFx_}) fxReset(*fx);
@@ -1266,7 +1267,6 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
         gemSeen_.clear(), seenChart_ = nullptr, wasOd_ = false, lastHeld_ = -1, lastHeldSlots_ = 0;
     }
     lastFxMs_ = nowMs;
-    tempo_ = &song.tempo;
     fxEvents(player, nowMs);
     fxUpdate(nowMs);
     if (const scene::Object* o = obj(drums_ ? "guitar_draw.grp" : "drum_draw.grp")) pose_.setShowing(o, false);

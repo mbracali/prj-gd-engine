@@ -1558,7 +1558,7 @@ void App::beginSong() {
     if (skipIntro_) extendAtMs_ = float(startMs) - 10000.0f;
     extendSent_ = skipIntro_;
     rbExtendMs_ = skipIntro_ || practice ? float(startMs) : float(std::max(startMs, 0.0));
-    if (rbHud_) rbHud_->reset(rbExtendMs_);  // track_panel.dta on_reset / on_extend (intro.trig)
+    if (rbHud_) rbHud_->reset(rbExtendMs_, song_ ? &song_->tempo : nullptr);  // track_panel.dta on_reset / on_extend (intro.trig)
     controllersLive_ = false;
     heldBeforeLive_ = {};
     introSfx_ = 0;
@@ -3763,7 +3763,7 @@ RbHudView::State App::rbHudState(float t) const {
 void App::drawRbHud(float t) {
     if (const char* h = SDL_getenv("GD05_HUD"); h && *h == '0') return;  // development aid: the track alone
     canvas_.flush();
-    if (rbHud_->introAt() != rbExtendMs_) rbHud_->reset(rbExtendMs_);
+    if (rbHud_->introAt() != rbExtendMs_) rbHud_->reset(rbExtendMs_, song_ ? &song_->tempo : nullptr);
     const RbHudView::State st = rbHudState(t);
     rbHud_->draw(canvas_.renderer(), *sceneCache_, st, t);
     // The walks (or GD05_HUD_PROBE=1): a probe at 15 s and every 20 s after,

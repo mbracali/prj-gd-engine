@@ -109,7 +109,10 @@ public:
     bool loaded() const { return panel_ != nullptr; }
     // A new song: the panel's reset (reset_all.trig, every element's reset).
     // `introAtMs`: when the panel's intro (on_extend: intro.trig) plays.
-    void reset(float introAtMs);
+    // `tempo`: the new song's (the reset runs the panel's reset anims at
+    // their beat rates; the view keeps no pointer into an older song, whose
+    // chart a retry frees: GD05-086).
+    void reset(float introAtMs, const TempoMap* tempo);
     float introAt() const { return introAtMs_; }
     // Draws the HUD over the picture (its own camera; depth cleared).
     void draw(gfx::Renderer& r, gfx::SceneCache& cache, const State& state, float nowMs);
