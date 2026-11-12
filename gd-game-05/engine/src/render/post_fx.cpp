@@ -189,13 +189,34 @@ PostProcState postProcState(const scene::PostProc& pp, TextureId luminanceMap, T
     s.bloomThreshold = pp.bloomThreshold;
     s.bloomKernel = pp.bloomKernelMult;
     s.bloomScale = pp.bloomScale;
-    s.bloomIntensity = pp.bloomIntensity;
+    // Interim [I] (GD05-054): RB's PostProc v18 keeps a bloom colour, size,
+    // intensity and threshold, and RB's shaders write a bloom mask in alpha
+    // (wave 05 notes, GD05-042 / 043); the GH2 bright pass above reads the
+    // colour as thresholds and turned the lit band into white blobs once
+    // every shot selected ProFilm_a.pp. RB's bloom is not drawn until it is
+    // ported; the rest of the PostProc (ColorXfm, noise) is.
+    s.bloomIntensity = 0;
     s.luminanceMap = luminanceMap;
     s.colorXfm = pp.colorXfm;
     s.noiseBaseScale = pp.noiseBaseScale;
     s.noiseLayerScale = pp.unknownD0;
     s.noiseIntensity = pp.noiseIntensity;
     s.noiseMap = noiseMap;
+    return s;
+}
+
+PostProcState blendPostProc(const PostProcState& from, const PostProcState& to, float t) {
+    t = std::clamp(t, 0.0f, 1.0f);
+    auto mix = [t](float a, float b) { return a + (b - a) * t; };
+    PostProcState s = to;
+    for (size_t i = 0; i < s.bloomThreshold.size(); ++i) s.bloomThreshold[i] = mix(from.bloomThreshold[i], to.bloomThreshold[i]);
+    s.bloomKernel = mix(from.bloomKernel, to.bloomKernel);
+    s.bloomScale = mix(from.bloomScale, to.bloomScale);
+    s.bloomIntensity = mix(from.bloomIntensity, to.bloomIntensity);
+    for (size_t i = 0; i < s.colorXfm.size(); ++i) s.colorXfm[i] = mix(from.colorXfm[i], to.colorXfm[i]);
+    for (size_t i = 0; i < s.noiseBaseScale.size(); ++i) s.noiseBaseScale[i] = mix(from.noiseBaseScale[i], to.noiseBaseScale[i]);
+    s.noiseLayerScale = mix(from.noiseLayerScale, to.noiseLayerScale);
+    s.noiseIntensity = mix(from.noiseIntensity, to.noiseIntensity);
     return s;
 }
 

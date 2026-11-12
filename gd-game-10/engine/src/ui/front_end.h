@@ -1,0 +1,181 @@
+// SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+// Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
+#pragma once
+
+#include <array>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "audio/sfx.h"
+#include "input/input.h"
+#include "script/vm.h"
+#include "ui/natives_flow.h"
+#include "ui/ui_states.h"
+#include "ui/ui_system.h"
+
+class Canvas;
+class Disc;
+class Globals;
+class TextureCache;
+class MenuScene;
+
+// GH3's front end run from its own scripts (L1): the VM boots with
+// guitar_startup, the flow manager builds the screens with screen elements
+// (ui/ui_system.h), and the natives the scripts call (script/natives_*.cpp,
+// ui/natives_*.cpp) answer for the engine. Game time advances in 60 Hz
+// steps.
+class FrontEnd {
+public:
+    FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, gfx::RenderDevice& device);
+    ~FrontEnd();
+    bool start();
+    void handle(const InputEvent& e);
+    void frame(Canvas& c, double dtMs);
+    qs::Vm& vm() { return *vm_; }
+    ui::UiSystem& ui() { return *ui_; }
+    // Buttons pressed since the last GetButtonsPressed (natives).
+    struct Pad {
+        int makes = 0;
+        int device = 0;
+    } pad;
+    FlowState flow;
+    std::unique_ptr<UiStates> states;  // gh4's UI state machine (ui/ui_states.h)
+    Sfx sfx;
+    // The controllers (device numbers 0..3) the scripts see as connected
+    // (GetActiveControllers, a bit each; the app keeps it current) and
+    // those that are guitars (IsGuitarController).
+    uint32_t activeControllers = 1, guitarControllers = 0xF;
+    // A song the scripts started (start_gem_scroller): the app plays it
+    // with the native game core, then calls songEnded.
+    struct SongRequest {
+        bool pending = false;
+        uint32_t song = 0;
+        int difficulty = 3;
+        // Two players (start_gem_scroller's globals) [C script start_gem_scroller]:
+        // game_mode (p1_quickplay, p2_career, p2_coop, p2_faceoff,
+        // p2_pro_faceoff, p2_battle, ...), current_num_players,
+        // current_difficulty2, playerN_status.part (guitar / rhythm), and a
+        // boss song's current_boss (boss_battle = 1).
+        uint32_t gameMode = 0;
+        int players = 1;
+        int difficulty2 = 3;
+        bool part2Rhythm[2] = {false, false};
+        uint32_t boss = 0;  // the boss props struct's name (boss_tom_props ...), 0: none
+        // Battle's sudden death: battle_sudden_death and the saved health
+        // (GuitarEvent_SongWon) [C script].
+        bool suddenDeath = false;
+        float saveHealth[2] = {1.0f, 1.0f};
+        // starttime (ms; current_starttime): a mid-song start (practice,
+        // Lou's finish at marker 37); devil_finish kept by a
+        // devil_finish_restart [C script start_gem_scroller].
+        double startMs = 0;
+        double endMs = -1;  // start_gem_scroller's endtime (practice: the section's end; -1: the song's)
+        // setslomo current_speedfactor (practice's speed; 1 normal) and
+        // PitchShiftSlow1's pitch on player 1's guitar (Player1PracticeEffects:
+        // training outside the section menu; else 1) [C scripts
+        // start_gem_scroller, startpreloadpaused_song, menu_choose_practice_speed_set_speed].
+        float speed = 1, slowPitch = 1;
+        bool devilFinish = false;
+        // The user_options tags' lefty_flip_p1 / _p2 -> lefthanded_gems and
+        // lefthanded_button_ups [C script start_gem_scroller].
+        bool lefty[2] = {false, false};
+        // user_options.lag_calibration (ms; CALIBRATE LAG) [C script gem_scroller].
+        double lagMs = 0;
+        // end_credits: kept by an end_credits_restart or for
+        // thrufireandflames, else cleared [C script start_gem_scroller].
+        bool endCredits = false;
+        uint32_t transition = 0;  // current_transition (fastintro, intro, encore, boss, ...)
+    } songRequest;
+    // The venue preload start_gem_scroller asks for (App runs it on a worker:
+    // ui/song_screen.h VenuePreload); a new serial (re)starts it.
+    struct PreloadRequest {
+        int serial = 0;
+        uint32_t song = 0, transition = 0;
+        double endMs = -1, startMs = 0;
+    } preloadRequest;
+    bool songPlaying = false;
+    // The last song's first gem against its clocks (SongScreen::SyncCheck; walk practice's check:sync).
+    struct SongSync {
+        bool measured = false;
+        float speed = 1;
+        double noteMs = 0, lateMs = 0, clockErrMs = 0, audioErrMs = 0;
+    } songSync;
+    // Practice's section-menu preview (ui/song_preview.cpp): the song's
+    // streams from `startMs` (SetSeekPosition_Song), playing once begin_song
+    // unpaused them; positionMs: where the stream is now (song ms). leaked: a
+    // song started while one still played (end_song never stopped it).
+    struct SongPreview {
+        bool active = false, playing = false, leaked = false;
+        std::string prefix;
+        double startMs = 0;
+        float speed = 1;
+        int starts = 0;
+        std::function<double()> positionMs;
+    } songPreview;
+    // The set list's song preview (SongPlayPreview, setlist_songpreview_monitor):
+    // the song's <prefix>_preview bank on the music_setlist buss (GD10-050).
+    struct SetlistPreview {
+        bool active = false;
+        std::string prefix;
+        int starts = 0;
+    } setlistPreview;
+    // Paused with Start in a song: GH3's pause menu runs over the frozen song
+    // (gh3_start_pressed); songKill: its quit / restart killed the gem scroller.
+    bool songPaused = false, songKill = false;
+    // A won song's end under GH3's scripts (GuitarEvent_SongWon_Spawned, the
+    // songwon transition): the song still drawn and its clock running, the
+    // scripts' You Rock over it, until kill_gem_scroller (songKill).
+    bool songOutro = false;
+    uint32_t heldPattern = 0;  // frets held in the menus (GetHeldPattern)
+    void startPressed();
+    // is_attract_mode = 1 (the demo after 110 s on "press any button").
+    bool attractMode() const;
+    // A movie the scripts asked for (PlayMovie movie = 'atvi'): the app plays
+    // it modally (video/movie_player.h).
+    std::string movieRequest;
+    struct SongResultPlayer {
+        int64_t score = 0;
+        int notesHit = 0, totalNotes = 0, bestRun = 0, phrasesHit = 0, phrasesTotal = 0, maxNotes = 0;
+        double baseScore = 0;
+        float health = 1, starPower = 0;
+    };
+    // The song is over: the flow goes on with win_song / fail_song [C data:
+    // GuitarEvent_SongWon_Spawned / GuitarEvent_SongFailed_Spawned].
+    // The song's result, as GH3 keeps it in player1_status [C data guitar.qb].
+    struct SongResult {
+        bool won = false;
+        int64_t score = 0;
+        int notesHit = 0, totalNotes = 0, bestRun = 0, phrasesHit = 0, phrasesTotal = 0, maxNotes = 0;
+        double baseScore = 0;
+        float health = 1, starPower = 0;
+        // Two players: player 2's numbers (player2_status) and battle's.
+        bool twoPlayers = false;
+        SongResultPlayer p2;
+        // Battle: a KO (song_failed -> GuitarEvent_SongWon battle_win = 1) [C GuitarEvent_SongFailed].
+        bool battleKo = false;
+        std::array<int, 2> finalBlow{-1, -1};
+        std::array<std::vector<int>, 2> cards;
+    };
+    void songEnded(const SongResult& r);
+    // GetSongTimeMs: the song's time while it plays (set by the app), then
+    // running on with the game unless paused (the end-of-song transitions wait on it).
+    double songClockMs = 0;
+    // The flow state player 1 is in (ui_flow_manager_state[0]), e.g.
+    // main_menu_fs; "" before the flow manager starts.
+    std::string flowState() const;
+    // A GH3 sound event (SoundEvent event = <name>), for the port's screens.
+    void soundEvent(const char* event);
+    // The zones map's current pak (SetPakManCurrentBlock map = zones), for the menus' 3D scene.
+    void setZone(uint32_t zone);
+
+private:
+    const Disc& disc_;
+    Globals& globals_;
+    std::unique_ptr<qs::Vm> vm_;
+    std::unique_ptr<ui::UiSystem> ui_;
+    std::unique_ptr<MenuScene> scene_;  // the menus' 3D background (ui/menu_scene.h)
+    double accum_ = 0;
+    uint32_t lastFlowState_ = 0;
+    bool glitchesDone_ = false;
+};

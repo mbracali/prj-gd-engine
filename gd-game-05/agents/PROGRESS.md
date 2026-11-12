@@ -5,6 +5,171 @@ Rock Band (Xbox 360) -> `gd05`. Kickoff: `docs/spikes/GD-GAME-05_KICKOFF.md`
 bottom. "Verified" lines quote the command and its output; "built only" and
 "not tested" are said explicitly.
 
+## 2026-11-12: the guitar inside the launcher (GD05-061)
+
+- **Owner:** "the strum is not working on the songs, there is no pause in
+  the song." His 21:40 report (launcher 1.1.14, gd05 0.0.6, Vulkan): the
+  guitar listed, background events on, keyboard focus on, and not one
+  joystick / gamepad event in 53 s; only keys. Guitar Start never came
+  either, hence no pause (his keys were 1..4 and the arrows, no Enter / Esc).
+- **Ruled out, by tests through his launcher build (local_builds
+  gdul-1.1.14, its libSDL3, the 0.0.6 module he ran, his enhanced.json /
+  controllers.json):** one SDL in the process (the module has no SDL of its
+  own: nm -D, ldd); the launcher closes its pads before the game and owns
+  nothing while it runs; the window made again for Vulkan. Events written
+  into the real guitar's own node /dev/input/event9 (evdev passes them to
+  every reader as the device's) reach gd05 through the launcher: menus
+  launched from the launcher's own UI with the guitar, then 120 / 120
+  events (controllers-report: `4: 120 / 120`); a uinput guitar with his
+  ids and GUID: 120 / 120; --inputcapture: 80 / 80. Not reproduced: no
+  test fails on the current code. What is left unseen is below the
+  kernel's input layer (the USB stream from the guitar / xpad while gd05
+  runs): nothing here can strum the real guitar.
+- **Test (new):** walk device mode `GD05_WALK_EVDEV=/dev/input/eventN`
+  (written into that device) or `=uinput` (a kernel device that is his
+  guitar), tools/uinput_guitar.c. Verified in the launcher (Vulkan, real
+  node event9, his GUID seen by SDL): `GDUL_GAME_ARGS="--walktest
+  rb_guitar_play"`: menus with the guitar, 87 / 87 hits, Start -> pause,
+  green -> resume, sustain + whammy, Overdrive by tilt, a miss: OK;
+  rb_guitar_none (his assignment, keyboard P1, guitar None): 87 / 87,
+  pause / resume on the guitar: OK; rb_keys_play (Enter pause): OK.
+  The uinput mode inside a walk is not tested here (the real guitar takes
+  player 1 beside it); uinput devices are tested with the tool.
+  rb_owner_guitar fails in the launcher at dev_unfocus (a launcher window
+  cannot be hidden on Wayland: a test limit, not the game).
+- **Diagnosis for his next run:** the controller report reads each pad's
+  kernel device itself beside SDL: `Kernel device /dev/input/eventN: N
+  events from the controller, SDL joystick events M`, and says which side
+  lost them. Verified: idle guitar `0 events ... sent nothing to the
+  system`; written events `80 events from the controller, SDL joystick
+  events 80`. Owner steps: agents/OWNER_CHECK.md.
+
+## Wave 06b (owner's retest, 2026-11-11 evening)
+
+- **Real guitar still silent (GD05-058).** His 17:35 session (launcher,
+  window made again for Vulkan): the report listed his guitar but no raw
+  event at all, and 0 of 326 notes. Cause [C SDL 3.4,
+  SDL_PrivateJoystickShouldIgnoreEvent]: with windows and no keyboard focus
+  SDL drops every joystick / gamepad event. Proven: a window made again
+  without focus got 0 events, 2 with SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS.
+  Fix: the hint (D41). Walk rb_owner_guitar (his GUID via
+  GD05_TEST_PAD_GUID, his controllers.json imported, the window without
+  focus): 29 of 30 hit, 28 of 29 hat strums reach the song as Strum; with
+  SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=0 it fails 0 of 30 (his bug).
+  The report and GD05_INPUTLOG=1 log every raw event and the game's
+  decision; `--inputcapture` (also through the launcher: --play gd05
+  --exit-after -- --inputcapture) writes input-capture.txt. His bindings
+  already list Orange=LB, Whammy=Right Stick X, Gyro=Right Stick Y/Back.
+- **Title round trip (GD05-059).** The port switched screens at once and
+  faded after (the new screen flashed at full, then dimmed); going back the
+  main menu vanished at once. RB exits the old panels and loads the new
+  ones as the transition starts while the old screen shows; main_panel's
+  load / exit fade the fx panel to black (D41). Walk rb_title_back: shots
+  at 33..2500 ms both ways: the buttons slide out (button_exit.trg) under
+  the fade, PRESS START flashes and fades, the new screen fades in.
+- **Text colours (GD05-054).** Walk rb_text_colors: per text element the
+  expected glyph-core colour from the data (preset / material colour,
+  lights, ambient, font texel, D25 curve) vs the drawn pixels, fail > 8%
+  darker. Worst before: tour_band_welcome title 22 vs 180 (a blackmask drawn
+  over it: RB sorts draws, D43), now 180. Options audio 190/190, gameplay
+  104/107, Create a Band 236/236 and 127/127, pause 217/217 and 153/162,
+  help bar 215/218. Second gamma, sRGB, premultiplied alpha, double
+  colour and mips ruled out by measurement. LOADING bright at once (owner
+  decision D44, 28 -> 253).
+- **In-song HUD (GD05-060).** trackpanel.milo's own elements replace the
+  stand-in (D45): drawn boxes vs milo boxes within 0-4 px (solo: Overdrive
+  meter 3, score 0, multiplier 2, rock meter 1; band: 13 boxes within 2),
+  values = the Player's. Not done: the vocal HUD, head-to-head's panel,
+  side angles, streak pop-ups, gamertags.
+- **rb_keys_rebind**: a load flake (26 of 30 hits with eight walks at
+  once); hit floor 80% as the device walks; walk save folders unique.
+
+## 2026-11-12: sub-menu letters "grey" (GD05-062)
+
+- Measured, not changed (D46). The owner's capture of RB's main menu
+  (SOLO's sub-menu, QUICKPLAY focused) vs the port, 99th percentile luma
+  per word box at 1200 x 675: QUICKPLAY focused RB 188 / port 183, SOLO
+  TOUR normal RB 102 / port 97. Same through his launcher build (Vulkan,
+  his enhanced.json / controllers.json / profile): 191 / 98. The labels'
+  data colour (custom_colors 0x707070 / 0xd7d7d7), environ, light falloff
+  (RB 0x827D6F00) and per-pixel shader match; every sub-menu (multi,
+  training, options) also matches its data (rb_text_colors: 90..104
+  normal, 179..198 focused). Walk rb_text_colors now also checks the sub-menu
+  labels against RB's capture (refcolors:solo, refcolors:solo_2nd, 10%) and
+  prints the main menu's modelled words: COMMUNITY 224 vs RB 191 (RB's word
+  darker on its left), OPTIONS 226 / 215; others within 2%. Open: what the
+  owner sees as grey needs a screenshot of his screen.
+
+## 2026-11-12: the now bar under the HUD, LOADING graded as the icons (GD05-064 / 065)
+
+- **Highway (GD05-064).** Causes [C data]: (1) the gem tracks never took
+  trackpanel.milo's track_configuration (track_paneldir.dta update ->
+  gem_track.dta set_pitch / set_fov / set_cam_pos / set_fade): the camera
+  stayed tracksystem's own (0 -57.6 17.6, 27 degrees), so the HUD's
+  Overdrive meter and multiplier sat across the smashers; (2) rig.grp's
+  rig_movement.tnm (repeat_trans) stopped at its last key, y 100, a second
+  in: the smashers and camera stayed 100 units ahead of the gems' now, so
+  gems crossed the smashers 1.2 s before they were struck. Fix: 1_player_wide
+  applied (pitch -44.5, camera 0 -81 18.7, fov 21, fade 60 + 40, top_y 105,
+  y_per_second = top_y / view_time, the panel's 2.4 .. 1.2 s), the rig kept
+  at its origin, TransAnim repeat_trans (D50). Check (quickplay,
+  rb_guitar_play, rb_pad_play, band_quickplay): a gem in each lane at the
+  now bar, then the HUD drawn over it: 39% of the gems' pixels covered
+  before, 0% now (`rb now bar` log, counters rb_nowbar_*). Shots at
+  20 / 30 / 45 s for guitar and drums: gems pass the smashers, the meter
+  under them. Open: the surface's track_reflect scroll (it rode the rig).
+- **LOADING (GD05-065).** D44's flat white replaced (owner: graded like the
+  icons, D49): the word at its focus colour lit by instruments.lit as the
+  four icons take it, plus loading.tnm's sweep light. rb_bright: word luma
+  194, blue/red 0.69; icons 172 / 0.68 (D44: 232 white, 1.00); shots at
+  1.2 / 1.6 / 2.0 s show the sweep crossing the word.
+- Gate (own build, the w6 gate1 list): 29 walks OK, selftest, scenetest,
+  scripttest, videotest, sfxtest OK.
+
+## Wave 06 (owner's 0.0.6 report, 2026-11-11, 14:50 -> ~18:30, me + 4 subagents)
+
+Each item: cause, fix, how verified.
+- **Inputs (GD05-056).** Cause [C, our code + his controllers.json]: his
+  guitar (1bad:0002) was saved at GAMEPADS None beside the keyboard as
+  player 1; Input::actionsOf drops every in-song control of a device
+  without a player but Start. Fix: a one-player song takes every device
+  (D35, D34 extended). Also: a pad's / guitar's Start on the title went
+  nowhere (splash_panel's {$this button_down kPad_X}: the panel's native
+  ButtonDown was missing); a gamepad after the keyboard in the menus hit
+  nothing (the watcher was fixed by the last device at song start; it now
+  follows the device that plays, D38). Verified: walks rb_guitar_play (a
+  virtual joystick that is his device: name, 1bad:0002, 11 buttons /
+  6 axes / hat, his SDL mapping; menus with the guitar, 86/87 hits, pause /
+  resume with Start / green, a sustain with the whammy, Overdrive by tilt,
+  a miss), rb_guitar_none (his exact assignment: keyboard P1, guitar None),
+  rb_pad_play (generic Xbox pad), rb_keys_play.
+- **Sound (GD05-057).** Misses were silent: RB has no PlayerMatcher
+  handlers; config/player.dta's player handler (miss $player_num $slot)
+  plays miss_gtr.cue / miss_bass / drum misses [C data] (D38). The guitar
+  stem mutes on a miss and comes back on hits (checked in rb_guitar_play).
+- **Missing shaders at band start (GD05-055).** $world was never set:
+  band_objects.dta start_shot could not find ProFilm_a.pp, so every shot
+  from the band's first drew with no post (D37); pp_blend_task added;
+  RB bloom gated off until ported (interim). The highway now rises at
+  intro.trig. Audit: no failed program / pipeline / variant on local GL,
+  core OpenGL 3, Vulkan (AMD, NVIDIA). Walk rb_band_start (fails with
+  missing_shaders 3 without the fix).
+- **Fret board (GD05-045).** tracksystem.milo's EventTriggers: hit flames,
+  smasher glow, burn, miss, phrase captured, Overdrive deploy (D40);
+  ParticleSys rev 36 grow before shrink. rb_fx_* counters in the device
+  walks (86 hits, 0 without a flame; 1 deploy with its visual).
+- **Dark items (GD05-054).** Band icons on the loading screen lit by their
+  directory's own environ (D36, p97 44 -> 215); audio sliders drawn
+  edge-on (slider.grp's turn, D39, p97 13 -> 150+); Calibrate opens.
+  LOADING: RB's draw path matched in the XEX (D39): the word is dark grey
+  until loading.tnm's 3 fps glint reaches it ~4.5 s in; the port's ~1 s
+  loads never show it. Owner's choice. Walk rb_bright: luma floors on main,
+  options, audio, solo, song list, difficulty, loading (icons, LOADING),
+  pause; fails without the fixes.
+- Left: RB bloom port, band overbright (GD05-042), RB's own HUD meters,
+  solo / fill / BRE lanes, the `options` walk (four downs reach COMMUNITY,
+  not in the gate), LOADING timing (owner).
+
 ## Final report, wave 05 (2026-11-10, about 4.5 h of agent time, 08:50 -> 13:20)
 
 The owner's wave 05 list (agents/WAVE05_REQUIREMENTS.md). Ledger
@@ -730,3 +895,32 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   poses (D33); 2000 steps pass (327 checks).
 - 053 Enhanced backdrop: the venue's own band shots (D31) instead of the
   port's close-up inside the drum kit.
+
+## 2026-11-12, song list letter sizes (GD05-063)
+
+- Owner: "the list of musics have wrong sizes for the letters". The new
+  walk rb_songlist_text measures every label text the song list draws into
+  its RenderDir's texture (480 x 552 through meta.cam; popup_bg fills it,
+  x 6..475, y 17..535) against the size RB gives it from the data (the
+  label's text_size through RB's kFitJust loop, the font's cell aspect,
+  the list's scale 2), in texture pixels; over 5% fails. RB's UIList rev 9
+  fields named from its SyncProperty (RB 0x822697E8): spacing 33,
+  arrow_offset, arrow_showing, arrow_only_scroll, arrows_on_highlight,
+  fade_offset, display_num 7 [C].
+- Data vs drawn (cell height in texture px): song names (list.lbl, fakir,
+  text_size 30, kFitJust 415 x 30, leading 0.75): RB size 28.0, 36.7 /
+  36.6; headings (heading.lbl, 35, 440 x 50, leading 0.70): 35.0, 45.8 /
+  45.6; line widths equal to 0.1 px; on the screen through the cloth a
+  44..50 px cell (the sway). 21 texts at 3 scroll positions, all within
+  0.3%.
+- Found [C]: RB's UILabel update (RB 0x8226E0A0) adds the label's kerning
+  to the font's (font +0x1044, put back after the layout); the port
+  replaced it. Fakir's and the list labels' kerning are 0, so the list is
+  unchanged; labels with their own kerning on fonts with one change (D48).
+- Found: the list never scrolled. drawList drew rows 0..6 only; past the
+  7th song the highlight left the cloth. A window of display_num rows now
+  follows the selection [I] (D48).
+- Left: where RB puts a sort heading (the port lifts heading.lbl to
+  list.lbl's height in its own slot [I]); a capture of RB's song list
+  would settle it. The HUD's labels (rb_hud_view.cpp) still replace the
+  kerning.

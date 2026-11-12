@@ -194,6 +194,12 @@ private:
     float endMs_ = 1e30f, failMs_ = 1e30f;
     std::string songKeys_;
     std::string error_;
+    // rb_text_colors / GD05_TEXTCOLORS=1: every screen's texts measured once
+    // it has rested (textColors), the ones too dark kept for finish().
+    bool textColors_ = false;
+    std::set<std::string> textColorsSeen_;
+    std::vector<std::string> textColorsBad_;
+    double textColorsSince_ = -1;
     std::array<float, 3> camera_{};  // the main menu's camera (the back walk)
     std::array<float, 4> bricks_{};  // the options' bricks light (the back walk)
     unsigned adapter_ = 0;           // the stickyaxis walk's virtual adapter (SDL_JoystickID)
@@ -219,6 +225,12 @@ private:
     unsigned kbHeld_ = 0;
     bool kbOdAsked_ = false;
     unsigned kbGreen_ = '1';  // an SDL_Keycode (SDLK_1)
+    // rb_guitar_play / rb_guitar_none / rb_pad_play: the device's own events.
+    size_t devGem_ = 0;
+    int devPlayed_ = 0, devTarget_ = -1;
+    unsigned devHeld_ = 0;
+    bool devStrumDown_ = false, devTilt_ = false, devOdAsked_ = false, devWhammied_ = false;
+    double devReleaseMs_ = -1, devSustainSince_ = -1;
 
     void runCheck(ui::UiManager& ui, const Step& s, double nowMs);
 };

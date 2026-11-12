@@ -277,6 +277,7 @@ void BandView::drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scen
     ctx.hdr = hdr_;
     const scene::Mat* mat = m.dir->resolve<scene::Mat>(m.mat);
     if (!mat) {
+        if (!m.mat.empty()) gfx::shaderaudit::note("band mesh without its material", m.name + " (" + m.mat + ")");  // none named: the data's
         mr.draw(g, bones, gfx::Material{}, ctx);
         ++meshes_;
         return;

@@ -582,6 +582,12 @@ public:
         // ;, N / M, B, O: input/input.h), so two players are always
         // possible [I: the port's choice].
         if (msg == "is_multiple_controllers") return r = Value::integer(1), true;
+        // is_playing (band_objects.dta's coda, ui/game.dta): a song loaded and
+        // its clock between its start and its end [I: RB's Game::IsPlaying not read].
+        if (msg == "is_playing") {
+            const double t = ui.host().gameTimeMs();
+            return r = Value::integer(ui.host().gameLoaded() && t >= 0 && t < ui.host().songDurationMs() ? 1 : 0), true;
+        }
         // multiplayer: num_players > 1; multiplayer_vs (0x822B37F8): and the mode's competitive [C].
         if (msg == "multiplayer" || msg == "multiplayer_vs")
             return r = Value::integer(gameCfgValue(ui, "num_players").integerValue() > 1 &&

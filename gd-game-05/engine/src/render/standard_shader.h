@@ -120,6 +120,7 @@ private:
     std::unordered_map<uint32_t, ProgramId> programs_;
     std::vector<ProgramId> owned_;
     std::unordered_set<uint32_t> failedLogged_;
+    std::unordered_set<uint32_t> substituted_;  // keys drawn with a stand-in (shaderaudit)
 };
 
 }  // namespace gfx

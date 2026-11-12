@@ -60,7 +60,7 @@ public:
 
     // The ranges a ParticleSysAnim changes, per running copy.
     struct Params {
-        std::array<float, 2> life, speed, emitRate, startSize;
+        std::array<float, 2> life, speed, emitRate, startSize, deltaSize;
         std::array<float, 4> startColorLow, startColorHigh, endColorLow, endColorHigh;
     };
     Params& params() { return params_; }
@@ -85,6 +85,10 @@ public:
     void poll(float clockFrames);
     // Stops or resumes emitting (an effect being hidden) [I].
     void setEmitting(bool on) { emitting_ = on; }
+    // Starts `n` particles now (Rock Band's launch_part / a BandMeshLauncher's
+    // launch_particles), with the current ranges (params()); returns how many
+    // the pool took.
+    int launch(int n);
 
     int count() const { return int(alive_.size()); }
     // Removes the particles whose position (in the particles' space) matches.

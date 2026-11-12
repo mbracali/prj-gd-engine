@@ -6,6 +6,20 @@ inside the Guitar Dream Universal Launcher's release
 
 ## [Unreleased]
 
+### Fixed
+- A Rock Band guitar (or any controller) set to "None" in GAMEPADS now plays a one-player song; before, the song took only its Start and ignored every fret and strum.
+- A gamepad or guitar's Start works on the title screen.
+- A gamepad plays the song with its frets even after the keyboard was used in the menus.
+- Missed notes play the miss sound again (miss_gtr / miss_bass / drum misses from the original's player handlers).
+- The loading screen's band icons are lit by their own light (they were dark olive).
+- Options > Audio: the volume sliders show as full bars again (they were drawn edge-on, almost black); Options > Calibrate opens.
+- A Rock Band guitar plays even when the game window lost the keyboard focus (the launcher's window made again for Vulkan could leave it without: every controller event was dropped). The controller report lists every raw event and what the game did with it; `--inputcapture` records a session for bug reports.
+- Press Start to the main menu and back: the old screen's buttons leave under a fade to black, then the new screen fades in, as in Rock Band.
+- Rock Band's own in-song HUD from the disc's track panel: score and stars, multiplier dial, Overdrive meter per track, band meter with instrument icons, player intros, solo / fail / Big Rock Ending pop-ups, in solo and band layouts.
+- Create a Band's "Congratulations!" was hidden under a dark layer (draw order); the LOADING label reads bright at once.
+- The fret board reacts as in Rock Band: hit flames, shockwaves and glass shards from the smashers, held frets light their smashers, sustains burn, misses flash, Overdrive phrases flash when captured, and deploying Overdrive brings the golden spotlight to the track.
+- Venue shots get their film look again (ProFilm post-processing was never selected when the band appeared); the highway rises in at the song start as in the original.
+
 ## [0.0.6] - 2026-11-10
 
 ### Added

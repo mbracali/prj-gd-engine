@@ -249,14 +249,19 @@ public:
 
     int textsDrawn() const { return textsDrawn_; }
     int meshesDrawn() const { return meshesDrawn_; }
+    // The rb_text_colors walk: every text of the last frame as drawn.
+    void setTextProbes(bool on) { texts_.probes = on ? &textProbes_ : nullptr; }
+    const std::vector<TextProbe>& textProbes() const { return textProbes_; }
     // Components whose template, font or string could not be found.
     const std::vector<std::string>& problems() const { return problems_; }
 
 private:
     struct LabelText;
+    void setProbeStyle(const scene::BandText* band, const LabelText& lt);
     struct ListState {
         std::vector<ListRow> rows;
         int selected = 0;
+        int first = 0;  // the first row shown (a list longer than its display_num scrolls)
     };
     struct EntryState {
         std::string entered, picking;
@@ -307,6 +312,7 @@ private:
     std::map<std::string, std::unique_ptr<scene::Tex>> texFiles_;
     std::vector<MaskDraw> masks_;
     std::vector<Hit> hits_;
+    std::vector<TextProbe> textProbes_;
     Mat4 viewProj_;  // the frame's camera, for the hits
     TargetId renderTarget_{};
     Rendered rendered_;

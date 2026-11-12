@@ -226,6 +226,7 @@ public:
     std::vector<std::string> enableEvents, disableEvents, waitForEvents;
     std::string nextRandom;
     std::vector<std::pair<std::string, std::string>> proxyCalls;  // proxy dir, message
+    std::vector<std::string> proxyEvents;  // RB: each proxy call's event (gem_smasher's hit.trig: break.trig)
 };
 
 // RndPostProc v9 (Load @ 0x821ec558 -> 0x821eb3d0): a shot's bloom, colour

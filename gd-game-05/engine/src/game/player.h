@@ -149,6 +149,11 @@ public:
     // Rock Band's drums (DrumTrackWatcherImpl, Swing RB 0x824A2320): every
     // pad of a chord is its own gem (splitDrumChords) [C].
     void setDrumMode(bool on) { drumMode_ = on; }
+    // A one-player song takes every device (D34 / D35): the watcher follows
+    // the device that plays, a gamepad's (every fret press strums) or a
+    // guitar's / the keyboard's (strummed) (GD05-056).
+    ControllerMode controllerMode() const { return mode_; }
+    void setControllerMode(ControllerMode m) { if (!drumMode_) mode_ = m; }
     // A saved member returns from the brink at this gem (RB 0x82442060): the
     // gems before it pass without a penalty [C].
     void skipUntil(int gem) { firstPlayable_ = std::max(firstPlayable_, gem); }

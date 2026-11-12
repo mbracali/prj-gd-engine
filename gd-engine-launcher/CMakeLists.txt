@@ -124,4 +124,7 @@ option(GDUL_BUILD_TESTS "Build the launcher's tests (the window hand-over test m
 if(GDUL_BUILD_TESTS AND NOT ANDROID)
   enable_testing()
   add_subdirectory(tests/handover)
+  # The list order: playable games first (tests/order/run_order.cmake, `ctest -R gdul_order`).
+  add_test(NAME gdul_order COMMAND ${CMAKE_COMMAND} -DGDUL=$<TARGET_FILE:gdul> -DDIR=${CMAKE_BINARY_DIR}/order-test
+           -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/order/run_order.cmake)
 endif()

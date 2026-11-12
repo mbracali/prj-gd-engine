@@ -391,9 +391,216 @@ pattern). Each says what, why and how to undo it.
 - **Undo:** App::handleAction's `ev.player = 0`, Input::keyboardSlot's
   fallback.
 
+## D35
+- **What (2026-11-11, GD05-056):** D34 extended: in a one-player song a
+  device without a player (GAMEPADS' None, or a pad past the enabled
+  players) plays it too (Input::setOnePlayerSong). The owner's
+  controllers.json had his Rock Band guitar at None beside the keyboard as
+  player 1: the song took only its Start, every fret and strum was dropped.
+  In multiplayer songs None still means "the menus only".
+- **Also:** a script's {$panel button_down b p} runs the panel's
+  BUTTON_DOWN_MSG and then UIPanel's native ButtonDown (the title's
+  splash_panel turns Start into kPad_X): a pad's or guitar's Start did
+  nothing on the title [I].
+- **Undo:** Input::actionsOf's `!onePlayerSong_`, PanelObj::handleNative's
+  "button_down".
+
+## D36
+- **What (2026-11-11, GD05-054):** a RndDir that names an environ draws its
+  objects in it (RndDir `environ`, SyncProperty RB 0x821B3438) [C].
+  loading.milo's band icons (load_icon_*: intruments.env, a warm white point
+  light) were drawn in ornate_leader.grp's dim environ: icons p97 luma
+  44 -> 215. LOADING's grey is the label's own custom colour (normal
+  0x3b3b3b) under ornate_leader.env [C data].
+- **Undo:** UiView::drawObject's inline-directory environ block.
+
+## D37
+- **What (2026-11-11, GD05-055):** $world is the attached WorldDir (RB's
+  band_objects.dta start_shot finds ProFilm_a.pp / override_blender.pp
+  through it; unset, every shot from the band's first on drew with no
+  post). BandCamShots without a PostProc keep the selection and blend via
+  pp_blend_task (RB 0x8220A8A0 / PostProcBlendTask 0x8220A508). RB
+  PostProc bloom is not drawn until RB's alpha-mask bloom is ported (the
+  GH2 bright pass misread its fields: white blobs) [I]. The RB track is
+  hidden until intro.trig (ui/game.dta on_extend at 0, gem_track.dta
+  play_intro +0.55 s solo, 0.25 s x index + 0.05 s in a band), then
+  intro_anim.grp's camera_intro.tnm at 30 fps [I fps].
+- **Undo:** World attach's $world, postProcState's bloom gate,
+  RbTrackView::setIntroAt.
+
+## D38
+- **What (2026-11-11, GD05-056 / 057):** in a one-player song the watcher
+  follows the device that plays (a gamepad's every fret press strums; a
+  guitar's or the keyboard's strum), as D34 / D35 take every device. RB
+  has no PlayerMatcher handlers: a miss goes to config/player.dta's player
+  handler (miss $player_num $slot) -> miss_gtr.cue / miss_bass /
+  miss_kick.cue / miss_drum [C data]; the port only sent GH2's matcher,
+  so misses were silent.
+- **Undo:** App::playerAction's setControllerMode, gameCallbacks' K::Miss.
+
+## D39
+- **What (2026-11-11, GD05-054):** slider resource meshes are drawn through
+  their resource parents (slider_audio.milo's slider.grp turns the flat
+  quads to the camera; the port drew them edge-on: the audio sliders were
+  2-3 px, nearly black). ProfileMgr keeps the global-options pad and a flag
+  set by set_global_options_pad (RB 0x823D6280) [C]. `calibrate_*`
+  UIScreens stay screens (makeRbMetaClass made them panels). LOADING is
+  drawn as RB does (lit Lubalin, custom normal 0x3b3b3b, ornate_leader.env
+  ambient 0; RB 0x82213470, 0x822FE7B8, 0x827D6F00, 0x821AACC8): it
+  brightens only when loading.tnm's 3 fps glint reaches the word (~4.5 s
+  after the screen opens); the port's ~1 s loads never show it. Not
+  changed (a port choice for the owner).
+- **Undo:** UiView::drawStyleMeshes' slider world, rb_natives
+  global_options_pad_set, makeRbMetaClass's screen check.
+
+## D40
+- **What (2026-11-11, GD05-045):** the fret board's effects are
+  tracksystem.milo's own EventTriggers, played by RbTrackView: the
+  gem_smasher.dta / gem_track.dta handlers (hit / hit_bonus, burn /
+  stop_burn, miss, combo, set_glow, deploy / stop_deploy) from changes in
+  the player's state [I: which native sends each]; particle_trigger
+  launches BandMeshLaunchers and part_launcher launches each system once
+  [C data; I: counts]. PropAnims are read in full (120/120 in
+  tracksystem.milo) [C data]. ParticleSys rev 36 reads grow_ratio before
+  shrink_ratio: the other order left the hit flares at size 0 [C data];
+  this also changes venue / band particles (their walks pass; shots not
+  compared).
+- **Undo:** RbTrackView::fxEvents / fxUpdate / drawSmasherFx,
+  readParticleSys' order.
+
+## D41
+- **What (2026-11-11, GD05-058 / 059):** (1) controllers send while no
+  window has the keyboard focus (SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS):
+  without it SDL drops every joystick and gamepad event then [C: SDL 3.4
+  SDL_PrivateJoystickShouldIgnoreEvent; proven: a window made again without
+  focus got 0 events, 2 with the hint]. The owner's session of 11-11 17:35
+  (the launcher made the window again for Vulkan) logged no raw event at all
+  from his guitar and 0 notes hit; the report now prints the focus state and
+  every raw event with what the game did with it (GD05_INPUTLOG=1 logs them;
+  `--inputcapture` writes input-capture.txt). (2) Transitions: RB's
+  GotoScreen exits the old screen's panels and loads the new screen's as the
+  transition starts (UIScreen Exit; a panel's load script every time its
+  screen comes up), while the old screen still shows; main.dta's main_panel
+  fades the fx panel to black on load and on exit and the new screen fades
+  in on TRANSITION_COMPLETE. The port's switch waits for that fade (at most
+  2 s; on the 360 the panel loads covered it [I]).
+- **Undo:** Input::prepareSdl / load's hint; UiManager::beginTransition's
+  early exit / load, updateTransition's fxFadingOut hold.
+
+## D43
+- **What (2026-11-11, GD05-054):** a directory's drawables sort as RB's
+  (0x821B3A48 / comparator 0x821FF100): by draw order, then the same class
+  by name [C]; different classes keep the file's order [I].
+  tour_band_welcome's all.grp (blackmask, 85% black) now draws first:
+  "Congratulations!" 22 -> 180 (expected 180 from its colour, material,
+  lights and the D25 curve; walk rb_text_colors).
+- **Undo:** sortDraws in render/ui_view.cpp.
+
+## D44 (Owner decision; replaced by D49 on 2026-11-12)
+- **What (2026-11-11):** LOADING reads bright from the moment the loading
+  screen shows: drawn at its own focus colour (custom_colors 0xfdfdfd) in
+  RB's UI environ (ambient 1). RB draws it at normal 0x3b3b3b under
+  ornate_leader.env (ambient 0), lit only while loading.tnm sweeps
+  loading.lit (range 35) across the word (keys 0 / 25 / 50, rate 2, from
+  enter) [C data]. p97 28 -> 253.
+- **Undo:** the loading.lbl block in UiView::drawObject.
+
+## D45
+- **What (2026-11-11, GD05-060):** RB's in-song HUD is trackpanel.milo's
+  own elements (render/rb_hud_view.h), placed by its track_configuration
+  objects (N_player_wide: objects / visibles / xfms) through the panel's
+  Cam.cam and driven as their RndDir type scripts do (track/gen/*.dta)
+  [C data]; scoreboard values follow the TrackPanel poll 0x82803750 [C];
+  the per-track senders are not traced [I]. In a band each gem track draws
+  the one-player picture scaled so its now bar sits on its own Overdrive
+  meter [I: RB uses one camera with x_offset / side_angle].
+- **Undo:** App::rbHud_, RbTrackView rects from RbHudView::trackRects.
+
+## D46
+- **What (2026-11-12, GD05-062):** the sub-menu labels are not changed.
+  Owner: "the sub-menu letters are grey". Measured against his capture of
+  RB (main_solomode_screen, QUICKPLAY focused; 99th percentile luma per
+  word box at 1200 x 675): QUICKPLAY focused RB 188 / port 183 (Vulkan in
+  his launcher build 191), SOLO TOUR normal RB 102 / port 97 (98); the
+  same on the second visit (186 / 96). Their colours are the buttons' own
+  custom_colors (normal 0x707070, focused 0xd7d7d7) [C data], lit by
+  popup_main_test.env's one point light bottom_right.lit (0.92, range
+  750, falloff from 178) [C data]; RB packs the falloff as
+  saturate(d * 1/(start - range) + range/(range - start)) (0x827D6F00) [C],
+  as the port does. light.tnm (looped by light.trg) names no trans: the
+  light stays put in RB too [C data]. Main words: SOLO 207 / 203, MULTI
+  215 / 216, TRAINING 222 / 220, OPTIONS 226 / 215, COMMUNITY 224 / 191
+  (RB's darker on its left: open, GD05-062).
+- **Undo:** nothing to undo; walk rb_text_colors' refcolors:solo /
+  refcolors:solo_2nd fail a sub-menu label outside 10% of RB's capture.
+
 ## Owner: completeness 36% (2026-11-10)
 - **What:** the owner set Rock Band's completeness to 36% (game-info.yaml
   0.36, README, the site) after playing the build; the parity ledger
   (docs/parity.md, 61%) scores rows too generously for what a player sees.
 - **How to apply:** never raise game-info.yaml above the owner's figure
   without the owner's OK; report the ledger's figure next to it.
+
+## D47
+- **What (2026-11-12, GD05-061):** the guitar's loss inside the launcher is
+  located by the controller report, not guessed. Each Linux pad's kernel
+  device (SDL_GetGamepadPath, /dev/input/eventN) is opened read-only by
+  Input beside SDL and drained each frame; the report prints what the
+  controller sent vs SDL's joystick events. An extra evdev reader changes
+  nothing for SDL (evdev copies every event to each reader). Device walks
+  can drive a kernel device (GD05_WALK_EVDEV) so the launcher's whole path
+  (its SDL, its window made again for Vulkan, the module) is tested from
+  the kernel up, not from SDL's virtual joystick.
+- **Why:** two of the owner's sessions showed 0 SDL events from his
+  guitar while every test from the kernel up passes in the same launcher
+  build; the next report has to say on which side of the kernel the
+  events stop.
+- **Undo:** Input::kernel_ / drainKernel / closeKernel and the report's
+  Kernel device line; walktest's EvdevOut and dev* helpers (SDL virtual
+  setters again).
+
+## D48
+- **What (2026-11-12, GD05-063):** a label's text is laid out with the
+  font's kerning plus the label's (RB 0x8226E0A0 raises the font's +0x1044
+  by the label's kerning around the layout, then puts it back) [C]. A
+  UIList with more rows than its display_num draws display_num rows from
+  a first row that follows the selection [I: the window moves only as far
+  as the selection needs]. The song list's texts are measured against
+  RB's sizes by walk rb_songlist_text (5%).
+- **Why:** the owner's "wrong sizes for the letters" on the song list: the
+  sizes match the data (within 0.3%), the kerning rule was not RB's, and
+  the list was stuck on its first seven rows.
+- **Undo:** UiView::drawLabel / drawTemplate (kerning), UiView::drawList
+  and ListState::first.
+
+## D49 (Owner decision, replaces D44)
+- **What (2026-11-12, GD05-065):** LOADING (loading.milo's loading.lbl) is
+  drawn at its focus colour (custom_colors 0xfdfdfd) lit as the four band
+  icons are: intruments.env's instruments.lit (1 1 0.68, range 500, falloff
+  from 200, parented to ornate_leader.grp, the label's own group) moved by
+  the word's offset from the icons, plus loading.tnm's sweep light
+  loading.lit (range 35) from ornate_leader.env [C data: lights, colours,
+  sweep; I: that RB lights the word so].
+- **Why:** the owner rejected D44's flat white: in the original the word has
+  the icons' colour grading and effects. Lit at its own place (normal
+  0x3b3b3b, ornate_leader.env, ambient 0) it is grey (p97 25..44).
+  Measured: word luma 194, blue/red 0.69 vs the icons' 172 / 0.68.
+- **Undo:** the loading.lbl block in UiView::drawObject.
+
+## D50
+- **What (2026-11-12, GD05-064):** each gem track takes the panel's
+  track_configuration as track_paneldir.dta's update gives it [C data]:
+  rotater.grp pitch, game.cam's y_fov and place (0, y_pos, z_pos),
+  track.env's fade and the far plane from the camera to fade_start and
+  fade_start + fade_length, top_y = fade_start + fade_length + 5,
+  y_per_second = top_y / view_time (view_time_easy .. _expert by the gem
+  players' mean difficulty; the GH2 per-difficulty speed is not used). The
+  one-player configuration (1_player_wide) for every track; the band's are
+  that picture on their meters (D45) [I]. rig.grp is kept at its origin
+  (the gems are placed relative to now) [I]; TransAnim repeat_trans goes on
+  past the keys, each span adding last - first [C data: the flag; I: form].
+- **Why:** the owner's "something on top of where the notes pass": the
+  Overdrive meter and multiplier covered 39% of a gem at the now bar; the
+  rig stopped at y 100 and the gems crossed the smashers 1.2 s early.
+- **Undo:** RbTrackView::configure, App::drawRbTracks' configure block, the
+  rig reset in RbTrackView::draw, ScenePose::transAnim's repeat.

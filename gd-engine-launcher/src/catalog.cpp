@@ -121,6 +121,11 @@ void Catalog::load() {
         g.moduleMissing = g.ready && !g.hasModule && !devRun;
         games_.push_back(g);
     }
+    // The playable games first (ready_to_play), then the others; games.yaml's
+    // order is kept within each group. Every view (the list, its navigation,
+    // the first focus, --list, Explore) reads this order; saved settings are
+    // keyed by game id, never by row.
+    std::stable_partition(games_.begin(), games_.end(), [](const Game& g) { return g.ready; });
 
 #ifdef __ANDROID__
     // The app's own folder on the shared storage (Android/data/<app>/files/),

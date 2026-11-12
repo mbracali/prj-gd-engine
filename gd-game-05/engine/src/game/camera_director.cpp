@@ -208,11 +208,37 @@ CameraDirector::CameraDirector(World& world, uint32_t seed) : world_(world), rng
         if (!s || it == directors().end()) return Value::integer(1);
         return it->second->camCheckShot(*s) ? Value::integer(1) : Value::integer(0);
     });
+    // {pp_blend_task blender pp time units delay} (RB 0x8220A8A0 ->
+    // PostProcBlendTask 0x8220A508) [C]: after `delay`, the selected PostProc
+    // blends into `pp` over `time` (in `units`), drawn through `blender`
+    // (override_blender.pp) which the task selects; the destination's maps
+    // are taken at once. band_objects.dta's start_shot runs it for every
+    // shot without its own PostProc (ProFilm_a.pp, or the VENUE track's
+    // override) [C data].
+    in.addBuiltin("pp_blend_task", [](Interp& i, const DataNode& c) {
+        auto it = directors().find(&i);
+        if (it == directors().end()) return Value::integer(0);
+        CameraDirector& d = *it->second;
+        const Value v = i.evalArg(c, 2);
+        const std::string n = v.type == Value::Type::Object && v.object ? v.object->name() : v.str();
+        const scene::PostProc* to = d.world_.venue().find<scene::PostProc>(n);
+        if (!to) return Value::integer(0);
+        const float time = c.children.size() > 3 ? i.evalArg(c, 3).number() : 0.0f;
+        const int units = c.children.size() > 4 ? int(i.evalArg(c, 4).integerValue()) : int(kTaskSeconds);
+        const float delay = c.children.size() > 5 ? i.evalArg(c, 5).number() : 0.0f;
+        d.blendFrom_ = d.postProc_;
+        d.postProc_ = to;
+        d.blendUnits_ = units == kTaskBeats ? kTaskBeats : kTaskSeconds;
+        d.blendStart_ = (d.blendUnits_ == kTaskBeats ? d.world_.beats() : d.world_.seconds()) + double(delay);
+        d.blendTime_ = std::max(0.0f, time);
+        if (d.blendTime_ <= 0 && delay <= 0) d.blendFrom_ = nullptr;
+        return Value::integer(0);
+    });
     // `rnd reset_postproc` (the UI's rnd answers it quietly; the director
     // takes the shot's PostProc itself at start_shot).
     if (!in.findObject("rnd")) {
         rnd_ = std::make_unique<FnObject>("rnd", "Rnd", [this](const std::string& msg, Value&) {
-            if (msg == "reset_postproc") postProc_ = nullptr;
+            if (msg == "reset_postproc") postProc_ = nullptr, blendFrom_ = nullptr;
             return true;
         });
         in.registerObject(rnd_.get());
@@ -273,6 +299,13 @@ float CameraDirector::random01() { return float(random() >> 8) / float(1u << 24)
 float CameraDirector::shakeRandom01() {
     shakeRng_ ^= shakeRng_ << 13, shakeRng_ ^= shakeRng_ >> 17, shakeRng_ ^= shakeRng_ << 5;
     return float(shakeRng_ >> 8) / float(1u << 24);
+}
+
+float CameraDirector::postProcBlend() const {
+    if (!blendFrom_) return 1.0f;
+    const double t = (blendUnits_ == kTaskBeats ? world_.beats() : world_.seconds()) - blendStart_;
+    if (t <= 0) return 0.0f;
+    return blendTime_ > 0 ? float(std::min(1.0, t / double(blendTime_))) : 1.0f;
 }
 
 double CameraDirector::now(const scene::CamShot& shot) const {
@@ -356,7 +389,7 @@ bool CameraDirector::native(Interp& in, const std::string& msg, std::vector<Valu
         r = Value::integer(!s || (msg == "cam_shot_ok" ? camShotOk(*s) : camCheckShot(*s)) ? 1 : 0);
         return true;
     }
-    if (msg == "reset_postproc") return postProc_ = nullptr, true;
+    if (msg == "reset_postproc") return postProc_ = nullptr, blendFrom_ = nullptr, true;
     if (msg == "set_min_lod") {
         // The band's characters (Character set_min_lod, 0x82152108).
         if (world_.band)
@@ -369,6 +402,9 @@ bool CameraDirector::native(Interp& in, const std::string& msg, std::vector<Valu
 
 bool CameraDirector::objectNative(Interp& in, scene::Object& o, const std::string& msg, std::vector<Value>& args, Value& r) {
     if (auto* c = o.as<scene::CamShot>()) {
+        // duration_seconds (worldbase.dta next_outro_camera, world_validate):
+        // its frames at 30 a second; a looping shot has none [I].
+        if (msg == "duration_seconds") return r = Value::real(c->looping ? 0.0f : c->lengthFrames() / 30.0f), true;
         if (msg == "get" && !args.empty()) {
             const std::string key = args[0].str();
             if (key == "duration") return r = Value::real(c->lengthFrames()), true;
@@ -379,7 +415,7 @@ bool CameraDirector::objectNative(Interp& in, scene::Object& o, const std::strin
         return false;
     }
     if (auto* p = o.as<scene::PostProc>()) {
-        if (msg == "select") return postProc_ = p, true;
+        if (msg == "select") return postProc_ = p, blendFrom_ = nullptr, true;
         return false;
     }
     // The band slots: guitarist0's clip flags, walk and lose_teleport.
@@ -538,8 +574,12 @@ void CameraDirector::startShot(const scene::CamShot* shot) {
     for (const std::string& h : shot->hideList)
         if (const scene::Object* o = world_.venue().find(h)) world_.setShowing(o, false);
     // The shot's PostProc (camshot.dta start_shot: [postprocess] select, else
-    // rnd reset_postproc).
-    postProc_ = world_.venue().find<scene::PostProc>(shot->flag("postprocess"));
+    // rnd reset_postproc). RB's BandCamShot (band_objects.dta) keeps the
+    // selection for a shot without one: its start_shot blends to ProFilm_a.pp
+    // or the VENUE track's override (pp_blend_task) [C data].
+    const scene::PostProc* own = world_.venue().find<scene::PostProc>(shot->flag("postprocess"));
+    if (own || !world_.venue().find<scene::PostProc>("override_blender.pp")) postProc_ = own;
+    blendFrom_ = nullptr;
     if (onShot) onShot("shot " + shot->name + " (" + shot->category + ")");
     if (world_.log) {
         std::string hides;
@@ -548,6 +588,10 @@ void CameraDirector::startShot(const scene::CamShot* shot) {
                 hides.empty() ? "" : ", hides", hides.c_str());
     }
     world_.interp().send(world_.scriptFor(const_cast<scene::CamShot*>(shot)), "start_shot", {}, false);
+    // RB's shots always end with a PostProc selected (theirs, ProFilm_a.pp or
+    // the VENUE track's override): none is the look missing (shaderaudit).
+    if (current_ == shot && !postProc_ && world_.venue().find<scene::PostProc>("override_blender.pp"))
+        gfx::shaderaudit::note("shot without its PostProc", shot->name);
     if (onShotStarted && current_ == shot) onShotStarted(*shot);
 }
 

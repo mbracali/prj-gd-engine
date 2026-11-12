@@ -133,6 +133,9 @@ public:
     // (a Group's environ while its objects draw).
     void setLightEnv(const LightEnv& env) { setFrame(lastCamera_, env, lastW_, lastH_, sceneDepth_); }
     const LightEnv& lightEnv() const { return env_; }
+    const Camera& camera() const { return lastCamera_; }
+    int viewportW() const { return lastW_; }
+    int viewportH() const { return lastH_; }
     // `bones`: ctx.bones transforms (one for a rigid mesh).
     void draw(const GpuMesh& mesh, const Mat4* bones, const Material& m, const DrawContext& ctx);
 

@@ -293,6 +293,7 @@ void VenueView::drawMesh(gfx::MaterialRenderer& mr, const scene::Mesh& m, const 
     ctx.hdr = hdr_;
     const scene::Mat* mat = m.dir->resolve<scene::Mat>(m.mat);
     if (!mat) {
+        if (!m.mat.empty()) gfx::shaderaudit::note("venue mesh without its material", m.name + " (" + m.mat + ")");  // none named: the data's
         mr.draw(g, bones, gfx::Material{}, ctx);
         ++meshes_;
         return;

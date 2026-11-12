@@ -663,7 +663,8 @@ void UiManager::enterPanel(PanelObj* p) {
 }
 
 void UiManager::exitPanel(PanelObj* p) {
-    if (!p->up) return;
+    const bool early = exitedEarly_.erase(p) > 0;
+    if (!p->up && !early) return;
     for (const char* ev : {"ui_exit", back_ ? "ui_exit_back" : "ui_exit_forward"})
         if (p->view)
             for (const gfx::UiView::Trigger& t : p->view->triggers(ev)) {
@@ -671,6 +672,13 @@ void UiManager::exitPanel(PanelObj* p) {
                 exitPosed_[p].insert(t.anim->name);
             }
     p->exit();
+}
+
+// The fx panel (main.dta) fading to black: fade_out set its in_transition and
+// runs fade.mnm from 25 to 0 (is_faded_out: frame 0).
+bool UiManager::fxFadingOut() {
+    PanelObj* fx = panel("fx");
+    return fx && fx->up && fx->view && fx->getProp(interp_, "in_transition").truthy() && fx->view->frame("fade.mnm") > 0.01f;
 }
 
 void UiManager::beginTransition(ScreenObj* next, bool back) {
@@ -698,6 +706,24 @@ void UiManager::beginTransition(ScreenObj* next, bool back) {
                         animateTrigger(p, t);
                         block = std::max(block, double(t.blockSeconds));
                     }
+        // GD05-059: RB's GotoScreen exits the old screen's panels and loads
+        // the new screen's as the transition starts (UIScreen Exit; UIPanel
+        // load, every time a screen comes up: the port keeps its milos
+        // loaded, so the load script runs here), while the old screen still
+        // shows: main.dta's main_panel fades the fx panel to black on load
+        // and on exit, and the new screen comes in only after (fade_in on
+        // TRANSITION_COMPLETE). The port's switch waits for that fade (the
+        // 360's load time covered it [I]).
+        // (A pushed screen leaves the one below as it is; a pop goes back to it as it was.)
+        if (!pushing_)
+            for (PanelObj* p : current_->panels())
+                if (p->up && !next->hasPanel(p)) p->exit(), exitedEarly_.insert(p);
+        if (!popping_)
+            for (PanelObj* p : next->panels())
+                if (!p->up) {
+                    if (!p->loaded) p->load();
+                    else callScript(p, "load");
+                }
         phase_ = Phase::Out;
         phaseMs_ = 0;
         phaseLen_ = block * 1000;
@@ -851,7 +877,9 @@ void UiManager::updateTransition() {
         phaseMs_ += frameDt_;
         const float t = float(std::clamp(phaseMs_ / std::max(1.0, phaseLen_), 0.0, 1.0));
         applyTransitionPose(t);
-        if (phaseMs_ >= phaseLen_) {
+        // The old screen stays while the fx panel fades to black (at most 2 s more).
+        const bool fading = phase_ == Phase::Out && phaseMs_ < phaseLen_ + 2000 && fxFadingOut();
+        if (phaseMs_ >= phaseLen_ && !fading) {
             if (phase_ == Phase::Out) switchScreens();
             else phase_ = Phase::Complete;
         }

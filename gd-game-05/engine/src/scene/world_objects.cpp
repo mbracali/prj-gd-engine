@@ -396,7 +396,7 @@ void readEventTrigger(Rd& r, EventTrigger& e) {
     e.proxyCalls.resize(r.count(8));
     for (auto& p : e.proxyCalls) {
         p.first = r.str(), p.second = r.str();
-        r.str();  // RB: the event symbol
+        e.proxyEvents.push_back(r.str());  // RB: the event symbol
     }
 }
 

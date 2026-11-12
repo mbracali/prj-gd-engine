@@ -146,6 +146,28 @@ struct DeviceInfo {
     bool clipDepthZeroToOne = false;  // projection: depth 0..1 instead of -1..1
 };
 
+// Draws that lack their shader (GD05-054): a draw dropped because its
+// program failed to compile or link, its pipeline failed, or a standard
+// material variant stood in by a simpler one. Counted always (the walks'
+// counter missing_shaders); GD05_SHADERLOG=1 logs each kind once.
+namespace shaderaudit {
+inline int& count() {
+    static int n = 0;
+    return n;
+}
+inline void note(const char* what, const std::string& name) {
+    ++count();
+    static const bool log = SDL_getenv("GD05_SHADERLOG") != nullptr;
+    static std::vector<std::string> seen;
+    if (!log) return;
+    const std::string key = std::string(what) + ": " + name;
+    for (const std::string& s : seen)
+        if (s == key) return;
+    seen.push_back(key);
+    SDL_Log("shaderaudit: %s", key.c_str());
+}
+}  // namespace shaderaudit
+
 // GD05_PERF=1: what the device did since the last read (perfStats).
 struct DevicePerf {
     uint64_t draws = 0, uniformBytes = 0, bufferBytes = 0, textureBytes = 0;

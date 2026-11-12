@@ -48,6 +48,7 @@ ParticleSystem::ParticleSystem(const scene::ParticleSys& def, uint32_t seed) : d
 void ParticleSystem::reset() {
     const scene::ParticleSys& d = *def_;
     params_.life = d.life, params_.speed = d.speed, params_.emitRate = d.emitRate, params_.startSize = d.startSize;
+    params_.deltaSize = d.deltaSize;
     params_.startColorLow = d.startColorLow, params_.startColorHigh = d.startColorHigh;
     params_.endColorLow = d.endColorLow, params_.endColorHigh = d.endColorHigh;
     // SetPool(max_particles) (vtable +0x24 from the Load) [C].
@@ -192,7 +193,7 @@ void ParticleSystem::init(Particle& p, float frame) {
     p.size = random(params_.startSize);
     const float life = std::max(p.death - p.birth, 1e-4f);
     float sizeScale = 1.0f / life;
-    p.sizeVel = random(d.deltaSize);
+    p.sizeVel = random(params_.deltaSize);
     if (p.sizeVel < -p.size) p.sizeVel = -p.size;
     if (d.type == 1) {
         if (d.growRatio == 0) {
@@ -296,6 +297,18 @@ void ParticleSystem::emit(float frame, float dt) {
         alive_.push_back(i);
         emitCount_ -= 1;
     }
+}
+
+int ParticleSystem::launch(int n) {
+    int started = 0;
+    const float now = def_->frameDrive ? frame_ : std::max(lastClock_, 0.0f);
+    for (; started < n && !free_.empty(); ++started) {
+        const uint32_t i = free_.back();
+        free_.pop_back();
+        init(pool_[i], now);
+        alive_.push_back(i);
+    }
+    return started;
 }
 
 // Pre-spawn (0x822146E8) [C]: over min(mean life, max / mean rate) frames

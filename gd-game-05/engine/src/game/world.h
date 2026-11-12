@@ -260,6 +260,7 @@ private:
     std::unordered_map<const scene::Object*, std::unique_ptr<VenueObj>> objs_;
     std::function<ScriptObject*(const std::string&)> prevResolver_;
     ScriptObject* prevWorld_ = nullptr;
+    Value prevWorldVar_;  // $world before attach
     double seconds_ = 0, beats_ = 0;
     std::vector<AnimTask> tasks_;
     std::unordered_map<const scene::Object*, float> frames_;  // last frame set per anim
