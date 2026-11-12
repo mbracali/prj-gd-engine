@@ -604,3 +604,58 @@ pattern). Each says what, why and how to undo it.
   rig stopped at y 100 and the gems crossed the smashers 1.2 s early.
 - **Undo:** RbTrackView::configure, App::drawRbTracks' configure block, the
   rig reset in RbTrackView::draw, ScenePose::transAnim's repeat.
+
+## D51
+- **What (2026-11-12, GD05-066/067/068):** the band moves with the song as
+  Rock Band does [C data: char_objects.dta, midi_parsers.dta; C code
+  addresses in char/rb_midi_parser.h and game/rb_band.cpp]. RB's MidiParser
+  is its own class (char/rb_midi_parser.cpp: script handlers gem / midi /
+  text, add_message, gaps and idles RB 0x824BB8F0 / 0x824BB9D8, inversion,
+  poll RB 0x824B8210 sends every due event). Each member hooks its
+  CharDriverMidi drivers (fret, strum, string_hi / _low, the drummer's nine),
+  fret.ikmidi (new_spot), the drummer_play / guitar_lookat / singalong
+  setters and itself (guitarist_parser ... play modes) to the parsers
+  world_configure names (guitar_* or bass_*). A driver's clip starts
+  `length` before its first frame and blends in over it (RB 0x82342168);
+  the main clip is the start group's FindClip with the play, attitude and
+  instrument flags (RB 0x822E5908 / 0x822E4A80 / 0x8231BF10); the drummer
+  plays with main_add.drv while the mode is mellow .. solo. [I]: a new
+  clip of the group as the playing one ends; a group named by midi_parser
+  plays its next clip; the CharDriverMidi +0x7c flag is taken as true.
+- **Why:** the owner: hands wrong, drummer still, lips still. Nothing of
+  this ran (the GH2 parsers had other names and form; no hand clip ever played).
+- **Undo:** Band::rbLoadSong / rbEnter / rbChangeGroup / rbPlayGroup /
+  rbDriverClip and RbPart (game/rb_band.cpp); GD05_BAND_LEGACY=1 shows the
+  band without them.
+
+## D52
+- **What (2026-11-12, GD05-066/067):** RB's rig where it differs from GH2's
+  [C]: CharWeightSetter base = offset + scale x the driver's flag weight,
+  followed at 1 / beats_per_weight per beat (RB 0x8234A320; GH2's was the
+  flag weight itself: the hand IK came on exactly when the main clip wanted
+  the arm free); CharIKHand with several targets weighs each 144 / its
+  squared local offset, the IK's weight times the sum when under 1 (RB
+  0x8232EB48; GH2 averaged them by 1 / offset at full weight: hands pulled
+  between hip and mouth); CharPollGroup hand_iks orders the hand IKs (strum
+  after right_hand) [I: only its IK hands swap places]; CharForeTwist puts
+  twist2 at hand x x length_scale (RB 0x8233DE58; GH2 halfway); RndGroup
+  draw_only (hands.grp -> mic.grp, sticks.grp -> singlestick.grp).
+- **Why:** measured (GD05_BANDCHECK): pick to strum target p95 18.97 ->
+  0.00 units; arm bones up to 2.98 x bind -> 1.25; mic hand drew every prop.
+- **Undo:** Rig::Impl::pollSetter / pollHand / pollFore, the poll group
+  block after sort(), Character::drawOnly.
+
+## D53
+- **What (2026-11-12, GD05-068):** the RB face: char/singer.fac (from the
+  milo's source folder), the viseme set (the head outfit's `visemes`, else
+  char/male/anim/male_viseme_head_1.milo), the graph's bone pose nodes that
+  are clips of it; each poll the face is Base plus weight x (viseme -
+  Base), times the servo's weight (expression.weight / singalong.weight)
+  [C data; I: the delta blend and q = (qi qb^-1)^w q]. The singer plays the
+  song's .voc, the others the blink track [I: the guitar type's song_owner
+  and the 0.05 s song_offset are not followed; expression.drv's faces not
+  played].
+- **Why:** the singer's lips never moved (the .fac was looked up under
+  char/male/, and RB has no `visemes` clip of frames as GH2).
+- **Undo:** Character::setRbFace and pollFace's RB branch, Band::setupFace's
+  RB branch.

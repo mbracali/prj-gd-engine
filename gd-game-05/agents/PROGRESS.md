@@ -5,6 +5,41 @@ Rock Band (Xbox 360) -> `gd05`. Kickoff: `docs/spikes/GD-GAME-05_KICKOFF.md`
 bottom. "Verified" lines quote the command and its output; "built only" and
 "not tested" are said explicitly.
 
+## 2026-11-12: the band as Rock Band moves it (wave G06 1, GD05-066/067/068)
+
+- **Causes (measured, GD05_BANDCHECK=1; GD05_BAND_LEGACY=1 runs the band
+  without the fixes):** none of RB's band drivers ran: RB's parsers are
+  script objects ({new MidiParser guitar_fret ...}) the GH2 parser set did
+  not read, so no fret / strum / drum hit clip ever played and the fret
+  hand never moved along the neck; the CharWeightSetters used GH2's
+  formula (RB's is offset + scale x flag weight: the hand IK was on when
+  the main clip wanted the arm free); GH2's multi-target IK pulled the
+  hands between hip and mouth (RB weighs targets by 144 / squared offset);
+  the strum IK ran before the right hand's hip IK (RB's hand_iks order);
+  draw_only ignored (the singer held mic, cowbell and tambourine); the
+  face graph was looked up as char/male/singer.fac and RB's visemes are
+  separate clips relative to Base.
+- **Fixes:** D51 (RbMidiParser, the members' sinks, play modes, the main
+  clip by flags, the drummer's main_add.drv), D52 (rig), D53 (face).
+- **Verified** (`GD05_BANDCHECK=1 GD05_END_AT=60000 gd05 "$ISO" --song
+  inbloom --autoplay --part guitar --difficulty 3`), before (legacy) ->
+  after: guitarist arm bones 2.98 -> 1.25 x bind (11 of 11938 frames past
+  1.2), bassist 2.77 -> 1.39 (89 frames); fret finger and pick to their
+  targets p95 0.00 with the IK on (7178 / 10092 frames); drummer moves on
+  150 -> 235 of 252 notes; singer's jaw moving on 0 -> 5155 of 11820
+  frames; hands.grp draws every member -> mic.grp, mic 4.97 from the hand.
+  GD05_FPS=60 vs 240: the same numbers within 1-5 frames, but the cap
+  does not throttle the offscreen driver (about 200 fps both), so the
+  frame-rate check is not conclusive; the drummer's worst stretch varies
+  between runs (1.22 / 7.92). Shots (GD05_FACE_CAM per member, GD05_POST=0)
+  looked at: guitarist fretting and strumming, singer singing into the mic.
+- **Left:** the drummer's hand IK over-reaches on some frames (FAIL),
+  guitar / bass hands past 1.2 x bind on 0.1% / 0.7% of frames (FAIL;
+  RB's height / weight deform and CharIKScale are not applied),
+  expression.drv faces, the guitarists' singalong, Overdrive / crowd
+  energy reactions beyond the play modes, fail / win groups (win / lose
+  played at the end as before).
+
 ## 2026-11-12: the guitar inside the launcher (GD05-061)
 
 - **Owner:** "the strum is not working on the songs, there is no pause in

@@ -107,3 +107,15 @@ Wave 05 retest (2026-11-10):
   2000; ~10 min); every few steps the screen's panels must be up, shown and
   draw their buttons on screen, with a focused panel. On a failure it prints
   the last actions and saves `fuzz_fail.bmp` under `GD05_WALK_SHOTS`.
+
+Wave G06 band (GD05-066/067/068):
+- `GD05_BANDCHECK=1 GD05_END_AT=60000 gd05 "$ISO" --song inbloom --autoplay
+  --part guitar --difficulty 3`: `bandcheck:` lines when the band goes
+  (stretch of the body's skinned bones vs 1.2 x bind, the fret finger and
+  pick on their IK targets, the drummer's motion on the drum notes, the
+  singer's jaw, the mic in the hand and hands.grp's draw_only), then
+  `bandcheck: passed` or `FAILED (n problem(s))`. `GD05_BAND_LEGACY=1` runs
+  the band without the wave's fixes (no RB parsers, GH2 weight setters,
+  draw_only ignored, no RB face) to show the checks failing.
+- `GD05_FACE_CAM=player_guitar0:50:0:bone_spine2.mesh GD05_POST=0
+  GD05_TRACK=0 GD05_HUD=0` with `GD05_SCREENSHOT(_AT)`: close shots of a member.
