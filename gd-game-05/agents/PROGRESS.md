@@ -1332,3 +1332,49 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   LEGACY=1) 1735.7 x, 2839 of 2901 frames past; after 1.000 x, 0 frames,
   10 of 10 runs passed (8,744..14,209 frames each; drummer stretch worst
   1.000..1.001 x bind, moves on 231 of 252 notes).
+- **Venue brightness (GD05-069): not fixed; cause narrowed to the
+  particles.** rb_look (Vulkan, 30 fixed shots vs the movies' luma 69.3,
+  contrast 55.4, saturation 0.397), now / with every ParticleSys left out
+  (a temporary switch, removed):
+
+  | venue | luma | contrast | saturation | luma, no particles | contrast, no particles | saturation, no particles |
+  |---|---|---|---|---|---|---|
+  | small_club_02 | 124.3 (+79 %) | 80.3 (+45 %) | 0.188 | 73.5 (+6 %) | 68.7 (+24 %) | 0.249 |
+  | big_club_03 | 175.0 (+153 %) | 58.2 (+5 %) | 0.091 | 52.9 (-24 %) | 59.6 (+8 %) | 0.324 |
+  | arena_04 | 141.6 (+104 %) | 79.4 (+43 %) | 0.131 | 59.2 (-15 %) | 60.8 (+10 %) | 0.174 |
+  | theater_02 | 78.7 (+14 %) | 73.0 (+32 %) | 0.241 | - | - | - |
+
+  GD05_POST=0: small_club_02 124.3 -> 126.8 (the post is not it); lights x
+  0.25: 124.3 -> 104.5. Checked against RB [C], all as the port: the lit
+  pixel shaders (ark/xbox_shaders, read with a scratch dumper over gd04's
+  Xenos translator, agents/scratch/fix7/xs/rbshaders.cpp, git-ignored):
+  ColorXfmEnv . (tex x gMultipliers.y x (diffuse x ambient + diffuse x
+  sum(lightCol x sat(N.L) x sat(dist x k + o)))); gColorXfmEnv (c109) is
+  the environ's ColorXfm only with use_color_adjust (0x821AB638 from the
+  environ select 0x827D7570), identity in every venue environ; the light
+  colours are uploaded as they are (point 0x827D6F00, directional
+  0x827D7090: -y row, w 0), up to 8.0 in the presets (stage_point_b
+  3.23 / 8.00 / 6.68, char_rim 6.0); textures are created with non-gamma
+  formats (DXT 0x1A200152.., A8R8G8B8 0x18280186: sign bits 0), so a
+  gamma-to-linear fetch (tried: small_club_02 124 -> 75, big_club_03
+  175 -> 104) is not RB's; the particle pixel shader is tex x vertex
+  colour; RB's particle move (0x821D1100) steps colour and size with
+  smoothstep's derivative 6u(1 - u) (the port: linear; the same mean).
+  The big washes are stage_fog02 / 03 (small_club_lighting's
+  stage_fog.grp, a root of the venue's draw list: life 800..1000 frames,
+  rate 0.01..0.05 a frame, size 100 growing over the life, colour black ->
+  0.8 grey -> black, additive, not use_environ, beam_fog*_nomip.tex mean
+  0.33 opaque; 16..31 quads drawn). Next: RB's RndDir draw list (does it
+  draw a directory's ungrouped stage_fog.grp at all? the port's rule is
+  [I]) and the emission at RB's clock (init 0x821D33E8).
+- **Gate** (a clean build of afa09ca exported to agents/scratch/fix7/head;
+  `agents/scratch/fix7/gate_par.sh`: gate1.sh's 42 walks + rb_highway,
+  rb_crowd (default, arena_01, theater_01), rb_look in four venues, rb_lose
+  x9 perturbed, five tests, bandcheck x4 and once with
+  GD05_BLENDER_LEGACY=1; 6 at a time): 53 of 58 walks OK, 5 of 5 tests OK,
+  bandcheck 4 of 4 passed (14,089..14,334 frames; drummer channels
+  1.000 x, stretch 1.001), legacy FAILED as it should (8,496 x, 13,856 of
+  14,122 frames). Failed: rb_look in all four venues (GD05-069: luma
+  123.0 / 165.4 / 150.7 / 66.4, contrast +42 / +23 / +35 / +28 %,
+  saturation 0.165 / 0.102 / 0.116 / 0.269) and rb_band_start (timed out
+  on qp_endgame_screen under the load; OK when run alone right after).
