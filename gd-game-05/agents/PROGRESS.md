@@ -84,6 +84,22 @@ bottom. "Verified" lines quote the command and its output; "built only" and
 - **rb_keys_rebind**: a load flake (26 of 30 hits with eight walks at
   once); hit floor 80% as the device walks; walk save folders unique.
 
+## 2026-11-12: sub-menu letters "grey" (GD05-062)
+
+- Measured, not changed (D46). The owner's capture of RB's main menu
+  (SOLO's sub-menu, QUICKPLAY focused) vs the port, 99th percentile luma
+  per word box at 1200 x 675: QUICKPLAY focused RB 188 / port 183, SOLO
+  TOUR normal RB 102 / port 97. Same through his launcher build (Vulkan,
+  his enhanced.json / controllers.json / profile): 191 / 98. The labels'
+  data colour (custom_colors 0x707070 / 0xd7d7d7), environ, light falloff
+  (RB 0x827D6F00) and per-pixel shader match; every sub-menu (multi,
+  training, options) also matches its data (rb_text_colors: 90..104
+  normal, 179..198 focused). Walk rb_text_colors now also checks the sub-menu
+  labels against RB's capture (refcolors:solo, refcolors:solo_2nd, 10%) and
+  prints the main menu's modelled words: COMMUNITY 224 vs RB 191 (RB's word
+  darker on its left), OPTIONS 226 / 215; others within 2%. Open: what the
+  owner sees as grey needs a screenshot of his screen.
+
 ## 2026-11-12: the now bar under the HUD, LOADING graded as the icons (GD05-064 / 065)
 
 - **Highway (GD05-064).** Causes [C data]: (1) the gem tracks never took

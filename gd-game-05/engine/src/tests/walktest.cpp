@@ -199,6 +199,7 @@ static void devAxis(SDL_Joystick* j, int axis, Sint16 v) {
 }
 
 static void measureTextColors(ui::UiManager& ui, const std::string& tag, std::vector<std::string>& bad);
+static void measureRefColors(ui::UiManager& ui, const std::string& tag, std::vector<std::string>& bad);
 
 WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     textColors_ = scenario == "rb_text_colors" || SDL_getenv("GD05_TEXTCOLORS");
@@ -290,7 +291,6 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("main_solomode_screen");
         wait(1000);
         check("no_black");  // title > main > solo > song list > back: no black frame
-    } else if (scenario == "rb_esc3") {
     } else if (scenario == "rb_songlist_text") {
         // GD05-063, owner report: "the list of musics have wrong sizes for
         // the letters". Every text the song list draws (into its RenderDir's
@@ -314,6 +314,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         for (int i = 0; i < 20; ++i) press(kDown), wait(150);
         wait(1200);
         check("songlist_text:down29");
+    } else if (scenario == "rb_esc3") {
         // Wave 05 (GD05-033, universal-behaviors.md): Esc three times in a
         // row on the main menu quits the game.
         at("splash_screen", 30000);
@@ -443,8 +444,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);
         at("main_solomode_screen");
         wait(800);
+        check("refcolors:solo");  // the owner's capture of RB's screen (GD05-062)
         press(kDown), wait(300);
         check("textcolors:solo_2nd");
+        check("refcolors:solo_2nd");
         press(kUp), wait(300);
         press(kX);  // QUICKPLAY
         at("qp_selsong_screen");
@@ -2730,12 +2733,12 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
             measureTextColors(ui, lastScreen_, textColorsBad_);
         }
     }
-    // career: the band has bought Judy Nails' second outfit and the SG's
-    // white skin in the store (M10), so both choices offer two.
-    if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song" || scenario_ == "career_encore" ||
     if (scenario_ == "rb_songlist_text" && ui.current())  // songlist_text measures the drawn texts
         for (ui::PanelObj* p : ui.current()->panels())
             if (p->view) p->view->setTextProbes(true);
+    // career: the band has bought Judy Nails' second outfit and the SG's
+    // white skin in the store (M10), so both choices offer two.
+    if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song" || scenario_ == "career_encore" ||
          scenario_ == "career_win" || scenario_ == "career_win_medium" || scenario_ == "career_practice") && !seeded_ && ui.currentScreen() == "sel_difficulty_screen" && ui.session().profileSlot >= 0) {
         seeded_ = true;
         Career::Profile& p = ui.career().profiles[size_t(ui.session().profileSlot)];
@@ -3075,9 +3078,105 @@ static void measureTextColors(ui::UiManager& ui, const std::string& tag, std::ve
     SDL_DestroySurface(img);
 }
 
+// ---- rb_text_colors against RB's own screen (GD05-062) -------------------
+// The owner's capture of RB's main menu with SOLO's sub-menu open
+// (QUICKPLAY focused on its orange bar, SOLO TOUR normal; 1200 x 675, kept
+// out of the repository): the 99th percentile luma of each word's box,
+// measured on that image. The port's frame is averaged down to 1200 x 675
+// and measured in the same boxes. The sub-menu labels (BandButtons with
+// custom_colors 0x707070 / 0xd7d7d7, avantgarde.mat, popup_main_test.env's
+// bottom_right.lit) must be within 10% of RB's for their state; the main
+// buttons' modelled words (button_main.milo's solo.mesh ...) are printed.
+static void measureRefColors(ui::UiManager& ui, const std::string& tag, std::vector<std::string>& bad) {
+    struct Box {
+        const char* name;
+        int x0, y0, x1, y1;
+        float focused, normal;  // RB's level in that state (0: not in the capture)
+    };
+    // Sub-menu rows by position (row 1 QUICKPLAY, row 2 SOLO TOUR): RB's
+    // focused QUICKPLAY 188, normal SOLO TOUR 102.
+    static const Box sub[2] = {{"quickplay.btn", 565, 256, 700, 284, 188, 102}, {"tour.btn", 565, 304, 700, 332, 188, 102}};
+    // Main buttons (SOLO focused in the capture, the others normal).
+    static const Box words[5] = {{"solo.btn", 340, 258, 440, 295, 203, 0},
+                                 {"multi.btn", 275, 322, 495, 362, 0, 216},
+                                 {"tutorial.btn", 310, 392, 465, 432, 0, 220},
+                                 {"options.btn", 315, 450, 465, 495, 0, 215},
+                                 {"community.btn", 265, 505, 490, 570, 0, 191}};
+    ui::PanelObj* subPanel = ui.panel("main_solomode_panel");
+    ui::PanelObj* mainPanel = ui.panel("main_panel");
+    if (ui.currentScreen() != "main_solomode_screen" || !subPanel || !mainPanel) {
+        bad.push_back("refcolors " + tag + ": not on main_solomode_screen (" + ui.currentScreen() + ")");
+        return;
+    }
+    const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+    const std::string path = std::string(dir ? dir : SDL_GetBasePath()) + "/rc_" + tag + ".bmp";
+    if (!ui.host().saveScreenshot(path)) return;
+    SDL_Surface* raw = SDL_LoadBMP(path.c_str());
+    SDL_Surface* img = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32) : nullptr;
+    if (raw) SDL_DestroySurface(raw);
+    if (!img) return;
+    // The frame averaged down to the capture's 1200 x 675 (each pixel the
+    // mean of the source pixels whose centres fall in it), as luma.
+    const int W = 1200, H = 675;
+    std::vector<double> sum(size_t(W) * H, 0.0);
+    std::vector<int> cnt(size_t(W) * H, 0);
+    for (int y = 0; y < img->h; ++y)
+        for (int x = 0; x < img->w; ++x) {
+            const int tx = std::min(W - 1, int((x + 0.5) * W / img->w)), ty = std::min(H - 1, int((y + 0.5) * H / img->h));
+            const Uint8* d = static_cast<const Uint8*>(img->pixels) + y * img->pitch + x * 4;
+            sum[size_t(ty) * W + size_t(tx)] += 0.299 * d[0] + 0.587 * d[1] + 0.114 * d[2];
+            ++cnt[size_t(ty) * W + size_t(tx)];
+        }
+    SDL_DestroySurface(img);
+    auto p99 = [&](const Box& b) {
+        std::vector<double> v;
+        for (int y = b.y0; y < b.y1; ++y)
+            for (int x = b.x0; x < b.x1; ++x)
+                if (const int n = cnt[size_t(y) * W + size_t(x)]) v.push_back(sum[size_t(y) * W + size_t(x)] / n);
+        if (v.empty()) return 0.0;
+        std::sort(v.begin(), v.end());
+        return v[size_t(double(v.size()) * 0.99)];
+    };
+    std::printf("  RB's capture vs the port, %s (99th percentile luma per word box, 1200 x 675):\n", tag.c_str());
+    for (int i = 0; i < 2; ++i) {
+        const bool focused = subPanel->focus == sub[i].name;
+        const float want = focused ? sub[i].focused : sub[i].normal;
+        const double got = p99(sub[i]);
+        const double ratio = want > 0 ? got / want : 1;
+        const bool off = ratio < 0.9 || ratio > 1.1;
+        std::printf("    sub-menu row %d %-14s %-7s RB %3.0f  drawn %3.0f  ratio %.2f%s\n", i + 1, sub[i].name, focused ? "focused" : "normal", want, got, ratio,
+                    off ? "  OFF" : "");
+        if (off) {
+            char line[200];
+            std::snprintf(line, sizeof line, "refcolors %s: sub-menu %s (%s) drawn %.0f, RB's capture %.0f (%.2f)", tag.c_str(), sub[i].name,
+                          focused ? "focused" : "normal", got, want, ratio);
+            bad.push_back(line);
+        }
+    }
+    for (const Box& b : words) {
+        const bool focused = mainPanel->focus == b.name;
+        const float want = focused ? b.focused : b.normal;
+        if (want <= 0) continue;  // not in that state in the capture
+        const double got = p99(b);
+        std::printf("    main word %-14s %-7s RB %3.0f  drawn %3.0f  ratio %.2f (printed only: GD05-062)\n", b.name, focused ? "focused" : "normal", want, got,
+                    got / want);
+    }
+}
+
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen.rfind("refcolors:", 0) == 0) {
+        // rb_text_colors: refcolors:<tag> measures main_solomode_screen's
+        // labels against the owner's capture of RB once it has rested 700 ms.
+        static double seenMs = -1;
+        if (ui.inTransition()) return;
+        if (seenMs < 0) seenMs = nowMs;
+        if (nowMs - seenMs < 700) return;
+        seenMs = -1;
+        measureRefColors(ui, s.screen.substr(10), textColorsBad_);
+        return pass();
+    }
     if (s.screen.rfind("textcolors:", 0) == 0) {
         // rb_text_colors: textcolors:<tag> measures the screen once it has
         // rested 700 ms (the probes on from the first poll).
@@ -3401,105 +3500,6 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 if (std::fabs(xs[i] - xs[j]) < 20) return fail("two band icons stand on each other");
         return pass();
     }
-    if (s.screen == "song_list_layout") {
-        // RB's song list (qp_selsong.milo, wave 03): drawn through its
-        // texture onto the screen; its rows (names, headings) do not run
-        // into each other and sit inside the cloth's place.
-        ui::PanelObj* p = ui.panel("qp_selsong_panel");
-        if (!p || !p->view) return fail("no qp_selsong_panel view");
-        const auto& rd = p->view->rendered();
-        std::vector<gfx::UiView::Hit> rows;
-        for (const gfx::UiView::Hit& h : p->view->hits())
-            if (h.key.rfind("ss_song.lst#", 0) == 0) rows.push_back(h);
-        std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.y0 < b.y0; });
-        // Wave 04 (GD05-022): the texture on the swaying cloth through
-        // cloth.cam; the cloth is polled every frame (CharTransCopy, the
-        // hair) and its mesh moves.
-        float cx0 = rd.x0, cy0 = rd.y0, cx1 = rd.x1, cy1 = rd.y1;
-        const bool cloth = p->view->clothRect(cx0, cy0, cx1, cy1);
-        std::printf("  song list: %s, %d cloth polls, %zu row texts, cloth %.0f..%.0f x %.0f..%.0f\n",
-                    cloth ? "on the cloth" : rd.texture.id ? "flat texture" : "none", p->view->clothPolls(), rows.size(), double(cx0), double(cx1), double(cy0), double(cy1));
-        if (!cloth && !rd.texture.id) return fail("the song list's texture was not drawn");
-        if (!SDL_getenv("GD05_SONGLIST_FLAT") && (!cloth || p->view->clothPolls() < 10)) return fail("the cloth is not polled");
-        if (rows.size() < 5) return fail("too few rows drawn");
-        for (size_t i = 0; i + 1 < rows.size(); ++i) {
-            const float overlap = rows[i].y1 - rows[i + 1].y0, h = std::min(rows[i].y1 - rows[i].y0, rows[i + 1].y1 - rows[i + 1].y0);
-            if (overlap > 0.35f * h) return fail(rows[i].key + " runs into " + rows[i + 1].key);
-            if (rows[i].x0 < cx0 - 1 || rows[i].x1 > cx1 + 1) return fail(rows[i].key + " outside the cloth");
-        }
-        return pass();
-    }
-    if (s.screen.rfind("tshot:", 0) == 0) {  // rb_title_back: a named shot and the transition state
-        const std::string tag = s.screen.substr(6);
-        if (const char* dir = SDL_getenv("GD05_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + "/title_" + tag + ".bmp");
-        std::string panels;
-        if (ui::ScreenObj* sc = ui.screen(ui.currentScreen()))
-            for (ui::PanelObj* p : sc->panels()) panels += " " + p->name() + (p->up ? "" : "(down)");
-        std::printf("  %-12s %s:%s%s\n", tag.c_str(), ui.currentScreen().c_str(), panels.c_str(), ui.inTransition() ? " [transition]" : "");
-        return pass();
-    }
-    if (s.screen == "band_start_shot") {  // rb_band_start's screenshots (GD05_WALK_SHOTS)
-        static int n = 0;
-        char name[32];
-        std::snprintf(name, sizeof name, "/band_start_%02d.bmp", n++);
-        if (const char* dir = SDL_getenv("GD05_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + name);
-        return pass();
-    }
-    // counter_max:<key>:<max>: the game's counter stays at or under max.
-    if (s.screen.rfind("counter_max:", 0) == 0) {
-        const std::string rest = s.screen.substr(12);
-        const size_t c = rest.rfind(':');
-        const std::string key = rest.substr(0, c);
-        const int most = std::atoi(rest.c_str() + c + 1);
-        const int got = ui.host().gameCounter(0, key);
-        std::printf("  counter %s: %d (want at most %d)\n", key.c_str(), got, most);
-        if (got > most) return fail(key + " is " + std::to_string(got));
-        return pass();
-    }
-    if (s.screen.rfind("counter:", 0) == 0) {
-        const std::string rest = s.screen.substr(8);
-        const size_t c = rest.rfind(':');
-        const std::string key = rest.substr(0, c);
-        const int want = c == std::string::npos ? 1 : std::atoi(rest.c_str() + c + 1);
-        const int got = ui.host().gameCounter(0, key);
-        std::printf("  counter %s: %d (want at least %d)\n", key.c_str(), got, want);
-        if (got < want) return fail(key + " is " + std::to_string(got));
-        return pass();
-    }
-    if (s.screen == "qp_footer") {
-        // GD02-156: quick play's footer ("Play Career Mode to get more songs")
-        // only while a tier is missing from the list; every save's The
-        // Glitches lists all eight, so no row carries it.
-        auto* sp = dynamic_cast<ui::ListProvider*>(ui.interp().findObject("song_provider"));
-        if (!sp) return fail("no song_provider");
-        std::vector<gfx::UiView::ListRow> rows;
-        int sel = 0;
-        sp->rows(rows, 0, sel);
-        int blurbs = 0;
-        std::set<std::string> venues;
-        for (const auto& r : rows) {
-            auto it = r.texts.find("blurb.txt");
-            blurbs += it != r.texts.end() && !it->second.empty();
-        }
-        for (int i = 0; i < sp->numData(); ++i) venues.insert(ui::campaign::venueOf(ui, sp->symbol(i)));
-        const bool all = std::all_of(ui::campaign::config(ui).tiers.begin(), ui::campaign::config(ui).tiers.end(),
-                                     [&](const auto& tier) { return venues.count(tier.first) > 0; });
-        std::printf("  quick play: %zu venues listed (all tiers: %s), %d footer row(s)\n", venues.size(), all ? "yes" : "no", blurbs);
-        if (all && blurbs) return fail("every tier is listed but the footer still says to play more");
-        return pass();
-    }
-    if (s.screen == "load_hold") {
-        // The song's loading screen stays up at least 2 s with its animation
-        // (UiManager::holdingLoadScreen, GD02-155).
-        std::printf("  loading screen shown %.0f ms\n", lastLoadingMs_);
-        if (lastLoadingMs_ < ui::UiManager::kLoadScreenHoldMs - 50) return fail("the loading screen passed in under 2 s");
-        return pass();
-    }
-    if (s.screen == "name_entry_1" || s.screen == "name_entry_2") {
-        // BandTextEntry's Texts are aligned middle left (0x82144558): the
-        // entered text starts at the same x whatever its length and the
-        // picked character follows it (GD02-068).
-        ui::PanelObj* fp = ui.focusPanel();
     if (s.screen.rfind("songlist_text:", 0) == 0) {
         // rb_songlist_text (GD05-063): every label text the song list drew
         // into its RenderDir's texture against the size RB gives it. RB's
@@ -3655,6 +3655,105 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (bad) return fail(std::to_string(bad) + " song list text(s) off their data size by more than 5%");
         return pass();
     }
+    if (s.screen == "song_list_layout") {
+        // RB's song list (qp_selsong.milo, wave 03): drawn through its
+        // texture onto the screen; its rows (names, headings) do not run
+        // into each other and sit inside the cloth's place.
+        ui::PanelObj* p = ui.panel("qp_selsong_panel");
+        if (!p || !p->view) return fail("no qp_selsong_panel view");
+        const auto& rd = p->view->rendered();
+        std::vector<gfx::UiView::Hit> rows;
+        for (const gfx::UiView::Hit& h : p->view->hits())
+            if (h.key.rfind("ss_song.lst#", 0) == 0) rows.push_back(h);
+        std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.y0 < b.y0; });
+        // Wave 04 (GD05-022): the texture on the swaying cloth through
+        // cloth.cam; the cloth is polled every frame (CharTransCopy, the
+        // hair) and its mesh moves.
+        float cx0 = rd.x0, cy0 = rd.y0, cx1 = rd.x1, cy1 = rd.y1;
+        const bool cloth = p->view->clothRect(cx0, cy0, cx1, cy1);
+        std::printf("  song list: %s, %d cloth polls, %zu row texts, cloth %.0f..%.0f x %.0f..%.0f\n",
+                    cloth ? "on the cloth" : rd.texture.id ? "flat texture" : "none", p->view->clothPolls(), rows.size(), double(cx0), double(cx1), double(cy0), double(cy1));
+        if (!cloth && !rd.texture.id) return fail("the song list's texture was not drawn");
+        if (!SDL_getenv("GD05_SONGLIST_FLAT") && (!cloth || p->view->clothPolls() < 10)) return fail("the cloth is not polled");
+        if (rows.size() < 5) return fail("too few rows drawn");
+        for (size_t i = 0; i + 1 < rows.size(); ++i) {
+            const float overlap = rows[i].y1 - rows[i + 1].y0, h = std::min(rows[i].y1 - rows[i].y0, rows[i + 1].y1 - rows[i + 1].y0);
+            if (overlap > 0.35f * h) return fail(rows[i].key + " runs into " + rows[i + 1].key);
+            if (rows[i].x0 < cx0 - 1 || rows[i].x1 > cx1 + 1) return fail(rows[i].key + " outside the cloth");
+        }
+        return pass();
+    }
+    if (s.screen.rfind("tshot:", 0) == 0) {  // rb_title_back: a named shot and the transition state
+        const std::string tag = s.screen.substr(6);
+        if (const char* dir = SDL_getenv("GD05_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + "/title_" + tag + ".bmp");
+        std::string panels;
+        if (ui::ScreenObj* sc = ui.screen(ui.currentScreen()))
+            for (ui::PanelObj* p : sc->panels()) panels += " " + p->name() + (p->up ? "" : "(down)");
+        std::printf("  %-12s %s:%s%s\n", tag.c_str(), ui.currentScreen().c_str(), panels.c_str(), ui.inTransition() ? " [transition]" : "");
+        return pass();
+    }
+    if (s.screen == "band_start_shot") {  // rb_band_start's screenshots (GD05_WALK_SHOTS)
+        static int n = 0;
+        char name[32];
+        std::snprintf(name, sizeof name, "/band_start_%02d.bmp", n++);
+        if (const char* dir = SDL_getenv("GD05_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + name);
+        return pass();
+    }
+    // counter_max:<key>:<max>: the game's counter stays at or under max.
+    if (s.screen.rfind("counter_max:", 0) == 0) {
+        const std::string rest = s.screen.substr(12);
+        const size_t c = rest.rfind(':');
+        const std::string key = rest.substr(0, c);
+        const int most = std::atoi(rest.c_str() + c + 1);
+        const int got = ui.host().gameCounter(0, key);
+        std::printf("  counter %s: %d (want at most %d)\n", key.c_str(), got, most);
+        if (got > most) return fail(key + " is " + std::to_string(got));
+        return pass();
+    }
+    if (s.screen.rfind("counter:", 0) == 0) {
+        const std::string rest = s.screen.substr(8);
+        const size_t c = rest.rfind(':');
+        const std::string key = rest.substr(0, c);
+        const int want = c == std::string::npos ? 1 : std::atoi(rest.c_str() + c + 1);
+        const int got = ui.host().gameCounter(0, key);
+        std::printf("  counter %s: %d (want at least %d)\n", key.c_str(), got, want);
+        if (got < want) return fail(key + " is " + std::to_string(got));
+        return pass();
+    }
+    if (s.screen == "qp_footer") {
+        // GD02-156: quick play's footer ("Play Career Mode to get more songs")
+        // only while a tier is missing from the list; every save's The
+        // Glitches lists all eight, so no row carries it.
+        auto* sp = dynamic_cast<ui::ListProvider*>(ui.interp().findObject("song_provider"));
+        if (!sp) return fail("no song_provider");
+        std::vector<gfx::UiView::ListRow> rows;
+        int sel = 0;
+        sp->rows(rows, 0, sel);
+        int blurbs = 0;
+        std::set<std::string> venues;
+        for (const auto& r : rows) {
+            auto it = r.texts.find("blurb.txt");
+            blurbs += it != r.texts.end() && !it->second.empty();
+        }
+        for (int i = 0; i < sp->numData(); ++i) venues.insert(ui::campaign::venueOf(ui, sp->symbol(i)));
+        const bool all = std::all_of(ui::campaign::config(ui).tiers.begin(), ui::campaign::config(ui).tiers.end(),
+                                     [&](const auto& tier) { return venues.count(tier.first) > 0; });
+        std::printf("  quick play: %zu venues listed (all tiers: %s), %d footer row(s)\n", venues.size(), all ? "yes" : "no", blurbs);
+        if (all && blurbs) return fail("every tier is listed but the footer still says to play more");
+        return pass();
+    }
+    if (s.screen == "load_hold") {
+        // The song's loading screen stays up at least 2 s with its animation
+        // (UiManager::holdingLoadScreen, GD02-155).
+        std::printf("  loading screen shown %.0f ms\n", lastLoadingMs_);
+        if (lastLoadingMs_ < ui::UiManager::kLoadScreenHoldMs - 50) return fail("the loading screen passed in under 2 s");
+        return pass();
+    }
+    if (s.screen == "name_entry_1" || s.screen == "name_entry_2") {
+        // BandTextEntry's Texts are aligned middle left (0x82144558): the
+        // entered text starts at the same x whatever its length and the
+        // picked character follows it (GD02-068).
+        ui::PanelObj* fp = ui.focusPanel();
         const gfx::UiView::Hit *entered = nullptr, *picking = nullptr;
         if (fp && fp->view)
             for (const gfx::UiView::Hit& h : fp->view->hits()) {

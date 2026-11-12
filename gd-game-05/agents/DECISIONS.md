@@ -516,6 +516,24 @@ pattern). Each says what, why and how to undo it.
   meter [I: RB uses one camera with x_offset / side_angle].
 - **Undo:** App::rbHud_, RbTrackView rects from RbHudView::trackRects.
 
+## D46
+- **What (2026-11-12, GD05-062):** the sub-menu labels are not changed.
+  Owner: "the sub-menu letters are grey". Measured against his capture of
+  RB (main_solomode_screen, QUICKPLAY focused; 99th percentile luma per
+  word box at 1200 x 675): QUICKPLAY focused RB 188 / port 183 (Vulkan in
+  his launcher build 191), SOLO TOUR normal RB 102 / port 97 (98); the
+  same on the second visit (186 / 96). Their colours are the buttons' own
+  custom_colors (normal 0x707070, focused 0xd7d7d7) [C data], lit by
+  popup_main_test.env's one point light bottom_right.lit (0.92, range
+  750, falloff from 178) [C data]; RB packs the falloff as
+  saturate(d * 1/(start - range) + range/(range - start)) (0x827D6F00) [C],
+  as the port does. light.tnm (looped by light.trg) names no trans: the
+  light stays put in RB too [C data]. Main words: SOLO 207 / 203, MULTI
+  215 / 216, TRAINING 222 / 220, OPTIONS 226 / 215, COMMUNITY 224 / 191
+  (RB's darker on its left: open, GD05-062).
+- **Undo:** nothing to undo; walk rb_text_colors' refcolors:solo /
+  refcolors:solo_2nd fail a sub-menu label outside 10% of RB's capture.
+
 ## Owner: completeness 36% (2026-11-10)
 - **What:** the owner set Rock Band's completeness to 36% (game-info.yaml
   0.36, README, the site) after playing the build; the parity ledger
