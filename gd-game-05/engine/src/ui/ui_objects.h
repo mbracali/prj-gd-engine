@@ -50,6 +50,7 @@ public:
     ScriptObject* provider = nullptr;
     int selected = 0;  // provider data index
     int storedSelected = -1;  // UIList store: the position undo goes back to
+    std::unique_ptr<ScriptObject> dataList;  // UIList set_data (<sym> ...): the list's own provider
     int numDisplay_ = 5;  // RB set_num_display
     void refreshList();
     // UISlider

@@ -403,6 +403,34 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         refreshList();
         return true;
     }
+    // UIList set_data (<sym> ...) (charcreator.dta attitude.lst): the
+    // symbols are the list's rows, shown localized [C data: the uses].
+    if (msg == "set_data" && !args.empty() && args[0].type == Value::Type::Array && args[0].array) {
+        struct DataList : ListProvider {
+            DataList(UiManager& u) : ListProvider("", "UIListData"), ui(u) {}
+            UiManager& ui;
+            std::vector<std::string> syms;
+            int numData() override { return int(syms.size()); }
+            std::string symbol(int i) override { return i >= 0 && i < int(syms.size()) ? syms[size_t(i)] : std::string(); }
+            void rows(std::vector<gfx::UiView::ListRow>& out, int sel, int& selRow) override {
+                out.clear();
+                for (const std::string& sy : syms) {
+                    gfx::UiView::ListRow row;
+                    const std::string* loc = ui.locale().find(sy);
+                    row.texts["list.lbl"] = row.texts["name.lbl"] = loc ? *loc : sy;
+                    out.push_back(std::move(row));
+                }
+                selRow = sel;
+            }
+        };
+        auto l = std::make_unique<DataList>(ui);
+        for (const Value& e : *args[0].array) l->syms.push_back(e.str());
+        provider = l.get();
+        dataList = std::move(l);
+        selected = std::clamp(selected, 0, std::max(0, int(static_cast<DataList*>(provider)->syms.size()) - 1));
+        refreshList();
+        return true;
+    }
     if (msg == "set_dirty" || msg == "set_first_showing" || msg == "set_data") return refreshList(), true;
     if (msg == "is_scrolling") return r = Value::integer(0), true;
     if (msg == "num_data") {

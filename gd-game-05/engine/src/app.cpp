@@ -2903,6 +2903,13 @@ int App::gameCounter(int player, const std::string& key) const {
                 for (const std::string& p : m->pieces) n += p.find("/" + key.substr(11) + ".milo") != std::string::npos;
         return n;
     }
+    if (key.rfind("band_flags:", 0) == 0) {  // GD05-072: the members whose play flags hold all of these (the attitude kGenre*)
+        const uint32_t want = uint32_t(std::stoul(key.substr(11)));
+        int n = 0;
+        if (band_)
+            for (const auto& m : band_->members()) n += (m->rbFlags & want) == want;
+        return n;
+    }
     if (key == "crowd_drawn") return venueView_ ? venueView_->crowdView().charactersDrawn() : 0;
     if (key == "band_meshes") return venueView_ ? venueView_->bandView().meshesDrawn() : 0;
     if (key == "score") return player_ ? player_->score() : 0;
@@ -3245,6 +3252,7 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
                 Band::Config::RbLook look;
                 look.gender = in.send(ch.object, "get_gender", {}).str();
                 look.skin = in.send(ch.object, "skin_color", {}).integerValue();
+                look.attitude = uint32_t(in.send(ch.object, "get_attitude", {}).integerValue());
                 const Value ol = in.send(ch.object, "outfit_list", {});
                 if (ol.array)
                     for (const Value& e : *ol.array)

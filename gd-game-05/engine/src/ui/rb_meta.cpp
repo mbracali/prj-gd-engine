@@ -95,7 +95,8 @@ void loadEvents(const DataNode* towns, std::vector<std::string>& townNames, std:
 // ------------------------------------------------------------ the profile
 
 struct CharData {
-    std::string name, gender = "male", instrument = "guitar", hometown = "boston", attitude = "kGenreRocker";
+    std::string name, gender = "male", instrument = "guitar", hometown = "boston";
+    int attitude = 256;  // kGenreRocker (config/macros.dta kGenre*: the scripts compare the values)
     std::map<std::string, std::string> outfit;  // category -> piece
     std::set<std::string> owned;                // pieces bought or won
     float weight = 0.5f, height = 0.5f;
@@ -405,6 +406,7 @@ public:
     // The hint: the first (hints ...) entry whose cond holds and that the
     // performer has not seen (ONEOFF hints are added by add_seen_hint) [I].
     std::string hint;
+    bool advancingHint = false;
     std::string currentHint() {
         const DataNode* block = soloChar() ? data.solo : bandPerf() ? data.band : nullptr;
         const DataNode* hints = block ? block->find("hints") : nullptr;
@@ -444,12 +446,12 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
         const std::string t = msg == "track_icon" && !sArg(args, 0).empty() ? sArg(args, 0) : d.instrument;
         return r = Value::string(t == "drum" ? "D" : t == "vocals" ? "V" : t == "bass" ? "B" : "G"), true;
     }
-    if (msg == "get_attitude") return r = Value::symbol(d.attitude), true;
+    if (msg == "get_attitude") return r = Value::integer(d.attitude), true;
     // The creator's setters take the CompositeCharacter being shown first
     // ({$tour_char set_skin_color $char {skin.lst selected_pos}},
     // charcreator.dta) [C data]: the value is the last argument.
     const size_t last = args.empty() ? 0 : args.size() - 1;
-    if (msg == "set_attitude") return d.attitude = sArg(args, last), true;
+    if (msg == "set_attitude") return d.attitude = iArg(args, last, d.attitude), true;
     if (msg == "money") return r = Value::integer(d.money), true;
     if (msg == "cheat_add_money") return d.money += iArg(args, 0), true;
     if (msg == "set_money") return d.money = iArg(args, 0, d.money), m.save(), true;  // the shop pays (shop.dta) [C data]
@@ -821,6 +823,12 @@ void RbMeta::save() {
         j.set("name", Json::string(c->d.name)), j.set("gender", Json::string(c->d.gender)), j.set("instrument", Json::string(c->d.instrument));
         j.set("hometown", Json::string(c->d.hometown)), j.set("money", Json::number(c->d.money)), j.set("score", Json::number(c->d.score));
         j.set("difficulty", Json::number(c->d.difficulty)), j.set("skin", Json::number(c->d.skin));
+        j.set("eye", Json::number(c->d.eye)), j.set("eyebrow", Json::number(c->d.eyebrow));
+        j.set("weight", Json::number(c->d.weight)), j.set("height", Json::number(c->d.height));
+        j.set("attitude", Json::number(c->d.attitude)), j.set("town", Json::string(c->d.town)), j.set("venue", Json::string(c->d.venue));
+        Json seenTowns = Json::array();
+        for (const std::string& s : c->d.seenTowns) seenTowns.a.push_back(Json::string(s));
+        j.set("seen_towns", seenTowns);
         Json o = Json::object();
         for (const auto& [k, v] : c->d.outfit) o.set(k, Json::string(v));
         j.set("outfit", o);
@@ -842,6 +850,7 @@ void RbMeta::save() {
         Json j = Json::object();
         j.set("name", Json::string(b->d.name)), j.set("hometown", Json::string(b->d.hometown)), j.set("fans", Json::number(b->d.fans));
         j.set("money", Json::number(b->d.money)), j.set("buzz", Json::number(b->d.buzz)), j.set("town", Json::string(b->d.town));
+        j.set("motto", Json::string(b->d.motto)), j.set("venue", Json::string(b->d.venue)), j.set("min_difficulty", Json::number(b->d.minDifficulty));
         Json st = Json::object();
         for (const auto& [k, v] : b->d.stars) st.set(k, Json::number(v));
         j.set("stars", st);
@@ -882,6 +891,11 @@ void RbMeta::load() {
         c->d.name = j["name"].str(), c->d.gender = j["gender"].str(), c->d.instrument = j["instrument"].str();
         c->d.hometown = j["hometown"].str(), c->d.money = int(j["money"].num(100)), c->d.score = int(j["score"].num());
         c->d.difficulty = int(j["difficulty"].num(1)), c->d.skin = int(j["skin"].num());
+        c->d.eye = int(j["eye"].num()), c->d.eyebrow = int(j["eyebrow"].num());
+        c->d.weight = float(j["weight"].num(0.5)), c->d.height = float(j["height"].num(0.5));
+        c->d.attitude = int(j["attitude"].num(256));
+        c->d.town = j["town"].str(), c->d.venue = j["venue"].str();
+        for (const Json& s : j["seen_towns"].a) c->d.seenTowns.insert(s.str());
         for (const auto& [k, v] : j["outfit"].o) c->d.outfit[k] = v.str();
         for (const auto& [k, v] : j["stars"].o) c->d.stars[k] = int(v.num());
         for (const Json& s : j["owned"].a) c->d.owned.insert(s.str());
@@ -892,6 +906,7 @@ void RbMeta::load() {
         RbBandObj* b = newBand();
         b->d.name = j["name"].str(), b->d.hometown = j["hometown"].str(), b->d.fans = int(j["fans"].num());
         b->d.money = int(j["money"].num()), b->d.buzz = int(j["buzz"].num()), b->d.town = j["town"].str(), b->d.finalized = true;
+        b->d.motto = j["motto"].str(), b->d.venue = j["venue"].str(), b->d.minDifficulty = int(j["min_difficulty"].num(3));
         for (const auto& [k, v] : j["stars"].o) b->d.stars[k] = int(v.num());
         for (const Json& s : j["items"].a) b->d.items.insert(s.str());
         for (const Json& s : j["members"].a) b->d.members.push_back(s.str());
@@ -937,6 +952,9 @@ public:
         }
         if (msg == "event_concrete_song") return r = Value::symbol(!m_.setlist.empty() && m_.setlist[0] != "any" ? m_.setlist[0] : std::string()), true;
         if (msg == "hint") {
+            // While a hint's (advance ...) runs, {tour hint} is that hint
+            // (ONEOFF_HINT: add_seen_hint {{tour hint} get_type}, tour.dta).
+            if (m_.advancingHint) return r = Value::obj(hintObj_), true;
             m_.hint = m_.currentHint();
             if (m_.hint.empty()) return true;
             return r = Value::obj(hintObj_), true;
@@ -992,8 +1010,15 @@ public:
             // ONEOFF hints: seen once; every hint's (advance ...) script.
             if (RbCharObj* c = m_.soloChar()) c->d.seenHints.insert(m_.hint);
             if (RbBandObj* b = m_.bandPerf()) b->d.seenHints.insert(m_.hint);
-            if (const DataNode* a = h ? h->find("advance") : nullptr)
-                for (size_t i = 1; i < a->children.size(); ++i) in.eval(a->children[i]);
+            m_.advancingHint = true;
+            try {
+                if (const DataNode* a = h ? h->find("advance") : nullptr)
+                    for (size_t i = 1; i < a->children.size(); ++i) in.eval(a->children[i]);
+            } catch (...) {
+                m_.advancingHint = false;
+                throw;
+            }
+            m_.advancingHint = false;
             return true;
         }
         return false;

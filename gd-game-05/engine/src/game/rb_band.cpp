@@ -222,6 +222,7 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
             if (a == "kGenreDramatic") att = kGenreDramatic;
             else if (a == "kGenreBanger") att = kGenreBanger;
             else if (a == "kGenreSpazz") att = kGenreSpazz;
+            if (look && look->attitude) att = look->attitude;  // the player's character's own
             m->rbFlags = att | (instrument == "guitar" ? kValidGuitar : instrument == "bass" ? kValidBass : 0u);
         }
         members_.push_back(std::move(m));

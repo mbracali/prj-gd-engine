@@ -60,6 +60,7 @@ public:
         struct RbLook {
             std::string gender = "male";
             int skin = 0;
+            uint32_t attitude = 0;  // the creator's kGenre* value (macros.dta: kGenreRocker 256 ...); 0: the premade's
             std::map<std::string, std::string> outfit;
         };
         std::map<std::string, RbLook> rbLooks;

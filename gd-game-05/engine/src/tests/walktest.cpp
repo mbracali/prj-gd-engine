@@ -43,6 +43,7 @@
 #include "app.h"
 #include "ui/enhanced_panel.h"
 #include "ui/natives.h"
+#include "platform/paths.h"
 #include "ui/rb_meta.h"
 #include "ui/ui_objects.h"
 #include "ui/ui_host.h"
@@ -796,6 +797,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1500);
         press(kX);  // NAME (the offered name is taken)
         wait(800);
+        check("focus_to attitude.btn", 5000);
+        press(kX), wait(600);  // attitude.lst (rocker, the default)
+        press(kDown), wait(400);  // spazz
+        press(kX), wait(600);  // confirm
+        check("rb_creator_attitude");
         check("focus_to appearance.btn", 5000);
         press(kX);  // PHYSIQUE
         at("charcreator_appearance_screen", 20000);
@@ -3752,6 +3758,15 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         auto owns = [&](const std::string& cat, const std::string& o) { return send(c, "has_outfit", {Value::symbol(cat), Value::symbol(o)}).truthy(); };
         std::printf("  %s: %s %s, money %d, skin %d, hair %s, torso %s\n", s.screen.c_str(), gender.c_str(), inst.c_str(), money, skin, hair.c_str(),
                     torso.c_str());
+        if (s.screen == "rb_creator_attitude") {
+            // attitude.lst's data (attitude_banger attitude_dramatic
+            // attitude_rocker attitude_spazz), on kGenreRocker's row: one down
+            // is attitude_spazz, kGenreSpazz (charcreator.dta sym_to_attitude).
+            const int a = send(c, "get_attitude").integerValue();
+            std::printf("  expected: attitude kGenreSpazz (2048); measured %d\n", a);
+            if (a != 2048) return fail("the attitude chosen in the creator is " + std::to_string(a));
+            return pass();
+        }
         if (s.screen == "rb_creator_before") {
             careerHair0_ = hair;
             return pass();
@@ -3784,8 +3799,11 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         if (s.screen == "rb_band_wears") {
             const int t = ui.host().gameCounter(0, "band_piece:" + torso), h = ui.host().gameCounter(0, "band_piece:" + hair);
-            std::printf("  expected: the guitarist built with %s and %s; measured: %d / %d member(s)\n", torso.c_str(), hair.c_str(), t, h);
+            const int att = send(c, "get_attitude").integerValue(), a = ui.host().gameCounter(0, "band_flags:" + std::to_string(att));
+            std::printf("  expected: the guitarist built with %s and %s, playing with attitude %d; measured: %d / %d / %d member(s)\n", torso.c_str(),
+                        hair.c_str(), att, t, h, a);
             if (t < 1 || h < 1) return fail("the character on stage does not wear its own clothes");
+            if (a < 1) return fail("no member plays with the character's attitude");
             return pass();
         }
         if (s.screen == "rb_gig_stars") {
@@ -3819,15 +3837,34 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                         careerStars_, want, rcat.c_str(), rout.c_str(), money, int(won), town.c_str(), venue.c_str(), name.c_str());
             if (money != want) return fail("the gig paid " + std::to_string(money - careerCash_) + ", not " + std::to_string(want - careerCash_));
             if (!won) return fail("the event's outfit " + rout + " was not won");
-            const std::string keep = std::to_string(money) + " " + std::to_string(skin) + " " + hair + " " + torso + " " + rcat + " " + rout;
+            const std::string keep = std::to_string(money) + " " + std::to_string(skin) + " " + hair + " " + torso + " " + std::to_string(send(c, "get_attitude").integerValue()) +
+                                     " " + rcat + " " + rout;
             SDL_setenv_unsafe("GD05_WALK_CAREER", keep.c_str(), 1);
             return pass();
         }
         if (s.screen == "rb_career_reloaded") {
             std::istringstream is(SDL_getenv("GD05_WALK_CAREER") ? SDL_getenv("GD05_WALK_CAREER") : "");
             int wMoney = -1, wSkin = -1;
-            std::string wHair, wTorso, wCat, wOut;
-            is >> wMoney >> wSkin >> wHair >> wTorso >> wCat >> wOut;
+            std::string wHair, wTorso, wAtt, wCat, wOut;
+            is >> wMoney >> wSkin >> wHair >> wTorso >> wAtt >> wCat >> wOut;
+            const std::string att = std::to_string(send(c, "get_attitude").integerValue());
+            // The hints seen, as the save holds them: the guitarist's
+            // welcome only (config/tour_solo.dta: welcome_guitar's cond).
+            std::string hints;
+            try {
+                std::ifstream f(prefDir() + "rb_profile.json");
+                std::stringstream ss;
+                ss << f.rdbuf();
+                const Json root = Json::parse(ss.str());
+                for (const Json& ch : root["characters"].a)
+                    for (const Json& h : ch["seen_hints"].a) hints += (hints.empty() ? "" : ",") + h.str();
+            } catch (const std::exception& e) {
+                hints = std::string("(") + e.what() + ")";
+            }
+            std::printf("  expected: attitude %s, seen hints welcome_guitar; measured: attitude %s, seen hints %s\n", wAtt.c_str(), att.c_str(),
+                        hints.c_str());
+            if (att != wAtt) return fail("the attitude changed through the save");
+            if (hints != "welcome_guitar") return fail("the seen hints are " + hints);
             const int fame = send(c, "world_fame").integerValue();
             const bool won = wCat.empty() || owns(wCat, wOut), bought = owns("torso", "flannelcoat_checked");
             std::printf("  expected (before the restart): cash %d, skin %d, hair %s, torso %s, %s owned, 1+ event played; measured: cash %d, skin %d, "
