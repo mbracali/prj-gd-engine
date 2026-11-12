@@ -42,6 +42,7 @@ struct RigContext {
     std::function<void(const std::string& driver)> pollDriver;
     std::function<void()> pollDrivers;  // main.drv and the hand drivers, into the servo's bones
     std::function<void()> pollServo;    // CharServoBone: the bones posed, root motion
+    std::function<void(const std::string& blender)> pollBlender;  // CharBonesBlender: into its dest, cleared
     std::function<void(const std::string& servo)> pollFace;  // FaceFxLipSyncServo
     std::function<void(const std::string& walk)> pollWalk;   // CharWalk (queues the walk's clips)
     // The face's clocks (FaceFxLipSyncServo Poll): TaskMgr kTaskSeconds

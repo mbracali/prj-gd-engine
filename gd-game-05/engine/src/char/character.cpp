@@ -121,14 +121,23 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
     if (!shadow_) shadow_ = outfitShadow_;
     // The rig.
     rig_ = std::make_unique<Rig>(d, skeleton_);
-    // Drivers: their clip sets' channels into the servo.
+    // GD05_BLENDER_LEGACY=1: the code before GD05-088 (no blenders, rotate-to
+    // drivers added) to show the bandcheck failing.
+    static const bool legacy = [] {
+        const char* e = SDL_getenv("GD05_BLENDER_LEGACY");
+        return e && *e && *e != '0';
+    }();
+    for (const auto& o : d.objects)
+        if (auto* bb = o->as<scene::CharBonesBlender>(); bb && !legacy) blenders_[bb->name].dest = bb->dest;
+    // Drivers: their clip sets' channels into their bones (the servo, or a
+    // blender and the bones it blends into).
     for (const auto& o : d.objects) {
         auto* drv = o->as<scene::CharDriver>();
         if (!drv) continue;
         ClipSet* set = drv->clips.empty() ? clips.byObject(path_, d, drv->clipsObject) : clips.get(path_, drv->clips);
         auto cd = std::make_unique<ClipDriver>(drv->name, set);
         cd->realign = drv->realign;
-        cd->skipScaleDown = drv->unknown55;
+        cd->apply = legacy && drv->apply == ClipDriver::kApplyRotateTo ? uint32_t(ClipDriver::kApplyAdd) : drv->apply;
         const std::string wname = drv->name;
         Rig* rig = rig_.get();
         cd->weight = [rig, wname] { return rig->weightOf(wname); };
@@ -138,7 +147,18 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
         cd->sendStarved = [this](const std::string& m) {
             if (sendMessage) sendMessage(m);
         };
-        if (set) set->listChannels(bones_, set->data().moveSelf);
+        Bones* target = bonesNamed(drv->bones);
+        driverBones_[cd.get()] = target;
+        if (set) {
+            // RB lists a blender's channels in its dest too (0x8231F1C8 finds them there).
+            for (const std::string* n = &drv->bones; target != &bones_;) {
+                set->listChannels(*target, set->data().moveSelf);
+                auto it = blenders_.find(*n);
+                n = &it->second.dest;
+                target = bonesNamed(*n);
+            }
+            set->listChannels(bones_, set->data().moveSelf);
+        }
         driverByName_[drv->name] = cd.get();
         drivers_.push_back(std::move(cd));
     }
@@ -173,6 +193,13 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
 }
 
 Character::~Character() = default;
+
+// A driver's or blender's bones by name: a CharBonesBlender's buffer, else
+// the servo's (bone.servo, and any other name the port does not keep apart).
+Bones* Character::bonesNamed(const std::string& name) {
+    auto it = blenders_.find(name);
+    return it == blenders_.end() ? &bones_ : &it->second.bones;
+}
 
 ClipDriver* Character::driver(const std::string& name) {
     auto it = driverByName_.find(name);
@@ -584,10 +611,16 @@ void Character::poll(RigContext ctx) {
     const double beat = ctx.beat;
     const float dB = ctx.dBeats, dS = ctx.dSeconds;
     ctx.pollDriver = [this, beat, dB, dS](const std::string& name) {
-        if (ClipDriver* d = driver(name)) d->poll(beat, dB, dS, &bones_);
+        if (ClipDriver* d = driver(name)) d->poll(beat, dB, dS, driverBones_[d]);
     };
     ctx.pollDrivers = [this, beat, dB, dS] {
-        for (auto& d : drivers_) d->poll(beat, dB, dS, &bones_);
+        for (auto& d : drivers_) d->poll(beat, dB, dS, driverBones_[d.get()]);
+    };
+    ctx.pollBlender = [this](const std::string& name) {
+        auto it = blenders_.find(name);
+        if (it == blenders_.end()) return;
+        it->second.bones.blendInto(*bonesNamed(it->second.dest));
+        it->second.bones.clear();
     };
     ctx.pollServo = [this, dB] {
         poseMeshes(bones_, channelBone_, channelsMapped_);

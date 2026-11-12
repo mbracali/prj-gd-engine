@@ -265,7 +265,6 @@ void readCharDriverBody(Rd& r, CharDriver& d, bool readVersion = true) {
     if (d.clips.empty()) d.clipsObject = r.str();
     d.realign = r.b();
     d.apply = r.u32();
-    d.unknown55 = d.apply != 0;
     d.starvedClip = r.str();
 }
 

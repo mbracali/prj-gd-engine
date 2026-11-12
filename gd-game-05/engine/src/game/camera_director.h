@@ -151,6 +151,9 @@ private:
     bool objectNative(Interp& in, scene::Object& o, const std::string& msg, std::vector<Value>& args, Value& r);
     void startShot(const scene::CamShot* shot);
     void endShot();
+    void showShotCrowd(const scene::CamShot& shot);
+    void applyShowLists(const scene::CamShot& shot);
+    void restoreShowLists();
     Value prop(const scene::CamShot& shot, const std::string& key);
     bool passes(const scene::CamShot& shot, const std::vector<std::pair<std::string, Value>>& filter);
     void play(const scene::CamShot& shot, ShotState& st, float frame, float dt);
@@ -168,6 +171,9 @@ private:
     std::vector<const scene::CamShot*> shots_;  // the world directory's, in order
     std::unordered_map<const scene::CamShot*, ShotState> state_;
     const scene::CamShot* current_ = nullptr;
+    // The objects the current shot's hide / show lists changed (RB's CamShot
+    // +0xec / +0xd8 lists), set back when it ends.
+    std::vector<const scene::Object*> hidByShot_, shownByShot_;
     const scene::PostProc* postProc_ = nullptr;
     const scene::PostProc* blendFrom_ = nullptr;  // pp_blend_task
     double blendStart_ = 0;

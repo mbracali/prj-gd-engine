@@ -190,6 +190,16 @@ private:
     std::unique_ptr<scene::CharacterObj> own_;
     Skeleton skeleton_;
     Bones bones_;
+    // RB's CharBonesBlenders (limbs.blender: the drummer's hand and foot
+    // drivers): their own buffers, blended into their dest and cleared as
+    // they poll (RB 0x8234D520).
+    struct Blender {
+        Bones bones;
+        std::string dest;
+    };
+    std::unordered_map<std::string, Blender> blenders_;
+    std::unordered_map<const ClipDriver*, Bones*> driverBones_;  // a driver's bones (the servo's or a blender's)
+    Bones* bonesNamed(const std::string& name);
     std::unique_ptr<Rig> rig_;
     std::vector<std::unique_ptr<ClipDriver>> drivers_;
     std::unordered_map<std::string, ClipDriver*> driverByName_;

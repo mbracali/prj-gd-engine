@@ -303,7 +303,7 @@ struct Rig::Impl {
     std::vector<PosConstraint> constraints;
     std::vector<IkRod> rods;
 
-    enum Kind { kDriver, kServo, kFace, kWalk, kSetter, kHand, kMidi, kUpper, kFore, kLookAt, kEyes, kHair, kConstraint, kRod };
+    enum Kind { kDriver, kServo, kBlender, kFace, kWalk, kSetter, kHand, kMidi, kUpper, kFore, kLookAt, kEyes, kHair, kConstraint, kRod };
     struct Pollable {
         Kind kind;
         size_t index;
@@ -353,6 +353,10 @@ void Rig::Impl::build() {
             p.kind = kDriver, p.index = driverNames.size();
             driverNames.push_back(o->name);
             p.writes = {d->bones};
+        } else if (auto* bb = o->as<scene::CharBonesBlender>()) {
+            // RB's CharBonesBlender (PollDeps RB 0x8234DE60) [C]: changes its dest.
+            p.kind = kBlender, p.index = 0;
+            p.writes = {bb->dest};
         } else if (o->as<scene::CharServoBone>()) {
             p.kind = kServo, p.index = 0;
             p.writesAllBones = true;
@@ -617,6 +621,9 @@ void Rig::Impl::poll(const RigContext& ctx) {
             break;
         case kServo:
             if (ctx.pollServo) ctx.pollServo();
+            break;
+        case kBlender:
+            if (ctx.pollBlender) ctx.pollBlender(p.name);
             break;
         case kFace:
             if (ctx.pollFace) ctx.pollFace(p.name);

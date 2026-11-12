@@ -560,8 +560,8 @@ bool CameraDirector::camCheckShot(const scene::CamShot& shot) {
 
 // ---- start / end -------------------------------------------------------------------
 
-// CamShot StartAnim 0x82226120 (start_shot, the hide list, state reset) after
-// the old shot's EndAnim 0x82226338 (stop_shot, its hide list shown again).
+// CamShot StartAnim RB 0x822904B0 (state reset, start_shot, the hide and show
+// lists) after the old shot's EndAnim RB 0x822906A8 (its lists set back).
 void CameraDirector::startShot(const scene::CamShot* shot) {
     endShot();
     current_ = shot;
@@ -571,8 +571,6 @@ void CameraDirector::startShot(const scene::CamShot* shot) {
     st.used = used;
     st.start = now(*shot);
     ++started_;
-    for (const std::string& h : shot->hideList)
-        if (const scene::Object* o = world_.venue().find(h)) world_.setShowing(o, false);
     // The shot's PostProc (camshot.dta start_shot: [postprocess] select, else
     // rnd reset_postproc). RB's BandCamShot (band_objects.dta) keeps the
     // selection for a shot without one: its start_shot blends to ProFilm_a.pp
@@ -584,10 +582,16 @@ void CameraDirector::startShot(const scene::CamShot* shot) {
     if (world_.log) {
         std::string hides;
         for (const std::string& h : shot->hideList) hides += " " + h;
-        SDL_Log("world: shot %s (%s), planes %g..%g%s%s", shot->name.c_str(), shot->category.c_str(), double(shot->nearPlane), double(shot->farPlane),
-                hides.empty() ? "" : ", hides", hides.c_str());
+        std::string shows;
+        for (const std::string& n : shot->showList) shows += " " + n;
+        SDL_Log("world: shot %s (%s), planes %g..%g%s%s%s%s", shot->name.c_str(), shot->category.c_str(), double(shot->nearPlane),
+                double(shot->farPlane), hides.empty() ? "" : ", hides", hides.c_str(), shows.empty() ? "" : ", shows", shows.c_str());
     }
     world_.interp().send(world_.scriptFor(const_cast<scene::CamShot*>(shot)), "start_shot", {}, false);
+    if (current_ == shot) {
+        showShotCrowd(*shot);
+        applyShowLists(*shot);
+    }
     // RB's shots always end with a PostProc selected (theirs, ProFilm_a.pp or
     // the VENUE track's override): none is the look missing (shaderaudit).
     if (current_ == shot && !postProc_ && world_.venue().find<scene::PostProc>("override_blender.pp"))
@@ -595,12 +599,47 @@ void CameraDirector::startShot(const scene::CamShot* shot) {
     if (onShotStarted && current_ == shot) onShotStarted(*shot);
 }
 
+// RB 0x82286E50 [C], from StartAnim when the shot's directory is a WorldDir:
+// every WorldCrowd of the world (WorldDir +0x29c, gathered through its
+// proxies, 0x82288188) shows only when it is the shot's crowd; a shot
+// without one hides them all. The theaters' crowds (showing FALSE in
+// theater_char.milo) show this way.
+void CameraDirector::showShotCrowd(const scene::CamShot& shot) {
+    for (const scene::WorldCrowd* c : world_.venue().all<scene::WorldCrowd>()) world_.setShowing(c, c->name == shot.crowd);
+}
+
+// RB 0x8228F608 [C]: the hide list's showing objects are hidden and the show
+// list's hidden ones shown; only the objects it changed are remembered.
+// RB 0x8228F6C0 [C] sets exactly those back (the theaters' WorldCrowds,
+// showing FALSE in theater_char.milo, are shown by their shots' show lists).
+void CameraDirector::applyShowLists(const scene::CamShot& shot) {
+    hidByShot_.clear();
+    shownByShot_.clear();
+    gfx::ScenePose& pose = world_.pose();
+    for (const std::string& h : shot.hideList)
+        if (const scene::Object* o = world_.venue().find(h); o && pose.showing(o)) {
+            world_.setShowing(o, false);
+            hidByShot_.push_back(o);
+        }
+    for (const std::string& n : shot.showList)
+        if (const scene::Object* o = world_.venue().find(n); o && !pose.showing(o)) {
+            world_.setShowing(o, true);
+            shownByShot_.push_back(o);
+        }
+}
+
+void CameraDirector::restoreShowLists() {
+    for (const scene::Object* o : shownByShot_) world_.setShowing(o, false);
+    for (const scene::Object* o : hidByShot_) world_.setShowing(o, true);
+    hidByShot_.clear();
+    shownByShot_.clear();
+}
+
 void CameraDirector::endShot() {
     if (!current_) return;
     const scene::CamShot* old = current_;
     current_ = nullptr;
-    for (const std::string& h : old->hideList)
-        if (const scene::Object* o = world_.venue().find(h)) world_.setShowing(o, true);
+    restoreShowLists();
     world_.interp().send(world_.scriptFor(const_cast<scene::CamShot*>(old)), "stop_shot", {}, false);
 }
 

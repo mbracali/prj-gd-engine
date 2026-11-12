@@ -1312,3 +1312,23 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   the caps' order, new_town, the band towns' own events from
   tour/<town>.dta not loaded, fame / the hometown tier mapping 0x823FCED8,
   the active moments).
+
+## 2026-11-12: G06 follow-ups (fix7: theater crowds, drummer's left hand, venue brightness)
+
+- **Theater crowds (GD05-076, D77):** a shot shows its own WorldCrowd and
+  hides the others (RB 0x82286E50 from CamShot StartAnim 0x822904B0), then
+  applies its hide / show lists (0x8228F608), set back as it ends
+  (0x8228F6C0). Crowd sweep (41 venues, #crowd0; agents/scratch/fix7/
+  crowd_sweep.sh, git-ignored), characters drawn before -> after:
+  theater_01..09 0 -> 800 each; arena_01..08 700 -> 700; small_club_01..12
+  70 -> 70; big_club_01..12 350 -> 200 (two crowds drew before, the shot's
+  one now). rb_crowd: theater_01 FAILED (crowd_chars_max 0) -> OK (800),
+  arena_01 OK (700) -> OK (700).
+- **Drummer's left hand (GD05-088, D78):** the hand / foot dmidi drivers
+  write RB's limbs.blender (a CharBonesBlender blended into the servo and
+  zeroed each poll); main_add.drv / zBassOffset.drv (apply 2) rotate to
+  instead of adding. GD05_BANDCHECK's new channel check (each position
+  channel within its drivers' largest clip values): before (GD05_BLENDER_
+  LEGACY=1) 1735.7 x, 2839 of 2901 frames past; after 1.000 x, 0 frames,
+  10 of 10 runs passed (8,744..14,209 frames each; drummer stretch worst
+  1.000..1.001 x bind, moves on 231 of 252 notes).

@@ -675,7 +675,11 @@ void Band::rbShotTargets(const std::vector<std::pair<std::string, std::string>>&
 // - lips: the singer's jaw / lip bones away from their bind pose (degrees /
 //   units) while the song's .voc drives the face;
 // - mic: the mic bone's distance to the nearer hand, and hands.grp drawing
-//   only mic.grp.
+//   only mic.grp;
+// - channels: every position channel of the servo's bones (not the root's
+//   bone_facing*) within the sum over the drivers of the largest value their
+//   clip sets hold for it (x 1.01): a channel added into every frame without
+//   being scaled down or blended out grows past it (GD05-088).
 struct Band::RbCheck {
     struct Hit {
         double ms;
@@ -699,6 +703,10 @@ struct Band::RbCheck {
     float prevJaw = 0;
     std::vector<float> micDist;
     std::string micDrawOnly;
+    std::map<std::string, std::vector<float>> channelBound;  // per servo channel (0: not checked)
+    std::map<std::string, float> channelWorst;               // |value| / bound
+    std::map<std::string, std::string> channelWorstName;
+    std::map<std::string, int> channelFrames;                // frames with a channel past 1.01
 };
 
 bool Band::rbLegacy() {
@@ -776,6 +784,37 @@ void Band::rbCheckFrame() {
             if (auto it = k.minStretch.find(m.slot); it == k.minStretch.end() || r < it->second) k.minStretch[m.slot] = r, k.shortBone[m.slot] = sk.name(i);
         }
         if (bad) ++k.stretchFrames[m.slot];
+        // Channels against their clips' largest values.
+        auto& ch = c.bones().channels();
+        auto& bound = k.channelBound[m.slot];
+        if (bound.size() != ch.size()) {
+            bound.assign(ch.size(), 0.0f);
+            for (const auto& d : c.drivers()) {
+                if (!d->clipSet()) continue;
+                std::vector<float> most(ch.size(), 0.0f);
+                for (const scene::CharClipSamples* clip : d->clipSet()->clips())
+                    for (const scene::CharBonesSamples* set : {&clip->one, &clip->full})
+                        for (size_t b = 0; b < set->bones.size(); ++b) {
+                            const int i = c.bones().find(set->bones[b].name);
+                            if (i < 0 || set->bones[b].type != scene::CharBonesSamples::kPos) continue;
+                            for (uint32_t n = 0; n < set->count; ++n)
+                                for (int x = 0; x < 3; ++x)
+                                    most[size_t(i)] = std::max(most[size_t(i)], std::fabs(set->sample(n)[set->offset[b] + x]));
+                        }
+                for (size_t i = 0; i < ch.size(); ++i) bound[i] += most[i];
+            }
+            for (size_t i = 0; i < ch.size(); ++i)
+                if (ch[i].name.rfind("bone_facing", 0) == 0) bound[i] = 0;
+        }
+        bool over = false;
+        for (size_t i = 0; i < ch.size(); ++i) {
+            if (bound[i] <= 0 || ch[i].type != scene::CharBonesSamples::kPos) continue;
+            const float v = std::max({std::fabs(ch[i].v[0]), std::fabs(ch[i].v[1]), std::fabs(ch[i].v[2])});
+            const float r = v / bound[i];
+            if (r > k.channelWorst[m.slot]) k.channelWorst[m.slot] = r, k.channelWorstName[m.slot] = ch[i].name;
+            if (r > 1.01f) over = true;
+        }
+        if (over) ++k.channelFrames[m.slot];
         auto at = [&](const char* n, std::array<float, 3>& out) {
             const int i = sk.find(n);
             if (i < 0) return false;
@@ -837,6 +876,11 @@ void Band::rbCheckReport() {
         SDL_snprintf(buf, sizeof buf, "%s stretch: worst %.3f x bind (%s), %d of %d frames past 1.2", m.slot.c_str(), st,
                      k.worstBone.count(m.slot) ? k.worstBone.at(m.slot).c_str() : "-", sf, k.frames);
         line(sf == 0, buf);
+        const int cf = k.channelFrames.count(m.slot) ? k.channelFrames.at(m.slot) : 0;
+        SDL_snprintf(buf, sizeof buf, "%s channels within their clips: worst %.3f x (%s), %d of %d frames past 1.01", m.slot.c_str(),
+                     k.channelWorst.count(m.slot) ? double(k.channelWorst.at(m.slot)) : 0.0,
+                     k.channelWorstName.count(m.slot) ? k.channelWorstName.at(m.slot).c_str() : "-", cf, k.frames);
+        line(cf == 0, buf);
         if (m.type == "rb_guitar" || m.type == "rb_bass") {
             const auto fret = k.reachFret.count(m.slot) ? k.reachFret.at(m.slot) : std::vector<float>{};
             const auto pick = k.reachPick.count(m.slot) ? k.reachPick.at(m.slot) : std::vector<float>{};

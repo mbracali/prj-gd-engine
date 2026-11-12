@@ -114,7 +114,10 @@ Wave G06 band (GD05-066/067/068):
   (stretch of the body's skinned bones vs 1.2 x bind, the fret finger and
   pick on their IK targets, the drummer's motion on the drum notes, the
   singer's jaw, the mic in the hand and hands.grp's draw_only), then
-  `bandcheck: passed` or `FAILED (n problem(s))`. `GD05_BAND_LEGACY=1` runs
+  `bandcheck: passed` or `FAILED (n problem(s))`; `channels within their
+  clips` (D78): every servo position channel within its drivers' largest
+  clip values (GD05_BLENDER_LEGACY=1: the hand drivers without
+  limbs.blender, fails). `GD05_BAND_LEGACY=1` runs
   the band without the wave's fixes (no RB parsers, GH2 weight setters,
   draw_only ignored, no RB face) to show the checks failing.
 - `GD05_FACE_CAM=player_guitar0:50:0:bone_spine2.mesh GD05_POST=0

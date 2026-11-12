@@ -47,20 +47,31 @@ public:
     void scaleAdd(const scene::CharClipSamples& clip, float w, float frame, float dframe);
     // The clip's channels times `f`.
     void scaleDown(const scene::CharClipSamples& clip, float f);
-    // The older clips' channels that the newest lacks, once each, times `f`
-    // [I: Rock Band's hand / drum clip sets key different target bones per
-    // clip; scaled with the newest's only, those channels summed for ever].
-    void scaleDownOthers(const scene::CharClipSamples& newest, const std::vector<const scene::CharClipSamples*>& older, float f);
     // The clip's pose at `frame` as an additive layer (CharClip slot 7,
     // 0x82161F98 -> 0x8215E6A0): positions and angles added, quaternions
     // q = clip * q. The static set at its sample, the full set at the frame.
     void rotateBy(const scene::CharClipSamples& clip, float frame);
+    // Rock Band's RotateTo (CharClipSamples slot 8, RB 0x8234EC10 ->
+    // 0x823647F0 -> 0x8231F790) [C]: the static set's sample and the full
+    // set's two samples around the frame, each with its share a of `w`:
+    // positions and angles += a x sample, quaternions q = q x (a s.xyz,
+    // a s.w +- (1 - a)) (the sign of s.w).
+    void rotateTo(const scene::CharClipSamples& clip, float w, float frame);
+    // Rock Band's CharBones blend into another (RB 0x8231F1C8, a
+    // CharBonesBlender's Poll 0x8234D520) [C]: each channel of this one with
+    // weight a moves dest's: positions / scales (1 - a) d + s, quaternions
+    // (1 - a) d +- (|a| s.xyz, a s.w) (signed by the dot), angles
+    // (1 - a) d + a s. Dest's weights stay.
+    void blendInto(Bones& dest) const;
+    // Every value and weight zeroed (RB 0x8231E2F8 + 0x8231E9A8(0)).
+    void clear();
     // Every channel of a set (adds them): a clip set's skeleton.
     void addChannelsOf(const scene::CharBonesSamples& set);
 
 private:
     const std::vector<int>& map(const scene::CharBonesSamples& set);
     void addSample(const scene::CharBonesSamples& set, const std::vector<int>& idx, uint32_t sample, float w);
+    void rotateToSample(const scene::CharBonesSamples& set, uint32_t sample, float a);
     std::vector<Channel> ch_;
     std::unordered_map<std::string, int> index_;
     std::unordered_map<const scene::CharBonesSamples*, std::vector<int>> maps_;

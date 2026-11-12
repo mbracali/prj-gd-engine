@@ -1058,3 +1058,59 @@ pattern). Each says what, why and how to undo it.
   the second (5120_sparkle) bought at 1299, worn on stage, kept through a
   restart (PROGRESS.md 2026-11-12 GD05-083).
 - **Undo:** OutfitGroupPanelObj, modelFinishes, gChosenFinish.
+
+## D77
+- **What (2026-11-12, GD05-076):** a camera shot shows its own crowd and
+  applies its hide and show lists as Rock Band's CamShot StartAnim (RB
+  0x822904B0) [C]: after start_shot, when the shot's directory is a
+  WorldDir (dynamic cast to `WorldDir`, RTTI 0x82886CDC), 0x82286E50 sets
+  every WorldCrowd of the world (WorldDir +0x29C, gathered through its
+  proxies by 0x82288188, class `WorldCrowd` RTTI 0x82886CA8) showing only
+  when it is the shot's `crowd` (none: all hidden); then 0x8228F608 hides
+  the hide list's showing objects and shows the show list's hidden ones,
+  remembering only what it changed, and EndAnim (0x822906A8) sets exactly
+  those back (0x8228F6C0) before stop_shot. The theaters' WorldCrowds are
+  showing FALSE in theater_char.milo: their shots' crowd shows them.
+  render: CameraDirector::showShotCrowd / applyShowLists / restoreShowLists.
+- **Why:** rb_crowd drew 0 audience characters in all nine theaters (the
+  port hid list ran, the show list was read and dropped, and nothing showed
+  the shot's crowd); the old end of a shot also showed hidden objects that
+  had been hidden before it.
+- **Measured (crowd sweep, 41 venues, #crowd0, 9 s):** theater_01..09 0 ->
+  800 characters drawn (714k..732k px); arenas 700 / 700, small clubs
+  70 / 70, big clubs 350 -> 200 (only the shot's crowd now, as RB; px
+  1.10M -> 1.01M..1.06M).
+- **Not done:** the crowd's rotate (+0x48 of the shot's crowd set from the
+  shot's crowd_rotate by 0x82286E50) is still the script's.
+- **Undo:** the three CameraDirector functions.
+
+## D78
+- **What (2026-11-12, GD05-088):** Rock Band's CharDriver apply modes and
+  CharBonesBlender [C]: CharDriver Poll (RB 0x82313988) with apply 0
+  (blend) scales the newest clip's channels down (CharClipSamples slot 6,
+  RB 0x8234EB08) and adds the chain (0x823613C8), apply 1 (add) adds the
+  chain without scaling down, apply 2 (rotate to: main_add.drv,
+  zBassOffset.drv) runs 0x82361490 -> slot 8 (0x8234EC10 -> 0x823647F0 ->
+  0x8231F790): positions and angles += a x sample, quaternions
+  q = q x (a s.xyz, a s.w +- (1 - a)) for the two samples around the frame.
+  A driver writes into its `bones`: the drummer's hand and foot dmidi
+  drivers (left_hand / right_hand.dmidi apply 1, left_foot / right_foot)
+  write limbs.blender, a CharBonesBlender whose Poll (0x8234D520) blends
+  its channels into its dest (0x8231F1C8: (1 - w) d + s for positions,
+  sign-aligned (1 - w) d + w s for quaternions, (1 - w) d + w s for
+  angles; w the channel's weight) and then zeroes itself (0x8231E2F8,
+  0x8231E9A8(0)); it polls after the drivers writing it (its PollDeps
+  0x8234DE60 changes its dest). The [I] scale-down of older clips' channels
+  (GD05-067, Bones::scaleDownOthers) is gone: RB scales down the newest
+  clip's only.
+- **Why:** the hand drivers added into the servo every frame and nothing
+  zeroed those channels: the kit targets (bone_L-tip_<pad>.pos) summed to
+  6e4..3e5 units (weight 1 a frame), the left hand left the forearm on
+  high frame-rate runs.
+- **Measured (GD05_BANDCHECK, inbloom 60 s; new check: every position
+  channel within the sum of its drivers' largest clip values x 1.01):**
+  GD05_BLENDER_LEGACY=1 (the code before): drummer channels 1735.7 x
+  (bone_L-tip_R-cymbal.pos), 2839 of 2901 frames past; now 1.000 x, 0
+  frames, in 10 of 10 runs of 8,744..14,209 frames, drummer stretch worst
+  1.001 x bind (was 1.153..254).
+- **Undo:** GD05_BLENDER_LEGACY=1 (no blenders, rotate-to drivers added).

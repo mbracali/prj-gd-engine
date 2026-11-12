@@ -137,7 +137,12 @@ public:
     // Driver properties.
     float beatScale = 1;          // +0x58
     bool realign = false;         // +0x54
-    bool skipScaleDown = false;   // +0x55
+    // Rock Band's "apply" (RB CharDriver +0x48 in Poll 0x82313988) [C]:
+    // kApplyBlend scales the newest clip's channels down then adds the chain,
+    // kApplyAdd adds it, kApplyRotateTo composes it onto the bones (CharClip
+    // slot 8, RB 0x8234EC10).
+    enum Apply : uint32_t { kApplyBlend = 0, kApplyAdd = 1, kApplyRotateTo = 2 };
+    uint32_t apply = kApplyBlend;
     std::string starved;          // +0x44: the message sent while one node remains
     // The weight (CharWeightable; the weight owner's when it has one).
     std::function<float()> weight = [] { return 1.0f; };
