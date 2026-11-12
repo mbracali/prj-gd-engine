@@ -29,6 +29,8 @@
 
 #include "data/dta.h"
 #include "data/json.h"
+#include "char/char_objects.h"
+#include "scene/milo.h"
 #include "game/song_db.h"
 #include "platform/paths.h"
 #include "ui/natives.h"
@@ -348,6 +350,28 @@ public:
         return 2;
     }
 
+    // A creator palette as a list of its colours (skin.lst / color.lst set_colors).
+    std::map<std::string, RbList*> palettes;
+    RbList* palette(const std::string& pal) {
+        if (auto it = palettes.find(pal); it != palettes.end()) return it->second;
+        int n = 0;
+        try {
+            auto milo = scene::loadMilo(ui_.data(), "char/gen/skin.milo_xbox");
+            if (auto* p = milo->root().find<scene::ColorPalette>(pal)) n = int(p->colors.size());
+        } catch (const std::exception& e) {
+            SDL_Log("rb meta: skin.milo: %s", e.what());
+        }
+        RbList* l = own(std::make_unique<RbList>("rb_palette_" + pal));
+        l->build = [n] {
+            std::vector<std::string> v;
+            for (int i = 0; i < n; ++i) v.push_back(std::to_string(i));
+            return v;
+        };
+        l->label = [](const std::string&) { return std::string(); };
+        l->refresh();
+        return palettes[pal] = l;
+    }
+
     // ---- the save (rb_profile.json, version 1)
     std::string path() const { return prefDir() + "rb_profile.json"; }
     void save();
@@ -396,19 +420,37 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
         return r = Value::string(t == "drum" ? "D" : t == "vocals" ? "V" : t == "bass" ? "B" : "G"), true;
     }
     if (msg == "get_attitude") return r = Value::symbol(d.attitude), true;
-    if (msg == "set_attitude") return d.attitude = sArg(args, 0), true;
+    // The creator's setters take the CompositeCharacter being shown first
+    // ({$tour_char set_skin_color $char {skin.lst selected_pos}},
+    // charcreator.dta) [C data]: the value is the last argument.
+    const size_t last = args.empty() ? 0 : args.size() - 1;
+    if (msg == "set_attitude") return d.attitude = sArg(args, last), true;
     if (msg == "money") return r = Value::integer(d.money), true;
     if (msg == "cheat_add_money") return d.money += iArg(args, 0), true;
     if (msg == "set_money") return d.money = iArg(args, 0, d.money), m.save(), true;  // the shop pays (shop.dta) [C data]
     if (msg == "tour_score") return r = Value::integer(d.score), true;
     if (msg == "hometown") return r = Value::symbol(d.hometown), true;
     if (msg == "set_hometown") return d.hometown = sArg(args, 0), true;
-    if (msg == "set_weight") return d.weight = args.empty() ? d.weight : args[0].number(), true;
-    if (msg == "set_height") return d.height = args.empty() ? d.height : args[0].number(), true;
-    if (msg == "set_skin_color") return d.skin = iArg(args, 0), true;
-    if (msg == "set_eye_color") return d.eye = iArg(args, 0), true;
-    if (msg == "set_eyebrow_color") return d.eyebrow = iArg(args, 0), true;
+    if (msg == "set_weight") return d.weight = args.empty() ? d.weight : args[last].number(), true;
+    if (msg == "set_height") return d.height = args.empty() ? d.height : args[last].number(), true;
+    if (msg == "set_skin_color") return d.skin = iArg(args, last), true;
+    if (msg == "set_eye_color") return d.eye = iArg(args, last), true;
+    if (msg == "set_eyebrow_color") return d.eyebrow = iArg(args, last), true;
     if (msg == "skin_color") return r = Value::integer(d.skin), true;
+    // The character's properties the creator reads ({$char get weight},
+    // skin_color_palette / _index, eye_color_palette / _index: band_objects.dta
+    // Character) [C data]; the palettes are char/gen/skin.milo's skin.pal
+    // and eyes.pal (the band's skin, game/rb_band.cpp).
+    if (msg == "get") {
+        const std::string k = sArg(args, 0);
+        if (k == "weight") return r = Value::real(d.weight), true;
+        if (k == "height") return r = Value::real(d.height), true;
+        if (k == "skin_color_index") return r = Value::integer(d.skin), true;
+        if (k == "eye_color_index") return r = Value::integer(d.eye), true;
+        if (k == "skin_color_palette") return r = Value::obj(m.palette("skin.pal")), true;
+        if (k == "eye_color_palette") return r = Value::obj(m.palette("eyes.pal")), true;
+        return false;
+    }
     if (msg == "deform" || msg == "update" || msg == "print_guid" || msg == "set_dirty") return true;
     if (msg == "has_outfit") return r = Value::integer(d.owned.count(sArg(args, 1)) || (d.outfit.count(sArg(args, 0)) && d.outfit[sArg(args, 0)] == sArg(args, 1)) ? 1 : 0), true;
     if (msg == "has_group_selection") return r = Value::integer(0), true;  // [I] colour groups not offered yet
@@ -1137,6 +1179,12 @@ public:
         const size_t d = n.rfind('.');
         return d == std::string::npos ? n : n.substr(0, d);
     }
+    // The catalog's categories (hair, torso ...); the creator's skin.lst
+    // and the sliders are the script's own (charcreator.dta set_colors).
+    bool isOutfitCategory(const std::string& cat) {
+        RbCharObj* c = tourChar();
+        return outfitCategory(ui, c ? c->d.gender : "male", cat) != nullptr;
+    }
     OutfitList* listFor(const std::string& cat) {
         RbCharObj* c = tourChar();
         const std::string gender = c ? c->d.gender : "male";
@@ -1175,7 +1223,7 @@ public:
                    true;
         }
         if (msg == "focus_outfit") {
-            if (focus.rfind(".lst") == std::string::npos) return r = Value::symbol(""), true;
+            if (focus.rfind(".lst") == std::string::npos || !isOutfitCategory(base(focus))) return r = Value::symbol(""), true;
             OutfitList* l = listFor(base(focus));
             ComponentObj* c = component(focus);
             if (c && c->provider != l) in.send(c, "set_provider", {Value::obj(l)});
@@ -1222,7 +1270,7 @@ public:
         // Lists' providers when a list gets the focus.
         if (msg == "set_focus") {
             const bool done = PanelObj::handleNative(in, msg, args, r);
-            if (focus.rfind(".lst") != std::string::npos)
+            if (focus.rfind(".lst") != std::string::npos && isOutfitCategory(base(focus)))
                 if (ComponentObj* c = component(focus)) in.send(c, "set_provider", {Value::obj(listFor(base(focus)))});
             return done;
         }
@@ -1235,7 +1283,7 @@ public:
         const std::string before = focus;
         const bool onBtn = before.size() > 4 && before.rfind(".btn") == before.size() - 4;
         const bool r = PanelObj::buttonDown(button, player);
-        if (button == kPad_X && onBtn && focus == before && component(base(before) + ".lst")) {
+        if (button == kPad_X && onBtn && focus == before && component(base(before) + ".lst") && isOutfitCategory(base(before))) {
             ComponentObj* l = component(base(before) + ".lst");
             ui.interp().send(l, "set_provider", {Value::obj(listFor(base(before)))});
             ui.interp().send(this, "store_outfit", {});
@@ -1321,6 +1369,13 @@ std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& 
     if (name == "practice_space_panel")
         return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"select_cam", "set_creator_player_num", "play_attitude_group", "set_char_player_num"});
     return nullptr;
+}
+
+int rbOutfitCost(UiManager& ui, const std::string& gender, const std::string& category, const std::string& outfit) {
+    const DataNode* cat = outfitCategory(ui, gender, category);
+    const DataNode* outs = cat ? cat->find("outfits") : nullptr;
+    const DataNode* e = outs ? outs->find(outfit) : nullptr;
+    return e ? num(e->find("cost")) : -1;
 }
 
 void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<ScriptObject>>& owned) {

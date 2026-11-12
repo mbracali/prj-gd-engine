@@ -96,6 +96,7 @@ public:
         std::string type;                      // guitarist / singer / keyboardist / bassist / drummer
         int player = -1;                       // guitarists
         std::string miloPath;                  // the character's milo (its proxies resolve from it)
+        std::vector<std::string> pieces;       // RB: the outfit pieces' milos it was built from (the walks' checks)
         // The character's effect dirs (cheat_headflames, hand_flames_L / _R,
         // god_particles...): a RndDir proxying a shared milo (char/shared/og),
         // parented to a bone; script start / stop (char_objects.dta) [C data].

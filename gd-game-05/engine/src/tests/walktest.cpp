@@ -43,6 +43,7 @@
 #include "app.h"
 #include "ui/enhanced_panel.h"
 #include "ui/natives.h"
+#include "ui/rb_meta.h"
 #include "ui/ui_objects.h"
 #include "ui/ui_host.h"
 #include "ui/ui_manager.h"
@@ -748,6 +749,120 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1500);
         check("print_focus");
         check("counter:shop_bought:1");
+    } else if (scenario == "rb_career") {
+        // GD05-072: the Solo Tour end to end through RB's own menus. A new
+        // character (the creator: skin and hair chosen), the Rock Shop (a
+        // shirt bought: the cash drops by the catalog's price, the shirt
+        // worn), a gig played on autoplay (the character on stage in the
+        // shirt; the cash rises by the event's reward_per_star x the stars,
+        // the event's outfit won), then the game restarts (runApp) and
+        // rb_career_restarted finds it all in the save.
+        endMs_ = 30000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        check("focus_to appearance.btn", 5000);
+        press(kX);  // PHYSIQUE
+        at("charcreator_appearance_screen", 20000);
+        wait(1200);
+        check("rb_creator_before");
+        check("focus_to skin.btn", 5000);
+        press(kX), wait(500);  // skin.lst
+        press(kDown), wait(300), press(kDown), wait(300);
+        check("print_focus");
+        press(kX), wait(500);  // confirm the third skin colour
+        check("focus_to hair.btn", 5000);
+        press(kX), wait(600);  // hair.lst
+        press(kDown), wait(300), press(kDown), wait(300);
+        check("print_focus");
+        press(kX), wait(1200);  // confirm the hair
+        check("rb_creator_look");
+        check("focus_to done.btn", 5000);
+        press(kX);
+        at("charcreator_maker_screen", 20000);
+        wait(1000);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_career_cash0");
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROKK SHOPPE
+        at("shop_screen", 20000);
+        wait(1000);
+        press(kX);  // CLOTHING
+        at("shop_clothing_screen", 20000);
+        wait(1500);
+        press(kX);  // the first store (punk)
+        at("shop_clothing_genre_screen", 20000);
+        wait(1500);
+        press(kX);  // TORSO: its list
+        wait(1200);
+        for (int i = 0; i < 5; ++i) press(kDown), wait(250);  // flannelcoat_checked
+        check("print_focus");
+        press(kX);  // buy: the confirm screen
+        wait(1500);
+        press(kX);  // yes
+        wait(1500);
+        check("rb_shop_bought");
+        for (int i = 0; i < 3; ++i) press(kTri), wait(1200);  // the store, the clothing, the shop
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);  // GIG GUIDE
+        at("tour_solo_diff_screen");
+        press(kX);  // the difficulty
+        at("tour_solo_guitar_welcome_screen|tour_solo_event_screen", 20000);
+        wait(800);
+        press(kX);
+        at("tour_solo_event_screen", 20000);
+        wait(1000);
+        press(kX);  // the first event
+        at("game_screen", 60000);
+        wait(3000);
+        check("rb_band_wears");
+        at("tour_solo_endgame_screen", 120000);
+        check("rb_gig_stars");
+        wait(1000);
+        press(kX);
+        at("tour_solo_gigcomplete_screen", 20000);
+        wait(1000);
+        check("rb_gig_cash");
+        press(kX);
+        at("tour_solo_event_screen|tour_solo_hub_screen|tour_solo_newtown_screen", 40000);
+        wait(1500);
+        check("restart_app");
+    } else if (scenario == "rb_career_restarted") {
+        // rb_career's second half, after the restart: the character from
+        // the save (row 0 of the Solo Tour's list), its cash, look, clothes
+        // and the gig's stars as the first half left them.
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(1000);
+        press(kX);  // the saved character
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_career_reloaded");
     } else if (scenario == "solo_tour") {
         // RB's Solo Tour (ui/tour_solo.dta): Solo > Tour, a character (made
         // in the creator the first time), the hub, the gig guide, a
@@ -3445,6 +3560,117 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (hair.empty() || hair == "none") return fail("no hair chosen");
         return pass();
     }
+    // rb_career (GD05-072): expectations from the data, values measured
+    // through the scripts' own objects (tour performer, charcreator_panel).
+    if (s.screen.rfind("rb_creator_", 0) == 0 || s.screen.rfind("rb_career_", 0) == 0 || s.screen == "rb_shop_bought" ||
+        s.screen == "rb_band_wears" || s.screen.rfind("rb_gig_", 0) == 0) {
+        Interp& in = ui.interp();
+        const DataNode* tour = ui.bootTree() ? ui.bootTree()->find("tour") : nullptr;
+        auto send = [&](ScriptObject* o, const char* msg, std::vector<Value> a = {}) { return o ? in.send(o, msg, a) : Value::integer(0); };
+        ScriptObject* creating = in.send("charcreator_panel", "get_tour_char", {}).object;
+        ScriptObject* perf = in.send("tour", "performer", {}).object;
+        ScriptObject* c = s.screen.rfind("rb_creator_", 0) == 0 ? creating : perf;
+        if (!c) return fail(s.screen + ": no character");
+        const int money = send(c, "money").integerValue();
+        const std::string gender = send(c, "get_gender").str(), inst = send(c, "get_instrument").str();
+        const std::string hair = send(c, "get_outfit", {Value::symbol("hair")}).str(), torso = send(c, "get_outfit", {Value::symbol("torso")}).str();
+        const int skin = send(c, "skin_color").integerValue();
+        auto owns = [&](const std::string& cat, const std::string& o) { return send(c, "has_outfit", {Value::symbol(cat), Value::symbol(o)}).truthy(); };
+        std::printf("  %s: %s %s, money %d, skin %d, hair %s, torso %s\n", s.screen.c_str(), gender.c_str(), inst.c_str(), money, skin, hair.c_str(),
+                    torso.c_str());
+        if (s.screen == "rb_creator_before") {
+            careerHair0_ = hair;
+            return pass();
+        }
+        if (s.screen == "rb_creator_look") {
+            // Two downs on skin.lst from the first colour: the third (index 2).
+            ScriptObject* sl = ui.panel("charcreator_appearance_panel") ? ui.panel("charcreator_appearance_panel")->component("skin.lst") : nullptr;
+            std::printf("  skin.lst: %d colours, at %d\n", send(sl, "num_data").integerValue(), send(sl, "selected_pos").integerValue());
+            std::printf("  expected: skin 2, hair not %s; measured: skin %d, hair %s\n", careerHair0_.c_str(), skin, hair.c_str());
+            if (skin != 2) return fail("the skin colour chosen in the creator is " + std::to_string(skin) + ", not 2");
+            if (hair.empty() || hair == "none" || hair == careerHair0_) return fail("no hair chosen in the creator (" + hair + ")");
+            return pass();
+        }
+        if (s.screen == "rb_career_cash0") {
+            const int want = tour && tour->find("default_money") ? tour->find("default_money")->intAt(1) : -1;
+            std::printf("  expected cash (config/tour.dta default_money) %d, measured %d\n", want, money);
+            if (money != want) return fail("a new character has " + std::to_string(money) + ", not " + std::to_string(want));
+            careerCash_ = money;
+            return pass();
+        }
+        if (s.screen == "rb_shop_bought") {
+            const int price = ui::rbOutfitCost(ui, gender, "torso", "flannelcoat_checked");
+            std::printf("  expected: torso flannelcoat_checked, cash %d - %d = %d; measured: torso %s, cash %d, owned %d\n", careerCash_, price,
+                        careerCash_ - price, torso.c_str(), money, int(owns("torso", "flannelcoat_checked")));
+            if (price <= 0) return fail("flannelcoat_checked has no price in the catalog");
+            if (torso != "flannelcoat_checked") return fail("the bought shirt is not worn (torso " + torso + ")");
+            if (money != careerCash_ - price) return fail("the cash after the purchase is " + std::to_string(money));
+            careerCash_ = money;
+            return pass();
+        }
+        if (s.screen == "rb_band_wears") {
+            const int t = ui.host().gameCounter(0, "band_piece:" + torso), h = ui.host().gameCounter(0, "band_piece:" + hair);
+            std::printf("  expected: the guitarist built with %s and %s; measured: %d / %d member(s)\n", torso.c_str(), hair.c_str(), t, h);
+            if (t < 1 || h < 1) return fail("the character on stage does not wear its own clothes");
+            return pass();
+        }
+        if (s.screen == "rb_gig_stars") {
+            // As the scripts read them after the song (endgame.dta complete_song {main_performer num_stars}).
+            const UiHost::SongResult res = ui.host().lastResult(0);
+            careerStars_ = res.valid ? res.stars : ui.host().gameCounter(0, "stars");
+            std::printf("  the gig's stars: %d\n", careerStars_);
+            if (careerStars_ < 1) return fail("the gig earned no star");
+            return pass();
+        }
+        // The event in config/tour_solo.dta (towns (<town> (<venue> (<event> ...)))).
+        ScriptObject* ev = in.send("tour", "event", {}).object;
+        const std::string town = send(ev, "get", {Value::symbol("town")}).str(), venue = send(ev, "get", {Value::symbol("venue")}).str(),
+                          name = send(ev, "get", {Value::symbol("event_name")}).str();
+        const DataNode* solo = tour ? tour->find("solo") : nullptr;
+        const DataNode* towns = solo ? solo->find("towns") : nullptr;
+        const DataNode* tn = towns ? towns->find(town) : nullptr;
+        const DataNode* vn = tn ? tn->find(venue) : nullptr;
+        const DataNode* en = vn ? vn->find(name) : nullptr;
+        std::string rcat, rout;  // the event's outfit for the instrument and gender
+        if (const DataNode* o = en ? en->find("outfit") : nullptr)
+            if (const DataNode* i = o->find(inst == "bass" ? "guitar" : inst))
+                if (const DataNode* g = i->find(gender)) rcat = g->textAt(1), rout = g->textAt(2);
+        if (s.screen == "rb_gig_cash") {
+            if (!en) return fail("no event " + town + "/" + venue + "/" + name + " in the data");
+            const int per = en->find("reward_per_star") ? en->find("reward_per_star")->intAt(1) : 0;
+            const int most = solo->find("max_money") ? solo->find("max_money")->intAt(1) : 999999999;
+            const int want = std::min(most, careerCash_ + per * careerStars_);
+            const bool won = rcat.empty() || owns(rcat, rout);
+            std::printf("  expected: cash %d + %d x %d stars = %d, %s %s owned; measured: cash %d, owned %d (event %s/%s/%s)\n", careerCash_, per,
+                        careerStars_, want, rcat.c_str(), rout.c_str(), money, int(won), town.c_str(), venue.c_str(), name.c_str());
+            if (money != want) return fail("the gig paid " + std::to_string(money - careerCash_) + ", not " + std::to_string(want - careerCash_));
+            if (!won) return fail("the event's outfit " + rout + " was not won");
+            const std::string keep = std::to_string(money) + " " + std::to_string(skin) + " " + hair + " " + torso + " " + rcat + " " + rout;
+            SDL_setenv_unsafe("GD05_WALK_CAREER", keep.c_str(), 1);
+            return pass();
+        }
+        if (s.screen == "rb_career_reloaded") {
+            std::istringstream is(SDL_getenv("GD05_WALK_CAREER") ? SDL_getenv("GD05_WALK_CAREER") : "");
+            int wMoney = -1, wSkin = -1;
+            std::string wHair, wTorso, wCat, wOut;
+            is >> wMoney >> wSkin >> wHair >> wTorso >> wCat >> wOut;
+            const int fame = send(c, "world_fame").integerValue();
+            const bool won = wCat.empty() || owns(wCat, wOut), bought = owns("torso", "flannelcoat_checked");
+            std::printf("  expected (before the restart): cash %d, skin %d, hair %s, torso %s, %s owned, 1+ event played; measured: cash %d, skin %d, "
+                        "hair %s, torso %s, owned %d / %d, events played %d\n",
+                        wMoney, wSkin, wHair.c_str(), wTorso.c_str(), wOut.c_str(), money, skin, hair.c_str(), torso.c_str(), int(won), int(bought), fame);
+            if (wMoney < 0) return fail("rb_career's first half left no expectations (GD05_WALK_CAREER)");
+            if (money != wMoney || skin != wSkin || hair != wHair || torso != wTorso) return fail("the character changed through the save");
+            if (!won || !bought) return fail("the owned clothes were lost through the save");
+            if (fame < 1) return fail("the played event was lost through the save");
+            return pass();
+        }
+        return fail("unknown check " + s.screen);
+    }
+    if (s.screen == "restart_app") {  // the game starts again in the same process (runApp): the walk goes on as <walk>_restarted
+        ui.host().setEnhancedValue("restart_now", "1");
+        return pass();
+    }
     if (s.screen == "print_focus") {
         ui::PanelObj* fp = ui.focusPanel();
         std::printf("  focus: screen %s panel %s component %s (up %d)\n", ui.currentScreen().c_str(), fp ? fp->name().c_str() : "-",
@@ -5597,12 +5823,15 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (!band || !gtr || !sfx) return fail("a volume slider moved without its sound");
         return pass();
     }
-    if (s.screen.rfind("focus_to ", 0) == 0) {
-        // Down until the focus panel's focus is the component.
+    if (s.screen.rfind("focus_to ", 0) == 0 || s.screen.rfind("focus_up_to ", 0) == 0) {
+        // Down (focus_up_to: up) until the focus panel's focus is the component.
+        const bool up = s.screen[6] == 'u';
+        const std::string want = s.screen.substr(up ? 12 : 9);
         ui::PanelObj* fp = ui.focusPanel();
-        if (fp && fp->focus == s.screen.substr(9)) return pass();
-        if (nowMs - stepStart_ > s.ms) return fail("no focus on " + s.screen.substr(9) + " (on " + (fp ? fp->focus : std::string("-")) + ")");
-        if (!ui.inTransition() && nowMs - lastNavMs_ > 200) ui.buttonDown(kDown, 0), ui.buttonUp(kDown, 0), lastNavMs_ = nowMs;
+        if (fp && fp->focus == want) return pass();
+        if (nowMs - stepStart_ > s.ms) return fail("no focus on " + want + " (on " + (fp ? fp->focus : std::string("-")) + ")");
+        const int b = up ? kUp : kDown;
+        if (!ui.inTransition() && nowMs - lastNavMs_ > 200) ui.buttonDown(b, 0), ui.buttonUp(b, 0), lastNavMs_ = nowMs;
         return;
     }
     if (s.screen == "lag_strike") {

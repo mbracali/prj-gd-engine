@@ -20,5 +20,8 @@ class UiManager;
 void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<ScriptObject>>& owned);
 // The meta game's panel classes (CharCreatorPanel ...), or null.
 std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& cls, const std::string& name);
+// The outfit catalog's price of a piece (char/outfitloader.dta (cost n)),
+// -1 when the catalog has no such piece [C data] (the walks' expectations).
+int rbOutfitCost(UiManager& ui, const std::string& gender, const std::string& category, const std::string& outfit);
 
 }  // namespace ui

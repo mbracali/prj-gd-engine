@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <functional>
 #include <map>
@@ -101,27 +102,48 @@ public:
         out.clear();
         selectedRow = 0;
         int headersSoFar = 0;
+        // Every row, heading or song, has band.dta's song_select_gap below
+        // it (SongProvider's gap, RB 0x82400180, set from the config at
+        // 0x824053C8) [C]: the selected row's highlight (list_song.milo's
+        // highlight.mesh, 65 units: the name and the details line) then
+        // covers its row alone. Without it (33 units a row) it covered the
+        // next row too (owner, G06 6). GD05_SONGLIST_LEGACY=1: as before.
+        const bool legacy = SDL_getenv("GD05_SONGLIST_LEGACY") != nullptr;
+        float gap = 0;
+        if (!legacy && ui_.bootTree())
+            if (const DataNode* g = ui_.bootTree()->find("song_select_gap"); g && g->children.size() > 1) gap = g->floatAt(1);
         for (int i = 0; i < int(data_.size()); ++i) {
             // A heading is a row of its own, the slot above its first song
             // (list_song.milo's heading.lbl sits 17 units lower in its row
             // than list.lbl: drawn in the song's row it overlapped the song).
-            for (const auto& [idx, text] : headers_)
-                if (idx == i) {
+            for (size_t hi = 0; hi < headers_.size(); ++hi)
+                if (headers_[hi].first == i) {
                     gfx::UiView::ListRow h;
                     h.header = true;
-                    h.texts["heading.lbl"] = text;
+                    // RB 0x82400A68 column 1: "<group> (<n> Songs)", song_select_song for one [C].
+                    const int end = hi + 1 < headers_.size() ? headers_[hi + 1].first : int(data_.size());
+                    const int n = end - i;
+                    char buf[256];
+                    std::snprintf(buf, sizeof buf, ui_.localize(n == 1 ? "song_select_song" : "song_select_songs").c_str(), headers_[hi].second.c_str(), n);
+                    h.texts["heading.lbl"] = legacy ? headers_[hi].second : std::string(buf);
                     h.slot = float(i + headersSoFar);
+                    h.gap = gap;
                     ++headersSoFar;
                     out.push_back(std::move(h));
                 }
             gfx::UiView::ListRow r;
             r.slot = float(i + headersSoFar);
+            r.gap = gap;
             const std::string& sym = data_[size_t(i)];
+            // Column 3, details.lbl (drawn on every row): the artist, the
+            // random entry's by-line (RB 0x82400A68) [C].
             if (sym == "random_song") {
                 r.texts["list.lbl"] = ui_.localize("random_song");
+                if (!legacy) r.texts["details.lbl"] = ui_.localize("random_song_by_line");
             } else {
                 const int info = songInfoIndex(ui_, sym);
                 r.texts["list.lbl"] = info >= 0 ? ui_.host().songs()[size_t(info)].name : sym;
+                if (!legacy && info >= 0) r.texts["details.lbl"] = ui_.host().songs()[size_t(info)].artist;
             }
             if (i == selected) selectedRow = int(out.size());
             out.push_back(std::move(r));
@@ -490,8 +512,9 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     RbHost* charCache = add(std::make_unique<RbHost>(ui, "char_cache"));
     // The characters' cache: the band's loading is M6's (GD05-008) [I].
     charCache->quiet({"cache_update", "cache_enable", "cache_clear", "iterate", "light_characters", "load_instruments",
-                      "world_configure_characters", "reclaim_characters"});
+                      "world_configure_characters", "reclaim_characters", "request", "check_outside_refs"});
     charCache->on("loaded", yes);
+    charCache->on("compression_done", yes);  // the menus' character previews [I: no preview drawn yet]
     charCache->on("meta_configure_done", yes);  // meta_loading.dta waits on it [I: nothing to configure]
     // content_mgr: the Music Store / downloads are not in the port (GD05-013):
     // the disc's content is all there is, its refresh always done.

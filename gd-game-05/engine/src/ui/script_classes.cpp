@@ -240,7 +240,7 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     // TrackDir practice_reset) [I], logged once.
     // The vocal track's directory (track_paneldir.dta milo_apply, the tutorials) [I: its display options not done].
     if (msg == "set_configuration" || msg == "set_enable_vocals_options" || msg == "get_display_mode") return r = Value::integer(0), true;
-    if (msg == "trigger" || msg == "select" || msg == "practice_reset" || msg == "set_colors" || (msg == "reset" && (!object || object->cls != "BandList"))) {
+    if (msg == "trigger" || msg == "select" || msg == "practice_reset" || (msg == "set_colors" && !(args.size() == 1 && dynamic_cast<ListProvider*>(args[0].object))) || (msg == "reset" && (!object || object->cls != "BandList"))) {
         panel->ui.logOnce("STUB-quiet " + name() + " " + msg);
         return r = Value::integer(0), true;
     }
@@ -373,6 +373,21 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         return true;
     }
     if (msg == "selected_pos") return r = Value::integer(selected), true;
+    // RB's colour lists (charcreator.dta skin.lst / color.lst set_colors
+    // {$char get skin_color_palette}): one row per colour of the palette
+    // (the meta game's palette provider).
+    if (msg == "set_colors") {
+        std::vector<Value> a{args[0]};
+        return handleNative(in, "set_provider", a, r);
+    }
+    // UIList store / undo / confirm (charcreator.dta skin.lst): the
+    // position kept on store, put back by undo; confirm keeps the current.
+    if (msg == "store") return storedSelected = selected, true;
+    if (msg == "undo") {
+        if (storedSelected >= 0) selected = storedSelected, refreshList();
+        return true;
+    }
+    if (msg == "confirm") return storedSelected = -1, true;
     // RB's BandList rows shown at once (the town list) [I: the list keeps its own].
     if (msg == "num_display") return r = Value::integer(numDisplay_), true;
     if (msg == "set_num_display") return numDisplay_ = args.empty() ? numDisplay_ : args[0].integerValue(), r = Value::integer(0), true;

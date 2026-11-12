@@ -2896,6 +2896,13 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "vocal_score") return vocal_ ? vocal_->score() : 0;
     if (key == "vocal_phrases_rated") return vocal_ ? vocal_->phrasesRated(VocalPlayer::Rating::Awful) : 0;
     if (key == "band_members") return band_ ? int(band_->members().size()) : 0;
+    if (key.rfind("band_piece:", 0) == 0) {  // GD05-072: the members built with that outfit piece (char/.../<piece>.milo_xbox)
+        int n = 0;
+        if (band_)
+            for (const auto& m : band_->members())
+                for (const std::string& p : m->pieces) n += p.find("/" + key.substr(11) + ".milo") != std::string::npos;
+        return n;
+    }
     if (key == "crowd_drawn") return venueView_ ? venueView_->crowdView().charactersDrawn() : 0;
     if (key == "band_meshes") return venueView_ ? venueView_->bandView().meshesDrawn() : 0;
     if (key == "score") return player_ ? player_->score() : 0;

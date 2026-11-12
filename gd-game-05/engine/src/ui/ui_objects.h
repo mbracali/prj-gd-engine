@@ -49,6 +49,7 @@ public:
     // UIList
     ScriptObject* provider = nullptr;
     int selected = 0;  // provider data index
+    int storedSelected = -1;  // UIList store: the position undo goes back to
     int numDisplay_ = 5;  // RB set_num_display
     void refreshList();
     // UISlider

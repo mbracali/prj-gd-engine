@@ -179,6 +179,7 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
         m->miloPath = base;
         m->object = it->second;
         m->type = "rb_" + instrument;
+        for (const auto& [k, path] : outfits) m->pieces.push_back(path);
         try {
             m->character = std::make_unique<chr::Character>(data, base, *clips_, outfits);
         } catch (const std::exception& e) {

@@ -210,6 +210,10 @@ private:
     int lagStrikes_ = 0;                           // the options walk: strums on the lag clicks
     bool encoreDeclined_ = false;                  // career_song: NO on the encore offer
     std::string winTarget_;                        // career_win: the tour's last song
+    // rb_career (GD05-072): the creator's look before the choices, the
+    // cash before the shop / the gig, the gig's stars.
+    std::string careerHair0_;
+    int careerCash_ = -1, careerStars_ = -1;
     int shotN_ = 0;                                // venue_follow: screenshot number
     // rb_look (GD05-069): each sampled world frame's luma mean, contrast,
     // saturation and grain; the last gameplay frame's background box luma
