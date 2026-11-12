@@ -2,7 +2,9 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 // gfx::RenderDevice over gd::core::render::Device (render/core_backend.h):
 // gd05's device interface on gd-engine-core's opengl3, sdl3 and vulkan
-// backends (gd-engine-core/docs/render.md section 6b, "gd-game-05 on the core").
+// backends (gd-engine-core/docs/render.md section 6e, "gd-game-05 on the
+// core"), the only one since D71. "local" below is gd05's own OpenGL device
+// it was written against (removed with D71, the reference for its pixels).
 //
 // How gd05's GL-shaped calls map onto the core's explicit ones:
 // - Pictures are stored as local's are (GL style, row 0 at the bottom): every
@@ -197,9 +199,11 @@ public:
     void setFrameCap(int fps) override;
     void setInternalHeight(int height) override { internalH_ = std::max(0, height); }
     void setOutputGamma(float gamma) override { gamma_ = gamma > 0 ? gamma : 0.0f; }
-    std::string hdrStatus() const override {
-        return std::string("off: True HDR is not on the ") + backendId(backend_) + " graphics backend yet";
-    }
+    int hdrSurface() const override { return hdrSurface_; }
+    std::string hdrReason() const override;
+    void hdrStateChanged() override { hdrDirty_ = true; }
+    float hdrHeadroom() const override { return hdrSurface_ && hdrOn_ ? hdrHeadroom_ : 1.0f; }
+    std::string hdrStatus() const override;
     DevicePerf takePerf() override {
         DevicePerf p = perf_;
         perf_ = {};
@@ -237,13 +241,23 @@ private:
     // or the internal resolution's) and presented scaled.
     int internalH_ = 0;
     TargetId frameTarget_;
-    // setOutputGamma: the frame converted into gammaTarget_, which is presented (0: none).
+    // The output pass: the frame through setOutputGamma's curve and, on an
+    // HDR swapchain, converted for it, into outputTarget_, which is presented
+    // (none: the frame itself).
     float gamma_ = 0;
-    TargetId gammaTarget_;
-    ProgramId gammaProgram_;
-    BufferId gammaTriangle_;
-    bool gammaTried_ = false;
-    TargetId applyGamma();
+    TargetId outputTarget_;
+    ProgramId outputProgram_;
+    BufferId outputTriangle_;
+    bool outputTried_ = false;
+    TargetId applyOutput();
+    // True HDR (Enhanced > HDR, DeviceCreateInfo::hdrOutput): the swapchain's
+    // colour space (0 SDR, 1 scRGB, 2 PQ) and the window's HDR state. With
+    // one, the frame is RGBA16F (sRGB-encoded, paper white at 1.0).
+    int hdrSurface_ = 0;
+    bool hdrDirty_ = true, hdrOn_ = false;
+    float hdrWhite_ = 1, hdrHeadroom_ = 1;  // scRGB units (1 = 80 nits); headroom in paper whites
+    std::string hdrLogged_;
+    void updateHdr();
     int frameW_ = 0, frameH_ = 0;
 
     // Pass state.
@@ -254,7 +268,7 @@ private:
     int vp_[4] = {};
     std::vector<uint8_t> staged_;  // stageUniforms' copies, this frame
 
-    // Frame pacing (as gl_device.cpp: gd01 lesson L7).
+    // Frame pacing (as local's: gd01 lesson L7).
     uint64_t paceNs_ = 0, nextFrameNs_ = 0;
 };
 
@@ -276,6 +290,7 @@ bool CoreDevice::init(std::string& error) {
     ci.backend = backend_ == Backend::Sdl3 ? core::Backend::SdlGpu : backend_ == Backend::Vulkan ? core::Backend::Vulkan : core::Backend::OpenGL3;
     ci.window = window_;
     ci.presentMode = core::PresentMode::Vsync;
+    ci.hdrOutput = hdrRequested();  // Vulkan's HDR swapchain; the others stay SDR
     // The pref folder (as enhanced.json's): the Vulkan backend's pipeline cache.
     const char* saveDir = SDL_getenv("GD05_SAVE_DIR");
     ci.cacheDir = saveDir && *saveDir ? std::string(saveDir) : prefDir();
@@ -590,16 +605,20 @@ void CoreDevice::beginFrame() {
     ++frame_;
     staged_.clear();
     dev_->beginFrame();
+    // The swapchain's colour space can change when it is made again.
+    if (const int hdr = dev_->hdrSurface(); hdr != hdrSurface_) hdrSurface_ = hdr, hdrDirty_ = true;
+    if (hdrSurface_) updateHdr();
+    const TargetFormat format = hdrSurface_ ? TargetFormat::RGBA16F : TargetFormat::RGBA8;
     int ww = 0, wh = 0;
     dev_->drawableSize(ww, wh);
     ww = std::max(ww, 1), wh = std::max(wh, 1);
     const bool scaled = internalH_ > 0 && internalH_ != wh;
     const int w = scaled ? std::max(1, int(std::lround(double(ww) * internalH_ / wh))) : ww, h = scaled ? internalH_ : wh;
     const CTarget* f = targets_.get(frameTarget_.id);
-    if (!f || f->w != w || f->h != h) {
+    if (!f || f->w != w || f->h != h || f->format != (hdrSurface_ ? core::Format::RGBA16F : core::Format::RGBA8)) {
         if (f) destroyTarget(frameTarget_);
         std::string error;
-        frameTarget_ = createTarget(TargetDesc{w, h, true, TargetFormat::RGBA8}, error);
+        frameTarget_ = createTarget(TargetDesc{w, h, true, format}, error);
         if (!frameTarget_) SDL_Log("render: frame %dx%d: %s", w, h, error.c_str());
     }
     frameW_ = w, frameH_ = h;
@@ -823,9 +842,23 @@ SDL_Surface* CoreDevice::readPixels(int x, int y, int w, int h) {
     if (w <= 0 || h <= 0 || !f) return nullptr;
     if (inPass_) endPass();
     // The frame is stored bottom-up: the rectangle from the bottom, rows flipped.
-    const core::Readback r = dev_->readTexture(textures_.get(f->color.id)->tex, core::Rect{x, f->h - y - h, w, h});
+    // An RGBA16F frame (True HDR) is converted to RGBA8 first (clamped, as
+    // glReadPixels' conversion).
+    core::Texture src = textures_.get(f->color.id)->tex, rgba8;
+    core::Rect rect{x, f->h - y - h, w, h};
+    if (f->format != core::Format::RGBA8) {
+        core::TextureDesc d;
+        d.width = w, d.height = h, d.format = core::Format::RGBA8, d.usage = core::kSampledTexture | core::kColorTarget;
+        rgba8 = dev_->createTexture(d);
+        if (!rgba8) return nullptr;
+        dev_->blit(core::TextureRegion{src, 0, 0, rect.x, rect.y}, w, h, core::TextureRegion{rgba8, 0, 0, 0, 0}, w, h, core::Filter::Nearest);
+        src = rgba8, rect = core::Rect{0, 0, w, h};
+    }
+    const core::Readback r = dev_->readTexture(src, rect);
     std::vector<uint8_t> rows(size_t(w) * size_t(h) * 4);
-    if (!r || !dev_->readbackData(r, rows.data(), rows.size())) return nullptr;
+    const bool read = r && dev_->readbackData(r, rows.data(), rows.size());
+    if (rgba8) dev_->destroyTexture(rgba8);
+    if (!read) return nullptr;
     SDL_Surface* s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
     if (!s) return nullptr;
     for (int row = 0; row < h; ++row)
@@ -834,33 +867,70 @@ SDL_Surface* CoreDevice::readPixels(int x, int y, int w, int h) {
     return s;
 }
 
-// The Xbox's output to a TV (setOutputGamma, outputCurve): the frame through
-// it into gammaTarget_, presented instead of it. Empty: present the frame.
-TargetId CoreDevice::applyGamma() {
+// The output pass's shader: the frame (sRGB-encoded, paper white at 1.0, True
+// HDR highlights above it) through the Xbox's output to a TV (setOutputGamma,
+// outputCurve) and, on an HDR swapchain, to linear scRGB (1.0 = 80 nits)
+// scaled to the display's paper white, or BT.2020 PQ.
+const char* const kOutputVertex = R"(layout(location = 0) in vec2 aPos;
+out vec2 vUv;
+void main() {
+    vUv = aPos * 0.5 + 0.5;
+    gl_Position = vec4(aPos, 0.0, 1.0);
+}
+)";
+const char* const kOutputFragment = R"(
+in vec2 vUv;
+out vec4 fragColor;
+layout(std140) uniform GdOutput {
+    vec4 uOut;  // x paper white (scRGB units), y 1: PQ, z the gamma ramp's exponent (0: none), w 1: SDR (the ramp only)
+};
+uniform sampler2D sTex;
+void main() {
+    vec3 c = texture(sTex, vUv).rgb;
+    if (uOut.w > 0.5) {
+        fragColor = vec4(gdOutputCurve(c, uOut.z), 1.0);
+        return;
+    }
+    c = max(c, 0.0);
+    if (uOut.z > 0.0) c = gdOutputCurve(c, uOut.z);
+    vec3 lin = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)) * uOut.x;
+    if (uOut.y > 0.5) {
+        const mat3 toBt2020 = mat3(0.6274, 0.0691, 0.0164, 0.3293, 0.9195, 0.0880, 0.0433, 0.0114, 0.8956);
+        vec3 y = clamp(toBt2020 * lin * (80.0 / 10000.0), 0.0, 1.0);
+        vec3 p = pow(y, vec3(0.1593017578125));
+        lin = pow((0.8359375 + 18.8515625 * p) / (1.0 + 18.6875 * p), vec3(78.84375));
+    }
+    fragColor = vec4(lin, 1.0);
+}
+)";
+
+// The output pass into outputTarget_, presented instead of the frame. Empty:
+// present the frame (no ramp, SDR).
+TargetId CoreDevice::applyOutput() {
     const CTarget* f = targets_.get(frameTarget_.id);
-    if (gamma_ <= 0 || !f) return {};
-    if (!gammaTried_) {
-        gammaTried_ = true;
+    if ((gamma_ <= 0 && !hdrSurface_) || !f) return {};
+    if (!outputTried_) {
+        outputTried_ = true;
         ProgramDesc d;
-        d.name = "output_gamma";
-        d.vertex = "layout(location = 0) in vec2 aPos;\nout vec2 vUv;\nvoid main() {\n    vUv = aPos * 0.5 + 0.5;\n    gl_Position = vec4(aPos, 0.0, 1.0);\n}\n";
-        d.fragment = std::string("in vec2 vUv;\nout vec4 fragColor;\nlayout(std140) uniform GdGamma {\n    vec4 uGamma;\n};\nuniform sampler2D sTex;\n") +
-                     kOutputCurveGlsl + "void main() {\n    fragColor = vec4(gdOutputCurve(texture(sTex, vUv).rgb, uGamma.x), 1.0);\n}\n";
-        d.uniformBlocks = {"GdGamma"};
+        d.name = "output";
+        d.vertex = kOutputVertex;
+        d.fragment = std::string(kOutputCurveGlsl) + kOutputFragment;
+        d.uniformBlocks = {"GdOutput"};
         d.samplers = {"sTex"};
         std::string error;
-        gammaProgram_ = createProgram(d, error);
+        outputProgram_ = createProgram(d, error);
         const float tri[6] = {-1, -1, 3, -1, -1, 3};
-        gammaTriangle_ = createBuffer(BufferKind::Vertex, sizeof tri, tri, false);
-        if (!gammaProgram_ || !gammaTriangle_) SDL_Log("render: gamma ramp shader: %s; showing the frame unramped", error.c_str());
+        outputTriangle_ = createBuffer(BufferKind::Vertex, sizeof tri, tri, false);
+        if (!outputProgram_ || !outputTriangle_) SDL_Log("render: output shader: %s; showing the frame unconverted", error.c_str());
     }
-    if (!gammaProgram_ || !gammaTriangle_) return {};
-    const CTarget* g = targets_.get(gammaTarget_.id);
-    if (!g || g->w != f->w || g->h != f->h) {
-        if (g) destroyTarget(gammaTarget_);
+    if (!outputProgram_ || !outputTriangle_) return {};
+    const core::Format format = hdrSurface_ ? core::Format::RGBA16F : core::Format::RGBA8;
+    const CTarget* g = targets_.get(outputTarget_.id);
+    if (!g || g->w != f->w || g->h != f->h || g->format != format) {
+        if (g) destroyTarget(outputTarget_);
         std::string error;
-        gammaTarget_ = createTarget(TargetDesc{f->w, f->h, false, TargetFormat::RGBA8}, error);
-        if (!gammaTarget_) return {};
+        outputTarget_ = createTarget(TargetDesc{f->w, f->h, false, hdrSurface_ ? TargetFormat::RGBA16F : TargetFormat::RGBA8}, error);
+        if (!outputTarget_) return {};
     }
     static VertexLayout layout = [] {
         VertexLayout l;
@@ -868,23 +938,54 @@ TargetId CoreDevice::applyGamma() {
         l.attribs[0] = {0, 2, AttribType::Float, 0};
         return l;
     }();
-    setTarget(gammaTarget_);
-    const float block[4] = {gamma_, 0, 0, 0};
+    setTarget(outputTarget_);
+    const float block[4] = {hdrWhite_, hdrSurface_ == 2 ? 1.0f : 0.0f, gamma_, hdrSurface_ ? 0.0f : 1.0f};
     DrawCall c;
-    c.program = gammaProgram_;
+    c.program = outputProgram_;
     c.state.alphaWrite = true;
     c.layout = &layout;
-    c.vertices = gammaTriangle_;
+    c.vertices = outputTriangle_;
     c.count = 3;
     c.textures[0] = targetTexture(frameTarget_);
     c.samplers[0] = SamplerState{Filter::Nearest, Wrap::Clamp, 0};
     c.uniforms[0] = UniformData{block, sizeof block, 0};
     draw(c);
     if (inPass_) endPass();
-    return gammaTarget_;
+    return outputTarget_;
 }
 
-// The frame cap, as local's (gl_device.cpp setFrameCap): vsync where the
+// The window's HDR state (SDL's properties, re-read after hdrStateChanged).
+void CoreDevice::updateHdr() {
+    if (!hdrDirty_) return;
+    hdrDirty_ = false;
+    const SDL_PropertiesID props = SDL_GetWindowProperties(window_);
+    hdrOn_ = SDL_GetBooleanProperty(props, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
+    hdrWhite_ = std::max(1.0f, SDL_GetFloatProperty(props, SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT, 1.0f));
+    hdrHeadroom_ = std::max(1.0f, SDL_GetFloatProperty(props, SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT, 1.0f));
+    if (!hdrOn_ || hdrHeadroom_ <= 1.0f) {
+        hdrOn_ = false, hdrHeadroom_ = 1;
+        if (hdrSurface_ == 2) hdrWhite_ = 203.0f / 80.0f;  // a PQ surface is absolute: SDR white at BT.2408's 203 nits
+    }
+    const std::string st = hdrStatus();
+    if (st != hdrLogged_) SDL_Log("hdr: %s", (hdrLogged_ = st).c_str());
+}
+
+std::string CoreDevice::hdrReason() const {
+    if (backend_ != Backend::Vulkan) return std::string("True HDR is not on the ") + backendId(backend_) + " graphics backend yet";
+    const std::string why = dev_ ? dev_->hdrReason() : std::string();
+    return why.empty() ? "no HDR swapchain" : why;
+}
+
+std::string CoreDevice::hdrStatus() const {
+    if (!hdrSurface_) return "off: " + hdrReason();
+    if (!hdrOn_) return "off: HDR is off for this display (turn it on in the system's display settings)";
+    char buf[160];
+    std::snprintf(buf, sizeof buf, "%s output, paper white %.0f nits, peak %.0f nits", hdrSurface_ == 2 ? "PQ (BT.2020)" : "scRGB",
+                  double(hdrWhite_ * 80), double(hdrWhite_ * hdrHeadroom_ * 80));
+    return buf;
+}
+
+// The frame cap, as local's setFrameCap: vsync where the
 // display's rate is a whole multiple of the cap, software pacing otherwise;
 // headless runs are not paced.
 void CoreDevice::setFrameCap(int fps) {
@@ -916,7 +1017,7 @@ void CoreDevice::endFrame() {
         now = SDL_GetTicksNS();
         nextFrameNs_ = nextFrameNs_ + paceNs_ >= now ? nextFrameNs_ + paceNs_ : now + paceNs_;
     }
-    const TargetId ramped = applyGamma();
+    const TargetId ramped = applyOutput();
     if (const CTarget* f = targets_.get((ramped ? ramped : frameTarget_).id)) {
         // Stored bottom-up (GL style): presented flipped, scaled as local's blit.
         dev_->present(textures_.get(f->color.id)->tex, core::Rect{0, 0, f->w, f->h}, core::Filter::Linear, true);
@@ -929,11 +1030,31 @@ void CoreDevice::endFrame() {
 
 }  // namespace
 
-std::unique_ptr<RenderDevice> createCoreDevice(Backend b, SDL_Window* window, std::string& error) {
-    if (b == Backend::Local) {
-        error = "local is not a core backend";
-        return nullptr;
+float outputCurve(float c, float gamma) {
+    const double x = std::pow(std::clamp(double(c), 0.0, 1.0), double(gamma));
+    const double lin = x <= 0.04045 ? x / 12.92 : std::pow((x + 0.055) / 1.055, 2.4);  // RB 0x8253DCC8
+    return float(lin < 0.018 ? lin * 4.5 : 1.099 * std::pow(lin, 0.45) - 0.099);      // RB 0x8253DD78
+}
+
+const char* const kOutputCurveGlsl = R"(
+vec3 gdOutputCurve(vec3 c, float gamma) {
+    c = pow(clamp(c, 0.0, 1.0), vec3(gamma));
+    vec3 lin = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+    return mix(lin * 4.5, 1.099 * pow(lin, vec3(0.45)) - 0.099, step(0.018, lin));
+}
+)";
+
+void applyOutputGamma(SDL_Surface* s, float gamma) {
+    if (!s || gamma <= 0) return;
+    uint8_t lut[256];
+    for (int i = 0; i < 256; ++i) lut[i] = uint8_t(std::lround(double(outputCurve(float(i / 255.0), gamma)) * 255.0));
+    for (int y = 0; y < s->h; ++y) {
+        uint8_t* p = static_cast<uint8_t*>(s->pixels) + size_t(y) * size_t(s->pitch);
+        for (int x = 0; x < s->w; ++x, p += 4) p[0] = lut[p[0]], p[1] = lut[p[1]], p[2] = lut[p[2]];
     }
+}
+
+std::unique_ptr<RenderDevice> createCoreDevice(Backend b, SDL_Window* window, std::string& error) {
     auto device = std::make_unique<CoreDevice>(b, window);
     if (!device->init(error)) return nullptr;
     return device;

@@ -10,9 +10,9 @@
 #include <stdexcept>
 
 #include "data/crypt.h"
-#include "data/xdvdfs.h"
 
 namespace fs = std::filesystem;
+namespace plat = gd::core::platform;
 
 namespace {
 
@@ -32,6 +32,16 @@ std::optional<fs::path> findChild(const fs::path& dir, const std::string& name) 
 
 std::string partName(size_t i) { return "main_" + std::to_string(i) + ".ark"; }
 
+// gd-engine-core's file (UTF-8 / wide paths, content URIs, the launcher's
+// disc descriptors), shared by the archive parts and DiscFiles.
+std::shared_ptr<plat::RandomAccessFile> openFile(const std::string& path) {
+    return std::shared_ptr<plat::RandomAccessFile>(plat::RandomAccessFile::open(path));
+}
+
+void readExactly(plat::RandomAccessFile& f, uint64_t offset, void* dst, size_t n) {
+    if (offset + n > f.size() || !f.read(offset, dst, n)) throw std::runtime_error("read beyond end of file");
+}
+
 // The archive count is the second u32 of the decrypted header.
 size_t partCount(const Bytes& plainHdr) {
     ByteReader r(plainHdr);
@@ -49,14 +59,14 @@ GameData::GameData(const std::string& path) {
         auto gen = findChild(path, "gen");
         auto hdrPath = gen ? findChild(*gen, "main.hdr") : std::nullopt;
         if (!hdrPath) throw std::runtime_error("No gen/main.hdr found in folder: " + path);
-        auto f = RandomFile::open(hdrPath->string());
+        auto f = openFile(hdrPath->string());
         if (!f) throw std::runtime_error("Cannot open " + hdrPath->string());
         Bytes raw(f->size());
-        f->read(0, raw.data(), raw.size());
+        readExactly(*f, 0, raw.data(), raw.size());
         hdr = harmonixDecrypt(raw);
         for (size_t i = 0, n = partCount(hdr); i < n; ++i) {
             auto p = findChild(*gen, partName(i));
-            auto pf = p ? RandomFile::open(p->string()) : nullptr;
+            auto pf = p ? openFile(p->string()) : nullptr;
             if (!pf) throw std::runtime_error("Missing archive part gen/" + partName(i));
             parts_.push_back({pf.get(), 0, pf->size()});
             files_.push_back(std::move(pf));
@@ -64,21 +74,23 @@ GameData::GameData(const std::string& path) {
         description_ = "folder " + path;
         folder_ = path;
     } else {
-        auto image = RandomFile::open(path);
+        auto image = openFile(path);
         if (!image) throw std::runtime_error("Cannot open " + path);
-        auto disc = Xdvdfs::open(*image);
+        auto disc = plat::openXdvdfs(image);  // gd-engine-core's XDVDFS (the 360's game partition)
         if (!disc) throw std::runtime_error("Not a folder or an Xbox 360 disc image: " + path);
-        auto hdrExtent = disc->find("gen/main.hdr");
-        if (!hdrExtent) throw std::runtime_error("Disc image has no gen/main.hdr (not Rock Band?): " + path);
-        Bytes raw(hdrExtent->size);
-        image->read(hdrExtent->offset, raw.data(), raw.size());
+        plat::DiscEntry hdrEntry;
+        if (!disc->find("gen/main.hdr", hdrEntry) || hdrEntry.isDir)
+            throw std::runtime_error("Disc image has no gen/main.hdr (not Rock Band?): " + path);
+        Bytes raw(hdrEntry.size);
+        readExactly(*image, hdrEntry.offset, raw.data(), raw.size());
         hdr = harmonixDecrypt(raw);
         for (size_t i = 0, n = partCount(hdr); i < n; ++i) {
-            auto e = disc->find("gen/" + partName(i));
-            if (!e) throw std::runtime_error("Disc image is missing gen/" + partName(i));
-            parts_.push_back({image.get(), e->offset, e->size});
+            plat::DiscEntry e;
+            if (!disc->find("gen/" + partName(i), e) || e.isDir) throw std::runtime_error("Disc image is missing gen/" + partName(i));
+            parts_.push_back({image.get(), e.offset, e.size});
         }
-        image_ = image.get();
+        image_ = image;
+        disc_ = std::move(disc);
         files_.push_back(std::move(image));
         description_ = "disc image " + path;
     }
@@ -135,7 +147,7 @@ void GameData::readSpan(uint64_t offset, uint8_t* dst, size_t n) const {
             continue;
         }
         size_t k = static_cast<size_t>(std::min<uint64_t>(p.size - offset, n - done));
-        p.file->read(p.base + offset, dst + done, k);
+        readExactly(*p.file, p.base + offset, dst + done, k);
         done += k;
         offset = 0;
     }
@@ -171,16 +183,15 @@ std::vector<std::string> GameData::paths() const {
 size_t DiscFile::read(uint64_t offset, void* dst, size_t n) {
     if (offset >= size_) return 0;
     n = static_cast<size_t>(std::min<uint64_t>(n, size_ - offset));
-    if (n) file_->read(base_ + offset, dst, n);
+    if (n) readExactly(*file_, base_ + offset, dst, n);
     return n;
 }
 
 std::unique_ptr<DiscFile> GameData::openDiscFile(const std::string& discPath) const {
-    if (image_) {
-        auto disc = Xdvdfs::open(*image_);
-        auto e = disc ? disc->find(discPath) : std::nullopt;
-        if (!e) return nullptr;
-        return std::make_unique<DiscFile>(image_, nullptr, e->offset, e->size);
+    if (disc_) {
+        plat::DiscEntry e;
+        if (!disc_->find(discPath, e) || e.isDir) return nullptr;
+        return std::make_unique<DiscFile>(image_, e.offset, e.size);
     }
     fs::path p = folder_;
     for (size_t at = 0; at <= discPath.size();) {
@@ -195,9 +206,8 @@ std::unique_ptr<DiscFile> GameData::openDiscFile(const std::string& discPath) co
     }
     std::error_code ec;
     if (!fs::is_regular_file(p, ec)) return nullptr;
-    auto f = RandomFile::open(p.string());
+    auto f = openFile(p.string());
     if (!f) return nullptr;
-    RandomFile* raw = f.get();
-    const uint64_t size = raw->size();
-    return std::make_unique<DiscFile>(raw, std::move(f), 0, size);
+    const uint64_t size = f->size();
+    return std::make_unique<DiscFile>(std::move(f), 0, size);
 }

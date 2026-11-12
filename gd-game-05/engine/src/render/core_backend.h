@@ -6,40 +6,48 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "render/device.h"
 
-// The graphics backend (Enhanced > Performance > Graphics Backend, GDCORE-008):
-// "local" is gd05's own OpenGL device (render/gl_device.cpp), untouched;
-// "opengl3", "sdl3" and "vulkan" are gd-engine-core's backends
-// (gd-engine-core/docs/render.md) under the same gfx::RenderDevice
-// (render/core_device.cpp), so nothing above the device changes.
+// The graphics backend (Enhanced > Performance > Graphics Backend): gd05 draws
+// only through gd-engine-core (gd-engine-core/docs/render.md) under its
+// gfx::RenderDevice (render/core_device.cpp); Vulkan by default, the others
+// in turn when it cannot start (DECISIONS.md D71). Nothing above the device
+// knows which one draws.
 namespace gfx {
 
-enum class Backend : uint8_t { Local, OpenGL3, Sdl3, Vulkan };
+enum class Backend : uint8_t { Vulkan, Sdl3, OpenGL3 };
 
-// The setting id: "local", "opengl3", "sdl3", "vulkan".
+// The default, and the order the others are tried in when one cannot start.
+constexpr Backend kDefaultBackend = Backend::Vulkan;
+
+// The setting id: "vulkan", "sdl3", "opengl3".
 const char* backendId(Backend b);
-// The backend for this start of the game: the development aid
-// GD05_GRAPHICS_BACKEND=<id>, else `saved` (Enhanced > Graphics Backend as
-// App::run latched it, startupGraphicsBackend), else local. A backend this
-// build does not have is local (and logged). Not cached: Restart Now runs
-// App::run again in the same process with the new setting.
-Backend chosenBackend(const std::string& saved);
+// Whether this build has the backend (no Vulkan without a loader, no OpenGL3
+// on macOS: gd-engine-core rule 7).
+bool backendAvailable(Backend b);
+// The backends to try for this start of the game, best first: the development
+// aid GD05_GRAPHICS_BACKEND=<id>, else `saved` (Enhanced > Graphics Backend as
+// App::run latched it, startupGraphicsBackend), else the default; then every
+// other one this build has, in kDefaultBackend's order (gd-engine-core rule
+// 2: never a black screen). Not cached: Restart Now runs App::run again in
+// the same process with the new setting.
+std::vector<Backend> backendsToTry(const std::string& saved);
 
 // The window for a backend: call before SDL_CreateWindow and pass the result
-// in its flags (local and opengl3: gfx::prepareWindow()'s OpenGL window; sdl3
-// and vulkan: the core's prepareWindow, which in a launcher module also asks
+// in its flags (the core's prepareWindow: in a launcher module it also asks
 // the launcher for a window made for that API).
 SDL_WindowFlags prepareWindowFor(Backend b);
 
-// The backend Renderer::init starts the device with (App sets it once it has
-// made the window for it; default local, also for every development tool).
+// The backend Renderer::init starts the device with (App sets it for the
+// window it made; the development tools keep the default, OpenGL3, on their
+// OpenGL windows).
 void setRendererBackend(Backend b);
 Backend rendererBackend();
 
 // A core device on `window` (made with prepareWindowFor(b)'s flags), or
-// nullptr with `error` set: the caller falls back to local (rule 2).
+// nullptr with `error` set: the caller tries the next backend.
 std::unique_ptr<RenderDevice> createCoreDevice(Backend b, SDL_Window* window, std::string& error);
 
 }  // namespace gfx

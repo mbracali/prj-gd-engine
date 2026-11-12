@@ -19,6 +19,7 @@
 #include "game/world.h"
 #include "render/band_view.h"
 #include "render/canvas.h"
+#include "render/core_backend.h"
 #include "render/crowd_view.h"
 #include "render/renderer.h"
 
@@ -380,7 +381,7 @@ int runVenueView(const std::string& dataPath, const std::string& venueOrMilo) {
         std::fprintf(stderr, "%s --view: cannot start video: %s\n", app::kProgram, SDL_GetError());
         return 2;
     }
-    SDL_Window* window = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), SDL_WINDOW_RESIZABLE | gfx::prepareWindow());
+    SDL_Window* window = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), SDL_WINDOW_RESIZABLE | gfx::prepareWindowFor(gfx::rendererBackend()));
     Canvas canvas;
     std::string error;
     if (!window || !canvas.init(window, error)) {

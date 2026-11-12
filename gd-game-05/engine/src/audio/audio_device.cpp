@@ -10,104 +10,100 @@
 #include <vector>
 
 #include "audio/sfx_dsp.h"
-
-#if GDCORE_HAS_AUDIO
 #include "gd/core/audio/output.h"
-#endif
 
 namespace audiodev {
 
 namespace {
 
+namespace core = gd::core::audio;
+
 std::mutex g_lock;
-std::mutex g_openLock;  // openStream / closeStream, one at a time (the device opens and closes in them)
-SDL_AudioDeviceID g_device = 0;
-int g_streams = 0;
+std::mutex g_openLock;  // openStream / closeStream, one at a time (the output opens and closes in them)
 std::atomic<bool> g_limiterOn{true};
-sfxdsp::Limiter g_limiter;  // the device thread only
+sfxdsp::Limiter g_limiter;  // the output's thread only
 int g_limiterRate = 0;
 
-void SDLCALL postmix(void*, const SDL_AudioSpec* spec, float* buffer, int bytes) {
-    if (!g_limiterOn.load() || !spec || spec->channels <= 0) return;
-    if (spec->freq != g_limiterRate) {
-        g_limiterRate = spec->freq;
-        g_limiter.configure(1, 50, -2, spec->freq);  // default.dta synth limiter [C data]
+// The master limiter on the summed mix (SDL's postmix point before the core).
+void limit(float* buffer, int frames, int channels, int rate) {
+    if (!g_limiterOn.load() || channels <= 0) return;
+    if (rate != g_limiterRate) {
+        g_limiterRate = rate;
+        g_limiter.configure(1, 50, -2, rate);  // default.dta synth limiter [C data]
     }
-    g_limiter.process(buffer, bytes / int(sizeof(float)) / spec->channels, spec->channels);
+    g_limiter.process(buffer, frames, channels);
 }
 
 // Enhanced > Audio backend (setBackend): the backend asked for, the one that
-// runs ("" while nothing is open, "local" for SDL's device), and whether the
-// asked one failed (then local for the rest of the run, as rule 2 asks).
-std::string g_asked = "local", g_running;
-bool g_failed = false;
+// plays ("" while nothing is open, "none" when none could start).
+std::string g_asked = kDefaultBackend, g_running;
+bool g_failed = false;  // every backend failed: no sound for the rest of the run
 
-#if GDCORE_HAS_AUDIO
-// A gd-engine-core output in place of SDL's device: the streams are not bound
-// to a device; the output's thread pulls each (which runs its get callback,
-// as SDL's device thread would), sums them as SDL mixes bound streams, and
-// passes the sum through the master limiter (SDL's postmix point).
-std::unique_ptr<gd::core::audio::Output> g_out;
-gd::core::audio::Spec g_outSpec;
-std::vector<SDL_AudioStream*> g_coreStreams;  // under g_lock
-std::vector<float> g_scratch;                 // the output's thread only
+// The output: the streams are bound to no device; the output's thread pulls
+// each (which runs its get callback, as SDL's device thread would), sums them
+// as SDL mixes bound streams, and passes the sum through the master limiter.
+std::unique_ptr<core::Output> g_out;
+core::Spec g_outSpec;
+std::vector<SDL_AudioStream*> g_streams;  // under g_lock
+std::vector<float> g_scratch;             // the output's thread only
 
-void pullCore(float* out, int frames) {
+void pull(float* out, int frames) {
     const int ch = g_outSpec.channels, n = frames * ch, bytes = n * int(sizeof(float));
     std::fill(out, out + n, 0.0f);
     if (int(g_scratch.size()) < n) g_scratch.resize(size_t(n));
     {
         std::lock_guard<std::mutex> g(g_lock);
-        for (SDL_AudioStream* s : g_coreStreams) {
+        for (SDL_AudioStream* s : g_streams) {
             const int got = SDL_GetAudioStreamData(s, g_scratch.data(), bytes);
             const int m = std::max(0, got) / int(sizeof(float));
             for (int i = 0; i < m; ++i) out[i] += g_scratch[size_t(i)];
         }
     }
-    const SDL_AudioSpec spec{SDL_AUDIO_F32, ch, g_outSpec.sampleRate};
-    postmix(nullptr, &spec, out, bytes);
+    limit(out, frames, ch, g_outSpec.sampleRate);
 }
 
 // Opens and starts the output `id` (outside g_lock: a backend's thread may
-// pull, which takes it, while its start waits for that thread). nullptr:
-// local for this run.
-std::unique_ptr<gd::core::audio::Output> openCore(const std::string& id) {
-    std::string why;
-    std::unique_ptr<gd::core::audio::Output> out = gd::core::audio::create(id, why);
-    if (out) {
-        gd::core::audio::Spec want;
-        want.sampleRate = 48000;  // the 360's mastering rate [C]; each stream converts to the output's
-        want.channels = 2;
-        // Headless (SDL's dummy driver: the self-tests, the walks): the
-        // backend's null device, which consumes in real time like SDL's dummy.
-        const char* drv = SDL_GetCurrentAudioDriver();
-        want.nullDevice = drv && std::strcmp(drv, "dummy") == 0;
-        if (out->open(want, &pullCore, why)) {
-            g_outSpec = out->spec();  // before the first pull (start)
-            if (out->start(why)) {
-                SDL_Log("audio: backend %s: %s, %d Hz, %d channels (%.1f ms buffered)", id.c_str(), out->name().c_str(),
-                        g_outSpec.sampleRate, g_outSpec.channels, out->latencyMs());
-                return out;
-            }
-        }
-        out.reset();
-    }
-    SDL_Log("audio: backend %s failed (%s); using local", id.c_str(), why.c_str());
-    return nullptr;
+// pull, which takes it, while its start waits for that thread). nullptr and
+// `why` when it cannot.
+std::unique_ptr<core::Output> openOutput(const std::string& id, std::string& why) {
+    std::unique_ptr<core::Output> out = core::create(id, why);
+    if (!out) return nullptr;
+    core::Spec want;
+    want.sampleRate = 48000;  // the 360's mastering rate [C]; each stream converts to the output's
+    want.channels = 2;
+    // Headless (SDL's dummy driver: the self-tests, the walks): the backend's
+    // null device, which consumes in real time like SDL's dummy.
+    const char* drv = SDL_GetCurrentAudioDriver();
+    want.nullDevice = drv && std::strcmp(drv, "dummy") == 0;
+    if (!out->open(want, &pull, why)) return nullptr;
+    g_outSpec = out->spec();  // before the first pull (start)
+    if (!out->start(why)) return nullptr;
+    SDL_Log("audio: backend %s: %s, %d Hz, %d channels (%.1f ms buffered)", id.c_str(), out->name().c_str(), g_outSpec.sampleRate,
+            g_outSpec.channels, out->latencyMs());
+    return out;
 }
-#endif
+
+// The asked backend, then every other one this build has in menu order
+// after the default (gd-engine-core rule 2: never left without sound).
+std::vector<std::string> backendsToTry(const std::string& asked) {
+    std::vector<std::string> ids{asked};
+    if (asked != kDefaultBackend) ids.push_back(kDefaultBackend);
+    for (const core::Backend& b : core::backends())
+        if (std::find(ids.begin(), ids.end(), b.id) == ids.end()) ids.push_back(b.id);
+    return ids;
+}
 
 }  // namespace
 
 void setBackend(const std::string& id) {
     std::lock_guard<std::mutex> g(g_lock);
-    g_asked = id.empty() ? "local" : id;
+    g_asked = id.empty() ? kDefaultBackend : id;
     g_failed = false;
 }
 
 std::string backend() {
     std::lock_guard<std::mutex> g(g_lock);
-    return g_running.empty() ? (g_failed ? "local" : "") : g_running;
+    return g_running.empty() && g_failed ? "none" : g_running;
 }
 
 std::string askedBackend() {
@@ -117,84 +113,52 @@ std::string askedBackend() {
 
 SDL_AudioStream* openStream(const SDL_AudioSpec& spec, SDL_AudioStreamCallback callback, void* user) {
     std::lock_guard<std::mutex> o(g_openLock);
-#if GDCORE_HAS_AUDIO
-    std::string open;
+    std::string asked;
     {
         std::lock_guard<std::mutex> g(g_lock);
-        if (g_asked != "local" && !g_failed && !g_out) open = g_asked;
+        if (!g_out && !g_failed) asked = g_asked;
     }
-    if (!open.empty()) {
-        std::unique_ptr<gd::core::audio::Output> out = openCore(open);
+    if (!asked.empty()) {
+        std::unique_ptr<core::Output> out;
+        std::string running;
+        for (const std::string& id : backendsToTry(asked)) {
+            std::string why;
+            if ((out = openOutput(id, why))) {
+                running = id;
+                break;
+            }
+            SDL_Log("audio: backend %s failed (%s)", id.c_str(), why.c_str());
+        }
+        if (!out) SDL_Log("audio: no backend could start; no sound this run");
         std::lock_guard<std::mutex> g(g_lock);
-        if (out) g_out = std::move(out);
+        if (out) g_out = std::move(out), g_running = running;
         else g_failed = true;
     }
-#endif
     std::lock_guard<std::mutex> g(g_lock);
-#if GDCORE_HAS_AUDIO
-    if (g_out) {
-        const SDL_AudioSpec dst{SDL_AUDIO_F32, g_outSpec.channels, g_outSpec.sampleRate};
-        SDL_AudioStream* s = SDL_CreateAudioStream(&spec, &dst);
-        if (s && !SDL_SetAudioStreamGetCallback(s, callback, user)) SDL_DestroyAudioStream(s), s = nullptr;
-        if (!s) return nullptr;
-        g_coreStreams.push_back(s);
-        g_running = g_asked;
-        ++g_streams;
-        return s;
-    }
-#else
-    if (g_asked != "local" && !g_failed) {
-        SDL_Log("audio: backend %s failed (this build has no gd-engine-core audio); using local", g_asked.c_str());
-        g_failed = true;
-    }
-#endif
-    if (!g_device) {
-        g_device = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, nullptr);
-        if (!g_device) return nullptr;
-        SDL_SetAudioPostmixCallback(g_device, &postmix, nullptr);
-    }
-    SDL_AudioStream* s = SDL_CreateAudioStream(&spec, nullptr);
-    if (s && (!SDL_SetAudioStreamGetCallback(s, callback, user) || !SDL_BindAudioStream(g_device, s))) {
-        SDL_DestroyAudioStream(s);
-        s = nullptr;
-    }
-    if (!s) {
-        if (g_streams == 0) SDL_CloseAudioDevice(g_device), g_device = 0;
+    if (!g_out) {
+        SDL_SetError("no audio output");
         return nullptr;
     }
-    ++g_streams;
-    g_running = "local";
+    const SDL_AudioSpec dst{SDL_AUDIO_F32, g_outSpec.channels, g_outSpec.sampleRate};
+    SDL_AudioStream* s = SDL_CreateAudioStream(&spec, &dst);
+    if (s && !SDL_SetAudioStreamGetCallback(s, callback, user)) SDL_DestroyAudioStream(s), s = nullptr;
+    if (s) g_streams.push_back(s);
     return s;
 }
 
 void closeStream(SDL_AudioStream* stream) {
     if (!stream) return;
     std::lock_guard<std::mutex> o(g_openLock);
-#if GDCORE_HAS_AUDIO
+    std::unique_ptr<core::Output> last;
     {
-        std::unique_ptr<gd::core::audio::Output> last;
-        bool core = false;
-        {
-            std::lock_guard<std::mutex> g(g_lock);
-            auto it = std::find(g_coreStreams.begin(), g_coreStreams.end(), stream);
-            if (it != g_coreStreams.end()) {
-                core = true;
-                g_coreStreams.erase(it);  // no pull reaches it after this
-                SDL_DestroyAudioStream(stream);
-                if (--g_streams == 0) last = std::move(g_out), g_running.clear();
-            }
-        }
-        if (last) last->close();  // outside g_lock: the output's thread may be waiting on it
-        if (core) return;
+        std::lock_guard<std::mutex> g(g_lock);
+        auto it = std::find(g_streams.begin(), g_streams.end(), stream);
+        if (it == g_streams.end()) return;
+        g_streams.erase(it);  // no pull reaches it after this
+        SDL_DestroyAudioStream(stream);
+        if (g_streams.empty()) last = std::move(g_out), g_running.clear();
     }
-#endif
-    SDL_DestroyAudioStream(stream);
-    std::lock_guard<std::mutex> g(g_lock);
-    if (--g_streams == 0 && g_device) {
-        SDL_CloseAudioDevice(g_device);
-        g_device = 0;
-        g_running.clear();
-    }
+    if (last) last->close();  // outside g_lock: the output's thread may be waiting on it
 }
 
 void toggleLimiter() { g_limiterOn.store(!g_limiterOn.load()); }

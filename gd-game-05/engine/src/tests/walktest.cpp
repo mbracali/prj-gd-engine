@@ -2456,7 +2456,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX), wait(300);
         check("enhanced_calibration_reset");
         // PERFORMANCE & GRAPHICS -> Graphics Backend -> Audio Backend (the
-        // section's first rows, kept at local) -> Screen Mode -> Resolution;
+        // section's first rows, kept at their defaults) -> Screen Mode -> Resolution;
         // select opens its dropdown, down and select pick the next option.
         for (int i = 0; i < 5; ++i) press(kDown), wait(120);
         press(kX);
@@ -2482,8 +2482,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("enhanced_hdr_true");
         again(kRight), wait(400);
         check("enhanced_hdr_none");
-        // Graphics / Audio Backend (GDCORE-008): still local (the walk never
-        // touched them; the backends walk does).
+        // Graphics / Audio Backend (GDCORE-008): still the defaults, Vulkan and
+        // miniaudio (the walk never touched them; the backends walk does).
         check("enhanced_backends");
         row(kLeft), again(kLeft), row(kLeft), row(kRight), again(kRight), row(kX), row(kRight), row(kRight), again(kRight), row(kRight),
             row(kRight), again(kRight), row(kRight), again(kRight), row(kRight), again(kRight);
@@ -2543,11 +2543,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     } else if (scenario == "enhanced_backends") {
         // Enhanced > Graphics / Audio Backend (GDCORE-008, universal-menus.md
         // "Backends"). With GD05_WALK_ENHANCED_SEED holding unknown backends:
-        // they are dropped at start (local). The two rows are the first of
-        // PERFORMANCE & GRAPHICS; Right steps Graphics to SDL3, then Vulkan
-        // (each change asks Restart Now / Later: back is Later), the Audio
-        // dropdown picks OpenAL (Later again): saved, still local in this run.
-        // Then Graphics back to SDL3 and Restart Now: the game starts again
+        // they are dropped at start (the defaults, Vulkan and miniaudio, D71).
+        // The two rows are the first of PERFORMANCE & GRAPHICS; Right steps
+        // Graphics to SDL3, then OpenGL3 (each change asks Restart Now /
+        // Later: back is Later), the Audio dropdown picks OpenAL (Later
+        // again): saved, still the defaults in this run. Then Graphics back
+        // to SDL3 and Restart Now: the game starts again
         // (enhanced_backends_restarted).
         at("main_screen");
         for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS
@@ -2560,11 +2561,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         for (int i = 0; i < 14; ++i) press(kDown), wait(120);  // MODES > Steam Deck down to Graphics Backend
         press(kRight), wait(300);  // SDL3: the pop-up
         press(kTri), wait(300);    // Later
-        press(kRight), wait(300);  // Vulkan
+        press(kRight), wait(300);  // OpenGL3
         press(kTri), wait(300);
         press(kDown), wait(120);
         press(kX), wait(200);  // Audio Backend's dropdown
-        press(kDown), wait(120), press(kDown), wait(120);
+        press(kDown), wait(120);
         press(kX), wait(300);  // OpenAL
         press(kTri), wait(300);
         at("enhanced_options_screen");
@@ -2575,7 +2576,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         expect_ = {"main_screen", "options_screen", "enhanced_options_screen"};
     } else if (scenario == "enhanced_backends_restarted") {
         // The game started again by Restart Now: straight on Enhanced Options,
-        // on the saved backends (SDL3 falls back to local headless).
+        // on the saved backends (SDL3 hands over to the next backend where
+        // it cannot start).
         at("enhanced_options_screen");
         check("enhanced_backends_restarted");
         expect_ = {"enhanced_options_screen"};
@@ -5903,13 +5905,14 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 problems += std::string(problems.empty() ? "" : "; ") + "GD05-user-settings.json does not parse";
             }
         } else if (w == "enhanced_backends") {
-            // Local, nothing saved (no mode sets them); a saved backend the
-            // build offers is kept, an unknown one dropped.
-            for (const char* key : {"graphics_backend", "audio_backend"}) {
+            // The defaults (Vulkan, miniaudio: D71), nothing saved (no mode
+            // sets them); a saved backend the build offers is kept, an unknown
+            // one (or the removed "local") dropped.
+            for (auto [key, def] : {std::pair<const char*, const char*>{"graphics_backend", "vulkan"}, {"audio_backend", "miniaudio"}}) {
                 const std::string got = ui.host().enhancedValue(key), file = saved.has(key) ? saved[key].str() : "(unset)";
                 std::printf("  enhanced: %s %s (enhanced.json %s)\n", key, got.c_str(), file.c_str());
-                if (got != "local" || (file != "(unset)" && file != "local"))
-                    problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + " / " + file + ", not local";
+                if (got != def || (file != "(unset)" && file != def))
+                    problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + " / " + file + ", not " + def;
             }
             Json j = Json::parse(R"({"graphics_backend":"vulkan","audio_backend":"openal","bloom":"2x"})");
             ui::migrateEnhanced(j);
@@ -5919,6 +5922,9 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             ui::migrateEnhanced(j);
             if (j.has("graphics_backend") || j.has("audio_backend") || !j.has("bloom"))
                 problems += std::string(problems.empty() ? "" : "; ") + "an unknown backend was kept";
+            j = Json::parse(R"({"graphics_backend":"local","audio_backend":"local"})");
+            ui::migrateEnhanced(j);
+            if (j.has("graphics_backend") || j.has("audio_backend")) problems += std::string(problems.empty() ? "" : "; ") + "local was kept";
 #ifdef __APPLE__
             j = Json::parse(R"({"graphics_backend":"opengl3"})");
             ui::migrateEnhanced(j);
@@ -5932,20 +5938,19 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                         gNow.c_str(), aNow.c_str());
             auto add = [&](const std::string& p) { problems += std::string(problems.empty() ? "" : "; ") + p; };
             if (w == "enhanced_backends_start") {
-                // (the file keeps what it had until the next save; the game reads local)
-                for (const char* key : {"graphics_backend", "audio_backend"})
-                    if (ui.host().enhancedValue(key) != "local") add(std::string(key) + " is " + ui.host().enhancedValue(key));
-                if (g0 != "local" || a0 != "local" || aNow != "local") add("an unknown saved backend was not dropped at start");
+                // (the file keeps what it had until the next save; the game reads the defaults)
+                want("graphics_backend", "vulkan"), want("audio_backend", "miniaudio");
+                if (g0 != "vulkan" || a0 != "miniaudio" || aNow != "miniaudio") add("an unknown saved backend was not dropped at start");
             } else if (w == "enhanced_backends_saved") {
-                want("graphics_backend", "vulkan"), want("audio_backend", "openal");
-                if (!saved.has("graphics_backend") || saved["graphics_backend"].str() != "vulkan" || !saved.has("audio_backend") ||
+                want("graphics_backend", "opengl3"), want("audio_backend", "openal");
+                if (!saved.has("graphics_backend") || saved["graphics_backend"].str() != "opengl3" || !saved.has("audio_backend") ||
                     saved["audio_backend"].str() != "openal")
                     add("the backends were not saved");
-                if (g0 != "local" || a0 != "local" || aNow != "local") add("a backend changed before the restart");
+                if (g0 != "vulkan" || a0 != "miniaudio" || aNow != "miniaudio") add("a backend changed before the restart");
             } else {
                 want("graphics_backend", "sdl3"), want("audio_backend", "openal");
                 if (g0 != "sdl3" || a0 != "openal") add("the restart did not start on the saved backends");
-                if (aNow != "openal" && aNow != "local") add("audio plays on " + aNow);
+                if (aNow != "openal" && aNow != "miniaudio") add("audio plays on " + aNow);
             }
         } else if (w == "enhanced_settings_loaded") {
             status("Settings loaded");

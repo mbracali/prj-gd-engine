@@ -56,8 +56,6 @@ target_sources(gd05 PRIVATE
   src/data/midi.cpp
   src/data/mogg.cpp
   src/data/aes128.cpp
-  src/data/random_file.cpp
-  src/data/xdvdfs.cpp
   src/devaids/menu_keys.cpp
   src/devaids/screenshot.cpp
   src/game/camera_director.cpp
@@ -92,15 +90,12 @@ target_sources(gd05 PRIVATE
   src/render/core_device.cpp
   src/render/char_view.cpp
   src/render/crowd_view.cpp
-  src/render/gl_api.cpp
-  src/render/gl_device.cpp
   src/render/highway.cpp
   src/render/image_enhance.cpp
   src/render/hud_view.cpp
   src/render/material.cpp
   src/render/particles.cpp
   src/render/enhanced_fx.cpp
-  src/render/hdr_output.cpp
   src/render/enhanced_lights.cpp
   src/render/post_fx.cpp
   src/render/renderer.cpp

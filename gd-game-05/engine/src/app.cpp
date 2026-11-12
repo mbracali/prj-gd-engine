@@ -51,7 +51,6 @@
 #include "platform/paths.h"
 #include "render/canvas.h"
 #include "render/core_backend.h"
-#include "render/hdr_output.h"
 #include "render/highway.h"
 #include "render/hud_view.h"
 #include "render/scene_gpu.h"
@@ -299,7 +298,7 @@ private:
 // enhanced.json once, at the start of App::run (each restart reads it again).
 struct StartupBackends {
     bool latched = false;
-    std::string graphics = "local", audio = "local";
+    std::string graphics = gfx::backendId(gfx::kDefaultBackend), audio = audiodev::kDefaultBackend;
 };
 StartupBackends& startupBackends() {
     static StartupBackends b;
@@ -525,14 +524,13 @@ private:
     void drawFpsCounter();
     // Enhanced Options only: "Graphics: X   Audio: Y", the backends this run uses.
     void drawBackendLabel();
-    // The graphics backend that draws now (after any fallback): "local" until
-    // the gd-engine-core renderer lands (GDCORE-008; the graphics work returns
-    // the device's real id here).
-    std::string graphicsBackendNow() const { return gfx::backendId(gfx::rendererBackend()); }  // what draws (after a fallback)
-    // The audio backend that plays now (after any fallback).
+    // The graphics backend that draws now (after any fallback).
+    std::string graphicsBackendNow() const { return gfx::backendId(gfx::rendererBackend()); }
+    // The audio backend that plays now (after any fallback; the asked one
+    // while nothing plays).
     static std::string audioBackendNow() {
         const std::string b = audiodev::backend();
-        return b.empty() ? std::string("local") : b;
+        return b.empty() ? audiodev::askedBackend() : b;
     }
     // Enhanced Options > Enable Touch Controls: the track's lanes for the
     // fingers (Input::setTouchLanes) and the on-screen buttons.
@@ -830,7 +828,7 @@ private:
     // effect, and the FPS counter's average.
     Json enhanced_ = Json::object();
     // Enhanced > HDR > True HDR: the window's surface (chosen at start) and why it is SDR when it is.
-    hdr::Surface hdrSurface_ = hdr::Surface::Sdr;
+    int hdrSurface_ = 0;  // the swapchain's colour space: 0 SDR, 1 scRGB, 2 PQ (RenderDevice::hdrSurface)
     std::string hdrReason_, hdrApplied_;
     std::string hdrStatus();
     std::string savedHdrMode();  // enhanced.json's HDR before the window exists
@@ -898,11 +896,6 @@ int App::run() {
     // 1430:4748:guitar) plugs in a virtual controller, to test without hardware.
     if (const char* vp = SDL_getenv("GD05_VIRTUAL_PAD")) virtualPad_ = Input::attachVirtualPad(vp);
     inputLog_ = envOn("GD05_INPUTLOG");
-    // Enhanced > Graphics Backend (GDCORE-008, render/core_backend.h): local
-    // (gd05's OpenGL device) or a gd-engine-core backend, decided before the
-    // window: SDL3 GPU and Vulkan need a window made for their API (in the
-    // launcher, prepareWindowFor asks it for one). Local and opengl3 keep the
-    // OpenGL window.
     debugHighway_ = envOn("GD05_DEBUG_HIGHWAY");
     debugMenu_ = envOn("GD05_DEBUG_MENU");
     if (!options_.walk.empty()) {
@@ -923,46 +916,48 @@ int App::run() {
     {
         std::string audio = startupBackends().audio;
         if (const char* b = SDL_getenv("GD05_AUDIO_BACKEND"); b && *b) audio = b;
-        audiodev::setBackend(audio);  // every sound's output (audio/audio_device.h); local is SDL's device
+        audiodev::setBackend(audio);  // every sound's output (audio/audio_device.h)
     }
-    const gfx::Backend graphicsBackend = gfx::chosenBackend(startupBackends().graphics);
-    const bool gpuWindow = graphicsBackend == gfx::Backend::Sdl3 || graphicsBackend == gfx::Backend::Vulkan;
     SDL_WindowFlags baseFlags = SDL_WINDOW_RESIZABLE;
 #ifdef __ANDROID__
     baseFlags |= SDL_WINDOW_FULLSCREEN;
 #endif
-    SDL_WindowFlags flags = baseFlags | gfx::prepareWindowFor(graphicsBackend);  // OpenGL (render/device.h) for local
-    // Enhanced > HDR > True HDR: the window's surface is chosen now (render/hdr_output.h).
-    // A window or surface that cannot be made with it is made again without (Emulated).
-    // The surface probe is local's (an OpenGL context): on the core backends True HDR runs as Emulated.
-    hdrReason_ = graphicsBackend != gfx::Backend::Local
-                     ? std::string("True HDR is not on the ") + gfx::backendId(graphicsBackend) + " graphics backend yet"
-                     : hdr::unsupportedReason();
+    // Enhanced > HDR > True HDR: the Vulkan backend's HDR swapchain, asked
+    // for when the device starts (Emulated when there is none, and why).
     const bool trueHdr = savedHdrMode() == "true";
-    const bool wantHdr = trueHdr && graphicsBackend == gfx::Backend::Local && hdr::request();
-    window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
-    if (wantHdr) {
+    gfx::setHdrRequest(trueHdr);
+    // The graphics backends to try, best first (render/core_backend.h, D71):
+    // each needs a window made for its API (in the launcher, prepareWindowFor
+    // asks it for one), so a backend that cannot start has its window made
+    // again for the next (rule 2: never a black screen).
+    std::string error, failed;
+    bool rendererOk = false;
+    for (const gfx::Backend b : gfx::backendsToTry(startupBackends().graphics)) {
         if (window_) {
-            if (SDL_GLContext probe = SDL_GL_CreateContext(window_)) {
-                hdrSurface_ = hdr::obtained(hdrReason_);
-                SDL_GL_DestroyContext(probe);
-            } else {
-                hdrReason_ = hdr::failure("no OpenGL context on an HDR surface", SDL_GetError());
-            }
-        } else {
-            hdrReason_ = hdr::failure("no window with an HDR surface", SDL_GetError());
+            SDL_Log("graphics backend: %s: making the window again for %s", failed.c_str(), gfx::backendId(b));
+            SDL_DestroyWindow(window_);
         }
-        if (hdrSurface_ == hdr::Surface::Sdr) {
-            if (window_) SDL_DestroyWindow(window_);
-            hdr::cancel();
-            window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
-        }
+        window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), baseFlags | gfx::prepareWindowFor(b));
+        if (window_) setAppWindowIcon(window_);
+        gfx::setRendererBackend(b);
+        error.clear();
+        rendererOk = window_ && canvas_.init(window_, error);
+        if (rendererOk) break;
+        failed = gfx::backendId(b);
+        SDL_Log("graphics backend: %s did not start (%s)", failed.c_str(), window_ ? error.c_str() : SDL_GetError());
     }
+    if (!rendererOk) {
+        std::fprintf(stderr, "%s: cannot open the window: %s\n", app::kProgram, window_ ? error.c_str() : SDL_GetError());
+        SDL_Quit();
+        return 2;
+    }
+    SDL_Log("graphics backend: %s (gd-engine-core)", gfx::backendId(gfx::rendererBackend()));
+    hdrSurface_ = canvas_.renderer().device().hdrSurface();
+    hdrReason_ = hdrSurface_ ? "" : canvas_.renderer().device().hdrReason();
     if (trueHdr)
-        SDL_Log("hdr: %s", hdrSurface_ == hdr::Surface::ScRgb ? "scRGB surface (linear, RGBA16F)"
-                           : hdrSurface_ == hdr::Surface::Pq  ? "BT.2020 PQ surface"
-                                                              : ("unavailable (" + hdrReason_ + "), using Emulated").c_str());
-    setAppWindowIcon(window_);
+        SDL_Log("hdr: %s", hdrSurface_ == 1   ? "scRGB surface (linear, RGBA16F)"
+                           : hdrSurface_ == 2 ? "BT.2020 PQ surface"
+                                              : ("unavailable (" + hdrReason_ + "), using Emulated").c_str());
     installDesktopEntry();
     // Touch: window-normalised positions to menu units (the 16:9 picture).
     input_.setTouchToMenu([this](float nx, float ny, float& mx, float& my) {
@@ -972,30 +967,6 @@ int App::run() {
         mx = (nx * float(ww) - (float(ww) - 1280.0f * scale) * 0.5f) / scale;
         my = (ny * float(wh) - (float(wh) - 720.0f * scale) * 0.5f) / scale;
     });
-    std::string error;
-    gfx::setRendererBackend(graphicsBackend);
-    bool rendererOk = window_ && canvas_.init(window_, error);
-    if (!rendererOk && graphicsBackend != gfx::Backend::Local) {
-        // The core backend did not start: local runs instead (rule 2: never a
-        // black screen); an SDL3 GPU / Vulkan window is made again for
-        // OpenGL first (in the launcher the shim gets its OpenGL window back).
-        SDL_Log("graphics backend: %s did not start (%s); using local", gfx::backendId(graphicsBackend), window_ ? error.c_str() : SDL_GetError());
-        if (gpuWindow) {
-            SDL_Log("graphics backend: %s: making the window again for OpenGL (local)", gfx::backendId(graphicsBackend));
-            if (window_) SDL_DestroyWindow(window_);
-            window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), baseFlags | gfx::prepareWindowFor(gfx::Backend::Local));
-            if (window_) setAppWindowIcon(window_);
-        }
-        gfx::setRendererBackend(gfx::Backend::Local);
-        error.clear();
-        rendererOk = window_ && canvas_.init(window_, error);
-    }
-    if (!rendererOk) {
-        std::fprintf(stderr, "%s: cannot open the window: %s\n", app::kProgram, window_ ? error.c_str() : SDL_GetError());
-        SDL_Quit();
-        return 2;
-    }
-    canvas_.renderer().device().setHdrSurface(int(hdrSurface_));
     if (!mixer_.open(error)) {
         std::fprintf(stderr, "%s: cannot open the audio device: %s\n", app::kProgram, error.c_str());
         canvas_.shutdown();
@@ -4338,7 +4309,7 @@ std::string App::hdrStatus() {
     if (mode == "emulated") return "Emulated: HDR rendering tone mapped to your screen";
     if (mode != "true") return "";
     std::string why;
-    if (hdrSurface_ == hdr::Surface::Sdr) {
+    if (!hdrSurface_) {
         why = !hdrReason_.empty() ? "unavailable: " + hdrReason_ : "takes effect the next time the game starts";
     } else {
         const std::string live = canvas_.renderer().device().hdrStatus();
@@ -4718,18 +4689,18 @@ int App::enhancedState(const std::string& key) {
 // any fallback to local), in small white text above the FPS counter
 // (universal-menus.md "Backends"); GH2's help bar legend sits beside the
 // counter and reaches its left, so the label stays on the line above it even
-// when the counter is off. A chosen one that could not start shows as "local (<name>
-// could not start)".
+// when the counter is off. A chosen one that could not start shows as "<the one
+// running> (<name> could not start)"; "none": no audio backend started.
 void App::drawBackendLabel() {
     if (!ui_ || ui_->headless() || player_ || ui_->currentScreen() != "enhanced_options_screen") return;
     auto label = [](const std::string& id) -> std::string {
         static const std::map<std::string, std::string> k = {{"sdl3", "SDL3"},          {"vulkan", "Vulkan"}, {"opengl3", "OpenGL3"},
                                                              {"miniaudio", "miniaudio"}, {"openal", "OpenAL"}, {"faudio", "FAudio"}};
         auto it = k.find(id);
-        return it == k.end() ? std::string("local") : it->second;
+        return it == k.end() ? id : it->second;
     };
     auto shown = [&](const std::string& running, const std::string& chosen) {
-        return label(running) + (chosen != running && label(chosen) != "local" ? " (" + label(chosen) + " could not start)" : "");
+        return label(running) + (chosen != running ? " (" + label(chosen) + " could not start)" : "");
     };
     std::string audio = startupBackends().audio;
     if (const char* b = SDL_getenv("GD05_AUDIO_BACKEND"); b && *b) audio = b;
