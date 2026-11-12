@@ -340,6 +340,39 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             press(kUp), wait(300);
             check("songlist_highlight");
         }
+    } else if (scenario == "rb_stutter") {
+        // GD05-073, owner (G06 6): "micro-stutters when a song preview
+        // starts and when a song starts". Each preview the song list asks
+        // for while it scrolls (the window of 30 frames after each) and the
+        // song's first 240 frames against the run's median frame (ratios:
+        // load on the machine moves both; the median of the previews'
+        // windows), and no texture or mesh sent to the GPU once the song has
+        // begun (each was a stall on the frame that first drew it).
+        // GD05_MUSIC_LEGACY=1 / GD05_WARM_LEGACY=1 run the code before.
+        endMs_ = 25000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(1500);
+        for (int i = 0; i < 16; ++i) press(kDown), wait(400);
+        wait(1500);
+        check("counter:frame_marks:preview:12");
+        check("counter:music_plays:8");
+        check("counter_max:frame_spike:preview:30:40");  // the previews' windows: median of their longest frame <= 4.0 x the median frame
+        press(kX);
+        at("qp_seldiff_solo_screen");
+        press(kX);  // the guitar slot's part
+        wait(1500);
+        press(kX);  // the focused difficulty: ready
+        at("game_screen", 60000);
+        wait(12000);
+        check("counter:frame_marks:song_begin:1");
+        check("counter_max:song_gpu_uploads:0");
+        check("counter_max:frame_spike:song_begin!:240:150");  // the song's first 240 frames: longest <= 15 x the median frame
     } else if (scenario == "rb_esc3") {
         // Wave 05 (GD05-033, universal-behaviors.md): Esc three times in a
         // row on the main menu quits the game.

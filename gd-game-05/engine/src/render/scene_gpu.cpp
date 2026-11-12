@@ -517,6 +517,7 @@ TextureId SceneCache::texture(const scene::Tex* tex) {
         textures_.erase(it);
     }
     stale(tex);
+    ++uploads_;
     TextureId id;
     const scene::Bitmap& b = tex->bitmap;
     TexFormat format = TexFormat::RGBA8;
@@ -647,6 +648,7 @@ const GpuMesh* SceneCache::mesh(const scene::Mesh* m) {
     stale(geom);
     std::unique_ptr<GpuMesh> g;
     if (!geom->verts.empty() && !geom->faces.empty()) {
+        ++uploads_;
         g = std::make_unique<GpuMesh>();
         const std::vector<float> verts = packVertices(*geom);
         g->vertices = device_.createBuffer(BufferKind::Vertex, verts.size() * sizeof(float), verts.data(), false);

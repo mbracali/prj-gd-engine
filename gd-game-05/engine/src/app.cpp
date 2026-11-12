@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <random>
 #include <cmath>
@@ -19,6 +20,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "app_ids.h"
@@ -217,6 +219,79 @@ public:
 private:
     std::unique_ptr<VorbisStream> s_;
     uint64_t start_ = 0, end_ = 0, pos_ = 0, fade_ = 0;
+};
+
+// The menus' music streams (a song's preview, the meta loops, the credits)
+// open off the frame: reading, deciphering and opening a song's mogg took
+// 100..240 ms on the main thread, a stutter at every preview the song list
+// started (GD05-073). RB streams them from the disc too. One stream opens
+// at a time; a request while one opens replaces the waiting one (scrolling
+// down the list), and only the latest request is played.
+class MusicLoader {
+public:
+    struct Request {
+        std::string key, arkPath;
+        double startMs = 0, endMs = 0, fadeMs = 0;
+    };
+    ~MusicLoader() { join(); }
+    void request(const GameData& data, Request r) {
+        data_ = &data;
+        want_ = std::move(r);
+        wanted_ = true;
+        if (!thread_.joinable() && !legacyDone_) start();
+    }
+    void cancel() { wanted_ = false; }
+    // The stream of the latest request once it is open (its key in `key`), else null.
+    std::unique_ptr<LoopSource> poll(std::string& key) {
+        std::unique_ptr<LoopSource> out;
+        if ((thread_.joinable() || legacyDone_) && done_) {
+            if (thread_.joinable()) thread_.join();
+            legacyDone_ = false;
+            if (!error_.empty()) SDL_Log("music %s: %s", job_.key.c_str(), error_.c_str());
+            if (wanted_ && result_ && job_.key == want_.key) out = std::move(result_), key = job_.key, wanted_ = false;
+            result_.reset();
+        }
+        if (wanted_ && !thread_.joinable() && !legacyDone_) start();
+        return out;
+    }
+    void join() {
+        if (thread_.joinable()) thread_.join();
+        result_.reset();
+    }
+
+private:
+    void start() {
+        job_ = want_;
+        done_ = false;
+        error_.clear();
+        if (SDL_getenv("GD05_MUSIC_LEGACY")) {  // the code before: opened on the frame that asks
+            try {
+                result_ = std::make_unique<LoopSource>(std::make_unique<VorbisStream>(data_->read(job_.arkPath)), job_.startMs, job_.endMs, job_.fadeMs);
+            } catch (const std::exception& e) {
+                error_ = e.what();
+            }
+            done_ = true;
+            legacyDone_ = true;
+            return;
+        }
+        thread_ = std::thread([this, job = job_, data = data_] {
+            try {
+                auto s = std::make_unique<VorbisStream>(data->read(job.arkPath));
+                result_ = std::make_unique<LoopSource>(std::move(s), job.startMs, job.endMs, job.fadeMs);
+            } catch (const std::exception& e) {
+                error_ = e.what();
+            }
+            done_ = true;
+        });
+    }
+    const GameData* data_ = nullptr;
+    Request want_, job_;
+    bool wanted_ = false;
+    std::thread thread_;
+    std::atomic<bool> done_{false};
+    bool legacyDone_ = false;
+    std::unique_ptr<LoopSource> result_;
+    std::string error_;
 };
 
 // Enhanced > Graphics / Audio Backend as this start of the game uses them
@@ -768,6 +843,25 @@ private:
     float failMs_ = -1e9f;
     // The menus' music: none, a meta loop or a song's preview.
     enum class Music { None, Menu, Preview, Credits } music_ = Music::None;
+    Music musicPending_ = Music::None;  // the stream musicLoader_ opens
+    int musicPlays_ = 0;                 // streams musicLoader_ handed to the mixer (the walks)
+    // GD05-073: each frame's work time (ms) and marks at moments that used
+    // to stutter (a preview asked for / playing, the song's start), for the
+    // walks' frame_spikes checks (ratios to the frames' median: load on the
+    // machine moves both). GD05_FRAMELOG=1 logs the frames after a mark.
+    std::vector<float> frameWorkMs_;
+    std::vector<std::pair<size_t, std::string>> frameMarks_;
+    int frameLogLeft_ = 0;
+    void markFrame(const std::string& tag) {
+        frameMarks_.push_back({frameWorkMs_.size(), tag});
+        if (envOn("GD05_FRAMELOG")) frameLogLeft_ = 240, SDL_Log("frames: mark %s at frame %zu", tag.c_str(), frameWorkMs_.size());
+    }
+    int frameSpikeRatio(const std::string& spec) const;
+    int gpuUploads() const { return (venueCache_ ? venueCache_->uploads() : 0) + (sceneCache_ ? sceneCache_->uploads() : 0); }
+    int uploadsAtBegin_ = -1;  // gpuUploads() as the song began
+    void warmWorld();
+    MusicLoader musicLoader_;
+    void pollMusic();
     // GH2's sound effects (audio/synth.h): config/sound.dta's banks, the
     // venue's through the world; made with the game data.
     std::unique_ptr<Synth> synth_;
@@ -957,6 +1051,9 @@ int App::run() {
         // frames a second instead of spinning; gd01's frame limiter comes
         // with its renderer.
         const uint64_t spent = SDL_GetTicksNS() - frameStart;
+        frameWorkMs_.push_back(float(double(spent) / 1e6));
+        if (frameLogLeft_ > 0 && --frameLogLeft_ >= 0)
+            SDL_Log("frames: %zu %.2f ms %s%s", frameWorkMs_.size() - 1, double(spent) / 1e6, ui_ ? ui_->currentScreen().c_str() : "-", player_ ? " (song)" : "");
         // Development aid (GD05-034, the load stutter): GD05_HITCHLOG=<ms>
         // logs every frame whose work took longer, with its screen; the
         // longest and the count print at the end.
@@ -1020,6 +1117,7 @@ bool App::loadData(const std::string& path) {
         sceneCache_.reset(), milos_.reset();
         trackTried_ = false;
         synth_.reset();
+        musicLoader_.cancel(), musicLoader_.join(), musicPending_ = Music::None;
         data_ = std::move(data), rules_ = rules, songs_ = std::move(songs);
         // The sound effects: the banks decode here (all of them: ~0.1 s).
         const uint64_t t0 = SDL_GetTicksNS();
@@ -1299,6 +1397,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         loadVenue(v, var);
     }
     if (!band_ && song_ && info_) startBand(*info_, *song_);
+    warmWorld();
     worldDriver_ = WorldDriver(!ui_);
     worldDriver_.reset(float(-leadInMs_));
     return true;
@@ -1452,6 +1551,9 @@ float App::practiceBackgroundDb() const {
 
 void App::beginSong() {
     if (!pendingStream_ || !info_) return;
+    warmWorld();  // anything loaded since the song's load (a venue world_panel loaded after it)
+    markFrame("song_begin");
+    uploadsAtBegin_ = gpuUploads();
     // GamePanel's start (0x822CCA60): the intro clock from the INTRO shot's
     // length (CamShot +0xf0 = every keyframe's duration + blend, frames at
     // 30 a second, 0x82226630) [C].
@@ -2715,6 +2817,7 @@ void App::frameSong() {
 // track and HUD are its game panels).
 void App::frameUi() {
     const double now = double(SDL_GetTicksNS()) / 1e6 - uiStartMs_;
+    pollMusic();
     updateCursor();
     actions_.clear();
     input_.poll(SDL_GetTicksNS(), actions_);
@@ -2874,8 +2977,87 @@ const scene::CamShot* App::forcedShot(const std::string& spec) const {
     return shots[size_t(std::max(0, std::atoi(spec.c_str() + (crowd ? 6 : 1)))) % shots.size()];
 }
 
+// frame_spike:<tag>:<frames>: for each mark `tag`, the longest frame of
+// the `frames` after it against the median frame of the run's frames from
+// the first such mark on (x10, an integer). With several marks the median
+// of their windows' ratios (one slow frame from the machine's load does not
+// decide); "<tag>!" takes the largest instead.
+int App::frameSpikeRatio(const std::string& spec) const {
+    const size_t c = spec.find(':');
+    std::string tag = spec.substr(0, c);
+    const bool worst = !tag.empty() && tag.back() == '!';
+    if (worst) tag.pop_back();
+    const size_t window = c == std::string::npos ? 60 : size_t(std::max(1, std::atoi(spec.c_str() + c + 1)));
+    size_t first = frameWorkMs_.size();
+    for (const auto& m : frameMarks_)
+        if (m.second == tag) first = std::min(first, m.first);
+    if (first >= frameWorkMs_.size()) return -1;
+    std::vector<float> all(frameWorkMs_.begin() + std::ptrdiff_t(first), frameWorkMs_.end());
+    std::nth_element(all.begin(), all.begin() + std::ptrdiff_t(all.size() / 2), all.end());
+    const float median = std::max(0.05f, all[all.size() / 2]);
+    std::vector<float> ratios;
+    for (const auto& m : frameMarks_) {
+        if (m.second != tag) continue;
+        float mx = 0;
+        for (size_t f = m.first; f < std::min(frameWorkMs_.size(), m.first + window); ++f) mx = std::max(mx, frameWorkMs_[f]);
+        ratios.push_back(mx / median);
+    }
+    std::sort(ratios.begin(), ratios.end());
+    const float r = worst ? ratios.back() : ratios[ratios.size() / 2];
+    SDL_Log("frames: %s: %zu marks, median frame %.2f ms, window max / median: median %.1f, largest %.1f", tag.c_str(), ratios.size(),
+            double(median), double(ratios[ratios.size() / 2]), double(ratios.back()));
+    return int(std::lround(r * 10));
+}
+
+// GD05-073: the world's textures and meshes (the venue and its proxies,
+// the band, the crowd) and the track's and the HUD's go to the GPU while
+// the song loads, not on the frame that first draws each: that frame
+// stalled (a stutter as the song starts, and at a camera cut showing parts
+// of the venue not seen yet). The 360 has every texture in memory once the
+// milo is loaded [I]. GD05_WARM_LEGACY=1: as before (each on its first draw).
+void App::warmWorld() {
+    if (SDL_getenv("GD05_WARM_LEGACY")) return;
+    const uint64_t t0 = SDL_GetTicksNS();
+    const int before = gpuUploads();
+    auto warm = [](gfx::SceneCache& c) {
+        return [&c](scene::Object& o) {
+            if (const auto* t = o.as<scene::Tex>()) c.texture(t);
+            else if (const auto* m = o.as<scene::Mesh>()) c.mesh(m);
+        };
+    };
+    if (venueCache_) {
+        auto w = warm(*venueCache_);
+        if (venue_) venue_->forEach(w);
+        if (band_)
+            for (const auto& m : band_->members()) {
+                if (m->character) m->character->forEachObject(w);
+                for (const auto& [name, fx] : m->fx)
+                    if (fx && fx->milo) fx->milo->root().forEach(w);
+            }
+        if (world_)
+            for (const Crowd::State& st : world_->crowd().crowds())
+                for (const auto& a : st.archetypes)
+                    if (a.actor && a.actor->character) a.actor->character->forEachObject(w);
+    }
+    if (sceneCache_ && milos_) {
+        auto w = warm(*sceneCache_);
+        milos_->forEachMilo([&](scene::Milo& m) { m.root().forEach(w); });
+    }
+    if (const int n = gpuUploads() - before; n > 0 && envOn("GD05_UILOG"))
+        SDL_Log("world warmed: %d textures and meshes to the GPU in %.1f ms", n, double(SDL_GetTicksNS() - t0) / 1e6);
+}
+
 int App::gameCounter(int player, const std::string& key) const {
-    if (key == "missing_shaders") return gfx::shaderaudit::count();  // draws without their shader (render/device.h)
+    if (key == "missing_shaders") return gfx::shaderaudit::count();
+    // Textures and meshes sent to the GPU since the song began (warmWorld: none).
+    if (key == "song_gpu_uploads") return uploadsAtBegin_ < 0 ? -1 : gpuUploads() - uploadsAtBegin_;
+    if (key == "music_plays") return musicPlays_;
+    if (key.rfind("frame_marks:", 0) == 0) {
+        int n = 0;
+        for (const auto& m : frameMarks_) n += m.second == key.substr(12);
+        return n;
+    }
+    if (key.rfind("frame_spike:", 0) == 0) return frameSpikeRatio(key.substr(12));  // draws without their shader (render/device.h)
     // The world's pacing (render/post_fx.h hold): worlds drawn, frames shown again, the PostProc's emulate_fps.
     if (key == "world_draws") return const_cast<Canvas&>(canvas_).renderer().post().worldDraws();
     if (key == "world_holds") return const_cast<Canvas&>(canvas_).renderer().post().worldHolds();
@@ -3888,33 +4070,57 @@ void App::drawHud() {
 void App::stopMusic() {
     if (music_ != Music::None && !player_) mixer_.stop();
     music_ = Music::None;
+    musicPending_ = Music::None;
+    musicLoader_.cancel();
+}
+
+// The stream musicLoader_ opened, played once it is ready (GD05-073).
+void App::pollMusic() {
+    std::string key;
+    std::unique_ptr<LoopSource> src = musicLoader_.poll(key);
+    if (!src) return;
+    const Music kind = musicPending_;
+    musicPending_ = Music::None;
+    if (player_ || kind == Music::None) return;
+    std::vector<Mixer::Track> tracks(static_cast<size_t>(src->channels()));
+    if (kind == Music::Preview) {
+        auto it = std::find_if(songs_.begin(), songs_.end(), [&](const SongInfo& s) { return "preview:" + s.id == key; });
+        if (it == songs_.end()) return;
+        tracks = mixerTracks(it->audio);
+    } else if (kind == Music::Menu) {
+        const int ch = src->channels();
+        for (int c = 0; c < ch; ++c) tracks[size_t(c)].pan = ch == 2 ? (c == 0 ? -1.0f : 1.0f) : 0.0f, tracks[size_t(c)].volume = 0.25f;  // -12 dB
+    } else {
+        // Channels 0 / 2 left, 1 / 3 right (CreditsPanel 0x8229B310) [C].
+        for (size_t c = 0; c < tracks.size(); ++c) tracks[c].pan = c % 2 ? 1.0f : -1.0f, tracks[c].volume = 0.8f;
+    }
+    mixer_.play(std::move(src), tracks, 0);
+    music_ = kind;
+    ++musicPlays_;
+    if (kind == Music::Preview) markFrame("preview_play");
 }
 
 void App::songPreview(const std::string& songId) {
     if (player_) return;
     if (songId.empty()) {
-        if (music_ == Music::Preview) stopMusic();
+        if (music_ == Music::Preview || musicPending_ == Music::Preview) stopMusic();
         return;
     }
     auto it = std::find_if(songs_.begin(), songs_.end(), [&](const SongInfo& s) { return s.id == songId; });
-    if (it == songs_.end()) return;
-    try {
-        auto s = std::make_unique<VorbisStream>(data_->read(it->audio.moggPath));
-        auto loop = std::make_unique<LoopSource>(std::move(s), it->previewStartMs, it->previewEndMs, 1000);
-        mixer_.play(std::move(loop), mixerTracks(it->audio), 0);
-        music_ = Music::Preview;
-    } catch (const std::exception& e) {
-        SDL_Log("song_preview %s: %s", songId.c_str(), e.what());
-    }
+    if (it == songs_.end() || !data_) return;
+    // The (preview a b) section with a 1 s fade in and out [I: GH2's fade times].
+    musicLoader_.request(*data_, {"preview:" + songId, it->audio.moggPath, it->previewStartMs, it->previewEndMs, 1000});
+    musicPending_ = Music::Preview;
+    markFrame("preview");
 }
 
 void App::menuMusic(bool on) {
     if (player_) return;
     if (!on) {
-        if (music_ == Music::Menu) stopMusic();
+        if (music_ == Music::Menu || musicPending_ == Music::Menu) stopMusic();
         return;
     }
-    if (music_ == Music::Menu) return;
+    if (music_ == Music::Menu || musicPending_ == Music::Menu || !data_) return;
     // RB's config/synth.dta (metamusic (volume -12.0) (fade_time 2.0) (music
     // shellmusic_29fingers ...)) [C data]: a random loop from sfx/streams
     // [I: the fade-in is not applied].
@@ -3923,16 +4129,8 @@ void App::menuMusic(bool on) {
                                          "shellmusic_epic", "shellmusic_suffragette", "shellmusic_thehandthatfeeds", "shellmusic_gowiththeflow",
                                          "shellmusic_missqueen"};
     const std::string name = kLoops[SDL_GetTicks() % (sizeof kLoops / sizeof kLoops[0])];
-    try {
-        auto s = std::make_unique<VorbisStream>(data_->read("sfx/streams/" + name + ".mogg"));
-        const int ch = s->channels();
-        std::vector<Mixer::Track> tracks(static_cast<size_t>(ch));
-        for (int c = 0; c < ch; ++c) tracks[size_t(c)].pan = ch == 2 ? (c == 0 ? -1.0f : 1.0f) : 0.0f, tracks[size_t(c)].volume = 0.25f;  // -12 dB
-        mixer_.play(std::make_unique<LoopSource>(std::move(s), 0, 0, 0), tracks, 0);
-        music_ = Music::Menu;
-    } catch (const std::exception& e) {
-        SDL_Log("meta_music %s: %s", name.c_str(), e.what());
-    }
+    musicLoader_.request(*data_, {"menu:" + name, "sfx/streams/" + name + ".mogg", 0, 0, 0});
+    musicPending_ = Music::Menu;
 }
 
 void App::metaBackgroundSfx() {
@@ -3953,19 +4151,12 @@ void App::metaBackgroundSfx() {
 void App::creditsMusic(bool on) {
     if (player_) return;
     if (!on) {
-        if (music_ == Music::Credits) stopMusic();
+        if (music_ == Music::Credits || musicPending_ == Music::Credits) stopMusic();
         return;
     }
-    try {
-        auto s = std::make_unique<VorbisStream>(data_->read("sfx/streams/credits.mogg"));
-        // Channels 0 / 2 left, 1 / 3 right (CreditsPanel 0x8229B310) [C].
-        std::vector<Mixer::Track> tracks(static_cast<size_t>(s->channels()));
-        for (size_t c = 0; c < tracks.size(); ++c) tracks[c].pan = c % 2 ? 1.0f : -1.0f, tracks[c].volume = 0.8f;
-        mixer_.play(std::make_unique<LoopSource>(std::move(s), 0, 0, 0), tracks, 0);
-        music_ = Music::Credits;
-    } catch (const std::exception& e) {
-        SDL_Log("credits music: %s", e.what());
-    }
+    if (!data_) return;
+    musicLoader_.request(*data_, {"credits", "sfx/streams/credits.mogg", 0, 0, 0});
+    musicPending_ = Music::Credits;
 }
 
 void App::playMovie(const std::string& name) {

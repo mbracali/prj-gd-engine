@@ -2,9 +2,12 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "data/mogg.h"
 
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "data/aes128.h"
 
@@ -45,17 +48,39 @@ void decryptMogg(uint8_t* data, size_t size) {
     MoggHeader h = parseMoggHeader(data, size, false);
     if (h.version != 11) return;
     if (size < h.oggOffset) throw std::runtime_error("mogg header longer than the bytes read");
-    uint8_t counter[16];
-    std::memcpy(counter, data + h.oggOffset - 16, 16);
     const Aes128 aes(kMoggKey);
-    uint8_t ks[16];
-    for (size_t pos = h.oggOffset; pos < size; pos += 16) {
-        aes.encryptBlock(counter, ks);
-        const size_t n = size - pos < 16 ? size - pos : 16;
-        for (size_t k = 0; k < n; ++k) data[pos + k] ^= ks[k];
-        for (int k = 0; k < 16; ++k)
-            if (++counter[k] != 0) break;
-    }
+    const uint8_t* nonce = data + h.oggOffset - 16;
+    // Blocks [from, to) of the stream: block i's counter is the nonce + i,
+    // so the stream splits into ranges deciphered side by side (GD05-073: a
+    // song's mogg took 100..240 ms on one thread, at every preview).
+    auto run = [&](size_t from, size_t to) {
+        uint8_t counter[16];
+        std::memcpy(counter, nonce, 16);
+        uint64_t add = from;  // the 128-bit little-endian nonce + from
+        unsigned carry = 0;
+        for (int k = 0; k < 16; ++k) {
+            const unsigned sum = unsigned(counter[k]) + unsigned(add & 0xFF) + carry;
+            counter[k] = uint8_t(sum);
+            carry = sum >> 8;
+            add >>= 8;
+        }
+        uint8_t ks[16];
+        for (size_t b = from; b < to; ++b) {
+            const size_t pos = h.oggOffset + b * 16;
+            aes.encryptBlock(counter, ks);
+            const size_t n = size - pos < 16 ? size - pos : 16;
+            for (size_t k = 0; k < n; ++k) data[pos + k] ^= ks[k];
+            for (int k = 0; k < 16; ++k)
+                if (++counter[k] != 0) break;
+        }
+    };
+    const size_t blocks = (size - h.oggOffset + 15) / 16;
+    const size_t workers = blocks < 65536 ? 1 : std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
+    std::vector<std::thread> pool;
+    const size_t per = (blocks + workers - 1) / workers;
+    for (size_t w = 1; w < workers; ++w) pool.emplace_back(run, std::min(blocks, w * per), std::min(blocks, (w + 1) * per));
+    run(0, std::min(blocks, per));
+    for (std::thread& t : pool) t.join();
     if (size >= uint64_t(h.oggOffset) + 4 && std::memcmp(data + h.oggOffset, "OggS", 4) != 0)
         throw std::runtime_error("the mogg did not decrypt to an Ogg stream");
 }
