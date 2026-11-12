@@ -928,7 +928,13 @@ bool PanelObj::handleNative(Interp& in, const std::string& msg, std::vector<Valu
         std::string var = args[1].str();
         if (!var.empty() && var[0] == '$') var = var.substr(1);
         const Value saved = in.var(var);
-        for (scene::Object* o : view->milo()->root().byClass(args[0].str())) {
+        // A class's objects, its derived classes' too (RB's iterate is
+        // IsA: shop_instrument.dta's UIList over the BandLists).
+        std::vector<scene::Object*> objs = view->milo()->root().byClass(args[0].str());
+        if (args[0].str() == "UIList")
+            for (const char* sub : {"BandList", "BandSwatch"})
+                for (scene::Object* o : view->milo()->root().byClass(sub)) objs.push_back(o);
+        for (scene::Object* o : objs) {
             ComponentObj* c = component(o->name);
             if (!c) continue;
             in.var(var) = Value::obj(c);

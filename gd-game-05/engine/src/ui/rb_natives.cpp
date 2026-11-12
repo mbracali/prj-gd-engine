@@ -564,7 +564,6 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     charCache->quiet({"cache_update", "cache_enable", "cache_clear", "iterate", "light_characters", "load_instruments",
                       "world_configure_characters", "reclaim_characters", "request", "check_outside_refs"});
     charCache->on("loaded", yes);
-    charCache->on("compression_done", yes);  // the menus' character previews [I: no preview drawn yet]
     charCache->on("meta_configure_done", yes);  // meta_loading.dta waits on it [I: nothing to configure]
     // content_mgr: the Music Store / downloads are not in the port (GD05-013):
     // the disc's content is all there is, its refresh always done.

@@ -479,14 +479,23 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
         return false;
     }
     if (msg == "deform" || msg == "update" || msg == "print_guid" || msg == "set_dirty") return true;
-    if (msg == "has_outfit") return r = Value::integer(d.owned.count(sArg(args, 1)) || (d.outfit.count(sArg(args, 0)) && d.outfit[sArg(args, 0)] == sArg(args, 1)) ? 1 : 0), true;
+    if (msg == "has_outfit") {
+        // Owned, or worn: the piece itself, or an instrument model whose
+        // finish (<model>_<finish>, char/instruments.dta) is worn [I].
+        const std::string cat = sArg(args, 0), o = sArg(args, 1);
+        const std::string worn = d.outfit.count(cat) ? d.outfit[cat] : std::string();
+        return r = Value::integer(d.owned.count(o) || worn == o || (!o.empty() && worn.rfind(o + "_", 0) == 0) ? 1 : 0), true;
+    }
     if (msg == "has_group_selection") return r = Value::integer(0), true;  // [I] colour groups not offered yet
     if (msg == "outfit_list") {
         std::vector<Value> v;
         for (const auto& [k, o] : d.outfit) v.push_back(Value::list({Value::symbol(k), Value::symbol(o)}));
         return r = Value::list(std::move(v)), true;
     }
-    if (msg == "get_outfit") return r = Value::symbol(d.outfit.count(sArg(args, 0)) ? d.outfit[sArg(args, 0)] : "none"), true;
+    if (msg == "get_outfit" || msg == "selected_outfit") return r = Value::symbol(d.outfit.count(sArg(args, 0)) ? d.outfit[sArg(args, 0)] : "none"), true;
+    // select_outfit <char> <category> <outfit>: the shown character's piece
+    // (shop.dta's instrument preview) [I: no character drawn in the menus yet].
+    if (msg == "select_outfit") return true;
     if (msg == "set_outfit") return d.outfit[sArg(args, 0)] = sArg(args, 1), true;
     // The solo performer.
     if (msg == "town") return r = Value::symbol(d.town), true;
@@ -1231,9 +1240,31 @@ public:
         return RbList::handleNative(in, msg, args, r);
     }
     int cost(const std::string& o) const {
+        if (const DataNode* g = group(o)) return num(g->find("cost"));
         const DataNode* outs = cat ? cat->find("outfits") : nullptr;
         const DataNode* e = outs ? outs->find(o) : nullptr;
         return num(e ? e->find("cost") : nullptr);
+    }
+    // An instrument category's (groups (<model> (cost n) (default_outfit
+    // <finish>)) ...) (char/instruments.dta) [C data]: the shop lists and
+    // sells the models (OutfitProvider RB 0x82859E08: each group, its
+    // cost; a group without a cost only when owned) [C].
+    const DataNode* groups() const { return cat ? cat->find("groups") : nullptr; }
+    static std::string key(const DataNode& n) {
+        if (n.children.empty()) return {};
+        const DataNode& k = n.children[0];
+        return k.isText() ? k.s : k.type == DataNode::Type::Int ? std::to_string(k.i) : std::string();
+    }
+    const DataNode* group(const std::string& g) const {
+        const DataNode* gs = groups();
+        for (size_t i = 1; gs && i < gs->children.size(); ++i)
+            if (gs->children[i].isList() && key(gs->children[i]) == g) return &gs->children[i];
+        return nullptr;
+    }
+    // What a chosen symbol puts on the character: a model's default finish.
+    std::string wear(const std::string& o) const {
+        const DataNode* g = group(o);
+        return g && g->find("default_outfit") ? text(g->find("default_outfit")) : o;
     }
 };
 
@@ -1279,6 +1310,16 @@ public:
         OutfitList* raw = l;
         l->build = [raw, genre, closet, c] {
             std::vector<std::string> v;
+            if (const DataNode* gs = raw->groups()) {
+                for (size_t i = 1; i < gs->children.size(); ++i) {
+                    if (!gs->children[i].isList()) continue;
+                    const std::string g = OutfitList::key(gs->children[i]);
+                    const bool owned = c && c->d.owned.count(g);
+                    if (g.empty() || (closet && !owned) || (num(gs->children[i].find("cost")) == 0 && !owned)) continue;
+                    v.push_back(g);
+                }
+                return v;
+            }
             const DataNode* outs = raw->cat ? raw->cat->find("outfits") : nullptr;
             for (const auto& [o, n] : entries(outs)) {
                 const std::string og = text(n->find("genre"));
@@ -1334,9 +1375,10 @@ public:
                     OutfitList* l = listFor(cat);
                     ComponentObj* comp = component(focus);
                     const std::string o = l->symbol(comp ? comp->selected : 0);
-                    // The script pays (set_money, shop_confirm_screen); this keeps it owned.
-                    if (!o.empty()) c->d.owned.insert(o);
-                    if (!o.empty() && (c->d.owned.count(o) || l->cost(o) == 0)) c->d.outfit[cat] = o, ++bought_;
+                    // The script pays (set_money, shop_confirm_screen); this
+                    // keeps it owned (an instrument model: with its finish).
+                    if (!o.empty()) c->d.owned.insert(o), c->d.owned.insert(l->wear(o));
+                    if (!o.empty() && (c->d.owned.count(o) || l->cost(o) == 0)) c->d.outfit[cat] = l->wear(o), ++bought_;
                 } else if (stored_.count(cat)) {
                     c->d.outfit[cat] = stored_[cat];
                 }
@@ -1392,7 +1434,8 @@ public:
     using PanelObj::PanelObj;
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         if (msg == "select_cam" || msg == "update_appearance" || msg == "load_char") return r = Value::integer(0), true;
-        if (msg == "get_tour_char") {
+        // get_tour_char, or the property ({shop_char_panel get tour_char}: shop.dta's back of shop_instrument_screen).
+        if (msg == "get_tour_char" || (msg == "get" && sArg(args, 0) == "tour_char")) {
             const int pn = getProp(in, "char_player_num").integerValue();
             const Value cfg = in.send("game", "get_player_config", {Value::integer(std::max(0, pn))});
             return r = cfg.object ? in.send(cfg.object, "get_char", {}) : Value::integer(0), true;
@@ -1453,9 +1496,24 @@ std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& 
 
 int rbOutfitCost(UiManager& ui, const std::string& gender, const std::string& category, const std::string& outfit) {
     const DataNode* cat = outfitCategory(ui, gender, category);
+    OutfitList l("");
+    l.cat = cat;
+    if (const DataNode* g = l.group(outfit)) return num(g->find("cost"));  // an instrument model
     const DataNode* outs = cat ? cat->find("outfits") : nullptr;
     const DataNode* e = outs ? outs->find(outfit) : nullptr;
     return e ? num(e->find("cost")) : -1;
+}
+
+RbModel rbFirstModel(UiManager& ui, const std::string& gender, const std::string& category) {
+    OutfitList l("");
+    l.cat = outfitCategory(ui, gender, category);
+    const DataNode* gs = l.groups();
+    for (size_t i = 1; gs && i < gs->children.size(); ++i)
+        if (gs->children[i].isList()) {
+            const std::string m = OutfitList::key(gs->children[i]);
+            return {m, l.wear(m), num(gs->children[i].find("cost"))};
+        }
+    return {};
 }
 
 void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<ScriptObject>>& owned) {

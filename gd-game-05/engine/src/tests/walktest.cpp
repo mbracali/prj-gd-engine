@@ -1111,6 +1111,103 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("tour_band_hub_screen", 30000);
         wait(1000);
         check("rb_band_reloaded");
+    } else if (scenario == "rb_shop_items") {
+        // GD05-072: the Rock Shop's instruments (char/instruments.dta: the
+        // models and their prices). A new guitarist (100) cannot afford the
+        // first guitar (shop_error_money_screen, the cash kept); with RB's
+        // cheat_add_money 2000 (cheats_funcs.dta) it is bought: the cash
+        // drops by the model's price, its default finish is played on stage;
+        // after a restart it is still the character's.
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_career_cash0");
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROKK SHOPPE
+        at("shop_screen", 20000);
+        wait(1000);
+        check("focus_to instruments.btn", 5000);
+        press(kX);  // INSTRUMENTS
+        at("shop_guitarbass_screen", 20000);
+        wait(1000);
+        press(kX);  // GUITAR
+        at("shop_instrument_screen", 20000);
+        wait(1500);
+        check("print_focus");
+        press(kX);  // the first model: too dear
+        at("shop_error_money_screen", 10000);
+        check("rb_shop_too_dear");
+        press(kX);  // OK
+        at("shop_instrument_screen", 10000);
+        wait(1000);
+        check("rb_shop_cheat_money");
+        press(kX);  // the first model again: the confirm screen
+        at("shop_confirm_screen", 10000);
+        wait(1000);
+        press(kX);  // yes
+        wait(1500);
+        check("rb_shop_guitar");
+        at("shop_guitarbass_screen", 10000);  // the confirm screen's pop (the port's: [I])
+        press(kTri);
+        at("shop_screen", 10000);
+        press(kTri);
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);  // GIG GUIDE
+        at("tour_solo_diff_screen");
+        press(kX);
+        at("tour_solo_guitar_welcome_screen|tour_solo_event_screen", 20000);
+        wait(800);
+        press(kX);
+        at("tour_solo_event_screen", 20000);
+        wait(1000);
+        press(kX);  // the first event
+        at("game_screen", 60000);
+        wait(3000);
+        check("rb_shop_guitar_on_stage");
+        at("tour_solo_endgame_screen", 120000);
+        wait(1000);
+        press(kX);
+        at("tour_solo_gigcomplete_screen", 20000);
+        wait(1000);
+        press(kX);
+        at("tour_solo_event_screen|tour_solo_hub_screen|tour_solo_newtown_screen", 40000);
+        wait(1500);
+        check("restart_app");
+    } else if (scenario == "rb_shop_items_restarted") {
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(1000);
+        press(kX);  // the saved character
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_shop_guitar_reloaded");
     } else if (scenario == "solo_tour") {
         // RB's Solo Tour (ui/tour_solo.dta): Solo > Tour, a character (made
         // in the creator the first time), the hub, the gig guide, a
@@ -4011,6 +4108,63 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (!won || !bought) return fail("the owned clothes were lost through the save");
             if (fame < 1) return fail("the played event was lost through the save");
             return pass();
+        }
+        return fail("unknown check " + s.screen);
+    }
+    // rb_shop_items (GD05-072): the instrument shop against char/instruments.dta.
+    if (s.screen.rfind("rb_shop_", 0) == 0 && s.screen != "rb_shop_bought") {
+        Interp& in = ui.interp();
+        ScriptObject* c = in.send("tour", "performer", {}).object;
+        if (!c) return fail(s.screen + ": no character");
+        auto send = [&](const char* msg, std::vector<Value> a = {}) { return in.send(c, msg, a); };
+        const int money = send("money").integerValue();
+        const std::string gender = send("get_gender").str(), guitar = send("get_outfit", {Value::symbol("guitar")}).str();
+        // The first model of (guitar (groups ...)) and its price, from the data.
+        {
+            const ui::RbModel probe = ui::rbFirstModel(ui, gender, "guitar");
+            const int price = probe.cost;
+            const std::string model = probe.model, finish = probe.finish;
+            std::printf("  %s: money %d, guitar %s; data: first guitar %s (%s) at %d\n", s.screen.c_str(), money, guitar.c_str(), model.c_str(),
+                        finish.c_str(), price);
+            if (model.empty() || price <= 0) return fail("no guitar model with a price in char/instruments.dta");
+            if (s.screen == "rb_shop_too_dear") {
+                std::printf("  expected: shop_error_money_screen, cash %d kept (%d < %d); measured: %s, cash %d\n", careerCash_, careerCash_, price,
+                            ui.currentScreen().c_str(), money);
+                if (money != careerCash_) return fail("the cash changed on a refused purchase");
+                return pass();
+            }
+            if (s.screen == "rb_shop_cheat_money") {
+                send("cheat_add_money", {Value::integer(2000)});
+                careerCash_ = send("money").integerValue();
+                std::printf("  cheat_add_money 2000: cash %d\n", careerCash_);
+                return pass();
+            }
+            if (s.screen == "rb_shop_guitar") {
+                const bool owned = send("has_outfit", {Value::symbol("guitar"), Value::symbol(model)}).truthy();
+                std::printf("  expected: cash %d - %d = %d, guitar %s, owned; measured: cash %d, guitar %s, owned %d\n", careerCash_, price,
+                            careerCash_ - price, finish.c_str(), money, guitar.c_str(), int(owned));
+                if (money != careerCash_ - price) return fail("the guitar cost " + std::to_string(careerCash_ - money));
+                if (guitar != finish || !owned) return fail("the bought guitar is not the character's (" + guitar + ")");
+                SDL_setenv_unsafe("GD05_WALK_CAREER", (std::to_string(money) + " " + finish).c_str(), 1);
+                return pass();
+            }
+            if (s.screen == "rb_shop_guitar_on_stage") {
+                const int n = ui.host().gameCounter(0, "band_piece:" + finish);
+                std::printf("  expected: the guitarist plays %s; measured %d member(s)\n", finish.c_str(), n);
+                if (n < 1) return fail("the bought guitar is not on stage");
+                return pass();
+            }
+            if (s.screen == "rb_shop_guitar_reloaded") {
+                int wMoney = -1;
+                std::string wGuitar;
+                std::istringstream is(SDL_getenv("GD05_WALK_CAREER") ? SDL_getenv("GD05_WALK_CAREER") : "");
+                is >> wMoney >> wGuitar;
+                const bool owned = send("has_outfit", {Value::symbol("guitar"), Value::symbol(model)}).truthy();
+                std::printf("  expected (before the restart): cash >= %d, guitar %s owned; measured: cash %d, guitar %s, owned %d\n", wMoney,
+                            wGuitar.c_str(), money, guitar.c_str(), int(owned));
+                if (wMoney < 0 || money < wMoney || guitar != wGuitar || !owned) return fail("the guitar was lost through the save");
+                return pass();
+            }
         }
         return fail("unknown check " + s.screen);
     }
