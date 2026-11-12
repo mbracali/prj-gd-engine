@@ -98,6 +98,15 @@ public:
         uint32_t dof = 0;  // its dof (a DOF_*_tod_manager global; 0: DOF_Off_TOD_Manager)
         bool crowdOff = false;  // the entry's CrowdOff flag: enable_crowd_models_cfunc active = false [C script CameraCuts_StartCallback]
         uint32_t screenFx = 0;  // next_screenfx when it started (ApplyScreenFx; 0: none) [C script]
+        // The camera notes 101..104, 107, 108 (CameraBlur_* / CameraFX_Black*):
+        // the script, when it ran and the note's length; killed at the next
+        // cut (CameraCuts_ScriptsToKillOnCut). 0: none.
+        uint32_t fxScript = 0;
+        double fxStart = 0, fxLength = 0;
+        // CameraFX_WhiteFlash, spawned by ApplyDeferredCameraEffects one game
+        // frame after the cut when note 106 set cameracuts_pendingwhiteflash
+        // (< 0: none) [C scripts guitar_cameras.qb].
+        double flashStart = -1;
     };
     const Shot& shot() const { return shot_; }
     int cuts() const { return cuts_; }
@@ -152,6 +161,7 @@ private:
     std::string prefix_ = "cameras";
     uint32_t goodArray_ = 0, normalArray_ = 0, poorArray_ = 0;
     uint32_t forceType_ = 0, nextName_ = 0, lastType_ = 0;
+    bool pendingWhiteFlash_ = false;  // cameracuts_pendingwhiteflash (note 106)
     uint32_t nextScreenFx_ = 0;  // CameraCuts_SetNextScreenFx effect (screen_fx.cpp readShot)
     bool changeNow_ = false, enabled_ = true;
     bool allowNotes_ = true;      // CameraCuts_AllowNoteScripts

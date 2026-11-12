@@ -118,6 +118,17 @@ void readDof(const Globals& g, uint32_t manager, Params& p);
 uint32_t effectManager(const Globals& g, uint32_t effect);
 // The viewport's params for a shot: its effect's manager (cached), then its dof.
 void readShot(const Globals& g, uint32_t effect, uint32_t dof, Params& p);
+// The camera notes' scripts on the shot's params [C scripts misc_fx.qb,
+// bg_screenfx.qb]: CameraBlur_FastZoom_InandOut / SlowZoom_InandOut /
+// FocusIn / FocusOut (BG_fx_set_blur: dof3 strength with every blur
+// distance 0, back to the start values), CameraFX_BlackFadeIn (brightness to
+// 0 over the note's length) / BlackFadeOut (0, then back over 0.75 s) on the
+// TOD's Brightness___Saturation, and CameraFX_WhiteFlash (brightness 100,
+// contrast 0, saturation 0.5348 for 0.06 s, back over 0.06 s). `sinceMs`:
+// song ms since the script ran (< 0: none); `flashSinceMs` likewise for the
+// white flash. ScreenFX_UpdateFXInstanceParams' `time` is taken as a linear
+// blend from the values then [I].
+void cameraNoteFx(uint32_t script, double sinceMs, double lengthMs, double flashSinceMs, Params& p);
 
 class ScreenFx {
 public:

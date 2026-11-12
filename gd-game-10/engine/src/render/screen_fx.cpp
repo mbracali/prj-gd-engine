@@ -983,4 +983,73 @@ void readShot(const Globals& g, uint32_t effect, uint32_t dof, Params& p) {
     readDof(g, dof, p);
 }
 
+namespace {
+
+// A script's ScreenFX_UpdateFXInstanceParams calls on one instance: each at
+// `at` s blends the values from what they are then to its `to` over `dur` s
+// (empty `to`: back to the start values) [I: linear].
+struct FxStep {
+    double at, dur;
+    std::vector<float> to;
+};
+std::vector<float> fxTimeline(const std::vector<float>& start, const std::vector<FxStep>& steps, double t) {
+    std::vector<float> v = start;
+    for (size_t i = 0; i < steps.size() && steps[i].at <= t; ++i) {
+        std::vector<float> from = start;  // the values when this step runs
+        if (i > 0) from = fxTimeline(start, std::vector<FxStep>(steps.begin(), steps.begin() + long(i)), steps[i].at);
+        const std::vector<float>& to = steps[i].to.empty() ? start : steps[i].to;
+        const double a = steps[i].dur <= 0 ? 1.0 : std::clamp((t - steps[i].at) / steps[i].dur, 0.0, 1.0);
+        for (size_t k = 0; k < v.size(); ++k) v[k] = from[k] + (to[k] - from[k]) * float(a);
+    }
+    return v;
+}
+
+}  // namespace
+
+void cameraNoteFx(uint32_t script, double sinceMs, double lengthMs, double flashSinceMs, Params& p) {
+    const auto K = [](const char* n) { return qbkey::key(n); };
+    constexpr double kFrame = 1.0 / 60.0;
+    if (script && sinceMs >= 0) {
+        const double t = sinceMs / 1000.0;
+        // BG_fx_set_blur appendStrength = s: on, strength s, every near / far distance 0.
+        Dof& d = p.dof;
+        const std::vector<float> start{d.on ? 1.0f : 0.0f, d.strength, d.nearBegin, d.nearEnd, d.frontDist, d.backDist};
+        auto blur = [](float s) { return std::vector<float>{1, s, 0, 0, 0, 0}; };
+        std::vector<FxStep> steps;
+        if (script == K("CameraBlur_FastZoom_InandOut"))
+            steps = {{0, 0.1, blur(1)}, {0.2, 0.3, blur(0)}, {0.4, 0.1, blur(0.5)}, {0.5, 0.4, {}}};
+        else if (script == K("CameraBlur_SlowZoom_InandOut"))
+            steps = {{0, 0.5, blur(1)}, {0.4, 0.4, blur(0)}, {0.9, 0.3, blur(1)}, {1.2, 0.4, {}}};
+        else if (script == K("CameraBlur_FocusIn"))
+            steps = {{0, 0, blur(1)}, {0.1, 0.5, {}}};
+        else if (script == K("CameraBlur_FocusOut"))
+            steps = {{0, 0.6, blur(1)}};
+        if (!steps.empty()) {
+            const std::vector<float> v = fxTimeline(start, steps, t);
+            d.on = v[0] > 0.5f, d.strength = v[1], d.nearBegin = v[2], d.nearEnd = v[3], d.frontDist = v[4], d.backDist = v[5];
+        }
+        // BG_fx_set_brightness_BlackFade appendBrightness = 0 on Brightness___Saturation (the TOD's).
+        BrightSat& bs = p.brightSat[0];
+        if (bs.on) {
+            if (script == K("CameraFX_BlackFadeIn"))
+                bs.brightness = fxTimeline({bs.brightness}, {{0, lengthMs / 1000.0, {0.0f}}}, t)[0];
+            else if (script == K("CameraFX_BlackFadeOut"))
+                bs.brightness = fxTimeline({bs.brightness}, {{0, 0, {0.0f}}, {kFrame, 0.75, {}}}, t)[0];
+        }
+    }
+    BrightSat& bs = p.brightSat[0];
+    if (flashSinceMs >= 0 && bs.on) {
+        // BG_fx_set_brightness_WhiteFlash appendBrightness = 100: contrast 0,
+        // hue 1, saturation 0.5348, the identity mix; after 0.06 s back over 0.06 s.
+        std::vector<float> start{bs.brightness, bs.contrast, bs.hue, bs.saturation};
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c) start.push_back(bs.mix[r][c]);
+        std::vector<float> flash{100, 0, 1, 0.5348f, 1, 0, 0, 0, 1, 0, 0, 0, 1};
+        const std::vector<float> v = fxTimeline(start, {{0, 0, flash}, {0.06, 0.06, {}}}, flashSinceMs / 1000.0);
+        bs.brightness = v[0], bs.contrast = v[1], bs.hue = v[2], bs.saturation = v[3];
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c) bs.mix[r][c] = v[size_t(4 + r * 3 + c)];
+    }
+}
+
 }  // namespace screenfx

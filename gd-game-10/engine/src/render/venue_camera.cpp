@@ -171,6 +171,17 @@ void CameraDirector::applyNote(const ChartEvent& e) {
         } else if (scr == K("CameraCuts_SetNextScreenFx")) {
             // change next_screenfx = <effect>: applied at the next cut [C script].
             nextScreenFx_ = params ? keyOf(params->find(K("effect"))) : 0;
+        } else if (scr == K("CameraCuts_SetPendingWhiteFlash")) {
+            pendingWhiteFlash_ = true;  // change cameracuts_pendingwhiteflash = true [C script]
+            static const bool camLog = SDL_getenv("GD10_CAMLOG") != nullptr;
+            if (camLog) SDL_Log("camera: note %d at %d ms: white flash at the next cut", e.note, e.time);
+        } else if (scr == K("CameraBlur_FastZoom_InandOut") || scr == K("CameraBlur_SlowZoom_InandOut") || scr == K("CameraBlur_FocusIn") ||
+                   scr == K("CameraBlur_FocusOut") || scr == K("CameraFX_BlackFadeIn") || scr == K("CameraFX_BlackFadeOut")) {
+            // Spawned with ScrID CameraCuts_ScriptsToKillOnCut (a later one runs
+            // alongside; the last wins here) [C data CameraCuts_NoteMapping; I: one at a time].
+            shot_.fxScript = scr, shot_.fxStart = double(e.time), shot_.fxLength = double(e.length);
+            static const bool camLog = SDL_getenv("GD10_CAMLOG") != nullptr;
+            if (camLog) SDL_Log("camera: note %d at %d ms: %s (%d ms)", e.note, e.time, qbkey::names().get(scr).c_str(), e.length);
         }
         return;
     }
@@ -262,6 +273,10 @@ void CameraDirector::startShot(double t) {
     const qb::Value* arr = arrKey ? global(arrKey) : nullptr;
     shot_ = Shot{};
     shot_.start = t;
+    if (pendingWhiteFlash_) {
+        pendingWhiteFlash_ = false;
+        shot_.flashStart = t + 1000.0 / 60.0;
+    }
     shot_.screenFx = nextScreenFx_;
     shot_.array = arrKey;
     ++cuts_;

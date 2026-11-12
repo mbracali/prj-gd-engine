@@ -773,6 +773,11 @@ void VenueStage::draw(double ms) {
         screenfx::Params p = fxParams_;
         // ApplyScreenFx effect = next_screenfx (the camera notes' TOD manager) then the shot's dof [C].
         if (globals_) screenfx::readShot(*globals_, cameras_.shot().screenFx, cameras_.shot().dof, p);
+        {
+            // The camera notes 101..108 (blur zooms / focus, black fades, the cut's white flash) [C scripts].
+            const auto& sh = cameras_.shot();
+            screenfx::cameraNoteFx(sh.fxScript, sh.fxScript ? ms - sh.fxStart : -1.0, sh.fxLength, sh.flashStart >= 0 && ms >= sh.flashStart ? ms - sh.flashStart : -1.0, p);
+        }
         // ScreenFlash (z_prison's flares): FlashBS on the venue viewport, a
         // bright_sat of its own after the TOD's [C scripts misclightutils.qb].
         if (float b = 1, c = 1; particles_ && particles_->flash(ms, b, c)) {
