@@ -496,3 +496,54 @@ every song and for ever after it, and the game "do a lot of wrong stuff"
 after a quit (the quit song's end pulled the menus back to gameplay).
 Undo: natives_game.cpp's SongUnLoad, app.cpp's transition WarmUp block,
 song_hooks.cpp's crowd_reset, sfx.cpp's `v.paused = false` in the stops.
+
+## D100. Band_PlayClip as gh4's C function plays it [C 0x8219EF48, 0x82196A90, 0x8219ED08] (2026-11-12, characters agent)
+
+What: startframe / endframe are 1/30 s (0x8219F088: x 0.0333, the members'
+and the clip cameras' offsets; they were read as 60 Hz frames); each
+member's anim plays on the moment branch with blendduration 0 and
+blendoutduration 0 (a switch, no cross-fade); endframe returns the members
+to idle at event_time + (endframe - startframe) / 30 s (+1 frame:
+return_characters_to_idle_at_song_time's Band_ForceToIdle); arms.<member>:
+ik_targetl / ik_targetr guitar | slave set each hand chain's target
+(ik_setchaintarget, blend 0); strum / fret / chord on | off drive the
+hero_arm_branch's strum_anim_mod (over enable_strum_blend_time 0.2),
+fret_anim_mod (enable_fret_blend_time 0) and chord_anim_mod (at once).
+end_moment_anim puts the hand chains back on the guitar (guitar / bass /
+rhythm parts, else slave). [I]: the call's disable_arms (2 for the
+vocalist / drummer) does not switch the IK off: the clips leave the
+forearms unanimated (no keys, masked off), the elbows come from the IK onto
+the clip's slave bones (James' arms hung with it off).
+Undo: render/band_anim.cpp Ev::Mocap / Ev::BodyDone, mocap_camera.cpp.
+
+## D101. The tree by the instrument: James on the guitarist tree [C script create_band_member]
+
+What: create_band_member picks the tree by the instrument (vocals:
+vocalist_static_tree, drum: drummer_static_tree, else guitarist_static_tree),
+so the vocalist on rhythm (James) or bass (Lemmy) is guitar-like: Hero IK,
+strums, frets, chords (the guitar part's notes [I]). A singer's IK is
+Singer_IK_Params_Arms + _Legs (gh4 has no Singer_IK_Params). gh4's drummer
+tree has no arm nodes and the XEX no Drum_iterator: no GH3 drum-arm hits.
+Undo: Animator::vocalPlays_, the gh4 drummer guards.
+
+## D102. The accessory ragdolls: one solve a frame, limits always in it, resets [I: Havok's 4ITERS_MEDIUM; C scripts]
+
+What: one 60 Hz step of four Gauss-Seidel iterations with accumulated,
+clamped impulses and one integration (before: four sub-steps each with its
+own error correction); the twist / cone / planes limit rows always in the
+solve (inside the limit the joint may close the gap within the step);
+ragdoll_markforreset (handle_moment_anim_blending, end_moment_anim) at each
+mocap clip's start and end and at the member's first pose puts the bodies on
+the animated pose at rest. A body whose .rag constraint ties it to a body
+that is not one of its skeleton parents is animated, not simulated, and
+logged (Rob: Bone_ACC_Head_09 -> Bone_Ankle_R). Undo: render/band_ragdoll.cpp
+step / rows / apply's reset, init's ancestor check.
+
+## D103. A pose evaluated behind the newest events [I]
+
+What: the ragdoll steps evaluate the animation at step times up to a frame
+behind the newest advance; the modulate ramps keep their last segments, a
+node's plays are kept a second after a newer one is fully in and skipped
+before they start, the IK targets switch by time: the pose at a song time
+is the same at 60 and 240 fps (Band::frameRateCheck, 1 mm).
+Undo: render/band_anim.cpp Ramp, firstShown, Node::play's prune.

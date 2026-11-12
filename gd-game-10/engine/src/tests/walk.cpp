@@ -20,7 +20,9 @@
 #include "data/band.h"
 #include "data/json.h"
 #include "data/qbkey.h"
+#include "render/band.h"
 #include "render/canvas.h"
+#include "render/venue_stage.h"
 #include "game/save.h"
 #include "script/vm.h"
 #include "ui/front_end.h"
@@ -68,6 +70,25 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"song", {Op("wait", 2000), "key:Escape"}, 20000});
         steps_.push_back({"uistate_pausemenu", {"wait", "wait", "wait", D, "wait", "shot:pause_1@", D, "wait", "shot:pause_2@", D, "wait",
                                                 "shot:pause_3@", D, "wait", "shot:pause_4@", D, "wait", "shot:pause_5@", "wait"}, 20000});
+    } else if (name == "band_motion") {
+        // The band in a song (GD10-044): No Fail on, Quickplay to the first
+        // song, then 9 s and 14 s in (after the load hitch check; it ends near 20 s) the members' live poses plausible (no limb off its
+        // bind length, accessories on their joints, hands on their IK
+        // targets) and the band played again from its start at 60 and at
+        // 240 fps to every 5 s so far: the same poses (Band::frameRateCheck).
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"set:enhanced:no_fail=on", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, C}, 10000});
+        steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
+        steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", C, "wait", "wait", "key:Return"}, 20000});
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", C, "wait", "wait", "key:Return"}, 20000, true});
+        steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, "wait", C}, 20000});
+        steps_.push_back({"song", {Op("wait", 9000), "check:band_motion", "shot:band_motion_1@", Op("wait", 5000), "check:band_motion",
+                                   "shot:band_motion_2@"}, 90000});
     } else if (name == "qp_quit" || name == "qp_restart" || name == "qp_finish") {
         // The song's lifecycle (the owner: a quit song played on, the crowd
         // screamed for ever): Quickplay to a song; qp_quit: pause -> Quit ->
@@ -1612,6 +1633,21 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         if (std::fabs(pv.speed - 1.0f) > 0.001f) return fail("preview: not at full speed");
         if (pos < pv.startMs || pos > pv.startMs + 15000.0) return fail("preview: the stream is not where it started");
         return true;
+    }
+    if (what == "check:band_motion") {
+        VenueStage* venue = host.walkVenue();
+        Band* band = venue ? venue->band() : nullptr;
+        if (!band || band->members().empty()) return fail("band_motion: no band in the song");
+        const double ms = band->members().front().evaluatedAt;
+        if (const std::string p = band->plausible(ms); !p.empty()) return fail("band_motion: live pose at " + std::to_string(int(ms)) + " ms: " + p);
+        std::vector<double> times;
+        for (double t = 5000; t <= ms; t += 5000) times.push_back(t);
+        times.push_back(ms);
+        int checked = 0;
+        const std::string r = band->frameRateCheck(times, checked);
+        std::printf("  band_motion: %zu members live at %.0f ms plausible; %d poses again at 60 / 240 fps%s%s\n", band->members().size(), ms, checked,
+                    r.empty() ? ", the same and plausible" : ": ", r.c_str());
+        return r.empty() ? true : fail("band_motion: " + r);
     }
     if (what == "check:song_quiet") {
         // The song's lifecycle (GD10-060): after a quit / restart / the

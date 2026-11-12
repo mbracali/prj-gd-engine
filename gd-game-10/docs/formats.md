@@ -188,7 +188,7 @@ keys (0 or 2) [I], u32 their offset or -1, then the offsets of the Q data
 (first key 0, last = duration x 60); names I]. A song's mocap clips
 (`<Song>_G_01`, `_B_`, `_D_`, `_S_` = guitarist, bassist, drummer, singer;
 `_cNN_` = 3-bone GH4_Camera clips) are played by `Band_PlayClip {clip
-startframe}` in `<song>_performance`, the clip struct
+startframe endframe}` (frames of 1/30 s, D100) in `<song>_performance`, the clip struct
 (`<song>_song_scripts.qb`) naming each member's anim, start node and arms.
 
 ## gh4 character additions (2026-11-11, D60..D66)

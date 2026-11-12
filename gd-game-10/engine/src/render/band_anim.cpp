@@ -157,6 +157,15 @@ float clipTime(const Play& p, double t) {
     return float(std::clamp((t - p.start) / 1000.0 + double(p.offset), 0.0, double(p.clip ? p.clip->duration : 0.0f)));
 }
 
+// The newest play fully blended in at t (what lies before it is hidden).
+size_t firstShown(const Node& n, double t) {
+    for (size_t i = n.plays.size(); i-- > 0;) {
+        const Play& p = n.plays[i];
+        if (p.clip && p.start <= t && p.start + double(p.blend) * 1000.0 <= t) return i;
+    }
+    return 0;
+}
+
 // A degenerateblend node over `pose`: each clip's pose (over the bind pose for
 // the body, over what lies below for a partial node) cross-faded in from the
 // previous one [I: linear weights].
@@ -165,8 +174,9 @@ void evalNode(const Rig& rig, const Node& n, double t, Pose& pose, bool fromBind
     const Pose below = fromBind ? rig.bind : pose;
     Pose cur = below, target;
     bool first = true;
-    for (const Play& p : n.plays) {
-        if (!p.clip) continue;
+    for (size_t i = firstShown(n, t); i < n.plays.size(); ++i) {
+        const Play& p = n.plays[i];
+        if (!p.clip || p.start > t) continue;  // not started at t (a pose evaluated behind the newest events)
         target = below;
         overrideInto(rig, *p.clip, clipTime(p, t), target, tmp);
         const float w = first && !fromBind ? weightAt(p, t) : (first ? 1.0f : weightAt(p, t));
@@ -181,8 +191,9 @@ void evalNode(const Rig& rig, const Node& n, double t, Pose& pose, bool fromBind
 void evalDelta(const Rig& rig, const Node& n, double t, float strength, Pose& pose, std::vector<anim::BonePose>& tmp) {
     if (n.plays.empty() || strength <= 0) return;
     Pose cur(rig.size()), target;
-    for (const Play& p : n.plays) {
-        if (!p.clip) continue;
+    for (size_t i = firstShown(n, t); i < n.plays.size(); ++i) {
+        const Play& p = n.plays[i];
+        if (!p.clip || p.start > t) continue;
         target.assign(rig.size(), Xf{});
         if (isDifference(*p.clip)) {
             deltaInto(rig, *p.clip, clipTime(p, t), target, tmp);
@@ -296,26 +307,37 @@ void Rig::init(const anim::Skeleton& s) {
 
 void Node::play(const anim::Clip* c, double t, float blend, float offset) {
     plays.push_back({c, t, blend, offset});
-    // Drop what a fully blended-in clip hides.
+    // Drop what a clip fully blended in for a second hides (a pose may be
+    // evaluated up to a frame or so behind the newest play: the ragdoll).
     for (size_t i = plays.size() - 1; i > 0; --i)
-        if (plays[i].start + double(plays[i].blend) * 1000.0 <= t) {
+        if (plays[i].start + double(plays[i].blend) * 1000.0 + 1000.0 <= t) {
             plays.erase(plays.begin(), plays.begin() + long(i));
             break;
         }
-    if (plays.size() > 8) plays.erase(plays.begin(), plays.end() - 8);
+    if (plays.size() > 32) plays.erase(plays.begin(), plays.end() - 32);
 }
 
 float Ramp::at(double t) const {
-    if (length <= 0 || t >= start + length) return to;
-    if (t <= start) return from;
-    return from + (to - from) * float((t - start) / length);
+    if (segs.empty()) return 1.0f;
+    const Seg* s = &segs.front();
+    for (auto it = segs.rbegin(); it != segs.rend(); ++it)
+        if (it->start <= t) {
+            s = &*it;
+            break;
+        }
+    if (s->length <= 0 || t >= s->start + s->length) return t < s->start ? s->from : s->to;
+    if (t <= s->start) return s->from;
+    return s->from + (s->to - s->from) * float((t - s->start) / s->length);
 }
 
 void Ramp::set(float target, double t, double seconds) {
-    from = at(t);
-    to = target;
-    start = t;
-    length = seconds * 1000.0;
+    Seg s;
+    s.from = at(t);
+    s.to = target;
+    s.start = t;
+    s.length = seconds * 1000.0;
+    segs.push_back(s);
+    if (segs.size() > 16) segs.erase(segs.begin());
 }
 
 void Animator::schedule(double t, Ev kind, int a, int b, uint32_t gen, const qb::Struct* params) {
@@ -513,6 +535,7 @@ bool Animator::init(const Setup& s, std::string& error) {
             if (!mc.clip) continue;
             const qb::Value* sf = params->find(K("startframe"));
             mc.startFrame = sf ? float(sf->number()) : 0.0f;
+            if (const qb::Value* ef = params->find(K("endframe"))) mc.endFrame = float(ef->number());
             if (const qb::Struct* arms = structOf(cs->find(K("arms")))) mc.arms = structOf(arms->find(model_->member.object));
             mocaps_.push_back(mc);
             add(tv->number(), Ev::Mocap, int(mocaps_.size() - 1), 0, p);
@@ -1049,7 +1072,13 @@ void Animator::handle(const Event& e) {
             }
             if (guitarLike()) setArms(arms, t, 0.25f);
         }
-        schedule(t + std::max(kFrameMs, double(mc.clip->duration - offset) * 1000.0), Ev::BodyDone, 0, 0, bodyGen_);
+        double endMs = t + std::max(kFrameMs, double(mc.clip->duration - offset) * 1000.0);
+        // endframe: return_characters_to_idle_at_song_time at event_time +
+        // (endframe / 30 - startframe / 30) x 1000 [C 0x8219F920..0x8219F9B8],
+        // whose Band_ForceToIdle comes a frame after that time [C script].
+        if (gh4 && mc.endFrame >= 0)
+            endMs = std::min(endMs, t + std::max(0.0, double(mc.endFrame * kClipFrameSec - offset) * 1000.0) + kFrameMs);
+        schedule(endMs, Ev::BodyDone, 0, 0, bodyGen_);
         break;
     }
     case Ev::BodyDone:
@@ -1337,6 +1366,25 @@ void Animator::applyConstraints(Pose& pose) const {
         }
         }
     }
+}
+
+float Animator::ikMiss(double ms, const std::vector<Mat34>& world) const {
+    float worst = -1;
+    for (const Chain& c : chains_) {
+        if (c.hand < 0 || size_t(c.b2) >= world.size()) continue;
+        const float s = !guitarLike() ? 1.0f : c.right ? rightStrength_.at(ms) : leftStrength_.at(ms);
+        if (s < 0.99f) continue;
+        int tgt = c.target;
+        if (model_->member.gh4) {
+            bool slave = c.slaveBone >= 0 && c.target == c.slaveBone;
+            for (const IkSwitch& sw : ikSwitch_)
+                if (sw.t <= ms) slave = c.hand ? sw.slaveR : sw.slaveL;
+            const int b = slave ? c.slaveBone : c.guitarBone;
+            if (b >= 0) tgt = b;
+        }
+        worst = std::max(worst, vlen(vsub(posOf(world[size_t(c.b2)]), posOf(world[size_t(tgt)]))));
+    }
+    return worst;
 }
 
 void Animator::setIkTargets(double t, int left, int right) {

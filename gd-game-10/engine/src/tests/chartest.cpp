@@ -617,6 +617,14 @@ int runCharTest(const std::string& discPath) {
             ++agree;
         }
         if (offA) fail(zone + ": " + std::to_string(offA) + " of " + std::to_string(framedA) + " framed checkpoints lose their member, first " + offWhat);
+        // The band's poses plausible at every checkpoint, and Band::frameRateCheck.
+        {
+            int checked = 0;
+            std::vector<double> times;
+            for (double t = 2000; t < songEnd && times.size() < 40; t += 7919) times.push_back(t);
+            if (const std::string r = a.band()->frameRateCheck(times, checked); !r.empty()) fail(zone + ": band motion: " + r);
+            else std::printf("chartest %s: band motion: %d poses plausible and the same at 60 / 240 fps\n", zone.c_str(), checked);
+        }
         // Golden: the poses at 5, 30 and 60 s of song time.
         std::vector<float> all;
         for (const Sample& s : sa)

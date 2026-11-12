@@ -8,6 +8,9 @@
 #include <SDL3/SDL_stdinc.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdio>
 #include <exception>
 
 #include "data/disc.h"
@@ -43,6 +46,7 @@ bool Band::start(const Disc& disc, const Globals& g, const venue::Venue& v, cons
 
 bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, const Chart& chart, const std::vector<band::Member>& chosen,
                      const venue::PerfTimeline* perf, double startMs, std::string& error) {
+    disc_ = &disc, g_ = &g, venue_ = v, chart_ = &chart, perf_ = perf, chosen_ = chosen, startMs_ = startMs;
     members_.clear();
     view_.reset();
     songFiles_.clear();
@@ -307,4 +311,90 @@ void Band::draw(double ms, const venue::CamPose& cam, const venue::Venue& v, con
     view_->setTime(ms / 1000.0);
     view_->draw(cam, inst, v, lights, show);
     view_->setReuseSkinning(false);
+}
+
+std::string Band::plausible(double ms) const {
+    char buf[256];
+    for (const Entry& e : members_) {
+        const bandanim::Rig& rig = e.anim.rig();
+        const std::string who = e.model->member.profileName;
+        if (e.world.size() != rig.size()) continue;
+        for (size_t b = 0; b < e.world.size(); ++b)
+            for (float v : e.world[b].m)
+                if (!std::isfinite(v)) return who + ": a bone is not finite at " + std::to_string(int(ms)) + " ms";
+        for (size_t b = 1; b < e.world.size(); ++b) {
+            const int p = rig.parent[b];
+            if (p <= 0) continue;  // the root's children move freely (the clips' root motion)
+            // Props and helpers slide by design (the fret position along the
+            // neck, the IK targets, the mic, the sticks): the body's bones only.
+            std::string n = qbkey::name(e.model->skeleton->bones[b].name);
+            for (char& ch : n) ch = char(std::tolower(static_cast<unsigned char>(ch)));
+            bool prop = false;
+            for (const char* w : {"guitar", "ik_", "fret", "string", "mic", "stick", "camera", "prop", "drum", "bass"}) prop = prop || n.find(w) != std::string::npos;
+            if (prop) continue;
+            const bandanim::Vec d = {e.world[b].m[3] - e.world[size_t(p)].m[3], e.world[b].m[7] - e.world[size_t(p)].m[7],
+                                     e.world[b].m[11] - e.world[size_t(p)].m[11]};
+            const float len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+            const bandanim::Vec& bt = rig.bind[b].t;
+            const float bindLen = std::sqrt(bt.x * bt.x + bt.y * bt.y + bt.z * bt.z);
+            // An accessory joint may open by checkAndFixConstraint's 5 cm
+            // before it is fixed, plus a frame's swing [C 823FFC28: 0.05].
+            const bool acc = e.acc && e.acc->isDynamic(int(b));
+            if (std::fabs(len - bindLen) > std::max(acc ? 0.08f : 0.05f, 0.15f * bindLen)) {
+                std::snprintf(buf, sizeof buf, "%s: bone %s is %.3f m from its parent at %d ms (bind %.3f m)%s", who.c_str(),
+                              qbkey::name(e.model->skeleton->bones[b].name).c_str(), double(len), int(ms), double(bindLen),
+                              acc ? " (an accessory)" : "");
+                return buf;
+            }
+        }
+        const float miss = e.anim.ikMiss(ms, e.world);
+        if (miss > 0.10f) {
+            std::snprintf(buf, sizeof buf, "%s: a hand %.2f m off its IK target at %d ms", who.c_str(), double(miss), int(ms));
+            return buf;
+        }
+    }
+    return "";
+}
+
+std::string Band::frameRateCheck(const std::vector<double>& times, int& checked) const {
+    checked = 0;
+    if (!disc_ || times.empty()) return "";
+    Band a, b;
+    std::string err;
+    if (!a.startWith(*disc_, *g_, venue_, *chart_, chosen_, perf_, startMs_, err) || !b.startWith(*disc_, *g_, venue_, *chart_, chosen_, perf_, startMs_, err))
+        return "the band does not start again: " + err;
+    // Frame times at `fps` from the start, each check time also a frame.
+    auto play = [&](Band& band, int fps, double until, double& at) {
+        const double step = 1000.0 / fps;
+        while (at + step < until) {
+            at += step;
+            band.advance(at);
+            band.evaluate(at);
+        }
+        at = until;
+        band.advance(at);
+        band.evaluate(at);
+    };
+    double ta = startMs_, tb = startMs_;
+    char buf[256];
+    for (double t : times) {
+        if (t <= startMs_) continue;
+        play(a, 60, t, ta);
+        play(b, 240, t, tb);
+        if (std::string p = a.plausible(t); !p.empty()) return p;
+        for (size_t m = 0; m < a.members_.size() && m < b.members_.size(); ++m) {
+            const Entry &x = a.members_[m], &y = b.members_[m];
+            for (size_t k = 0; k < x.world.size() && k < y.world.size(); ++k) {
+                float d = 0;
+                for (int i : {3, 7, 11}) d = std::max(d, std::fabs(x.world[k].m[i] - y.world[k].m[i]));
+                if (d > 0.001f) {
+                    std::snprintf(buf, sizeof buf, "%s: bone %s %.4f m apart at 60 and 240 fps at %d ms", x.model->member.profileName.c_str(),
+                                  qbkey::name(x.model->skeleton->bones[k].name).c_str(), double(d), int(t));
+                    return buf;
+                }
+            }
+        }
+        ++checked;
+    }
+    return "";
 }

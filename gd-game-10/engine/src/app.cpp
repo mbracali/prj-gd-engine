@@ -113,6 +113,7 @@ public:
     Input& walkInput() override { return input_; }
     std::string walkSaveDir() override { return saveDir_; }
     bool walkSongAudio() override { return song_ != nullptr; }
+    VenueStage* walkVenue() override { return song_ ? song_->venue() : nullptr; }
     std::string walkEnhanced(const std::string& key) override { return enhanced_.get(key); }
     void walkSetEnhanced(const std::string& key, const std::string& value) override { enhanced_.set(key, value), applyEnhanced(key); }
 

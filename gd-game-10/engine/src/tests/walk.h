@@ -12,6 +12,7 @@
 
 class FrontEnd;
 class PortScreens;
+class VenueStage;
 
 // What the port's walks (mouse, gamepads, stickyaxis) reach in the app.
 struct WalkHost {
@@ -27,6 +28,8 @@ struct WalkHost {
     virtual void walkSetEnhanced(const std::string& key, const std::string& value) = 0;
     // The song (its streams on the mixer) still alive (check:song_quiet).
     virtual bool walkSongAudio() { return false; }
+    // The playing song's venue (check:band_motion); null: none.
+    virtual VenueStage* walkVenue() { return nullptr; }
 };
 
 // --walktest <walk>: plays through GH3's own menus with scripted buttons

@@ -711,3 +711,40 @@ Not done: the WarmUp runs at the song's start, not the table's 100 ms;
 <Current_Crowd_Applause_SoundEvent_L> is a local the WarmUp scripts never
 get (the first song's applause is silent); in-venue loading (career's
 Loading transition) and Lou's devil_finish_restart not walked.
+
+## 2026-11-12 Characters' motion and physics (GD10-044, D100..D103, characters agent)
+
+Owner: "the characters are moving all weird and bug out", "physics on the
+characters look wrong". Looked at: chartest member front shots
+(GD10_CHARTEST_MEMBERS, _MEMBER_BONE) of Kirk, James, Lars and Rob at -2..200 s
+in Enter Sandman (z_forum), Master of Puppets and One (z_forum, z_tushino);
+the Havok solver's per-step stats (GD10_RAGDOLL_LOG).
+
+Found and fixed:
+- Band_PlayClip's startframe is 1/30 s (0x8219F088), not 60 Hz: every mocap
+  clip and its cameras ran from half its frame (James and Rob 8.8 s off for
+  Enter Sandman's first 49 s).
+- The clip starts and ends with no blend (0x82196C18): no 0.3 s slide.
+- endframe ends a clip (solo clips in One ran on past it).
+- The hand IK during mocap: the clips' forearms are unanimated, the IK onto
+  the clip's slave bones places the hands; the port aimed every hand at the
+  guitar's bones (hands yanked off the mocap) or, for James, had no IK
+  (Singer_IK_Params does not exist in gh4): his arms hung by his sides,
+  hands off the guitar.
+- James (vocalist on rhythm) is on the guitarist tree: strums and chords.
+- strum / fret / chord switches per clip (strum_anim_mod etc.).
+- No GH3 drum-arm hits on gh4's drummer.
+- Ragdolls: one solve a frame with four accumulated iterations and the limits
+  always in it; resets at the mocap switches (the head's jump threw the hair:
+  joints 0.6 m apart); Rob's ankle-tied braid bone animated. Rob's braid no
+  longer stands up over his head (43 s).
+- 60 vs 240 fps: a ragdoll bone 2 mm off between rates (the animation
+  evaluated behind newer events); ramps / plays / IK targets now by time.
+
+Checks: chartest's ragdoll self-test; chartest's band motion (40 poses a
+venue: plausible and the same at 60 / 240 fps): Enter Sandman, Master of
+Puppets, One on z_forum and z_tushino; walk band_motion (Quickplay song,
+live poses at 12 s and 24 s plausible, the band replayed at 60 / 240 fps).
+Not done: Band_WalkToNode, band_movetostartnode after a clip, the clip's
+tempomatching / the body timer's pause and resume (a new loop starts),
+disable_arms' real effect, hair against the body (no collision bodies).

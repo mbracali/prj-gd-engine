@@ -85,9 +85,15 @@ struct Node {
 };
 
 // A modulate node's strength over time (modulate_startblend / modulate_setstrength).
+// Kept as its last segments, so a pose evaluated a little before the newest
+// change (the ragdoll's steps, behind the frame) sees the strength it had
+// then whatever the frame rate.
 struct Ramp {
-    float from = 1, to = 1;
-    double start = 0, length = 0;
+    struct Seg {
+        float from = 1, to = 1;
+        double start = 0, length = 0;
+    };
+    std::vector<Seg> segs;
     float at(double t) const;
     void set(float target, double t, double seconds);
 };
@@ -143,6 +149,9 @@ public:
     // (world x inverse bind).
     void evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>& skin) const;
     const Rig& rig() const { return rig_; }
+    // The farthest a hand chain's end (palm) is from its IK target in the
+    // model-space pose `world` at `ms`, over the chains fully on (-1: none).
+    float ikMiss(double ms, const std::vector<Mat34>& world) const;
     // ragdoll_markforreset's song times so far (gh4 handle_moment_anim_blending
     // / end_moment_anim: a mocap clip's start and end) [C scripts].
     const std::vector<double>& ragdollResets() const { return ragdollResets_; }
@@ -234,6 +243,7 @@ private:
         const anim::Clip* clip = nullptr;
         uint32_t key = 0;
         float startFrame = 0;
+        float endFrame = -1;  // Band_PlayClip's endframe (-1: none)
         const qb::Struct* arms = nullptr;
     };
     std::vector<Mocap> mocaps_;

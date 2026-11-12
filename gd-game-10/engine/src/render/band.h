@@ -115,6 +115,17 @@ public:
     const std::vector<qb::File>& songFiles() const { return songFiles_; }
     // Evaluates every member's pose at `ms` (after advance).
     void evaluate(double ms);
+    // The members' poses at `ms` (after evaluate) checked against what a
+    // body can do (walk band_motion, chartest): finite, every limb within
+    // 15 % / 5 cm of its bind length, the accessory bones on their joints,
+    // the hands on their IK targets (within 10 cm) while the chains are on.
+    // "" when plausible, else the first problem.
+    std::string plausible(double ms) const;
+    // A fresh copy of this band played from its start to each of `times`
+    // (ascending song ms) at 60 and at 240 fps: "" when every bone of every
+    // member is where it is at the other rate (1 mm) and plausible, else
+    // the first difference. `checked`: the poses compared.
+    std::string frameRateCheck(const std::vector<double>& times, int& checked) const;
     // One member's pose at `ms` (its animation and accessory bones; after its advance).
     static void evaluateEntry(Entry& e, double ms);
     // Draws the band's opaque meshes with a light's engine constants into
@@ -124,6 +135,14 @@ public:
                     const venue::LightShow& show);
 
 private:
+    // startWith's arguments (frameRateCheck's copies).
+    const Disc* disc_ = nullptr;
+    const Globals* g_ = nullptr;
+    const venue::Venue* venue_ = nullptr;
+    const Chart* chart_ = nullptr;
+    const venue::PerfTimeline* perf_ = nullptr;
+    std::vector<band::Member> chosen_;
+    double startMs_ = 0;
     size_t attached_ = 0;  // members attachStep uploaded
     std::unordered_map<uint32_t, gfx::TextureId> made_;  // the next member's textures (BandView::prepare)
     std::shared_ptr<band::Library> lib_;  // band::Library::shared
