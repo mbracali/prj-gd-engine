@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 #include "audio/synth.h"
 #include "data/dta.h"
@@ -19,6 +20,17 @@ namespace {
 std::string textOf(Interp& in, const Value& v) {
     const Value e = in.evalValue(v);
     return e.type == Value::Type::Object && e.object ? e.object->name() : e.str();
+}
+
+// GD05_CROWD_LEGACY=1: the crowd as before GD05-071 (no intro_start, no
+// BandCamShot crowd part, play_group_flags a stub): the archetypes keep
+// their bind pose, lying on the floor; the rb_crowd walk's before numbers.
+bool crowdLegacy() {
+    static const bool on = [] {
+        const char* e = SDL_getenv("GD05_CROWD_LEGACY");
+        return e && *e == '1';
+    }();
+    return on;
 }
 
 uint32_t flagsArg(Interp& in, std::vector<Value>& args, size_t k, uint32_t def) {
@@ -164,6 +176,23 @@ private:
         if (msg == "play_group" && !args.empty()) {
             a_.group = textOf(in, args[0]);
             d.playGroup(a_.group, flagsArg(in, args, 1, chr::kPlayLast));
+            return true;
+        }
+        // Rock Band's play_group_flags <group> <flags> [<play flags>] (CharDriver
+        // handler RB 0x82313140 [C]): the group's clip holding every flag
+        // (CharClipGroup FindClip RB 0x8231BF10; crowd.dta passes the song's
+        // anim_tempo, kTempoSlow / Medium / Fast, or 0 for any), played with
+        // the play flags (default 4). [I: no clip holding them: the group's next.]
+        if (msg == "play_group_flags" && !args.empty() && !crowdLegacy()) {
+            a_.group = textOf(in, args[0]);
+            const uint32_t want = flagsArg(in, args, 1, 0);
+            const uint32_t play = flagsArg(in, args, 2, 4);
+            chr::ClipSet* set = d.clipSet();
+            scene::CharClipGroup* g = set ? set->group(a_.group) : nullptr;
+            scene::CharClipSamples* clip = g ? set->nextMatching(*g, want) : nullptr;
+            if (g && !clip) clip = set->next(*g);
+            if (clip) d.playClip(clip, play);
+            else if (!g) SDL_Log("crowd: %s: main.drv has no clip group %s", a_.name.c_str(), a_.group.c_str());
             return true;
         }
         if (msg == "set" && args.size() >= 2) {
@@ -410,12 +439,27 @@ void Crowd::startShot(const scene::CamShot* shot, bool runScript) {
     if (!s) return;
     // StartAnim 0x82226120 sends start_shot first (camshot.dta: crowd_update,
     // rotate), then sets the crowd's 3D list.
-    if (runScript && s->script) {
+    // Rock Band's BandCamShot (band_objects.dta, type band) start_shot does
+    // the crowd's part itself [C data]: {[crowd] override_anim [crowd_anim]}
+    // {[crowd] crowd_update} {[crowd] set rotate [crowd_face_camera]}
+    // {[crowd] set_fullness [crowd_density] [crowd_density]}, the type's
+    // defaults crowd_anim '', crowd_face_camera FALSE, crowd_density 1. The
+    // port runs that part here (the world's scripts hold no BandCamShot type).
+    const bool rbShot = dynamic_cast<const scene::BandCamShot*>(shot) != nullptr && !crowdLegacy();
+    if (rbShot && s->script) {
+        Interp& in = world_.interp();
+        const std::string anim = shot->flag("crowd_anim"), face = shot->flag("crowd_face_camera"), density = shot->flag("crowd_density");
+        const float full = density.empty() ? 1.0f : float(std::atof(density.c_str()));
+        in.send(s->script, "override_anim", {Value::symbol(anim)}, false);
+        in.send(s->script, "crowd_update", {}, false);
+        in.send(s->script, "set", {Value::symbol("rotate"), Value::integer(face == "1" || face == "TRUE" ? 1 : 0)}, false);
+        setFullness(*s, full, full);
+    } else if (runScript && s->script) {
         Interp& in = world_.interp();
         in.send(s->script, "crowd_update", {}, false);
         in.send(s->script, "set", {Value::symbol("rotate"), Value::integer(shot->flag("crowd_face_camera") == "1" ? 1 : 0)}, false);
     }
-    if (!world_.interp().findObject("game")) setFullness(*s, fullnessFor(excitement_), fullnessFor(excitement_));
+    if (!rbShot && !world_.interp().findObject("game")) setFullness(*s, fullnessFor(excitement_), fullnessFor(excitement_));
     // 0x82247FD0: the old 3D placements go back to the cards (in their
     // place), then each pair (archetype, card index) moves to the 3D list
     // (out-of-range pairs are reported and skipped), the 3D list sorted;
@@ -584,7 +628,16 @@ void Crowd::listen(Interp& in, const std::string& msg, const std::vector<Value>&
         const bool fast = arg(0).truthy(), encore = arg(1).truthy();
         reactionSound("crowd_begin");
         audio_->introStart(fast, encore);
-        if (!in.findObject("game"))
+        // Rock Band's crowd.dta waits for intro_start instead: the game panel's
+        // start (RB 0x8242E520) runs game.dta pick_intro, whose {handle ($this
+        // intro_start)} reaches the game's sinks, the crowd's among them
+        // (crowd.dta enter: add_sinks ... intro_start) [C data; I: at the
+        // moment the port sends intro_start_msg]. It sets $crowd.tempo and
+        // starts every archetype's realtime_idle.
+        bool rb = false;
+        for (State& s : crowds_)
+            if (s.script && s.script->handler("intro_start") && !crowdLegacy()) rb = true, in.send(s.script, "intro_start", {}, false);
+        if (!rb && !in.findObject("game"))
             for (State& s : crowds_) setFullness(s, encore ? 1.0f : 0.5f, encore ? 1.0f : 0.5f);
     } else if (msg == "music_start") {
         reactionSound(audio_->musicStart(excitement_, now));

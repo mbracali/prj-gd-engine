@@ -540,6 +540,14 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         const std::string g = i >= 0 ? ui.host().songs()[size_t(i)].vocalGender : std::string();
         return Value::symbol(g.empty() ? "male" : g);
     });
+    // song_mgr anim_tempo <song>: songs.dtb's (anim_tempo kTempoSlow |
+    // kTempoMedium | kTempoFast), the macros' 16 / 32 / 64 [C data]; the
+    // crowd's clip flags (world/crowd.dta intro_start, GD05-071).
+    songMgr->on("anim_tempo", [&ui](std::vector<Value>& a) {
+        const int i = songInfoIndex(ui, strArg(a, 0));
+        const int t = i >= 0 ? ui.host().songs()[size_t(i)].animTempo : 1;
+        return Value::integer(t >= 16 ? t : 16 << std::clamp(t, 0, 2));
+    });
     songMgr->on("by_line", [&ui](std::vector<Value>& a) {
         const int i = songInfoIndex(ui, strArg(a, 0));
         return Value::string(i >= 0 ? ui.host().songs()[size_t(i)].artist : std::string());
