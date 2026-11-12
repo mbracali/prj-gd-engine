@@ -299,6 +299,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // texture) against the size its label's data gives through RB's
         // fit (songlist_text): scrolled, so headings and long names show.
         at("splash_screen", 30000);
+        check("unlock_all_songs");  // the list longer than the ten a new profile has (rb_qp_locked)
         wait(1500);
         press(kX);
         at("main_screen");
@@ -324,6 +325,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // (songlist_highlight: the drawn texts' middles against the quad).
         // GD05_SONGLIST_LEGACY=1 (rows without RB's song_select_gap) fails.
         at("splash_screen", 30000);
+        check("unlock_all_songs");  // the list longer than the ten a new profile has (rb_qp_locked)
         press(kX);
         at("main_screen");
         press(kX);  // SOLO
@@ -351,6 +353,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // GD05_MUSIC_LEGACY=1 / GD05_WARM_LEGACY=1 run the code before.
         endMs_ = 25000;
         at("splash_screen", 30000);
+        check("unlock_all_songs");  // the list longer than the ten a new profile has (rb_qp_locked)
         press(kX);
         at("main_screen");
         press(kX);  // SOLO
@@ -373,6 +376,30 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("counter:frame_marks:song_begin:1");
         check("counter_max:song_gpu_uploads:0");
         check("counter_max:frame_spike:song_begin!:240:150");  // the song's first 240 frames: longest <= 15 x the median frame
+    } else if (scenario == "rb_qp_locked") {
+        // GD05-073, owner (G06 6): "Quickplay: clicking a random song selects
+        // songs that are not unlocked". The quick play list holds the songs
+        // RB's rules make available on a new profile and nothing else
+        // (qp_locked: modes.dta's unlock_song_initial_num first songs by the
+        // rank of the mode's unlock_song_instrument, no (unlockable TRUE)
+        // song), Random Song draws only from them, and the song it starts
+        // is one of them. GD05_SONGLIST_LEGACY=1 (every song listed) fails.
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(1500);
+        check("qp_locked");
+        press(kX);  // Random Song (the first row)
+        at("qp_seldiff_solo_screen");
+        press(kX);  // the guitar slot's part
+        wait(1500);
+        press(kX);  // the focused difficulty: ready
+        at("game_screen", 60000);
+        check("qp_locked_song");
     } else if (scenario == "rb_esc3") {
         // Wave 05 (GD05-033, universal-behaviors.md): Esc three times in a
         // row on the main menu quits the game.
@@ -4072,6 +4099,49 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         for (size_t i = 0; i < xs.size(); ++i)
             for (size_t j = i + 1; j < xs.size(); ++j)
                 if (std::fabs(xs[i] - xs[j]) < 20) return fail("two band icons stand on each other");
+        return pass();
+    }
+    if (s.screen == "unlock_all_songs") {  // long_cheats.dta's code: every song listed (walks that scroll a long list)
+        ui.interp().send("profile_mgr", "unlock_all_songs", {});
+        return pass();
+    }
+    if (s.screen == "qp_locked" || s.screen == "qp_locked_song") {
+        // rb_qp_locked (GD05-073): the songs RB's SongMgr (0x82431AC8) makes
+        // available on a new profile, from the data alone.
+        const std::string inst = ui::gameCfgValue(ui, "unlock_song_instrument").str();
+        const int initial = ui::gameCfgValue(ui, "unlock_song_initial_num").integerValue();
+        std::vector<const SongInfo*> ranked;
+        int disc = 0, bonus = 0;
+        for (const SongInfo& si : ui.host().songs()) {
+            if (si.tutorial) continue;
+            ++disc, bonus += si.unlockable;
+            if (!si.unlockable && si.rank.count(inst)) ranked.push_back(&si);
+        }
+        std::stable_sort(ranked.begin(), ranked.end(), [&](const SongInfo* a, const SongInfo* b) { return a->rank.at(inst) < b->rank.at(inst); });
+        std::set<std::string> expected;
+        for (size_t i = 0; i < ranked.size() && int(i) < initial; ++i) expected.insert(ranked[i]->id);
+        if (s.screen == "qp_locked_song") {
+            const std::string song = ui.session().song;
+            std::printf("  quick play song started: %s (%s)\n", song.c_str(), expected.count(song) ? "available" : "LOCKED");
+            return expected.count(song) ? pass() : fail("the random song " + song + " is locked");
+        }
+        auto* sp = dynamic_cast<ui::ListProvider*>(ui.interp().findObject("song_provider"));
+        if (!sp) return fail("no song_provider");
+        std::set<std::string> listed;
+        for (int i = 0; i < sp->numData(); ++i)
+            if (sp->symbol(i) != "random_song") listed.insert(sp->symbol(i));
+        int lockedListed = 0, randomLocked = 0;
+        for (const std::string& id : listed) lockedListed += !expected.count(id);
+        for (int k = 0; k < 300; ++k) {
+            const std::string pick = ui.interp().send("song_provider", "get_song_to_set", {Value::integer(0)}).str();
+            randomLocked += !expected.count(pick);
+        }
+        qpLockedListed_ = lockedListed, qpRandomLocked_ = randomLocked;
+        std::printf("  quick play: unlock instrument '%s', initial %d; %d disc songs (%d bonus); expected available %zu, listed %zu, locked listed %d, "
+                    "random picks of locked songs %d of 300\n", inst.c_str(), initial, disc, bonus, expected.size(), listed.size(), lockedListed, randomLocked);
+        if (inst.empty() || expected.empty()) return fail("no unlock instrument / no available song from the data");
+        if (lockedListed || randomLocked || listed.size() != expected.size())
+            return fail(std::to_string(lockedListed) + " locked songs listed, " + std::to_string(randomLocked) + " random picks locked");
         return pass();
     }
     if (s.screen == "songlist_highlight") {

@@ -76,6 +76,11 @@ protected:
 };
 
 
+// profile_mgr unlock_all_songs (long_cheats.dta's ten-fret code on the
+// title): every song in the lists from now on (SongMgr's flag at
+// RB 0x8298F9C5, read by 0x82431AC8) [C]; true when it was not yet [I].
+bool g_unlockAllSongs = false;
+
 // song_provider, Rock Band's (ui/selsong.dta): the songs of the disc that
 // have a rank (songs.dtb), shown by the display RB's song select cycles
 // (rank first: band_ui / song_groupings in band.dtb), each group under a
@@ -88,6 +93,7 @@ public:
     explicit RbSongProvider(UiManager& ui) : ListProvider("song_provider", "SongProvider"), ui_(ui) {}
 
     void initData() override { build(); }
+    void rebuild() { built_ = false; }
     int numData() override {
         build();
         return int(data_.size());
@@ -178,14 +184,47 @@ public:
     }
 
 private:
+    // RB's SongMgr (0x82431AC8) [C]: a song a mode other than leaderboards
+    // lists only once it is available: downloaded, or every song unlocked
+    // (the cheat), or one of the mode's unlock_song_initial_num first songs
+    // (modes.dta: 10) by the rank of its unlock_song_instrument (qp_solo:
+    // the leader's instrument; band quick play: band; none: no such song)
+    // among the songs that are not (unlockable TRUE) (the ranked list of
+    // 0x82434020), or played in a tour (0x823D43D0), or within the tours'
+    // progress on guitar, vocals or drums (0x823D4738). The port has no
+    // downloads; the tours' part waits for the career's progress
+    // (GD05-077) [I]. GD05_SONGLIST_LEGACY=1: every song, as before.
+    std::set<std::string> availableSongs() {
+        std::set<std::string> out;
+        const std::string inst = gameCfgValue(ui_, "unlock_song_instrument").str();
+        const int initial = gameCfgValue(ui_, "unlock_song_initial_num").integerValue();
+        if (inst.empty() || inst == "0") return out;
+        std::vector<const SongInfo*> ranked;
+        for (const SongInfo& s : ui_.host().songs())
+            if (!s.tutorial && !s.unlockable && s.rank.count(inst)) ranked.push_back(&s);
+        std::stable_sort(ranked.begin(), ranked.end(), [&](const SongInfo* a, const SongInfo* b) { return a->rank.at(inst) < b->rank.at(inst); });
+        for (size_t i = 0; i < ranked.size() && int(i) < initial; ++i) out.insert(ranked[i]->id);
+        lockInstrument_ = inst;
+        return out;
+    }
+
     void build() {
         if (built_) return;
         built_ = true;
         data_ = {"random_song"};
         headers_.clear();
+        const bool everySong = mode_ == "leaderboards" || g_unlockAllSongs || SDL_getenv("GD05_SONGLIST_LEGACY");
+        const std::set<std::string> available = everySong ? std::set<std::string>{} : availableSongs();
+        locked_ = 0;
         std::vector<const SongInfo*> songs;
-        for (const SongInfo& s : ui_.host().songs())
-            if (!s.tutorial) songs.push_back(&s);
+        for (const SongInfo& s : ui_.host().songs()) {
+            if (s.tutorial) continue;
+            if (!everySong && !available.count(s.id)) {
+                ++locked_;
+                continue;
+            }
+            songs.push_back(&s);
+        }
         const std::string inst = "band";
         std::stable_sort(songs.begin(), songs.end(), [&](const SongInfo* a, const SongInfo* b) {
             auto ra = a->rank.count(inst) ? a->rank.at(inst) : 0, rb = b->rank.count(inst) ? b->rank.at(inst) : 0;
@@ -200,6 +239,11 @@ private:
         }
     }
 
+public:
+    int locked_ = 0;              // songs left out of the list as locked (the walks)
+    std::string lockInstrument_;  // the instrument the unlock rank was read for
+
+private:
     UiManager& ui_;
     std::string mode_ = "game";
     int display_ = 0;
@@ -320,6 +364,12 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     RbHost* profiles = add(std::make_unique<RbHost>(ui, "profile_mgr"));
     // The profiles' save data: RB's saves are M7 (GD05-009; DECISIONS D4).
     profiles->on("get_save_data_from_player", no);
+    profiles->on("unlock_all_songs", [&in](std::vector<Value>&) {
+        const bool was = g_unlockAllSongs;
+        g_unlockAllSongs = true;
+        if (auto* sp = dynamic_cast<RbSongProvider*>(in.findObject("song_provider"))) sp->rebuild();
+        return Value::integer(was ? 0 : 1);
+    });
     // A player's options (the tutorials' lessons done, tutorial_lesson_menu.dta) [I: kept for the session].
     {
         RbHost* po = add(std::make_unique<RbHost>(ui, "player_options"));

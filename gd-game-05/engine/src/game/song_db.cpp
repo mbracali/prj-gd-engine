@@ -104,6 +104,8 @@ std::vector<SongInfo> loadSongs(const GameData& data) {
             }
         }
         s.tutorial = s.rank.empty();
+        if (const DataNode* u = entry.find("unlockable"); u && u->children.size() > 1)
+            s.unlockable = u->children[1].isText() ? u->children[1].s == "TRUE" : u->intAt(1) != 0;
         if (s.name.empty()) s.name = s.id;
         if (data.exists(s.audio.moggPath) && data.exists(s.audio.midiPath)) songs.push_back(std::move(s));
     }

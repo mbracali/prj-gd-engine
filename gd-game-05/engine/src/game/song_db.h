@@ -51,6 +51,7 @@ struct SongInfo {
     std::string genre, decade, vocalGender;
     int context = 0;               // (context n)
     bool tutorial = false;         // a tutorial / drum trainer / test track (no rank), not in the song lists
+    bool unlockable = false;       // (unlockable TRUE): a bonus song, unlocked by the tours only (SongMgr 0x82434020) [C data]
 };
 
 // The songs of config/gen/songs.dtb (retail build: _SHIP and HX_XBOX
