@@ -895,6 +895,11 @@ private:
         if (msg == "can_deploy") return r = Value::integer(p && p->starPowerReady() ? 1 : 0), true;
         if (msg == "is_deploying") return r = Value::integer(p && p->starPowerActive() ? 1 : 0), true;
         if (msg == "popup_help" || msg == "enable_drum_solos") return true;  // [I] RB's help popups are not drawn
+        // player.dta's enable_drum_solos (set_energy crossing 0.5 / leaving
+        // ready): the drummer's fills on (enable_solos 2400) or off
+        // (RB 0x82461540). RbBonus shows a fill only when Overdrive is ready
+        // as it starts, the same gate [I: the 2400 ms lead not applied].
+        if (msg == "enable_solos" || msg == "disable_solos") return true;
         if (msg == "enable_phrase_bonus" || msg == "set_auto_play" || msg == "set_tutorial_arrow") return true;  // RB's tutorials [I: not done]
         if (msg == "get_times_failed") return r = Value::integer(0), true;  // [I] the band's fail-outs are not counted per player yet
         if (msg == "notes_per_streak") return r = Value::integer(0), true;

@@ -200,6 +200,11 @@ private:
     std::set<std::string> textColorsSeen_;
     int songlistHlChecks_ = 0, songlistHlMax_ = 0;  // rb_songlist_highlight (GD05-073)
     int qpLockedListed_ = 0, qpRandomLocked_ = 0;  // rb_qp_locked (GD05-073)
+    // rb_od_* (GD05-073): the Overdrive checks' state.
+    int odChecks_ = 0, odPhase_ = 0, odFills_ = 0, odGaps_ = 0, odDrainErrPct_ = 0;
+    bool odFreestyleSeen_ = false, odVocal_ = false;
+    float odStartMeter_ = 0;
+    double odStartBeat_ = 0, odStartMs_ = 0;
     std::vector<std::string> textColorsBad_;
     double textColorsSince_ = -1;
     std::array<float, 3> camera_{};  // the main menu's camera (the back walk)

@@ -386,6 +386,15 @@ public:
     void setPlayerStarPower(int index, const std::string& what, float value) override {
         Player* p = index == 0 ? player_.get() : player2_.get();
         if (!p) return;
+        // GD05-073's Overdrive walks: the singer's meter, and a shout (loud, no pitch) for `value` ms.
+        if (what == "vocal_meter") {
+            if (vocal_) vocal_->setOverdriveMeter(value);
+            return;
+        }
+        if (what == "vocal_shout") {
+            voiceShoutUntilMs_ = lastT_ + value;
+            return;
+        }
         if (what == "meter") p->setStarMeter(value);
         else if (what == "deploy_rate") p->setDeployRate(value);
         else if (what == "phrase_boost") p->setPhraseBoost(value);
@@ -636,6 +645,9 @@ private:
     std::unique_ptr<VocalInput> mic_;
     VocalTrackView vocalView_;
     float vocalRating_ = 0.5f, voicePitch_ = -1, voiceLoud_ = 0;
+    float voiceShoutUntilMs_ = -1e30f;
+    float botFillStrikeMs_ = -1e30f;  // the autoplay drummer's last fill strike
+    int botFillLane_ = 0;  // a walk's shout into the "microphone" (setPlayerStarPower vocal_shout)
     const char* vocalRatingName_ = nullptr;
     float vocalRatingMs_ = -1e9f;
     int vocalPhrasesHit_ = 0;
@@ -2367,6 +2379,7 @@ void App::updateVocals(float t) {
         pitch = vocal_->targetPitch(t);
         loud = vocal_->percussionDue(t) ? 0.6f : vocal_->noteAt(t) ? 0.3f : 0.0f;  // taps the tambourine's gems
     }
+    if (t < voiceShoutUntilMs_) loud = 1.0f, pitch = -1;
     voicePitch_ = pitch, voiceLoud_ = loud;
     if (SDL_getenv("GD05_VOCALLOG")) {
         static float next = 0;
@@ -2552,6 +2565,12 @@ void App::updateSong(float t) {
     if (!over && !paused_) {
         keys_.feed(*player_, t);
         if (bot_) bot_->feed(*player_, t);
+        // The autoplay drummer plays a shown fill as a player does (a pad
+        // every 150 ms, the lanes in turn): RB's crash deploys only after
+        // crash_fill_ready_hits strikes in the fill (RbBonus::codaStrike)
+        // [test aid, GD05-073: the autoplay hit the crash alone, never deployed].
+        if (bot_ && rbBonus_ && rbBonus_->fillActive(t) && t - botFillStrikeMs_ >= 150.0f)
+            rbBonus_->codaStrike(botFillLane_++ % 4, t), botFillStrikeMs_ = t;
         // A test aid: GD05_AUTODEPLOY=1 deploys Overdrive as soon as it is ready.
         static const bool autoDeploy = SDL_getenv("GD05_AUTODEPLOY") != nullptr;
         if (bot_ && autoDeploy && player_->starPowerReady()) player_->starPowerButton(t);
@@ -3052,6 +3071,11 @@ int App::gameCounter(int player, const std::string& key) const {
     // Textures and meshes sent to the GPU since the song began (warmWorld: none).
     if (key == "song_gpu_uploads") return uploadsAtBegin_ < 0 ? -1 : gpuUploads() - uploadsAtBegin_;
     if (key == "music_plays") return musicPlays_;
+    // GD05-073's Overdrive walks.
+    if (key == "vocal_od_active") return vocal_ && vocal_->overdriveActive() ? 1 : 0;
+    if (key == "vocal_od_meter_pct") return vocal_ ? int(std::lround(vocal_->overdriveMeter() * 100)) : -1;
+    if (key == "vocal_freestyle") return vocal_ && vocal_->inFreestyle(lastT_) ? 1 : 0;
+    if (key == "fills_deployed") return rbBonus_ ? rbBonus_->fillsDeployed() : 0;
     if (key.rfind("frame_marks:", 0) == 0) {
         int n = 0;
         for (const auto& m : frameMarks_) n += m.second == key.substr(12);

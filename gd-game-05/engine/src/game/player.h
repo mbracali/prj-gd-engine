@@ -109,7 +109,12 @@ public:
     // The tutorials' Star Power natives: the meter set, clamped to 0..1; the
     // meter lost per measure while deployed and the meter a captured phrase
     // adds replaced for this song [C].
-    void setStarMeter(float v) { meter_->value = v < 0 ? 0.0f : v > 1 ? 1.0f : v; }
+    // A meter set from outside (the cheats, the walks): under ready_level
+    // it is not ready (spPoll makes it ready again at ready_level).
+    void setStarMeter(float v) {
+        meter_->value = v < 0 ? 0.0f : v > 1 ? 1.0f : v;
+        if (!spActive_ && meter_->value < sp_.readyLevel) spReady_ = false;
+    }
     void setDeployRate(float r) { sp_.deployRate = r; }
     void setPhraseBoost(float b) { sp_.phrase = b; }
     // Enhanced Options > Forgiving Hammer-ons and Pull-offs [I: the port's]:

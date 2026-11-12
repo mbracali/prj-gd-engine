@@ -209,10 +209,14 @@ Input::Bindings Input::defaults(Profile p) {
         // The gyro (Star Power): tilt, the XInput guitar's right stick Y [I],
         // and Back (force_mercury kPad_Select) [C]; the HID Rock Band
         // guitars' tilt bit is the right shoulder (kRockBandMappings) [I].
+        // Tilting up is one way (+): taken either way from the rest, a
+        // rest read before the guitar's first report (0, the guitar level
+        // at -32768) held the tilt for good and Overdrive never deployed by
+        // tilt (GD05-073, rb_od_guitar).
         if (p == Profile::RockBand)
             set(C::Gyro, {btn(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER), btn(SDL_GAMEPAD_BUTTON_BACK)});
         else
-            set(C::Gyro, {axis(Kind::AxisAny, SDL_GAMEPAD_AXIS_RIGHTY), btn(SDL_GAMEPAD_BUTTON_BACK)});
+            set(C::Gyro, {axis(Kind::AxisPos, SDL_GAMEPAD_AXIS_RIGHTY), btn(SDL_GAMEPAD_BUTTON_BACK)});
         break;
     case Profile::Ps2Guitar:
         // GH2's `guitar`: kPad_R2 kPad_Circle kPad_Tri kPad_X kPad_Square [C],
@@ -788,8 +792,8 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
                 const bool menuControl = captureControl_ <= C::GuitarSelect;
                 int d = int(e.gaxis.value) - int(captureRest_[size_t(a)]);
                 if (!menuControl && std::abs(d) > 20000) {
-                    // The whammy and the gyro (tilt) take the axis either way; the others its direction.
-                    Kind k = captureControl_ == C::Whammy || captureControl_ == C::Gyro ? Kind::AxisAny : d > 0 ? Kind::AxisPos : Kind::AxisNeg;
+                    // The whammy takes the axis either way; the others (the gyro's tilt too, GD05-073) its direction.
+                    Kind k = captureControl_ == C::Whammy ? Kind::AxisAny : d > 0 ? Kind::AxisPos : Kind::AxisNeg;
                     captureFrom(id, axis(k, SDL_GamepadAxis(a)));
                 }
                 break;
