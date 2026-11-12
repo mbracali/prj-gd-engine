@@ -1009,3 +1009,33 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   (Enhancement): separate world / highway rates.
 - Verified: rb_look on four venues (numbers above); the gd05 gate (see the
   final report).
+
+## 2026-11-12: the highway's draw order and Overdrive look, the crowd (wave G06 3 / 4, GD05-070 / GD05-071)
+
+- **Causes (measured, App::rbProbes; GD05_HWY_LEGACY=1 / GD05_CROWD_LEGACY=1
+  run the code before):** the HUD and the track ran every trigger anim at
+  30 frames a second whatever its rate: be_ready.trig's be_color_pulse.anim
+  (loop 0..1 at k1_fpb, one pulse a beat) pulsed 30 times a second, the
+  Overdrive meter flickered (D59). The HUD drew each directory in file
+  order: the streak meter's "Nx" tag (multi_meter_anim.grp, draw order 1)
+  over its dial (streak_meter.grp, order 2) (D60). The track drew the beat
+  lines after the rails and now bar, every smasher whole (bottom, top,
+  effects) in gem_smashers.grp's order and its effects again after the
+  gems, not smasher_plate.dta's setup_draworder (D61); star tails kept the
+  slot's coloured texture (TailBuilder: tail_bonus.mat) (D61). No crowd
+  clip ever played (play_group_flags a silent stub, intro_start never sent,
+  no BandCamShot crowd part): the archetypes lay on the floor in their bind
+  pose and their cards were empty (D58).
+- **Numbers (before -> after):** Overdrive meter, back-and-forth luma jumps
+  in 240 frames 101 -> 0 (jumps 198 -> 5..7, one a beat); track parts out
+  of the data's order 5 of 11 -> 0; HUD pairs out of draw order 1 -> 0 (in
+  14..16 directories); star tails not on tail_bonus.mat 2837 of 2837 -> 0,
+  their chroma 100% -> 2..3%; crowd pixels (the audience alone, a crowd
+  shot) arena_01 0 -> 1,415,355, small_club_02 0 -> 1,556,614; every arena,
+  club and big club > 1.1 M px; the nine theaters 0 (their WorldCrowds are
+  hidden in the data: GD05-076).
+- **Verified:** `--walktest rb_highway` OK (legacy: FAIL meter_flickers is
+  101); `--walktest rb_crowd` OK (legacy: FAIL crowd_clips is 0);
+  `agents/scratch/hwy6/crowd_sweep.sh` (41 venues, `--song`); shots looked
+  at: arena_01 behind the band (the audience standing, moving), the
+  multiplier tag under the dial; the star tails' colour only measured.

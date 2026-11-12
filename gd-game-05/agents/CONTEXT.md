@@ -119,3 +119,18 @@ Wave G06 band (GD05-066/067/068):
   draw_only ignored, no RB face) to show the checks failing.
 - `GD05_FACE_CAM=player_guitar0:50:0:bone_spine2.mesh GD05_POST=0
   GD05_TRACK=0 GD05_HUD=0` with `GD05_SCREENSHOT(_AT)`: close shots of a member.
+
+Wave G06 highway and crowd (GD05-070 / GD05-071):
+- `--walktest rb_highway`: App::rbProbes under every frame: the Overdrive
+  meter alone (no luma jump straight back: `meter_flickers` 0), the
+  track's draw order against static.grp's + setup_draworder
+  (`rb_track_order_errors` 0), the HUD's directories in draw order
+  (`rb_hud_order_inversions` 0), star tails on tail_bonus.mat and near
+  white (`rb_star_tails_wrong` 0, `star_tail_chroma_pct` <= 20).
+  GD05_HWY_LEGACY=1 runs the code before the fixes (the checks fail).
+- `--walktest rb_crowd`: a shot with a crowd (GD05_FORCE_SHOT `#crowdN`),
+  the audience alone every 30th frame (`crowd_px_max`, `crowd_clips`);
+  GD05_VENUE picks the venue, GD05_CROWD_LEGACY=1 the code before.
+- The same probes in `--song` runs: GD05_METER_PROBE / GD05_TAIL_PROBE /
+  GD05_CROWD_PROBE=1 log `rb probe:` / `crowd probe:` lines;
+  `agents/scratch/hwy6/crowd_sweep.sh` (git-ignored) ran every venue.

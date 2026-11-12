@@ -718,3 +718,69 @@ pattern). Each says what, why and how to undo it.
   of its luma [C data]. The port already draws it (measured 0.28..0.30);
   the pause looked bright because the world under it was.
 - **Undo:** none (a check: rb_look's look:pause).
+
+## D58
+- **What (2026-11-12, GD05-071):** Rock Band's crowd animates as its
+  scripts say [C data: world/crowd.dta, band_objects.dta BandCamShot;
+  C code: CharDriver play_group_flags RB 0x82313140, game panel start RB
+  0x8242E520 -> game.dta pick_intro -> {handle ($this intro_start)}]:
+  `main.drv play_group_flags <group> <flags> [<play flags>]` plays the
+  group's clip holding every flag (FindClip RB 0x8231BF10; the song's
+  anim_tempo 16 / 32 / 64, song_mgr anim_tempo) with the play flags; the
+  crowd hears `intro_start` when the port sends intro_start_msg [I: the
+  moment]; a BandCamShot's start runs the type's crowd part itself
+  (override_anim [crowd_anim], crowd_update, rotate [crowd_face_camera],
+  set_fullness [crowd_density], defaults '' FALSE 1) because the world's
+  scripts hold no BandCamShot type.
+- **Why:** no crowd clip ever played (play_group_flags was a silent stub,
+  intro_start never came, crowd_update never ran): the archetypes kept
+  their bind pose, lying on the floor (head 27 units along x from the
+  pelvis at the same height), their cards empty: 0 crowd pixels.
+- **Undo:** Crowd's driver play_group_flags, Crowd::listen's intro_start,
+  Crowd::startShot's RB block; GD05_CROWD_LEGACY=1 runs without them.
+- **Open:** the theaters' WorldCrowds are hidden in the data (Draw showing
+  FALSE in theater_char.milo; the arenas' and clubs' TRUE); what shows
+  them in RB is not traced: no crowd pixels in the nine theaters yet.
+
+## D59
+- **What (2026-11-12, GD05-070):** an EventTrigger's anim entry runs at
+  its own rate [C data: macros.dta RATE_ENUM]: k30_fps / _ui / _tutorial
+  30 a second, k480_fpb 480 a beat, k1_fpb one a beat, on the song's tempo
+  (render/anim_rate.h; 120 a minute before the song). The HUD and the
+  track's effects took every rate as 30 a second.
+- **Why:** the owner's flickering Overdrive bar: be_ready.trig loops
+  be_color_pulse.anim 0..1 at k1_fpb (one pulse a beat); at 30 a second it
+  looped 30 times a second (measured: 101 back-and-forth jumps in 240
+  frames -> 0). star_deploy.trig's track_streak_glow.mnm (1000..1480 at
+  k480_fpb) took 16 s a loop instead of a beat.
+- **Undo:** RbHudView / RbTrackView tasks' `rate`; GD05_HWY_LEGACY=1.
+
+## D60
+- **What (2026-11-12, GD05-070):** the HUD's directories draw their draw
+  list as RB's RndDir sorts it (RB 0x821B3A48 / 0x821FF100: by draw order,
+  then same-class objects by name) [C]: render/draw_order.h, shared with
+  the UI (ui_view.cpp's sortDraws moved there).
+- **Why:** the owner's "multiplier drawn on top": streak_meter.milo's
+  multi_meter_anim.grp (order 1: the "Nx" tag) drew after streak_meter.grp
+  (order 2: the dial, its black circle and glass) in the file's order; RB
+  draws the dial over the tag.
+- **Undo:** RbHudView::drawDir; GD05_HWY_LEGACY=1.
+
+## D61
+- **What (2026-11-12, GD05-070):** the track draws static.grp in its own
+  order with the view's parts at their places [C data]: beat_markers.grp
+  (the bar widgets), now_bar.grp (the smasher plate after smasher_plate.dta
+  setup_draworder: smasher_plate.mesh, every smasher's base_bottom.grp
+  then every base_top.grp; gem_smashers.grp and after_hide.grp hidden),
+  widgets.grp (tails, then gems [I: their order]), smasher_fx.grp (every
+  smasher's effects.grp, gem_track.dta track_reset). The plate draws with
+  now_bar.grp's now_bar.env. A star (Overdrive / unison) tail takes
+  tail_bonus.mat (track_flash_style.tex) [C: Tail SetType RB 0x8281BEC8,
+  TailBuilder RB 0x8281A970's material table].
+- **Why:** the beat lines drew over the rails and the now bar; each
+  smasher drew whole (bottom, top, effects) in gem_smashers.grp's order
+  (2 3 1 0 4), its effects under the gems and the next smasher, then the
+  effects again after the gems (5 of 11 parts out of the data's order). Star
+  tails kept their slot's coloured texture (chroma 100% -> 2%).
+- **Undo:** RbTrackView::drawPart / drawSmasherPlate, drawTails' material;
+  GD05_HWY_LEGACY=1.
