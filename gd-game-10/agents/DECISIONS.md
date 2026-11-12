@@ -475,3 +475,24 @@ stops the menu music [C 0x8219DD60, 0x820E45E8 ("%s_preview"),
 0x82190010, 0x82190020, 0x8218FDD8]. The port plays it on the song mixer
 while no song or practice preview has it [I].
 Undo: song_preview.cpp's four natives, SongStream::openPreview.
+
+## D90. A song's lifecycle as the scripts run it (2026-11-12)
+
+What: (1) `SongUnLoad` (gh4's kill_gem_scroller; GH3 called
+SongUnLoadFSBIfDownloaded) ends the playing song [C script; I: the native
+unloads the song's streams]. (2) As a song starts, the transition's own
+WarmUp entry runs (Common_<t>_Transition's ScriptTable: FastIntro
+GH_SFX_Intro_WarmUp_Fast, Intro GH_SFX_Intro_WarmUp, MetallicaVOIntro
+GH_MetallicaVO_Intro_WarmUp; an unknown transition as FastIntro), spawned
+at the song's start rather than at the table's 100 ms [C data; I: the
+timing]. It kills Loading_Screen_Crowd_Swell (menu_soundevent_in's, a
+loop with no end) and resets Crowd_Beds. (3) SongHooks::begin sets
+crowd_in_Front_End_state = 0 and spawns crowd_reset per player (with the
+HUD; not for Lou's devil_finish_restart, which the port does not pass)
+[C script start_gem_scroller]. (4) A voice stopped while paused drops its
+pause [I: FMOD's stop ends a paused channel].
+Why: the owner heard the quit song play on, the crowd scream through
+every song and for ever after it, and the game "do a lot of wrong stuff"
+after a quit (the quit song's end pulled the menus back to gameplay).
+Undo: natives_game.cpp's SongUnLoad, app.cpp's transition WarmUp block,
+song_hooks.cpp's crowd_reset, sfx.cpp's `v.paused = false` in the stops.

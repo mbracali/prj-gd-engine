@@ -668,3 +668,46 @@ Gate (engine/build/pfx, headless, scratch XDG): walks boot, quickplay,
 menus, qp_pause, enhanced, gamepads, setlist_preview passed;
 `tools/fuzz_seeds.sh` 13 / 13 passed; `--selftest` 31 FAILED (as
 expected); `--scripttest`, `--sfxtest` pass.
+
+## 2026-11-12 A song's lifecycle: quit, restart, end; the crowd (GD10-060, D90)
+
+Owner: a quit song kept playing, the crowd screamed through every song and
+for ever after it, quitting made the game "do a lot of wrong stuff".
+Causes (logged with GD10_SFXLOG=1, GD10_SPAWNLOG=all, now logging every
+spawn and KillSpawnedScript):
+- gh4's kill_gem_scroller calls `SongUnLoad` (GH3:
+  SongUnLoadFSBIfDownloaded); unhandled, the quit song played on under the
+  set list, ui_deinit_gameplay's UnpauseGame resumed it, and its end's
+  GuitarEvent_SongWon_Spawned pulled the menus back to gameplay.
+- `menu_soundevent_in` (play_song) spawns Loading_Screen_Crowd_Swell, a
+  loop with no end (Crowd_Beds +12 dB, swells every 0.5..1 s), killed by
+  the transition's WarmUp entry; the port ran it for Intro only, so
+  Quickplay's FastIntro (GH_SFX_Intro_WarmUp_Fast) never killed it: 4.31
+  crowd sounds / s in the song, on in the menus. Now 0.26 / s.
+- start_gem_scroller's crowd_reset never ran: the venue's bed and the
+  one-shots (every 4.5..8 s) did not start; the menus' 10% bed went on
+  until the meter crossed a threshold. SongHooks::begin runs it now.
+- A voice stopped while the pause menu had it paused stayed paused for
+  ever (IsSoundPlaying true, never freed): the stops now drop the pause.
+The quiet crowd under the menus is the original's: FrontEnd_Menu_Music =
+EXT_MD_Crowd_Good_Loop at 10% [C data]. docs/ui.md "A song's lifecycle".
+
+Walks: qp_quit (Quickplay -> song -> pause -> Quit -> Quit -> New Song,
+three times), qp_restart (pause -> Restart -> Restart, then Quit),
+qp_finish (the song's end, results, the set list): in each song
+`check:crowd_rate<=1.0` (crowd voices under User_Crowd per second; fails
+while Loading_Screen_Crowd_Swell runs), after each `check:song_quiet` (no
+song, no crowd voice but the menus' bed, no paused voice, no swell /
+whistle / song script; the scripts still running listed: the same four
+after each of the three quits). Before: qp_quit failed (4.31 / s, then the
+song alive, 8 voices and GuitarEvent_SongWon_Spawned after the quit).
+
+Gate (engine/build/life, headless, scratch XDG): walks boot, quickplay
+(load window worst 32.3 ms, 0 over 50), menus, qp_pause, enhanced,
+gamepads, qp_quit, qp_restart, qp_finish passed; `tools/fuzz_seeds.sh`
+13 / 13; `--scripttest`, `--sfxtest` pass; `--selftest` 31 FAILED (as
+expected).
+Not done: the WarmUp runs at the song's start, not the table's 100 ms;
+<Current_Crowd_Applause_SoundEvent_L> is a local the WarmUp scripts never
+get (the first song's applause is silent); in-venue loading (career's
+Loading transition) and Lou's devil_finish_restart not walked.
