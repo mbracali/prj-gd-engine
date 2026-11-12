@@ -140,10 +140,70 @@ guitar_cameras.qb, tod_proxims.qb]. screen_fx.cpp effectManager / readShot;
 the camera keeps next_screenfx (venue_camera.cpp). E.g. One: Default, then
 Metal_NoisyDefault, Metal_BW_Grainy (black and white), Metal_BW_Grungy.
 
-Not yet: the camera notes 101..108 (CameraBlur_* zoom / focus blurs,
-CameraFX_WhiteFlash, CameraFX_BlackFadeIn / Out: BG_fx_set_blur /
-_brightness on the instances over time), godray, the practice / training
+The camera notes 101..108 (D111) [C scripts misc_fx.qb, bg_screenfx.qb,
+guitar_cameras.qb; I: the blend]: CameraCuts_NoteMapping spawns, with ScrID
+CameraCuts_ScriptsToKillOnCut, CameraBlur_FastZoom_InandOut (101),
+SlowZoom_InandOut (102), FocusIn (103), FocusOut (104), CameraFX_BlackFadeIn
+(107), BlackFadeOut (108); 106 sets cameracuts_pendingwhiteflash, which
+ApplyDeferredCameraEffects turns into CameraFX_WhiteFlash one game frame
+after the next cut. BG_fx_set_blur puts dof3 on with every near / far
+distance 0 and strength = appendStrength (the whole frame blurred);
+BG_fx_set_brightness_BlackFade sets the TOD's Brightness___Saturation
+brightness; _WhiteFlash brightness 100, contrast 0, hue 1, saturation
+0.5348, the identity mix. Each step is ScreenFX_UpdateFXInstanceParams
+with a `time`, taken as a linear blend from the values then; the scripts
+end at the next cut (ApplyScreenFx then sets the profile again).
+Timelines (s): 101: 1 over 0.1; at 0.2 0 over 0.3; at 0.4 0.5 over 0.1; at
+0.5 back over 0.4. 102: 1 over 0.5; at 0.4 0 over 0.4; at 0.9 1 over 0.3;
+at 1.2 back over 0.4. 103: 1 at once; at 0.1 back over 0.5. 104: 1 over
+0.6. 107: brightness 0 over the note's length. 108: 0, a frame later back
+over 0.75. Flash: 0.06 s, back over 0.06. In the songs: Sad But True and
+Whiplash use 101 / 102, 13 songs 103 / 106, Master of Puppets and The
+Unforgiven 107 / 108 [C data]. screen_fx.cpp cameraNoteFx; the shot keeps
+the script (venue_camera.cpp). Checked: Sad But True 5.3 s (blur), Master
+of Puppets 217.3 s (fade to black), Creeping Death 30.8 s (white frames
+30.85..30.93 s, back by 30.97 s). A note at its shot's own cut is killed
+with it (the original's deferred kill runs a game frame later: a frame of
+its effect not reproduced). Not yet: godray, the practice / training
 modes' skip of ApplyDeferredCameraEffects.
+
+## Light volumes (D110)
+
+gh4's housings use lightvolumetype volume2dsoftedge (most), volume2d,
+volume3d (5..6 a venue), flareonly and laser (z_donnington) [C data];
+GH3's ConeImpostor / volume (drawVolumes / drawRaytraced) appear on no gh4
+zone, so until now no beam was drawn. The 2D volumes
+(VenueView::drawVolumes2D):
+
+- Material sys_lightvolume2d (global_gfx.scn): template _LightVolume2D,
+  blend 1 (SRC_ALPHA + ONE), no depth write, textures s0 0x94191135 (the
+  falloff), s1 0x49263059 (the pattern), s2 0xa500318e (the smoke)
+  [C data]. The variant's name adds _smoke0 (smokeeffect false),
+  _softedge1 (volume2dsoftedge), _pattern0 (no volume2dpatterntexture) in
+  the library's order [C data: the template names; I: which field picks
+  which part, 824496D0 does not decompile].
+- The shaders [C: microcode and constant tables]: vertex in world space
+  (g_ViewProj only) with a projective TEXCOORD0 (u q, v, q); falloff at
+  (u, v), pattern at (u, v) x g_VolumeUVScale c5 + g_VolumeUVOffset c4,
+  smoke from the world position x g_UVScale (VS c3) + g_UVOffset (VS c2)
+  on the yz / zx / xy planes weighted by g_TexturePlainWeight c2; colour =
+  falloff x g_ConeColor c1 x pattern x smoke, x saturate(3.33 x (scene
+  view z - z)) for softedge1 (g_DepthBufferSamp s4, g_invProjMat c152);
+  alpha x (1 - g_Burn c3).
+- [I] (the CPU side, 8244E0F0, is VMX128 and not decoded): a camera-facing
+  trapezoid from the lens (2 startradius) to range (2 endradius) along the
+  housing's -z, q = the half-width; faded as the sight line turns onto the
+  beam; g_ConeColor = volumecolor x density (alpha density) as GH3's
+  impostor; g_TexturePlainWeight 1 each; g_UVScale 0.25 a metre, drift 0.02
+  a second; g_Burn 0; pattern uv scale / offset the snapshots'
+  lightvolumepatternuvscale / offset ((1, 1) / (0, 0) on the disc).
+  volume3d (_LightVolume3D's ray-marched cone) is drawn as a 2D soft volume
+  [I: approximation]; laser (_LightVolumeLaserBeam) and the volume shadow
+  maps (_LightVolume2DShadowMap / ShadowedMap) not drawn.
+- Development aids: GD10_VOL2D_LOG=1 (the drawn volumes), GD10_NO_VOLUMES2D=1,
+  GD10_VOL2D_PLANE=<weight>; --shadertest with GD10_SHADERTEST_DUMP=<template
+  substring> (constant tables, fetches, GLSL) and GD10_SHADERTEST_SYSMAT=1
+  (global.pak's sys_* materials: template, blend, textures, constants).
 
 ## Particles (D19)
 
@@ -246,13 +306,52 @@ lightmap or vertex colour (2x "overbright"), the frame read as gamma
 (frame^(1/2.2) gives 0.144 / 0.353). Measurements and debug knobs:
 agents/scratch/m10_dark_notes.md (git-ignored).
 
+### Measured 2026-11-12 (Enter Sandman, venuetest's 8 shots a venue)
+
+Mean luminance (`magick -alpha off -colorspace Gray`) of the 8 shots
+before / after the 2D light volumes, and the disc's venue_<x>.bik preview
+(2 frames a second, all frames, luma; the Bink streams are full range):
+z_forum 0.098 / 0.114 (movie 0.275), z_meadowlands 0.157 / 0.166 (0.186),
+z_tushino 0.086 / 0.086 (0.148), z_justice 0.101 / 0.102 (0.353), z_mop
+0.045 / 0.045 (0.270), z_donnington 0.051 / 0.051 (0.163), z_stone 0.090 /
+0.091 (0.229), z_icecave 0.077 / 0.119 (0.282), z_studio2 0.133 / 0.138
+(0.263), z_soundcheck2 0.208 / 0.208 (0.312). The movies are empty-venue
+fly-throughs under beams, smoke and pyro, so the gap is a guide, not a
+target. One more lead [I]: Metal_BlueTint's bright_sat (brightness 0.9705,
+contrast 1.1064 about 0.5) maps x to 1.073 x - 0.051, which clips
+everything under 0.048 to black: the arena wide shots (0.04 before it)
+vanish; on a frame in the movies' range (Sad But True's profile: 0.26 ..
+0.32) the same pass is mild. A scene pass that ends in a gamma-encoded
+target would put those shots at ~0.2 before the pass (the lead above).
+
+## The crowd (GD10-042)
+
+- Every venue but z_icecave has <zone>_crowd_models; no difficulty or
+  quality setting changes the count (guitar_crowd_data.qb, create_crowd_models:
+  disable_crowd only) [C scripts]. The 3D peds render into the atlas; the
+  cards draw Billboard_FastLit.
+- Billboard_FastLit [C: microcode]: colour = atlas x m_psPass0MaterialColor
+  x vertex colour x (g_ambientLightColor c160 + the g_PointLight /
+  g_SpotLight vertex lights); no SH, no directional light. The cards'
+  vertex colours are baked shading: on z_forum's card meshes about half
+  the vertices are 0 (black) and the rest 0x20..0xBF [C data], so the back
+  of the crowd is black whatever the lights, and the front reads at
+  vertex colour x the crowd group's ambient (Crowd_Ambient01 0.55; its
+  directional light 0.9 lights the peds in the atlas, not the cards).
+  The port follows the shader as written; the cards show where the data
+  makes them bright (AUDIENCE shots, the front rows) [checked: z_forum
+  35.5 s audience shot].
+
 ## Open
 
 - Why venues read darker than the preview movies (GD10-040): see "Venue
   brightness".
 - The values the screen effects' instances put in their constants (VMX128
   code): the shaders are read, the constants [I].
-- The crowd peds read very dark (their light group; see "Venue brightness").
+- The crowd cards read dark by their data (see "The crowd"); the peds'
+  own light (the atlas) is the crowd group's.
+- The 2D light volumes' CPU constants and geometry (8244E0F0), volume3d's
+  own shader, the laser beams.
 - Camera FOV pulses (CameraCutsEffect_FOVPulse: ccam_pulsefinalfov's curve
   units), the hand cam's amplitudes (ccam_sethandcamparams), shadow casters
   per shot (cameracuts_shadowcasters) not applied.

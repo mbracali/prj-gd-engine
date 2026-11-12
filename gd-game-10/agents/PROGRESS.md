@@ -748,3 +748,50 @@ live poses at 12 s and 24 s plausible, the band replayed at 60 / 240 fps).
 Not done: Band_WalkToNode, band_movetostartnode after a clip, the clip's
 tempomatching / the body timer's pause and resume (a new loop starts),
 disable_arms' real effect, hair against the body (no collision bodies).
+
+## 2026-11-12 Crowd, venue brightness, empty venues, screen FX (GD10-036 / 040 / 042, D110, D111)
+
+Found and fixed:
+- No light beam was drawn: gh4's housings are volume2dsoftedge / volume2d /
+  volume3d, the port drew only GH3's ConeImpostor / volume. Now the
+  _LightVolume2D variants (sys_lightvolume2d's falloff / pattern / smoke,
+  SRC_ALPHA + ONE, soft against the scene's depth) on a camera-facing
+  trapezoid per housing (D110; geometry and CPU constants [I], 8244E0F0 is
+  VMX128). z_forum: 33 of 54 beams live in Enter Sandman's shots.
+- The camera notes 101..108 (blur zooms / focus, black fades, the cut's
+  white flash) run as their scripts (D111). Checked by frame sequences:
+  Sad But True 5.25..6.3 s (blur up and down), Master of Puppets 217.2 s
+  (luminance 0.50 -> 0.07 over the note), Creeping Death 30.85..30.93 s
+  white (0.996) and back by 30.97 s.
+- The scene depth is copied once a frame for the volumes, raytraced beams
+  and particles (was once per user).
+- Development aids: GD10_VOL2D_LOG / GD10_NO_VOLUMES2D / GD10_VOL2D_PLANE;
+  --shadertest with GD10_SHADERTEST_DUMP=<template> and _SYSMAT=1.
+
+Measured (render.md "Venue brightness", "The crowd"):
+- Mean luminance of venuetest's 8 Enter Sandman shots, before / after, vs
+  the venue_<x>.bik preview: z_forum 0.098 / 0.114 (0.275), z_meadowlands
+  0.157 / 0.166 (0.186), z_tushino 0.086 / 0.086 (0.148), z_justice 0.101 /
+  0.102 (0.353), z_mop 0.045 / 0.045 (0.270), z_donnington 0.051 / 0.051
+  (0.163), z_stone 0.090 / 0.091 (0.229), z_icecave 0.077 / 0.119 (0.282),
+  z_studio2 0.133 / 0.138 (0.263), z_soundcheck2 0.208 / 0.208 (0.312).
+  Brightness cause still open; new lead: Metal_BlueTint's contrast clips
+  everything under 0.048 (the arena wide shots); other profiles' frames
+  (Sad But True, 0.26..0.32) sit in the movies' range.
+- The crowd: count per venue fixed by the data (no difficulty / quality
+  setting); the cards' Billboard_FastLit is vertex colour x (ambient +
+  vertex lights), and half of z_forum's card vertices are 0: the back
+  rows are black by data. Audience shots show the crowd (z_forum 35.5 s).
+
+Gate (build fx10 with the tree as it was, others' WIP included): walks
+boot / quickplay / menus / qp_pause passed; load hitch check 662 frames,
+worst 25.7 ms, 0 over 50 ms; venuetest all 10 venues (Enter Sandman)
+passed; selftest 31 failed (the 31 expected).
+
+Not done: volume3d's own _LightVolume3D (drawn as 2D [I]), laser beams,
+the volumes' shadow maps, godray, bloom2's equation, the CPU constants of
+the screen effects (VMX128), a Star Power shot comparison (venuetest does
+not activate Star Power), props / screens node by node (z_forum's classes:
+113 levelgeometry, 106 gameobject, 74 LevelObject, 69 particleobject, 35
+LevelLight, 14 waypoint; the gameobjects with skins, e.g.
+Encore_Blacktruck_Skin, ZachHarmon, not checked).

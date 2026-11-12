@@ -547,3 +547,35 @@ node's plays are kept a second after a newer one is fully in and skipped
 before they start, the IK targets switch by time: the pose at a song time
 is the same at 60 and 240 fps (Band::frameRateCheck, 1 mm).
 Undo: render/band_anim.cpp Ramp, firstShown, Node::play's prune.
+
+## D110. gh4's 2D light volumes on a camera-facing trapezoid [C shaders / material; I geometry and constants] (2026-11-12)
+
+What: render/venue_view.cpp drawVolumes2D draws every volume2dsoftedge /
+volume2d housing (and, for now, volume3d) with its _LightVolume2D variant
+(_smoke0 / _softedge1 / _pattern0 from smokeeffect, the type and
+volume2dpatterntexture), sys_lightvolume2d's textures and blend (SRC_ALPHA
++ ONE, no depth write), on a quad from the lens (2 startradius wide) to
+range (2 endradius) facing the camera, TEXCOORD0 = (u q, v, q) with q the
+half-width; g_ConeColor = volumecolor x density, plane weights 1, smoke
+0.25 a metre.
+Why: gh4's zones name volume2dsoftedge / volume2d / volume3d, none of
+GH3's ConeImpostor / volume: no beam was drawn (the owner's "venues look
+empty"; the preview movies are full of beams). The shaders take world
+positions and a projective texcoord, which the trapezoid gives; the
+CPU side (8244E0F0) is VMX128 and not decoded, so the quad's exact shape,
+the plane weights and the smoke scale are [I] (weights 1/3 left the beams
+at a tenth of the movies' look).
+Undo: drop the drawVolumes2D call in VenueStage::draw (or GD10_NO_VOLUMES2D=1).
+
+## D111. The camera notes 101..108 as their scripts [C scripts; I the blend] (2026-11-12)
+
+What: CameraDirector keeps the shot's camera-note script (101..104, 107,
+108) and note 106's pending white flash (one game frame after the next
+cut); screen_fx.cpp cameraNoteFx replays BG_fx_set_blur /
+BG_fx_set_brightness_BlackFade / _WhiteFlash on the shot's params (dof3,
+the TOD's first bright_sat) by the scripts' waits and times, each
+ScreenFX_UpdateFXInstanceParams `time` a linear blend from the values then.
+Why: misc_fx.qb / bg_screenfx.qb / guitar_cameras.qb [C]; the blend's curve
+is the engine's (not read) [I]. A note at its own shot's cut is dropped
+with the cut (the original kills it a game frame later).
+Undo: the cameraNoteFx call in VenueStage::draw.
