@@ -3669,16 +3669,20 @@ void App::rbProbes() {
         float hi = 0;
         for (const auto& e : m) hi = std::max(hi, e.second);
         // A flicker: a jump straight back (up then down, or down then up, on
-        // the next frame). The pulse's wrap is one jump, then a slope.
+        // the next frame). The pulse's wrap is one jump, then a slope that
+        // may fall up to 40% of the brightest a beat (be_color_pulse's keys:
+        // 0.99 0.80 0.21 -> 0.69 0.53 0.01), so a step counts as a jump past
+        // 6% plus that slope over the step's beats (slow frames under load).
         int jumps = 0, flickers = 0;
+        auto jump = [&](size_t i) {
+            const double beats = song_ ? gfx::beatAt(&song_->tempo, m[i].first) - gfx::beatAt(&song_->tempo, m[i - 1].first) : 0.0;
+            return std::fabs(m[i].second - m[i - 1].second) > hi * float(0.06 + 0.4 * std::max(0.0, beats));
+        };
         for (size_t i = 1; i < m.size(); ++i) {
-            const float d = m[i].second - m[i - 1].second;
-            if (std::fabs(d) <= 0.06f * hi) continue;
+            if (!jump(i)) continue;
             ++jumps;
-            if (i + 1 < m.size()) {
-                const float e = m[i + 1].second - m[i].second;
-                flickers += std::fabs(e) > 0.06f * hi && (e > 0) != (d > 0);
-            }
+            const float d = m[i].second - m[i - 1].second;
+            if (i + 1 < m.size() && jump(i + 1)) flickers += (m[i + 1].second - m[i].second > 0) != (d > 0);
         }
         rbProbe_.meterJumps = jumps, rbProbe_.meterFlickers = flickers;
         rbProbe_.meterBeats = m.size() > 1 && song_ ? int(std::ceil(gfx::beatAt(&song_->tempo, m.back().first) - gfx::beatAt(&song_->tempo, m.front().first))) : 0;

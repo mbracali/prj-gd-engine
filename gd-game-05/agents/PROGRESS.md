@@ -1039,3 +1039,10 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   `agents/scratch/hwy6/crowd_sweep.sh` (41 venues, `--song`); shots looked
   at: arena_01 behind the band (the audience standing, moving), the
   multiplier tag under the dial; the star tails' colour only measured.
+- **Gate** (`agents/scratch/hwy6/gate.sh`: gate1.sh's 29 walks + rb_highway
+  + rb_crowd + the five tests, 7 at a time, each with its own
+  XDG_DATA_HOME, while another agent's gate ran): 34 of 36 OK; rb_highway
+  failed on meter_flickers 2 under the load (slow frames: a slope step
+  counted as a jump; the threshold now adds the pulse's slope over the
+  step's beats, then OK; legacy 62), rb_pad_play failed twice under load
+  (20 of 30 gems hit) and passed alone (86 of 87).
