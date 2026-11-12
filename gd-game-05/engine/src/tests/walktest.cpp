@@ -5768,17 +5768,28 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         if (what == "pausehide" || what == "pauseshow" || what == "pauserestore") {
             // The pause screen's panels (pause.dta: pause_panel, helpbar):
-            // hidden; shown with its art left out (pause.milo's octopus.grp,
-            // octoarms.grp and the trim reach into the measured strips, placed
-            // differently each pause) so black_bg.mesh alone is over the world;
-            // then as it was.
+            // hidden; shown with every mesh of pause.milo but black_bg.mesh
+            // left out (its art, the octopus, arms, trim and the rest, is
+            // placed differently each pause and reaches into the measured
+            // strips) so black_bg.mesh alone is over the world; then as it was.
+            static std::vector<const scene::Object*> artHidden;
             const bool hide = what == "pausehide", art = what == "pauserestore";
             ui.interp().send("pause_panel", "set_showing", {Value::integer(hide ? 0 : 1)});
             ui.interp().send("helpbar", "set_showing", {Value::integer(art ? 1 : 0)});
             if (ui::ScreenObj* sc = ui.screen(ui.currentScreen()))
                 for (ui::PanelObj* p : sc->panels())
-                    if (p->name() == "pause_panel" && p->view)
-                        for (const char* n : {"octopus.grp", "octoarms.grp", "trim01.mesh", "trim02.mesh"}) p->view->setShowing(n, art);
+                    if (p->name() == "pause_panel" && p->view && p->view->milo()) {
+                        if (what == "pauseshow") {
+                            artHidden.clear();
+                            p->view->milo()->root().forEach([&](const scene::Object& o) {
+                                if (o.as<scene::Mesh>() && o.name != "black_bg.mesh" && p->view->showing(&o)) artHidden.push_back(&o);
+                            });
+                            for (const scene::Object* o : artHidden) p->view->setShowing(o, false);
+                        } else if (art) {
+                            for (const scene::Object* o : artHidden) p->view->setShowing(o, true);
+                            artHidden.clear();
+                        }
+                    }
             return pass();
         }
         const int draws = ui.host().gameCounter(0, "world_draws"), holds = ui.host().gameCounter(0, "world_holds");
@@ -5816,7 +5827,11 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         const char* dir = SDL_getenv("GD05_WALK_SHOTS");
         char name[48];
-        std::snprintf(name, sizeof name, "/look_%s.bmp", what == "frame" ? std::to_string(lookFrames_.size()).c_str() : what.c_str());
+        // The pause's pictures by attempt (look_pause_<n>.bmp, look_prepause_<n>.bmp).
+        const std::string tag = what == "frame" ? std::to_string(lookFrames_.size())
+                                : what.rfind("prepause", 0) == 0 || what == "pause" ? what + "_" + std::to_string(lookPauseOk_ + lookPauseDark_ + (lookPauseError_.empty() ? 0 : 1))
+                                                                               : what;
+        std::snprintf(name, sizeof name, "/look_%s.bmp", tag.c_str());
         const std::string path = std::string(dir ? dir : SDL_GetBasePath()) + name;
         if (!ui.host().saveScreenshot(path)) return fail("look: no screenshot");
         SDL_Surface* raw = SDL_LoadBMP(path.c_str());

@@ -1361,10 +1361,11 @@ pattern). Each says what, why and how to undo it.
   (pause_panel, helpbar) hidden, then shown: the paused world must not move
   (mean difference <= 2 of 255, measured 0.00) and the outer strips with
   the screen shown must be 0.3 of the colour through the display curve
-  (D57 / D25) within 10 %; for that frame the pause art (pause.milo's
-  octopus.grp, octoarms.grp, trim01 / 02.mesh, placed differently each
-  pause and reaching into the strips) and the helpbar are left out, so
-  black_bg.mesh alone is over the world; three pauses 4 s apart, one on a
+  (D57 / D25) within 10 %; for that frame every pause.milo mesh but
+  black_bg.mesh (the art: octopus, arms, trim and the rest, placed
+  differently each pause and reaching into the strips; with only the
+  octopus / arms / trim out 2 of 30 pauses still read 0.20 / 0.22) and the
+  helpbar are left out, so black_bg.mesh alone is over the world; three pauses 4 s apart, one on a
   dark world (blackout) is skipped, at least one measured.
 - **Why:** it compared a frame before the pause with one during it; the
   world changed between them (0.46..1.85 of the rule by the shot).
@@ -1372,3 +1373,24 @@ pattern). Each says what, why and how to undo it.
   venues, three pauses each, one on a blackout skipped); the paused world
   0.00..0.52 of 255 between two frames.
 - **Undo:** the walk's steps.
+
+## D89
+- **What (2026-11-12, GD05-069, a correction of D79's "never drawn"):**
+  the SpotlightDrawer's proxy (the stage fog / smoke group) is drawn, but
+  not into the picture [C]: NgSpotlightDrawer's beam pass (RB 0x822ABDC0)
+  first calls 0x822A9E58, which, when the proxy (+0x5C) is set, draws it
+  (RndDrawable Draw 0x8218AC08, with a device flag +0x25 set) through the
+  drawer's own RndCam (+0x64: near +0x2B4, far +0x2B8) into the drawer's
+  texture (+0x6C, 8218D170 sets the camera's target), with c91 = (0.1, 1,
+  0, 1 / far) and VS c55 = (near, -1 / near, 1, 0), and then binds that
+  texture as sampler 6, gFogDensityMap. Then the volume passes
+  (0x822ABC28) draw each queued spotlight with +0x1BC > 0 into the beam
+  target (DAT_828EBCD0), set c82 = gFogDensity (0x822A8E78) and the post
+  shaders add gFogDepth (s12) x (c82.x + c82.y x gFogDensityMap) x c91.x
+  to the scene (PROGRESS fix9). So the stage fog shows only where a
+  beam's light falls on it, as "smoke" in the beams; drawn straight into
+  the world (the port before D79) it was the far-too-bright wash. The
+  port draws no density map and no RB beam composite (GD05-093), so the
+  proxy stays out of the draw list (D79's code is right; its reason is
+  this one).
+- **Undo:** none (documentation; the code is D79's).

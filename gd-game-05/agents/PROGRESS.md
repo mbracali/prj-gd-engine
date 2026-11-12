@@ -1534,11 +1534,11 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   0x822A2608 / StartPreset 0x822A1B50 [C].
 - **The pause check (GD05-089, D88):** measured on a still frame (paused,
   flicker / grain held by GD05_POST_FREEZE, the pause screen hidden then
-  shown without its art): the paused world does not move (mean difference
-  0.00..0.52 of 255); with the art left out the background is 0.99..1.01
-  of black_bg.mat's rule in 11 of 11 measured pauses (4 venues x 3, one on
-  a blackout skipped); with the art in, the octopus, arms and trim reach
-  into the strips at a new place each pause (1.00..2.70). rb_look (this
+  shown with black_bg.mesh as its only mesh): the paused world does not
+  move (mean difference 0.00..0.52 of 255); the background is 0.99..1.01 of
+  black_bg.mat's rule in every measured pause once all the art is out
+  (with the art in: 1.00..2.70; with only the octopus / arms / trim out, 2
+  of 30 pauses read 0.20 / 0.22). rb_look (this
   build): small_club_02 luma 72.9, contrast 68.1 (+23 %); big_club_03 55.3
   (-20 %), 60.6; arena_04 65.4 (-6 %), 60.0 (+8 %): OK; theater_02 42.9
   (-38 %), 61.6; grain +46..58 % but arena_04's +14 % (GD05-095).
@@ -1560,8 +1560,18 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   white / 0.16 / 0.12 / (0.09, 0.16, 0.13); the presets' keyframes (1, 1..6,
   1) (15,223 entries: (1, 2, 1) 6,018, (1, 4, 1) 3,262 ...). So RB's beams
   reach the picture only through the post composite, at 0.01..0.06 of the
-  beam buffer times the density map times c91.x; the density map (the
-  drawer's +0x64 object, drawn at EndWorld 0x822A9CC8) and c91.x in the
-  post are not traced, so how bright that is stays open. Implementing it
+  beam buffer times the density map times c91.x; the density map is the
+  stage fog (below, D89); c91 is set per spotlight in the volume passes
+  (type 3 / 4: (0, 0, 0.625, +0x1C0); the others not read) and not by the
+  post, so its value at the composite is not settled and how bright the
+  beams are stays open. Implementing it
   means RB's three volume passes, the density map and the composite, not
   a gain on the port's GH2 beams: nothing changed (GD05-093).
+- **The stage fog proxy (D89, a correction of D79's reason):** RB does draw
+  it, through the drawer's own camera into the drawer's texture (0x822A9E58
+  from the beam pass 0x822ABDC0), which is gFogDensityMap: the smoke the
+  beams light in the composite. It never reaches the picture by itself, so
+  leaving it out of the draw list stays right until the beams are RB's
+  (GD05-093). The movies' white haze in the beams (theater, big club) is
+  most likely this composite [I]: the remaining dark gap of theater_02
+  (-38 %) and big_club_03 (-20 %) waits for it; nothing was tuned.
