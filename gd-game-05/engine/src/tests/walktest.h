@@ -215,7 +215,8 @@ private:
     // saturation and grain; the last gameplay frame's background box luma
     // (the pause rule).
     std::vector<std::array<double, 4>> lookFrames_;
-    double lookPrePause_ = -1;
+    std::vector<float> lookPrePause_;  // the luma (640x360) just before the pause
+    std::string lookPauseError_;
     std::array<double, 3> lookPace_{-1, 0, 0};  // wall ms, world draws, frames at the first look frame
     float nameX0_ = 0;               // the career walk's band name: where it starts
     // rb_fuzz: the generator, steps, the main menu's buttons, pacing, the last actions.

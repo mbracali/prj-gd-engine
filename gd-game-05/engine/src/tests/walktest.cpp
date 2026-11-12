@@ -1077,7 +1077,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // grain 1.97; fails outside 15% (grain 40%: Bink smooths it). Then
         // the pause: pause.milo's black_bg.mesh (black_bg.mat: black, alpha
         // 0.7, kBlendSrcAlpha over the whole screen) leaves the world at 0.3
-        // of its luma: a box free of the pause art, before and while paused.
+        // of its luma: the outer strips, before and while paused.
         // GD05_VENUE picks the venue (default small_club_02); the second song.
         if (!SDL_getenv("GD05_VENUE")) SDL_setenv_unsafe("GD05_VENUE", "small_club_02", 1);
         SDL_setenv_unsafe("GD05_TRACK", "0", 1);
@@ -3771,6 +3771,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             std::printf("  look: %zu frames: luma %.1f (movies %.1f, %+.0f%%), contrast %.1f (%.1f, %+.0f%%), saturation %.3f (%.3f), grain %.2f (%.2f, %+.0f%%)\n",
                         lookFrames_.size(), m[0], kLuma, 100 * (m[0] / kLuma - 1), m[1], kContrast, 100 * (m[1] / kContrast - 1), m[2], kSat, m[3],
                         kGrain, 100 * (m[3] / kGrain - 1));
+            if (!lookPauseError_.empty()) return fail(lookPauseError_);
             if (std::fabs(m[0] / kLuma - 1) > 0.15) return fail("look: luma " + std::to_string(m[0]) + " not within 15% of the movies'");
             if (std::fabs(m[1] / kContrast - 1) > 0.15) return fail("look: contrast " + std::to_string(m[1]) + " not within 15% of the movies'");
             if (std::fabs(m[3] / kGrain - 1) > 0.40) return fail("look: grain " + std::to_string(m[3]) + " not within 40% of the movies'");
@@ -3804,28 +3805,33 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 if (mx > 8) sat += (mx - mn) / mx;
             }
         const double n = double(w) * double(h), mean = sum / n;
-        auto box = [&](int x0, int y0, int x1, int y1) {  // mean luma of a 1280x720 box
-            double s = 0;
-            int c = 0;
-            for (int j = y0 / 2; j < y1 / 2 && j < h; ++j)
-                for (int i = x0 / 2; i < x1 / 2 && i < w; ++i) s += y[size_t(j) * size_t(w) + size_t(i)], ++c;
-            return c ? s / c : 0.0;
-        };
-        // Free of the pause art (pause.milo at 1280x720): the top right
-        // corner, right of the octopus.
-        const double bg = box(1190, 10, 1270, 80);
         SDL_DestroySurface(img);
         if (what == "prepause") {
-            lookPrePause_ = bg;
-            std::printf("  look: before the pause, background box luma %.1f\n", bg);
+            lookPrePause_ = y;
+            std::printf("  look: before the pause, luma %.1f\n", mean);
             return pass();
         }
         if (what == "pause") {
-            const double ratio = lookPrePause_ > 1 ? bg / lookPrePause_ : 0;
-            std::printf("  look: paused, background box luma %.1f = %.2f of the game's (black_bg.mat: 0.30)\n", bg, ratio);
-            if (lookPrePause_ <= 20) return fail("look: the box before the pause is too dark to measure");
+            // The screen's outer strips (x < 90, x >= 1190 at 1280x720: the
+            // pause art's octopus reaches in there only with its outlines):
+            // the median of paused / before over the pixels lit before
+            // (luma > 25); the world under the pause is paused.
+            std::vector<double> r;
+            if (lookPrePause_.size() == y.size())
+                for (int j = 0; j < h; ++j)
+                    for (int i = 0; i < w; ++i)
+                        if (i < 45 || i >= 595)
+                            if (const float b = lookPrePause_[size_t(j) * size_t(w) + size_t(i)]; b > 25) r.push_back(y[size_t(j) * size_t(w) + size_t(i)] / b);
+            // A failure here is reported by look:eval (both measured in one run).
+            if (r.size() < 500) {
+                lookPauseError_ = "look: too little lit background before the pause (" + std::to_string(r.size()) + " pixels)";
+                return pass();
+            }
+            std::nth_element(r.begin(), r.begin() + long(r.size() / 2), r.end());
+            const double ratio = r[r.size() / 2];
+            std::printf("  look: paused, the background at %.2f of the game's (median of %zu pixels; black_bg.mat: 0.30)\n", ratio, r.size());
             // The flicker (x 0.8..0.9 under ProFilm) and the grain move it a little.
-            if (std::fabs(ratio - 0.30) > 0.08) return fail("look: the pause background is " + std::to_string(ratio) + " of the game's, not 0.30");
+            if (std::fabs(ratio - 0.30) > 0.08) lookPauseError_ = "look: the pause background is " + std::to_string(ratio) + " of the game's, not 0.30";
             return pass();
         }
         double grain = 0;
