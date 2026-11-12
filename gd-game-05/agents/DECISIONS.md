@@ -923,3 +923,29 @@ pattern). Each says what, why and how to undo it.
   GD05_WALK_KEEP_GOING=1 prints a failed check and goes on (also through
   the restart) to run every check of a walk against an older build.
 - **Undo:** the walks' restart_app check; the fail lambda's keepGoing.
+
+## D71
+- **What (2026-11-12, GD05-074):** gd05 runs only on gd-engine-core (owner,
+  G06 7): every draw through `CoreDevice` on the core's render backends,
+  **Vulkan by default**, then SDL3, then OpenGL3 when one cannot start (each
+  with its window made again for its API; render/core_backend.cpp
+  backendsToTry); every sound through a core output, **miniaudio by
+  default**, then the core's other backends (audio/audio_device.cpp). gd05's
+  own OpenGL device ("local": gl_device.cpp, gl_api, the EGL HDR surface
+  hdr_output) and its SDL audio device path are deleted; True HDR is the
+  Vulkan backend's HDR swapchain with local's conversion shader (CoreDevice
+  applyOutput); the XDVDFS reader, RandomFile, the pref folder and the CPU
+  BCn decoder are the core's. A saved "local" is dropped (the default takes
+  its place). Development tools and the launcher's model explorer draw on
+  the core's OpenGL3. Inventory and what remains: docs/backend.md.
+- **Why:** Rock Band is the scaffolding for later games, so it must show a
+  game built on the shared parts alone; the engine-backend-guidelines'
+  "local is always the default" (rule 2) is replaced for gd05 by a fallback
+  through the core's own backends (never a black screen, never no sound
+  while any core backend starts). The other games keep local by default.
+- **Measured:** fixed-clock song shots (docs/backend.md "Checks"): Vulkan
+  now = Vulkan before (0 px); core OpenGL3 now = local before (0 px);
+  Vulkan vs the old default local: PROGRESS.md 2026-11-12 GD05-074.
+- **Undo:** core_backend.cpp kOrder / kDefaultBackend and
+  audiodev::kDefaultBackend choose the defaults; local itself is in git
+  history (before this decision's commit).

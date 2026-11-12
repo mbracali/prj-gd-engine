@@ -129,7 +129,7 @@ SDL_AudioStream* openStream(const SDL_AudioSpec& spec, SDL_AudioStreamCallback c
             }
             SDL_Log("audio: backend %s failed (%s)", id.c_str(), why.c_str());
         }
-        if (!out) SDL_Log("audio: no backend could start; no sound this run");
+        if (!out) SDL_Log("audio: no backend could start");
         std::lock_guard<std::mutex> g(g_lock);
         if (out) g_out = std::move(out), g_running = running;
         else g_failed = true;
