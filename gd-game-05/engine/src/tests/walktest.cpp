@@ -890,12 +890,16 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     } else if (scenario == "rb_career_band") {
         // GD05-072: the Band World Tour pays its members' characters. A
         // guitarist made in the Solo Tour's creator, the game restarted,
-        // then Multiplayer > Band World Tour alone (the lobby stand-in
-        // takes the profile's guitarist), a new band, its first gig on
+        // then Multiplayer > Band World Tour with a drummer (the lobby
+        // stand-in takes the profile's guitarist), a new band, its first gig on
         // autoplay: the character is paid the event's reward_per_star x the
         // band's stars and the band's money is its members'; restarted
         // again, the band and the money are still there.
-        SDL_setenv_unsafe("GD05_BAND_PLAYERS", "1", 1);
+        // Two players (modes.dta tour_world min_num_participants 2): the
+        // guitarist made here and a drummer without a character (the lobby
+        // stand-in's premade one: not a member, not paid).
+        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,guitar", 1);
+        SDL_setenv_unsafe("GD05_BAND_PLAYERS", "2", 1);
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -920,7 +924,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("rb_career_cash0");
         check("restart_app");
     } else if (scenario == "rb_career_band_restarted") {
-        endMs_ = 30000;
+        endMs_ = 90000;  // long enough for the band's first star on autoplay
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");

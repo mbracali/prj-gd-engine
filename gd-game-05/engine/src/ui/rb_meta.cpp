@@ -117,6 +117,9 @@ struct BandData {
     std::set<std::string> items, seenHints;
     std::string town, venue, event, unlockedItem;
     int minDifficulty = 3;
+    // The members' characters (their names, unique in the profile:
+    // profile_mgr is_char_name_unique): the band's money is theirs.
+    std::vector<std::string> members;
 };
 
 }  // namespace
@@ -218,6 +221,28 @@ public:
     std::vector<std::string> setlist;
     size_t songIndex = 0;
     int lastStars = 0, lastScore = 0;
+    // The stars of each song of the event played so far (RB's vector at
+    // 0x8298F7D0: complete_song RB 0x823D0640 appends, num_completed is its
+    // size) [C].
+    std::vector<int> songStars;
+    // The event's reward (TourPerformer reward, RB 0x823EEAE8) [C]: the
+    // event's reward_per_star times each song's stars, summed.
+    int reward() const {
+        const int per = event && event->ev.node ? num(event->ev.node->find("reward_per_star")) : 0;
+        int sum = 0;
+        for (int st : songStars) sum += per * st;
+        return sum;
+    }
+    // The money a character is paid, up to config/tour_solo.dta's max_money [C data].
+    void pay(RbCharObj& c, int amount);
+    // The session's local players' characters (game get_player_config <p>
+    // get_char), the band's members from now on.
+    std::vector<RbCharObj*> localMembers(RbBandObj* band = nullptr);
+    RbCharObj* charNamed(const std::string& name) {
+        for (RbCharObj* c : chars)
+            if (c->d.name == name) return c;
+        return nullptr;
+    }
     bool winning = false;
 
     std::function<void()> ensure;  // the tour data, once the boot scripts are loaded
@@ -489,6 +514,7 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
         if (const TourEvent* e = m.findEvent(false, "", "", sArg(args, 0))) {
             d.event = e->name, d.town = e->town, d.venue = e->venue;
             m.event = m.eventObj(*e, false);
+            m.songStars.clear();
         }
         return true;
     }
@@ -506,6 +532,7 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "set_random_songs") {
         m.setlist = m.event ? m.eventSongs(m.event->ev, false, d.instrument) : std::vector<std::string>{};
         m.songIndex = 0;
+        m.songStars.clear();
         return true;
     }
     if (msg == "next_song") {
@@ -514,6 +541,7 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     }
     if (msg == "complete_song") {
         m.lastStars = iArg(args, 0), m.lastScore = iArg(args, 1);
+        m.songStars.push_back(m.lastStars);
         d.score += m.lastScore;
         ++m.songIndex;
         return true;
@@ -522,17 +550,13 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "first_song") return r = Value::integer(m.songIndex == 0 ? 1 : 0), true;
     if (msg == "num_completed") return r = Value::integer(int(m.songIndex)), true;
     if (msg == "is_winning") return r = Value::integer(m.winning ? 1 : 0), true;
-    if (msg == "reward") {
-        const int per = m.event ? num(m.event->ev.node->find("reward_per_star"), 1, 5) : 5;
-        return r = Value::integer(per * m.lastStars), true;
-    }
+    if (msg == "reward") return r = Value::integer(m.reward()), true;
     if (msg == "complete_event") {
         if (!m.event) return true;
         const std::string key = std::to_string(d.difficulty) + ":" + m.event->ev.key();
         const bool first = !d.stars.count(key);
         d.stars[key] = std::max(d.stars[key], m.lastStars);
-        const int per = num(m.event->ev.node->find("reward_per_star"), 1, 5);
-        d.money += per * m.lastStars;
+        m.pay(*this, m.reward());
         // The event's outfit for the instrument and gender (the reward).
         if (first)
             if (const DataNode* o = m.event->ev.node->find("outfit"))
@@ -564,6 +588,25 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     return false;
 }
 
+void RbMeta::pay(RbCharObj& c, int amount) {
+    const DataNode* most = data.solo ? data.solo->find("max_money") : nullptr;
+    c.d.money = int(std::min<long long>(most ? num(most) : 999999999, (long long)c.d.money + amount));
+}
+
+std::vector<RbCharObj*> RbMeta::localMembers(RbBandObj* band) {
+    std::vector<RbCharObj*> v;
+    RbBandObj* b = band ? band : bandPerf();
+    for (int p = 0; p < 4; ++p) {
+        if (!ui_.session().players[size_t(p)].participating) continue;
+        const Value pc = in_.send("game", "get_player_config", {Value::integer(p)});
+        auto* c = pc.object ? dynamic_cast<RbCharObj*>(in_.send(pc.object, "get_char", {}).object) : nullptr;
+        if (!c || std::find(v.begin(), v.end(), c) != v.end()) continue;
+        v.push_back(c);
+        if (b && std::find(b->d.members.begin(), b->d.members.end(), c->d.name) == b->d.members.end()) b->d.members.push_back(c->d.name);
+    }
+    return v;
+}
+
 // ----------------------------------------------------------------- bands
 
 bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) {
@@ -576,7 +619,7 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "set_motto") return d.motto = sArg(args, 0), true;
     if (msg == "hometown") return r = Value::symbol(d.hometown), true;
     if (msg == "set_hometown") return d.hometown = sArg(args, 0), true;
-    if (msg == "init") return d.finalized = true, d.town = d.hometown, m.save(), true;
+    if (msg == "init") return d.finalized = true, d.town = d.hometown, m.localMembers(this), m.save(), true;
     if (msg == "is_finalized") return r = Value::integer(d.finalized ? 1 : 0), true;
     if (msg == "is_local") return r = Value::integer(1), true;
     if (msg == "update_members" || msg == "update_data" || msg == "set_dirty" || msg == "print_guid") return true;
@@ -589,7 +632,13 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     }
     if (msg == "world_fame" || msg == "total_fame_stars") return r = Value::integer(m.bandFame(*this, "")), true;
     if (msg == "fans") return r = Value::integer(d.fans), true;
-    if (msg == "money") return r = Value::integer(d.money), true;
+    if (msg == "money") {
+        // The members' characters' money summed (TourBand money, RB 0x823EDAA0) [C].
+        int sum = 0;
+        for (const std::string& n : d.members)
+            if (RbCharObj* c = m.charNamed(n)) sum += c->d.money;
+        return r = Value::integer(sum), true;
+    }
     if (msg == "cheat_add_money") return d.money += iArg(args, 0), true;
     if (msg == "buzz") return r = Value::integer(d.buzz), true;
     if (msg == "buzz_achievement") {
@@ -635,6 +684,7 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
             m.setlist = m.eventSongs(*e, true, "band");
             m.songIndex = 0;
             m.lastStars = m.lastScore = 0;
+            m.songStars.clear();
             if (SDL_getenv("GD05_UILOG")) {
                 std::string l;
                 for (const std::string& x : m.setlist) l += " " + x;
@@ -663,6 +713,7 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "next_song") return r = Value::symbol(m.songIndex < m.setlist.size() ? m.setlist[m.songIndex] : std::string()), true;
     if (msg == "complete_song") {
         m.lastStars += iArg(args, 0), m.lastScore += iArg(args, 1);
+        m.songStars.push_back(iArg(args, 0));
         ++m.songIndex;
         return true;
     }
@@ -670,16 +721,16 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "first_song") return r = Value::integer(m.songIndex == 0 ? 1 : 0), true;
     if (msg == "num_completed") return r = Value::integer(int(m.songIndex)), true;
     if (msg == "is_winning" || msg == "is_hardcore_winning") return r = Value::integer(m.winning ? 1 : 0), true;
-    if (msg == "reward") {
-        const int per = m.event ? num(m.event->ev.node->find("reward_per_star"), 1, 25) : 25;
-        return r = Value::integer(per * m.lastStars), true;
-    }
+    if (msg == "reward") return r = Value::integer(m.reward()), true;
     if (msg == "complete_event") {
         if (!m.event) return true;
         const int songs = std::max<int>(1, int(m.setlist.size()));
         const int stars = m.lastStars / songs;
         d.stars[m.event->ev.key()] = std::max(d.stars[m.event->ev.key()], m.lastStars);
-        d.money += num(m.event->ev.node->find("reward_per_star"), 1, 25) * m.lastStars;
+        // Every local member's character is paid the whole reward (pay,
+        // RB 0x823EE4A0: each member's character's own pay) [C].
+        const int reward = m.reward();
+        for (RbCharObj* c : m.localMembers()) m.pay(*c, reward);
         // Fans: the venue's (buzz (venues (<venue> (performance ...)))) by stars [I: the table's axes].
         const DataNode* buzz = m.data.band ? m.data.band->find("buzz") : nullptr;
         const DataNode* venues = buzz ? buzz->find("venues") : nullptr;
@@ -797,6 +848,9 @@ void RbMeta::save() {
         Json it = Json::array();
         for (const std::string& s : b->d.items) it.a.push_back(Json::string(s));
         j.set("items", it);
+        Json mem = Json::array();
+        for (const std::string& s : b->d.members) mem.a.push_back(Json::string(s));
+        j.set("members", mem);
         Json sh = Json::array();
         for (const std::string& s : b->d.seenHints) sh.a.push_back(Json::string(s));
         j.set("seen_hints", sh);
@@ -840,6 +894,7 @@ void RbMeta::load() {
         b->d.money = int(j["money"].num()), b->d.buzz = int(j["buzz"].num()), b->d.town = j["town"].str(), b->d.finalized = true;
         for (const auto& [k, v] : j["stars"].o) b->d.stars[k] = int(v.num());
         for (const Json& s : j["items"].a) b->d.items.insert(s.str());
+        for (const Json& s : j["members"].a) b->d.members.push_back(s.str());
         for (const Json& s : j["seen_hints"].a) b->d.seenHints.insert(s.str());
         bands.push_back(b);
     }
@@ -1598,6 +1653,18 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
             pc.controllerType = ui.host().controllerType(p);
             const std::string inst = pc.controllerType == 0 ? "drum" : pc.controllerType == 2 ? "vocals" : "guitar";
             pc.character = "prefab_" + inst;
+            // The band's members: each player's profile character of the
+            // instrument, when there is one (RB's lobby has the player pick
+            // or make it) [I: the stand-in picks the first one not taken].
+            if (!hth)
+                for (RbCharObj* c : m.chars) {
+                    bool taken = false;
+                    for (int q = 0; q < p; ++q) taken |= s.players[size_t(q)].character == c->name();
+                    if (!taken && c->d.instrument == inst) {
+                        pc.character = c->name();
+                        break;
+                    }
+                }
             // Two guitar players: the second plays the bass [I: RB asks in seldiff].
             pc.trackType = pc.controllerType == 0 ? 0 : pc.controllerType == 2 ? 3 : 2;
             if (pc.trackType == 2 && !hth)
