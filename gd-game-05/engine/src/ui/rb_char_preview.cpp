@@ -14,6 +14,7 @@
 #include "game/band.h"
 #include "render/band_view.h"
 #include "render/canvas.h"
+#include "render/char_skin.h"
 #include "render/renderer.h"
 #include "render/ui_view.h"
 #include "ui/ui_manager.h"
@@ -21,10 +22,15 @@
 namespace ui {
 
 int RbCharPreview::total_ = 0;
+RbCharPreview* RbCharPreview::last_ = nullptr;
 bool RbCharPreview::hidden = false;
 
 RbCharPreview::RbCharPreview() = default;
-RbCharPreview::~RbCharPreview() = default;
+RbCharPreview::~RbCharPreview() {
+    if (last_ == this) last_ = nullptr;
+}
+
+SDL_Surface* RbCharPreview::readSkin(const std::string& tex) { return ch_ && view_ ? view_->skin().read(*ch_, tex) : nullptr; }
 
 void RbCharPreview::clear() {
     ch_.reset();
@@ -82,6 +88,7 @@ int RbCharPreview::draw(UiManager& ui, gfx::UiView& v, const scene::Xfm& at) {
     view_->drawCharacter(r.materials(), *ch_, v.camera(), false);
     ui.keepDepthOnce();
     total_ += view_->meshesDrawn();
+    last_ = this;
     return view_->meshesDrawn();
 }
 

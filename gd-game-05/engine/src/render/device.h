@@ -229,6 +229,9 @@ public:
     // Reads a rectangle of the window's back buffer (origin top-left), as
     // RGBA32. Synchronous: development aids only (screenshots).
     virtual SDL_Surface* readPixels(int x, int y, int w, int h) = 0;
+    // The same for a target's colour (origin top-left, as drawn; no output
+    // gamma): the walks' checks of a texture rendered at run time.
+    virtual SDL_Surface* readTarget(TargetId t, int x, int y, int w, int h) = 0;
     // Presents, keeping to the frame cap (vsync where the display's rate
     // matches it, otherwise paced in software; headless is not paced).
     virtual void endFrame() = 0;

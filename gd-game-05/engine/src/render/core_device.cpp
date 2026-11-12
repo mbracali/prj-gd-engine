@@ -195,6 +195,7 @@ public:
     UniformData stageUniforms(const void* data, size_t size) override;
     void drawableSize(int& w, int& h) const override;
     SDL_Surface* readPixels(int x, int y, int w, int h) override;
+    SDL_Surface* readTarget(TargetId t, int x, int y, int w, int h) override;
     void endFrame() override;
     void setFrameCap(int fps) override;
     void setInternalHeight(int height) override { internalH_ = std::max(0, height); }
@@ -864,6 +865,21 @@ SDL_Surface* CoreDevice::readPixels(int x, int y, int w, int h) {
     for (int row = 0; row < h; ++row)
         std::memcpy(static_cast<uint8_t*>(s->pixels) + size_t(row) * size_t(s->pitch), &rows[size_t(h - 1 - row) * size_t(w) * 4], size_t(w) * 4);
     applyOutputGamma(s, gamma_);
+    return s;
+}
+
+SDL_Surface* CoreDevice::readTarget(TargetId id, int x, int y, int w, int h) {
+    const CTarget* t = targets_.get(id.id);
+    if (w <= 0 || h <= 0 || !t || t->format != core::Format::RGBA8) return nullptr;
+    if (inPass_) endPass();
+    // Stored bottom-up, as the frame (readPixels).
+    const core::Readback r = dev_->readTexture(textures_.get(t->color.id)->tex, core::Rect{x, t->h - y - h, w, h});
+    std::vector<uint8_t> rows(size_t(w) * size_t(h) * 4);
+    if (!r || !dev_->readbackData(r, rows.data(), rows.size())) return nullptr;
+    SDL_Surface* s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
+    if (!s) return nullptr;
+    for (int row = 0; row < h; ++row)
+        std::memcpy(static_cast<uint8_t*>(s->pixels) + size_t(row) * size_t(s->pitch), &rows[size_t(h - 1 - row) * size_t(w) * 4], size_t(w) * 4);
     return s;
 }
 

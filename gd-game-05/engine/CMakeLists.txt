@@ -87,6 +87,7 @@ target_sources(gd05 PRIVATE
   src/platform/disc_picker.cpp
   src/platform/paths.cpp
   src/render/band_view.cpp
+  src/render/char_skin.cpp
   src/render/canvas.cpp
   src/render/core_backend.cpp
   src/render/core_device.cpp

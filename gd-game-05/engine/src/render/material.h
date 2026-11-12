@@ -136,6 +136,7 @@ public:
     const Camera& camera() const { return lastCamera_; }
     int viewportW() const { return lastW_; }
     int viewportH() const { return lastH_; }
+    TextureId sceneDepth() const { return sceneDepth_; }
     // `bones`: ctx.bones transforms (one for a rigid mesh).
     void draw(const GpuMesh& mesh, const Mat4* bones, const Material& m, const DrawContext& ctx);
 

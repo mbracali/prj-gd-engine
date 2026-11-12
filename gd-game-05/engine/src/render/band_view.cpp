@@ -10,6 +10,7 @@
 #include "char/character.h"
 #include "game/band.h"
 #include "game/world.h"
+#include "render/char_skin.h"
 
 using gfx::Mat4;
 
@@ -29,9 +30,13 @@ float screenSize(const gfx::Camera& camera, const std::array<float, 4>& sphere) 
 
 BandView::BandView(World& world, gfx::SceneCache& cache) : world_(&world), cache_(cache) {
     dynamic_ = std::make_unique<gfx::DynamicMesh>(cache.device());
+    skin_ = std::make_unique<gfx::CharSkin>(cache);
 }
 
-BandView::BandView(gfx::SceneCache& cache) : cache_(cache) { dynamic_ = std::make_unique<gfx::DynamicMesh>(cache.device()); }
+BandView::BandView(gfx::SceneCache& cache) : cache_(cache) {
+    dynamic_ = std::make_unique<gfx::DynamicMesh>(cache.device());
+    skin_ = std::make_unique<gfx::CharSkin>(cache);
+}
 
 BandView::~BandView() = default;
 
@@ -92,6 +97,8 @@ void BandView::drawCharacter(gfx::MaterialRenderer& mr, chr::Character& c, const
     hdr_ = hdr;
     // Character::DrawShowing 0x82153090: the LOD, then the directory.
     c.updateLod(screenSize(camera, c.worldSphere()));
+    // Its skins (the TexRenderers' proxies) into their textures first.
+    skin_->update(mr, c);
     for (const scene::Mesh* m : meshesToDraw(c, world_ ? &world_->pose() : nullptr)) drawMesh(mr, c, *m);
 }
 
@@ -288,6 +295,7 @@ void BandView::drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scen
     }
     for (int pass = 0; mat && pass < 4; ++pass) {
         gfx::Material gm = cache_.material(*mat, matPose ? matPose : pose);
+        skin_->apply(*mat, gm);
         if (forceAlphaWrite) gm.alphaWrite = true;
         mr.draw(g, bones, gm, ctx);
         if (mat->nextPass.empty() || !mat->dir) break;

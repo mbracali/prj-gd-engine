@@ -330,7 +330,45 @@ void Character::loadOutfit(const GameData& data, const std::string& outfitPath) 
         set("normal_map", mat->normalMap);
         set("specular_map", mat->specularMap);
     }
+    // What stays in the outfit's directory (its inline proxies: a head's
+    // head_skin_proxy) resolves names in the character's, where the
+    // outfit's objects went [I: RB merges the outfit into the character's
+    // directory].
+    od.parent = &d;
     outfits_.push_back(std::move(m));
+}
+
+const scene::Directory* Character::proxyDir(const std::string& owner) {
+    const scene::Directory* found = nullptr;
+    std::function<void(const scene::Directory&)> walk = [&](const scene::Directory& d) {
+        for (const auto& [o, sub] : d.subdirs) {
+            if (found || !sub) continue;
+            if (o == owner) found = sub.get();
+            else walk(*sub);
+        }
+    };
+    forEachRoot([&](scene::Directory& root) {
+        if (!found) walk(root);
+    });
+    return found;
+}
+
+const scene::Directory* Character::linkMilo(const GameData& data, scene::Directory& into, const std::string& path) {
+    for (const auto& m : linked_)
+        if (m->path() == path) {
+            if (std::find(into.linked.begin(), into.linked.end(), &m->root()) == into.linked.end()) into.linked.push_back(&m->root());
+            return &m->root();
+        }
+    if (!data.exists(path)) return nullptr;
+    try {
+        linked_.push_back(scene::loadMilo(data, path));
+    } catch (const std::exception& e) {
+        SDL_Log("char %s: %s: %s", name_.c_str(), path.c_str(), e.what());
+        return nullptr;
+    }
+    into.linked.push_back(&linked_.back()->root());
+    into.clearIndex();
+    return &linked_.back()->root();
 }
 
 void Character::setXfm(const scene::Xfm& x) { skeleton_.setRoot(x); }

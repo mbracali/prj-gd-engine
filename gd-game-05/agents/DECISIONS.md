@@ -1247,3 +1247,46 @@ pattern). Each says what, why and how to undo it.
   panels' own cameras, so the creator's character stands behind the menu;
   the lobby slots' characters (CharLoadingPanel) are not drawn.
 - **Undo:** CharPanelObj / PracticeSpacePanelObj draw.
+
+## D84
+- **What (2026-11-12, GD05-022 / GD05-084):** the characters' skins are
+  rendered at run time as RB's (render/char_skin.h). The heads' and torsos'
+  diffuse textures are placeholders (head_head<n>_diffuse.tex in
+  head_<n>.milo, torso_naked.tex in <gender>_<instrument>.milo) a
+  TexRenderer (head_skin.rndtex, torso_skin.rndtex; Load RB 0x821ED160:
+  header, (rev > 2) Anim and Draw, draw, output texture, (rev > 1) force,
+  impostor_height) fills from its inline skin proxy (head_skin_proxy,
+  torso_skin_proxy) [C data]. RndTexRenderer::DrawShowing (RB 0x821ED620)
+  [C]: when dirty, the proxy's first Cam (Cam.cam: y_fov 0, a parallel
+  projection, RndCam RB 0x8218CAE0: x -1..1 across, z up scaled by the
+  target's height / width) targets the texture, the proxy draws (its draw
+  list: head1.grp / Group.grp in their order), then it is clean. The
+  proxies draw ScreenMasks (rect x y w h from the top left, the material's
+  texture across it [I: the uvs], mask colour x material colour, no depth
+  [I]) and uv-space meshes (the patch meshes, the arms' overlays); their
+  materials drawn unlit, white ambient [I: the proxies hold no Environ].
+  PatchRenderer (Load RB 0x822D3998: a TexRenderer, the test patch and
+  side symbols, back and front textures) renders its patch directory into
+  its output (patch_chest / _left_arm / _right_arm / _facepaint); without
+  one nothing is drawn, the output transparent [I: RB's untouched target].
+  CompositeCharacter's sync (RB 0x822E94B8) [C]: every skin.mat takes
+  skin.pal's colour at skin_color_index (set_skin_color RB 0x822E5110,
+  rgb), each skin_proxy's tattoo_overlay_mat(2, 3) skin_tattoo_overlay.pal's
+  (world_objects.dta skin_proxy set_color) [C data]; make-up:
+  makeup_eyes.mask / makeup_eyes_overlay.mask draw the character's
+  makeup_eyes.tex (the eyes outfit) through makeup_eyes(_overlay).mat,
+  makeup_lips.mask the lips', a mask showing only when its texture and
+  material exist; RB looks for makeup_lips_overlay.mask, the data's is
+  makeup_lips_ovelay.mask, so that one stays as loaded [C]. The torso
+  proxy's ObjectDir subdir (outfits/torso/naked/torso_skin_subdir.milo,
+  the base skin texture; RB 0x823C2C10) is loaded and linked. An outfit's
+  directory resolves names in the character's (its inline head proxy
+  finds the eyes' make-up) [I: RB merges outfits into the character].
+  Placeholders nothing renders (the naked legs) keep wave 05's stand-in
+  (the skin colour) [I]. The targets render once per change
+  (Character::skinSerial) and are freed 20 s after their character was
+  last drawn. Device: readTarget (a target's pixels, the walks' checks).
+- **Why:** every head and torso was one flat colour (the placeholders
+  drawn in the skin tone): no face texture, no make-up, no tattoos.
+- **Measured:** rb_makeup (PROGRESS 2026-11-12 car9).
+- **Undo:** GD05_SKIN_LEGACY=1 (nothing rendered); BandView's skin_.

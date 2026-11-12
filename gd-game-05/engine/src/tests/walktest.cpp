@@ -34,6 +34,8 @@
 #include "game/song_db.h"
 #include "input/input.h"
 #include "render/scene_gpu.h"
+#include "render/texture_codec.h"
+#include "char/character.h"
 #include "render/ui_view.h"
 #include "char/char_objects.h"
 #include "scene/milo.h"
@@ -1435,6 +1437,75 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("game_screen", 60000);
         wait(3000);
         check("rb_kit_on_stage");
+    } else if (scenario == "rb_makeup") {
+        // GD05-022 / GD05-084: the skins rendered at run time. A new
+        // character, the Rock Shop's INK > MAKEUP, the first eye make-up
+        // bought: the head's texture (head_skin.rndtex's output) changes in
+        // makeup_eyes.mask's rect by the make-up texture blended as the data
+        // says (rb_skin_makeup), and the skin colour from skin.pal holds
+        // (rb_skin_base); worn on stage after a restart.
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME
+        wait(800);
+        check("focus_to appearance.btn", 5000);
+        press(kX);  // PHYSIQUE
+        at("charcreator_appearance_screen", 20000);
+        wait(1200);
+        check("focus_to skin.btn", 5000);
+        press(kX), wait(500);  // skin.lst
+        for (int i = 0; i < 5; ++i) press(kDown), wait(300);
+        press(kX), wait(500);  // the sixth skin colour
+        check("focus_to done.btn", 5000);
+        press(kX);
+        at("charcreator_maker_screen", 20000);
+        wait(1000);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_skin_cheat_money");
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROKK SHOPPE
+        at("shop_screen", 20000);
+        wait(1000);
+        check("focus_to ink.btn", 5000);
+        press(kX);  // INK
+        at("shop_ink_screen", 20000);
+        wait(1000);
+        check("focus_to makeup.btn", 5000);
+        press(kX);  // MAKEUP
+        at("shop_makeup_screen", 20000);
+        wait(1500);
+        check("rb_skin_base");
+        check("focus_to eyes.btn", 5000);
+        press(kX);  // EYES: the list
+        wait(1200);
+        check("print_focus");
+        press(kDown), wait(800);  // the first make-up after (none)
+        check("print_focus");
+        press(kX);  // its colours (has_group_selection: several outfits contain the name)
+        at("group_select_screen", 10000);
+        wait(1200);
+        press(kX);  // the first: a free piece (no cost in the catalog) is worn at once
+        at("shop_makeup_screen", 10000);
+        wait(2500);
+        check("print_focus");
+        check("rb_skin_makeup");
     } else if (scenario == "rb_body_deform") {
         // GD05-084: the creator's weight and height sliders (5 steps,
         // charcreator.dta) both at their top (1, 1: the deform clip's sample 1,
@@ -1933,6 +2004,45 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("look:pause");
         check("look:shot:");
         check("look:eval");
+    } else if (scenario == "rb_win_sparks") {
+        // GD05-090: arena_04's win fountains (sparks_fountain_blue_WIN..07,
+        // WorldInstances of sparks_fountain_blue_win.milo in
+        // win_fx_draw_first.grp) stay idle in play: their start_hide.trig
+        // (event "start") hides shared.grp, and nothing drives their
+        // frame-driven systems; the win sequence's shots (coop_fw_*: their
+        // play_anim EventAnim, here win_drums.eventanm from coop_fw_all05)
+        // fire game_win.trig at frames 18 / 20, which shows shared.grp and
+        // plays it (0..60). Particles started by those systems: 0 in play,
+        // more than 0 after the win shot (and drawn).
+        if (!SDL_getenv("GD05_VENUE")) SDL_setenv_unsafe("GD05_VENUE", "arena_04", 1);
+        SDL_setenv_unsafe("GD05_TRACK", "0", 1);
+        SDL_setenv_unsafe("GD05_HUD", "0", 1);
+        endMs_ = 90000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(500);
+        press(kDown), wait(400);
+        press(kX);
+        at("qp_seldiff_solo_screen");
+        press(kX);
+        wait(1500);
+        press(kX);
+        at("game_screen", 60000);
+        wait(15000);
+        check("counter:parts_started:sparks_fountain_blue_win:0");  // the systems are there (-1: none)
+        check("counter_max:parts_started:sparks_fountain_blue_win:0");
+        check("counter_max:parts_drawn:sparks_fountain_blue_win:0");
+        check("setenv:GD05_FORCE_SHOT=coop_fw_all05.shot");
+        wait(5000);
+        check("counter:world_eventanim_triggers:1");
+        check("counter:parts_started:sparks_fountain_blue_win:1");
+        check("counter:parts_drawn:sparks_fountain_blue_win:1");
+        check("setenv:GD05_FORCE_SHOT=");
     } else if (scenario == "quickplay") {
         endMs_ = 30000;  // the song ends early (the walk's end time; GD05_WALK_END overrides)
         if (const char* e = SDL_getenv("GD05_WALK_END")) endMs_ = float(std::atof(e));
@@ -4516,6 +4626,145 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         return fail("unknown check " + s.screen);
     }
+    // rb_skin_* (GD05-022 / GD05-084): the menu preview's head texture,
+    // rendered from head_skin_proxy (render/char_skin.h), against the data.
+    if (s.screen == "rb_skin_cheat_money") {
+        ScriptObject* c = ui.interp().send("tour", "performer", {}).object;
+        if (!c) return fail("no character");
+        ui.interp().send(c, "cheat_add_money", {Value::integer(2000)});
+        return pass();
+    }
+    if (s.screen == "rb_skin_base" || s.screen == "rb_skin_makeup") {
+        static std::vector<uint8_t> base;
+        static int bw = 0, bh = 0;
+        ui::RbCharPreview* p = ui::RbCharPreview::drawnLast();
+        chr::Character* ch = p ? p->character() : nullptr;
+        if (!ch) return fail(s.screen + ": no character preview drawn");
+        std::string out;
+        ch->forEachObject([&](scene::Object& o) {
+            if (const auto* t = o.as<scene::TexRenderer>(); t && o.name == "head_skin.rndtex") out = t->outputTexture;
+        });
+        const scene::Directory* proxy = ch->proxyDir("head_skin_proxy");
+        if (out.empty() || !proxy) return fail("the head has no head_skin.rndtex / head_skin_proxy");
+        SDL_Surface* sf = p->readSkin(out);
+        if (!sf) return fail("the head's texture " + out + " was not rendered (GD05-022)");
+        std::vector<uint8_t> px(size_t(sf->w) * size_t(sf->h) * 4);
+        for (int y = 0; y < sf->h; ++y) std::memcpy(&px[size_t(y) * size_t(sf->w) * 4], static_cast<uint8_t*>(sf->pixels) + y * sf->pitch, size_t(sf->w) * 4);
+        const int w = sf->w, h = sf->h;
+        SDL_DestroySurface(sf);
+        auto texRgba = [](const scene::Tex& t, std::vector<uint8_t>& rgba) {
+            const scene::Bitmap& b = t.bitmap;
+            gfx::TexFormat f = gfx::TexFormat::RGBA8;
+            switch (b.format) {
+            case scene::Bitmap::Format::DXT1: f = gfx::TexFormat::BC1; break;
+            case scene::Bitmap::Format::DXT5: f = gfx::TexFormat::BC3; break;
+            case scene::Bitmap::Format::RGBA8: break;
+            default: return false;
+            }
+            return !b.empty() && gfx::decodeToRgba8(f, b.level(0), b.levels[0].size, b.width, b.height, rgba);
+        };
+        // A ScreenMask's rect in the target's pixels.
+        auto rectOf = [&](const scene::ScreenMask& m, int& x0, int& y0, int& x1, int& y1) {
+            x0 = int(m.screenRect[0] * w), y0 = int(m.screenRect[1] * h);
+            x1 = int((m.screenRect[0] + m.screenRect[2]) * w), y1 = int((m.screenRect[1] + m.screenRect[3]) * h);
+        };
+        const auto* eyes = proxy->find<scene::ScreenMask>("makeup_eyes.mask");
+        if (!eyes) return fail("no makeup_eyes.mask in head_skin_proxy");
+        int x0, y0, x1, y1;
+        rectOf(*eyes, x0, y0, x1, y1);
+        if (s.screen == "rb_skin_base") {
+            // The skin: skin.mask draws the proxy's texture times skin.mat's
+            // colour, skin.pal's entry (rbSkin); overlay.mask then lays the
+            // same texture's alpha-marked parts untinted. A pixel where the
+            // texture's alpha is 0: texture x colour exactly.
+            base = px, bw = w, bh = h;
+            const auto* sm = proxy->find<scene::ScreenMask>("skin.mask");
+            const scene::Mat* mat = sm ? proxy->find<scene::Mat>(sm->mat) : nullptr;
+            const scene::Tex* tex = mat ? proxy->find<scene::Tex>(mat->diffuseTex) : nullptr;
+            std::vector<uint8_t> t;
+            if (!tex || !texRgba(*tex, t) || tex->bitmap.width != w || tex->bitmap.height != h) return fail("skin.mask's texture is not the target's size");
+            // The colour: char/gen/skin.milo skin.pal at the character's skin_color (RB 0x822E5110).
+            ScriptObject* perf = ui.interp().send("tour", "performer", {}).object;
+            const int idx = perf ? ui.interp().send(perf, "skin_color", {}).integerValue() : -1;
+            std::array<float, 4> want{-1, -1, -1, -1};
+            try {
+                auto skinMilo = scene::loadMilo(ui.data(), "char/gen/skin.milo_xbox");
+                if (auto* pal = skinMilo->root().find<scene::ColorPalette>("skin.pal"); pal && idx >= 0 && size_t(idx) < pal->colors.size()) want = pal->colors[size_t(idx)];
+            } catch (const std::exception&) {
+            }
+            std::printf("  skin: expected skin.pal[%d] = %.3f %.3f %.3f\n", idx, want[0], want[1], want[2]);
+            for (int k = 0; k < 3; ++k)
+                if (std::fabs(want[size_t(k)] - mat->color[size_t(k)]) > 1e-4f) return fail("skin.mat's colour is not skin.pal's entry");
+            if (idx != 5) return fail("the creator's sixth skin colour was not chosen");
+            double err = 0, n = 0;
+            for (size_t i = 0; i < size_t(w) * size_t(h); i += 97)
+                if (t[i * 4 + 3] == 0)
+                    for (int k = 0; k < 3; ++k) err += std::fabs(px[i * 4 + size_t(k)] - t[i * 4 + size_t(k)] * mat->color[size_t(k)]), n += 1;
+            std::printf("  head skin %s %dx%d: skin.mat colour %.3f %.3f %.3f; expected texture x colour where its alpha is 0: mean error %.2f over %.0f "
+                        "channels\n", out.c_str(), w, h, mat->color[0], mat->color[1], mat->color[2], n ? err / n : -1.0, n);
+            if (n < 100 || err / n > 3) return fail("the head's skin is not the proxy's texture times the skin colour");
+            return pass();
+        }
+        if (base.empty() || bw != w || bh != h) return fail("rb_skin_base did not run");
+        // makeup_eyes.mask then makeup_eyes_overlay.mask (head1.grp's order),
+        // both over the rect with makeup_eyes.tex: alpha blends (Mat blend 3)
+        // of the texture times mask colour x mat colour [C data].
+        struct Layer {
+            const scene::ScreenMask* mask;
+            const scene::Mat* mat;
+            std::vector<uint8_t> rgba;
+            int tw = 0, th = 0;
+        };
+        std::vector<Layer> layers;
+        for (const char* n : {"makeup_eyes.mask", "makeup_eyes_overlay.mask"}) {
+            const auto* m = proxy->find<scene::ScreenMask>(n);
+            const scene::Mat* mat = m ? proxy->find<scene::Mat>(m->mat) : nullptr;
+            const scene::Tex* tex = mat && mat->dir ? mat->dir->resolve<scene::Tex>(mat->diffuseTex) : nullptr;
+            if (!m || !m->draw.showing || !mat || !tex) return fail(std::string(n) + " is not showing the eyes' make-up (RB 0x822E94B8)");
+            Layer l{m, mat, {}, tex->bitmap.width, tex->bitmap.height};
+            if (!texRgba(*tex, l.rgba)) return fail("cannot decode " + tex->name);
+            std::printf("  %s: %s (%dx%d), mat %s colour %.2f %.2f %.2f %.2f, rect %.4f %.4f %.4f %.4f\n", n, tex->name.c_str(), l.tw, l.th, mat->name.c_str(),
+                        mat->color[0], mat->color[1], mat->color[2], mat->color[3], m->screenRect[0], m->screenRect[1], m->screenRect[2], m->screenRect[3]);
+            layers.push_back(std::move(l));
+        }
+        auto sample = [](const Layer& l, float u, float v, float c[4]) {
+            const float fx = std::clamp(u * l.tw - 0.5f, 0.0f, float(l.tw - 1)), fy = std::clamp(v * l.th - 0.5f, 0.0f, float(l.th - 1));
+            const int ix = int(fx), iy = int(fy), jx = std::min(ix + 1, l.tw - 1), jy = std::min(iy + 1, l.th - 1);
+            const float ax = fx - ix, ay = fy - iy;
+            for (int k = 0; k < 4; ++k) {
+                auto at = [&](int x, int y) { return float(l.rgba[(size_t(y) * size_t(l.tw) + size_t(x)) * 4 + size_t(k)]); };
+                c[k] = ((at(ix, iy) * (1 - ax) + at(jx, iy) * ax) * (1 - ay) + (at(ix, jy) * (1 - ax) + at(jx, jy) * ax) * ay) / 255.0f;
+            }
+        };
+        double err = 0, n = 0;
+        long wantPx = 0, gotPx = 0;  // pixels the make-up changes by more than 8 levels: expected, measured
+        for (int y = y0 + 2; y < y1 - 2; ++y)
+            for (int x = x0 + 2; x < x1 - 2; ++x) {
+                const size_t i = (size_t(y) * size_t(w) + size_t(x)) * 4;
+                float e[3] = {base[i] / 255.0f, base[i + 1] / 255.0f, base[i + 2] / 255.0f};
+                for (const Layer& l : layers) {
+                    const float u = ((x + 0.5f) / w - l.mask->screenRect[0]) / l.mask->screenRect[2];
+                    const float v = ((y + 0.5f) / h - l.mask->screenRect[1]) / l.mask->screenRect[3];
+                    float c[4];
+                    sample(l, u, v, c);
+                    const float a = c[3] * l.mat->color[3] * l.mask->color[3];
+                    for (int k = 0; k < 3; ++k) e[k] = e[k] * (1 - a) + c[k] * l.mat->color[size_t(k)] * l.mask->color[size_t(k)] * a;
+                }
+                float dw = 0, dg = 0;
+                for (int k = 0; k < 3; ++k) {
+                    err += std::fabs(e[k] * 255.0f - px[i + size_t(k)]);
+                    dw = std::max(dw, std::fabs(e[k] * 255.0f - base[i + size_t(k)]));
+                    dg = std::max(dg, std::fabs(float(px[i + size_t(k)]) - float(base[i + size_t(k)])));
+                    n += 1;
+                }
+                wantPx += dw > 8, gotPx += dg > 8;
+            }
+        const double merr = n ? err / n : -1;
+        std::printf("  head texture in makeup_eyes.mask's rect (%d,%d)-(%d,%d): expected the make-up over the bare skin (mean error <= 3), %ld pixels "
+                    "changed by > 8 levels; measured mean error %.2f, %ld pixels changed\n", x0, y0, x1, y1, wantPx, merr, gotPx);
+        if (n == 0 || merr > 3 || wantPx < 200 || std::labs(gotPx - wantPx) > wantPx / 10) return fail("the eyes' make-up is not in the head's texture as the data says");
+        return pass();
+    }
     // rb_preview_drawn (GD05-083): the menu's character preview
     // (ui/rb_char_preview.h) drew meshes, and the frame with it differs from
     // the frame without it (RbCharPreview::hidden) in more than 500 pixels.
@@ -5626,6 +5875,15 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         return pass();
     }
     // counter_max:<key>:<max>: the game's counter stays at or under max.
+    if (s.screen.rfind("setenv:", 0) == 0) {  // setenv:NAME=VALUE (empty: unset)
+        const std::string kv = s.screen.substr(7);
+        const size_t e = kv.find('=');
+        const std::string k = kv.substr(0, e), v = e == std::string::npos ? std::string() : kv.substr(e + 1);
+        if (v.empty()) SDL_unsetenv_unsafe(k.c_str());
+        else SDL_setenv_unsafe(k.c_str(), v.c_str(), 1);
+        std::printf("  env %s=%s\n", k.c_str(), v.c_str());
+        return pass();
+    }
     if (s.screen.rfind("counter_max:", 0) == 0) {
         const std::string rest = s.screen.substr(12);
         const size_t c = rest.rfind(':');

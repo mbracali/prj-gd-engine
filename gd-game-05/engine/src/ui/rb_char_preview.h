@@ -6,6 +6,8 @@
 #include <memory>
 #include <string>
 
+#include <SDL3/SDL.h>
+
 #include "scene/objects.h"
 
 class BandView;
@@ -51,6 +53,11 @@ public:
     // meshes drawn (0 without a character).
     int draw(UiManager& ui, gfx::UiView& view, const scene::Xfm& at);
     chr::Character* character() { return ch_.get(); }
+    // The preview drawn last (the walks' checks), or null.
+    static RbCharPreview* drawnLast() { return last_; }
+    // The pixels of the character's texture `tex` rendered at run time
+    // (render/char_skin.h; RGBA, top row first), or null.
+    SDL_Surface* readSkin(const std::string& tex);
     // Every preview's meshes drawn so far (the walks' check).
     static int totalMeshes() { return total_; }
     // The walks' pixel check: every preview hidden while set.
@@ -64,6 +71,7 @@ private:
     std::unique_ptr<BandView> view_;
     double clock_ = 0;
     static int total_;
+    static RbCharPreview* last_;
 };
 
 }  // namespace ui

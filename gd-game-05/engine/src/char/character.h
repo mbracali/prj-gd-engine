@@ -68,6 +68,23 @@ public:
         milo_->root().forEach(f);
         for (auto& m : outfits_) m->root().forEach(f);
     }
+    // The character's milo's root and each outfit's (with their inline
+    // proxied directories: the head's and the torso's skin proxies).
+    template <class F>
+    void forEachRoot(F&& f) {
+        f(milo_->root());
+        for (auto& m : outfits_) f(m->root());
+    }
+    // The inline proxied directory object `owner` holds in any of the roots
+    // (head_skin_proxy, torso_skin_proxy), or null.
+    const scene::Directory* proxyDir(const std::string& owner);
+    // Loads a milo one of its directories names (a skin proxy's ObjectDir
+    // subdir, torso_skin_subdir.milo), kept with the character, and links it
+    // into `into`'s lookups (Directory::linked); null when it cannot load.
+    const scene::Directory* linkMilo(const GameData& data, scene::Directory& into, const std::string& path);
+    // Bumped whenever what the skin proxies draw changes (the skin colour,
+    // make-up, a patch): render/char_skin.h renders them again.
+    uint32_t skinSerial = 0;
     const scene::CharacterObj& own() const { return *own_; }
     bool band() const { return own_->band; }
     const std::string& type() const { return own_->header.type; }  // guitarist / singer / ... / crowd / ui
@@ -187,6 +204,7 @@ private:
     std::string path_, name_;
     std::unique_ptr<scene::Milo> milo_;
     std::vector<std::unique_ptr<scene::Milo>> outfits_;
+    std::vector<std::unique_ptr<scene::Milo>> linked_;  // linkMilo's
     std::unique_ptr<scene::CharacterObj> own_;
     Skeleton skeleton_;
     Bones bones_;

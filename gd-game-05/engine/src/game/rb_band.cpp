@@ -45,6 +45,7 @@
 #include "script/script.h"
 #include "scene/milo.h"
 #include "scene/objects.h"
+#include "scene/ui_objects.h"
 
 namespace {
 
@@ -251,20 +252,39 @@ std::map<std::string, std::string> Band::rbOutfitMilos(const GameData& data, con
     return outfits;
 }
 
-// The skin [C data: char/gen/skin.milo skin.pal; the heads' and bodies'
-// diffuse textures are empty placeholders the game renders at run time
-// (PatchRenderer / TexRenderer: the skin tone, tattoos and make-up)].
-// The port has no render-to-texture for them yet (GD05-022): every
-// material whose diffuse texture is such a placeholder is drawn in the
-// prefab's skin colour (skin_color_index) instead [I].
+// The skin (GD05-022 / GD05-084, DECISIONS D84), as CompositeCharacter's
+// sync after its outfits load (RB 0x822E94B8) [C]:
+// - every "skin.mat" of the character (the skin proxies' base: the skin
+//   texture tinted) takes the skin palette's colour at skin_color_index
+//   (set_skin_color RB 0x822E5110: the mat's colour, rgb), and every skin
+//   proxy (an RndDir of type skin_proxy, world_objects.dta) its
+//   tattoo_overlay_color, skin_tattoo_overlay.pal's colour at the same
+//   index (when the palettes are the same size), on its
+//   tattoo_overlay_mat(2, 3) [C data: skin_proxy's set_color];
+// - make-up: in head_skin_proxy, makeup_eyes.mask and makeup_eyes_overlay.mask
+//   draw the character's makeup_eyes.tex (the eyes outfit's) through
+//   makeup_eyes.mat / makeup_eyes_overlay.mat, makeup_lips.mask the
+//   lips'; a mask shows only while its texture and material exist [C]
+//   (RB looks for makeup_lips_overlay.mask; the data's is named
+//   makeup_lips_ovelay.mask, so that one stays as loaded [C data]);
+// - render/char_skin.h renders the TexRenderers (head_skin.rndtex,
+//   torso_skin.rndtex) from their proxies into the heads' and torsos'
+//   placeholder textures.
+// A torso proxy's ObjectDir subdir (outfits/torso/naked/
+// torso_skin_subdir.milo: the base skin texture) is loaded and linked
+// (RB 0x823C2C10 names <gender>/outfits/torso/naked/torso_skin_subdir.milo).
+// Other placeholder textures nothing renders (the legs' naked parts) keep
+// wave 05's stand-in: the skin colour, nothing for an overlay, a dark cloth
+// else [I].
 void Band::rbSkin(const GameData& data, chr::Character& c, const DataNode* prefab, int skinIndex) {
-    static std::vector<std::array<float, 4>> skin;
+    static std::vector<std::array<float, 4>> skin, tattoo;
     static bool loaded = false;
     if (!loaded) {
         loaded = true;
         try {
             auto milo = scene::loadMilo(data, "char/gen/skin.milo_xbox");
             if (auto* pal = milo->root().find<scene::ColorPalette>("skin.pal")) skin = pal->colors;
+            if (auto* pal = milo->root().find<scene::ColorPalette>("skin_tattoo_overlay.pal")) tattoo = pal->colors;
         } catch (const std::exception& e) {
             SDL_Log("band: skin.milo: %s", e.what());
         }
@@ -272,28 +292,94 @@ void Band::rbSkin(const GameData& data, chr::Character& c, const DataNode* prefa
     int idx = 0;
     if (const DataNode* n = prefab ? prefab->find("skin_color_index") : nullptr; n && n->children.size() > 1) idx = n->intAt(1);
     if (skinIndex >= 0) idx = skinIndex;
+    // RB 0x822E5110: the index clamped to the palette (out of range: 0).
+    if (idx < 0 || size_t(idx) >= skin.size()) idx = 0;
     std::array<float, 4> tone{0.8f, 0.62f, 0.5f, 1};
-    if (idx >= 0 && size_t(idx) < skin.size()) tone = skin[size_t(idx)];
+    if (size_t(idx) < skin.size()) tone = skin[size_t(idx)];
+    std::array<float, 4> overlay{1, 1, 1, 1};
+    if (tattoo.size() == skin.size() && size_t(idx) < tattoo.size()) overlay = tattoo[size_t(idx)];
+
+    // The TexRenderers' proxies and outputs.
+    std::set<const scene::Directory*> proxies;
+    std::set<const scene::Tex*> rendered;
+    std::vector<std::pair<const scene::DirObj*, const scene::Directory*>> skinProxies;
+    c.forEachObject([&](scene::Object& o) {
+        const auto* t = o.as<scene::TexRenderer>();
+        if (!t || !o.dir) return;
+        if (const scene::Tex* out = o.dir->resolve<scene::Tex>(t->outputTexture)) rendered.insert(out);
+        if (o.as<scene::PatchRenderer>() || t->drawName.empty()) return;
+        const scene::Directory* proxy = c.proxyDir(t->drawName);
+        if (!proxy) return;
+        proxies.insert(proxy);
+        const auto* own = o.dir->resolve<scene::DirObj>(t->drawName);
+        if (own && own->header.type == "skin_proxy") skinProxies.emplace_back(own, proxy);
+        // Its ObjectDir subdirs (torso_skin_subdir.milo), relative to the
+        // character's milo.
+        if (own)
+            for (const std::string& sub : own->objectDir.subdirs)
+                if (!sub.empty()) c.linkMilo(data, const_cast<scene::Directory&>(*proxy), scene::findMiloRelative(data, c.path(), sub));
+    });
+    auto prop = [](const scene::ObjectHeader& h, const std::string& key) -> std::string {
+        if (!h.hasProps) return {};
+        for (const auto& kv : h.props.children)
+            if (kv.children.size() > 1 && kv.children[0].str == key) return kv.children[1].str;
+        return {};
+    };
     c.forEachObject([&](scene::Object& o) {
         auto* mat = o.as<scene::Mat>();
-        if (!mat || mat->diffuseTex.empty() || !mat->dir) return;
+        if (mat && mat->name == "skin.mat") mat->color = {tone[0], tone[1], tone[2], mat->color[3]};
+    });
+    for (const auto& [own, proxy] : skinProxies) {
+        if (auto* m = proxy->find<scene::Mat>(prop(own->header, "mat"))) m->color = {tone[0], tone[1], tone[2], m->color[3]};
+        for (const char* k : {"tattoo_overlay_mat", "tattoo_overlay_mat2", "tattoo_overlay_mat3"})
+            if (auto* m = proxy->find<scene::Mat>(prop(own->header, k))) m->color = {overlay[0], overlay[1], overlay[2], m->color[3]};
+    }
+    // Make-up (RB 0x822E94B8).
+    if (const scene::Directory* head = c.proxyDir("head_skin_proxy")) {
+        auto findTex = [&](const std::string& name) {
+            const scene::Tex* t = nullptr;
+            c.forEachObject([&](scene::Object& o) {
+                if (!t && o.name == name && !proxies.count(o.dir)) t = o.as<scene::Tex>();
+            });
+            return t;
+        };
+        static const char* const kMakeup[][3] = {{"makeup_eyes.mask", "makeup_eyes.tex", "makeup_eyes.mat"},
+                                                 {"makeup_eyes_overlay.mask", "makeup_eyes.tex", "makeup_eyes_overlay.mat"},
+                                                 {"makeup_lips.mask", "makeup_lips.tex", "makeup_lips.mat"},
+                                                 {"makeup_lips_overlay.mask", "makeup_lips.tex", "makeup_lips_overlay.mat"}};
+        for (const auto& m : kMakeup) {
+            auto* mask = head->find<scene::ScreenMask>(m[0]);
+            if (!mask) continue;
+            const scene::Tex* tex = findTex(m[1]);
+            auto* mat = head->find<scene::Mat>(m[2]);
+            mask->draw.showing = tex && mat;
+            if (tex && mat) mat->diffuseTex = tex->name;
+        }
+    }
+    // The placeholders nothing renders (wave 05's stand-in) [I].
+    c.forEachObject([&](scene::Object& o) {
+        auto* mat = o.as<scene::Mat>();
+        if (!mat || mat->diffuseTex.empty() || !mat->dir || proxies.count(mat->dir)) return;
         const scene::Tex* t = mat->dir->resolve<scene::Tex>(mat->diffuseTex);
         if (t && !t->bitmap.levels.empty() && t->width > 8) return;
+        if (t && rendered.count(t)) return;
         mat->diffuseTex.clear();
-        // Skin materials take the tone; the patch overlays (tattoos, logos,
-        // stickers: alpha-blended) show nothing without a patch; other
-        // clothes whose texture the port has not set: a dark cloth [I].
         const bool skinMat = mat->name.find("skin") != std::string::npos || mat->name.find("naked") != std::string::npos;
         if (skinMat) mat->color = {tone[0], tone[1], tone[2], mat->color[3]};
         else if (mat->blend == 3) mat->color[3] = 0;
         else mat->color = {0.22f, 0.22f, 0.24f, mat->color[3]};
-        if (const char* red = SDL_getenv("GD05_SKINRED"); red && skinMat) mat->color = {1, 0, 0, 1};
-        if (SDL_getenv("GD05_SKINLOG"))
-            SDL_Log("skin %s: normal %s spec %s custom %s emissive %s env %s twoColor %d mask %s color2 %.2f %.2f %.2f ppl %d useEnv %d blend %d",
-                    mat->name.c_str(), mat->normalMap.c_str(), mat->specularMap.c_str(), mat->customDiffuseMap.c_str(), mat->emissiveMap.c_str(),
-                    mat->environMap.c_str(), int(mat->twoColor), mat->twoColorMask.c_str(), mat->color2[0], mat->color2[1], mat->color2[2],
-                    int(mat->perPixelLit), int(mat->useEnviron), mat->blend);
     });
+    if (SDL_getenv("GD05_SKINLOG"))
+        c.forEachObject([&](scene::Object& o) {
+            const auto* mat = o.as<scene::Mat>();
+            if (!mat || !proxies.count(mat->dir)) return;
+            const scene::Tex* t = mat->dir->resolve<scene::Tex>(mat->diffuseTex);
+            SDL_Log("skin %s/%s: tex %s (%s %dx%d) colour %.2f %.2f %.2f %.2f blend %d z %d useEnv %d prelit %d", mat->dir->name.c_str(),
+                    mat->name.c_str(), mat->diffuseTex.c_str(), t ? (t->bitmap.levels.empty() ? "placeholder" : "bitmap") : "missing",
+                    t ? t->width : 0, t ? t->height : 0, mat->color[0], mat->color[1], mat->color[2], mat->color[3], mat->blend, mat->zMode,
+                    int(mat->useEnviron), int(mat->prelit));
+        });
+    ++c.skinSerial;
 }
 
 // ---- the band at run time ----------------------------------------------------
