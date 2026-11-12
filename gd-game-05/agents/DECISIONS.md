@@ -540,3 +540,17 @@ pattern). Each says what, why and how to undo it.
 - **Undo:** Input::kernel_ / drainKernel / closeKernel and the report's
   Kernel device line; walktest's EvdevOut and dev* helpers (SDL virtual
   setters again).
+
+## D48
+- **What (2026-11-12, GD05-063):** a label's text is laid out with the
+  font's kerning plus the label's (RB 0x8226E0A0 raises the font's +0x1044
+  by the label's kerning around the layout, then puts it back) [C]. A
+  UIList with more rows than its display_num draws display_num rows from
+  a first row that follows the selection [I: the window moves only as far
+  as the selection needs]. The song list's texts are measured against
+  RB's sizes by walk rb_songlist_text (5%).
+- **Why:** the owner's "wrong sizes for the letters" on the song list: the
+  sizes match the data (within 0.3%), the kerning rule was not RB's, and
+  the list was stuck on its first seven rows.
+- **Undo:** UiView::drawLabel / drawTemplate (kerning), UiView::drawList
+  and ListState::first.

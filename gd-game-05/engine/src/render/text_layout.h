@@ -144,6 +144,17 @@ struct TextProbe {
     Mat4 viewProj;
     float rect[4] = {0, 0, 1280, 720};
     bool indirect = false;
+    // As drawn: the camera's view-projection and the target's size (a
+    // RenderDir's texture for the song list's texts).
+    Mat4 drawViewProj;
+    int targetW = 0, targetH = 0;
+    // The label's own text fields (UILabel rev 8) when it has them, and the
+    // fit scale the port gave it (the songlist_text walk).
+    bool hasStyle = false;
+    std::string text;
+    const scene::Font* font = nullptr;
+    float dataSize = 0, leading = 1, boxW = 0, boxH = 0, kerning = 0, fitX = 1, fitZ = 1;
+    uint32_t fitType = 0, align = 0, capsMode = 0;
 };
 
 // Draws laid-out texts through the renderer: the quads go to a vertex
@@ -167,6 +178,7 @@ public:
     // When set, each draw appends a TextProbe named probeName.
     std::vector<TextProbe>* probes = nullptr;
     std::string probeName;
+    TextProbe probeStyle;  // the next draw's label fields (hasStyle ... capsMode)
 
 private:
     struct Entry;

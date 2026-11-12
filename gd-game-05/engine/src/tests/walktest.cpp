@@ -291,6 +291,29 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1000);
         check("no_black");  // title > main > solo > song list > back: no black frame
     } else if (scenario == "rb_esc3") {
+    } else if (scenario == "rb_songlist_text") {
+        // GD05-063, owner report: "the list of musics have wrong sizes for
+        // the letters". Every text the song list draws (into its RenderDir's
+        // texture) against the size its label's data gives through RB's
+        // fit (songlist_text): scrolled, so headings and long names show.
+        at("splash_screen", 30000);
+        wait(1500);
+        press(kX);
+        at("main_screen");
+        wait(1500);
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        wait(800);
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(2500);
+        check("songlist_text:top");
+        for (int i = 0; i < 9; ++i) press(kDown), wait(250);
+        wait(1200);
+        check("songlist_text:down9");
+        for (int i = 0; i < 20; ++i) press(kDown), wait(150);
+        wait(1200);
+        check("songlist_text:down29");
         // Wave 05 (GD05-033, universal-behaviors.md): Esc three times in a
         // row on the main menu quits the game.
         at("splash_screen", 30000);
@@ -2695,6 +2718,9 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     // career: the band has bought Judy Nails' second outfit and the SG's
     // white skin in the store (M10), so both choices offer two.
     if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song" || scenario_ == "career_encore" ||
+    if (scenario_ == "rb_songlist_text" && ui.current())  // songlist_text measures the drawn texts
+        for (ui::PanelObj* p : ui.current()->panels())
+            if (p->view) p->view->setTextProbes(true);
          scenario_ == "career_win" || scenario_ == "career_win_medium" || scenario_ == "career_practice") && !seeded_ && ui.currentScreen() == "sel_difficulty_screen" && ui.session().profileSlot >= 0) {
         seeded_ = true;
         Career::Profile& p = ui.career().profiles[size_t(ui.session().profileSlot)];
@@ -3432,6 +3458,161 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         // entered text starts at the same x whatever its length and the
         // picked character follows it (GD02-068).
         ui::PanelObj* fp = ui.focusPanel();
+    if (s.screen.rfind("songlist_text:", 0) == 0) {
+        // rb_songlist_text (GD05-063): every label text the song list drew
+        // into its RenderDir's texture against the size RB gives it. RB's
+        // UILabel update (RB 0x8226E0A0) lays the label's text out with
+        // the font's kerning plus the label's (the font's +0x1044 raised by
+        // the label's kerning while it lays out, then put back), wraps at
+        // the label's width (RB 0x82215EE8: Text +0xF4 = width), and for
+        // kFitJust (RB 0x8226DDA8) takes the text size down 0.2 at a time
+        // from text_size while the text is wider than the box, higher than
+        // it (height in the font's cell aspect, RB 0x82214FE8) or a line
+        // splits a word. Expected: that size's cell height (size * cell_h /
+        // cell_w) and the line's width, through the texture's camera, in
+        // texture pixels; drawn: the glyph quads as drawn. > 5% fails.
+        const std::string tag = s.screen.substr(14);
+        ui::PanelObj* p = ui.panel("qp_selsong_panel");
+        if (!p || !p->view) return fail("no qp_selsong_panel view");
+        if (const char* dir = SDL_getenv("GD05_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + "/songlist_" + tag + ".bmp");
+        if (SDL_getenv("GD05_SONGLIST_DUMP") && p->view->milo()) {
+            std::function<void(const scene::Directory&, int)> dump = [&](const scene::Directory& d, int depth) {
+                std::printf("  %*sdir %s (%s)\n", depth * 2, "", d.name.c_str(), d.cls.c_str());
+                for (const auto& o : d.objects) {
+                    const auto* l = o->as<scene::UILabel>();
+                    if (!l && !o->as<scene::UIList>() && !o->as<scene::Mesh>() && !o->as<scene::Cam>()) continue;
+                    if (const auto* c = o->as<scene::Cam>()) std::printf("  %*scam %s yfov %.4f near %.1f far %.1f\n", depth * 2 + 2, "", o->name.c_str(), double(c->yFov), double(c->nearPlane), double(c->farPlane));
+                    const scene::Xfm w = p->view->pose().world(o.get());
+                    std::printf("  %*s%s %s show %d at %.0f %.0f %.0f", depth * 2 + 2, "", o->cls.c_str(), o->name.c_str(), int(p->view->showing(o.get())),
+                                double(w.pos[0]), double(w.pos[1]), double(w.pos[2]));
+                    {
+                        const scene::Xfm lo = p->view->pose().local(o.get());
+                        std::printf(" local rot [%.3f %.3f %.3f | %.3f %.3f %.3f | %.3f %.3f %.3f] pos %.1f %.1f %.1f world rot0 %.3f %.3f %.3f",
+                                    double(lo.rot[0]), double(lo.rot[1]), double(lo.rot[2]), double(lo.rot[3]), double(lo.rot[4]), double(lo.rot[5]),
+                                    double(lo.rot[6]), double(lo.rot[7]), double(lo.rot[8]), double(lo.pos[0]), double(lo.pos[1]), double(lo.pos[2]),
+                                    double(w.rot[0]), double(w.rot[1]), double(w.rot[2]));
+                    }
+                    if (l) std::printf(" type %s text '%s' token %s size %.1f fit %u box %.0fx%.0f lead %.2f k %.2f",
+                                       l->header.type.c_str(), l->text.c_str(), l->textToken.c_str(), double(l->style.textSize), l->style.fitText,
+                                       double(l->style.width), double(l->style.height), double(l->style.leading), double(l->style.kerning));
+                    if (const auto* m = o->as<scene::Mesh>(); m && depth > 0 && !p->view->textProbes().empty()) {
+                        const gfx::TextProbe& q0 = p->view->textProbes().front();
+                        float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
+                        const gfx::Mat4 wm = gfx::toMat4(w);
+                        for (const scene::MeshVertex& v : m->verts) {
+                            const gfx::Vec3 ww = wm.transformPoint({v.pos[0], v.pos[1], v.pos[2]});
+                            const gfx::Mat4& mm = q0.drawViewProj;
+                            const float cx = mm.at(0, 0) * ww.x + mm.at(0, 1) * ww.y + mm.at(0, 2) * ww.z + mm.at(0, 3);
+                            const float cy = mm.at(1, 0) * ww.x + mm.at(1, 1) * ww.y + mm.at(1, 2) * ww.z + mm.at(1, 3);
+                            const float cw = mm.at(3, 0) * ww.x + mm.at(3, 1) * ww.y + mm.at(3, 2) * ww.z + mm.at(3, 3);
+                            const float px = (cx / cw + 1) * 0.5f * float(q0.targetW), py = (1 - cy / cw) * 0.5f * float(q0.targetH);
+                            x0 = std::min(x0, px), x1 = std::max(x1, px), y0 = std::min(y0, py), y1 = std::max(y1, py);
+                        }
+                        std::printf(" | in the texture (%dx%d): x %.0f..%.0f y %.0f..%.0f", q0.targetW, q0.targetH, double(x0), double(x1), double(y0), double(y1));
+                    }
+                    std::printf("\n");
+                }
+                for (const auto& [owner, sub] : d.subdirs)
+                    if (sub) dump(*sub, depth + 1);
+            };
+            dump(p->view->milo()->root(), 0);
+        }
+        float cx0 = 0, cy0 = 0, cx1 = 0, cy1 = 0;
+        const bool cloth = p->view->clothRect(cx0, cy0, cx1, cy1);
+        auto project = [](const gfx::TextProbe& q, gfx::Vec3 local, float& px, float& py) {
+            const gfx::Vec3 w = q.world.transformPoint(local);
+            const gfx::Mat4& m = q.drawViewProj;
+            const float cx = m.at(0, 0) * w.x + m.at(0, 1) * w.y + m.at(0, 2) * w.z + m.at(0, 3);
+            const float cy = m.at(1, 0) * w.x + m.at(1, 1) * w.y + m.at(1, 2) * w.z + m.at(1, 3);
+            const float cw = m.at(3, 0) * w.x + m.at(3, 1) * w.y + m.at(3, 2) * w.z + m.at(3, 3);
+            px = (cx / cw + 1) * 0.5f * float(q.targetW), py = (1 - cy / cw) * 0.5f * float(q.targetH);
+        };
+        int measured = 0, bad = 0;
+        for (const gfx::TextProbe& q : p->view->textProbes()) {
+            if (!q.hasStyle || !q.font || q.verts.size() < 4 || q.targetW <= 0) continue;
+            gfx::FontMetrics fm(*q.font);
+            const float aspect = fm.lineHeight(1.0f);
+            gfx::TextStyle st;
+            st.leading = q.leading, st.align = q.align, st.capsMode = q.capsMode, st.wrapWidth = q.boxW;
+            st.overrideKerning = true, st.kerning = fm.kerning() + q.kerning;
+            float size = q.dataSize;
+            gfx::TextLayout lay;
+            for (;;) {
+                st.size = size;
+                lay = gfx::layoutText(&fm, q.text, st);
+                if (q.fitType != 2) break;
+                float top, bottom;
+                lay.extent(st, top, bottom);
+                const float h = std::fabs(top - bottom) * aspect, w = lay.maxWidth();
+                bool shrink = (q.boxW > 0 && q.boxW < w) || (q.boxH > 0 && q.boxH < h);
+                for (size_t li = 0; !shrink && li + 1 < lay.lines.size(); ++li) {
+                    const size_t e = lay.lines[li].end;
+                    const char a = e > 0 ? lay.text[e - 1] : ' ', b = e < lay.text.size() ? lay.text[e] : ' ';
+                    if (a != ' ' && a != '\n' && b != ' ' && b != '\n') shrink = true;
+                }
+                if (!shrink || size - 0.2f < 0) break;
+                size -= 0.2f;
+            }
+            // Expected: the cell's height and the widest line's width at that
+            // size, in the label's own space (its world before the fit scale).
+            const float wantH = size * aspect, wantW = lay.maxWidth();
+            float ax, ay, bx, by;
+            project(q, {0, 0, 0}, ax, ay);
+            project(q, {0, 0, wantH / q.fitZ}, bx, by);
+            (void)wantW;
+            const float expH = std::hypot(bx - ax, by - ay);
+            // Drawn: the first glyph quad's height; the quads' x extent.
+            float t0x, t0y, t1x, t1y;
+            project(q, {q.verts[0].pos[0], 0, q.verts[0].pos[2]}, t0x, t0y);
+            project(q, {q.verts[0].pos[0], 0, q.verts[1].pos[2]}, t1x, t1y);
+            const float gotH = std::hypot(t1x - t0x, t1y - t0y);
+            float minX = 1e30f, maxX = -1e30f;
+            for (const scene::MeshVertex& v : q.verts) minX = std::min(minX, v.pos[0]), maxX = std::max(maxX, v.pos[0]);
+            // The size the port laid the text out at (a quad is one cell high).
+            const float drawnSize = (q.verts[0].pos[2] - q.verts[1].pos[2]) / aspect;
+            // The glyphs' span: the first quad's left to the last's right.
+            float l0x, l0y, l1x, l1y;
+            project(q, {0, 0, 0}, l0x, l0y);
+            project(q, {maxX - minX, 0, 0}, l1x, l1y);
+            const float gotSpan = std::hypot(l1x - l0x, l1y - l0y);
+            // The same span RB's layout gives (first glyph's left to the last glyph's right).
+            float wantSpanL = 1e30f, wantSpanR = -1e30f;
+            for (const scene::MeshVertex& v : lay.verts) wantSpanL = std::min(wantSpanL, v.pos[0]), wantSpanR = std::max(wantSpanR, v.pos[0]);
+            float s0x, s0y, s1x, s1y;
+            project(q, {0, 0, 0}, s0x, s0y);
+            project(q, {(wantSpanR - wantSpanL) / q.fitX, 0, 0}, s1x, s1y);
+            const float wantSpan = std::hypot(s1x - s0x, s1y - s0y);
+            const float dh = expH > 0 ? gotH / expH - 1 : 0, dw = wantSpan > 0 ? gotSpan / wantSpan - 1 : 0;
+            const float toScreen = cloth && q.targetH > 0 ? (cy1 - cy0) / float(q.targetH) : 1;
+            const bool off = std::fabs(dh) > 0.05f || std::fabs(dw) > 0.05f;
+            ++measured, bad += off;
+            std::printf("  %-34s %-24.24s font %-22s size %5.2f -> RB %5.2f (port %5.2f) fit %u box %5.1fx%4.1f k %5.3f+%5.3f | cell h px want %5.1f got %5.1f (%+.1f%%) | span px want %6.1f got %6.1f (%+.1f%%) | screen h ~%4.1f px%s\n",
+                        q.name.c_str(), q.text.c_str(), q.font->name.c_str(), double(q.dataSize), double(size), double(drawnSize * q.fitZ), q.fitType,
+                        double(q.boxW), double(q.boxH), double(fm.kerning()), double(q.kerning), double(expH), double(gotH), double(dh * 100), double(wantSpan),
+                        double(gotSpan), double(dw * 100), double(gotH * toScreen), off ? "  <-- off" : "");
+        }
+        if (SDL_getenv("GD05_SONGLIST_DUMP"))
+            for (const gfx::TextProbe& q : p->view->textProbes()) {
+                const gfx::Vec3 o = q.world.transformPoint({0, 0, 0});
+                float zt = -1e9f, zb = 1e9f;
+                for (const scene::MeshVertex& v : q.verts) zt = std::max(zt, v.pos[2]), zb = std::min(zb, v.pos[2]);
+                const gfx::Vec3 ox = q.world.transformPoint({1, 0, 0}), oz = q.world.transformPoint({0, 0, 1});
+                float px0, py0;
+                {
+                    const gfx::Mat4& m = q.drawViewProj;
+                    const float cx = m.at(0, 0) * o.x + m.at(0, 1) * o.y + m.at(0, 2) * o.z + m.at(0, 3);
+                    const float cy = m.at(1, 0) * o.x + m.at(1, 1) * o.y + m.at(1, 2) * o.z + m.at(1, 3);
+                    const float cw = m.at(3, 0) * o.x + m.at(3, 1) * o.y + m.at(3, 2) * o.z + m.at(3, 3);
+                    px0 = (cx / cw + 1) * 0.5f * float(q.targetW), py0 = (1 - cy / cw) * 0.5f * float(q.targetH);
+                }
+                std::printf("  probe %s align 0x%x lead %.3f origin %.1f %.1f %.1f (texture %.0f %.0f) scale x %.3f z %.3f quads z %.1f..%.1f\n", q.name.c_str(), q.align, double(q.leading),
+                            double(o.x), double(o.y), double(o.z), double(px0), double(py0), double(std::hypot(ox.x - o.x, ox.z - o.z)), double(std::hypot(oz.x - o.x, oz.z - o.z)), double(zb), double(zt));
+            }
+        std::printf("  songlist_text %s: %d texts measured, %d off by more than 5%%\n", tag.c_str(), measured, bad);
+        if (measured < 5) return fail("too few song list texts measured");
+        if (bad) return fail(std::to_string(bad) + " song list text(s) off their data size by more than 5%");
+        return pass();
+    }
         const gfx::UiView::Hit *entered = nullptr, *picking = nullptr;
         if (fp && fp->view)
             for (const gfx::UiView::Hit& h : fp->view->hits()) {

@@ -853,3 +853,32 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   poses (D33); 2000 steps pass (327 checks).
 - 053 Enhanced backdrop: the venue's own band shots (D31) instead of the
   port's close-up inside the drum kit.
+
+## 2026-11-12, song list letter sizes (GD05-063)
+
+- Owner: "the list of musics have wrong sizes for the letters". The new
+  walk rb_songlist_text measures every label text the song list draws into
+  its RenderDir's texture (480 x 552 through meta.cam; popup_bg fills it,
+  x 6..475, y 17..535) against the size RB gives it from the data (the
+  label's text_size through RB's kFitJust loop, the font's cell aspect,
+  the list's scale 2), in texture pixels; over 5% fails. RB's UIList rev 9
+  fields named from its SyncProperty (RB 0x822697E8): spacing 33,
+  arrow_offset, arrow_showing, arrow_only_scroll, arrows_on_highlight,
+  fade_offset, display_num 7 [C].
+- Data vs drawn (cell height in texture px): song names (list.lbl, fakir,
+  text_size 30, kFitJust 415 x 30, leading 0.75): RB size 28.0, 36.7 /
+  36.6; headings (heading.lbl, 35, 440 x 50, leading 0.70): 35.0, 45.8 /
+  45.6; line widths equal to 0.1 px; on the screen through the cloth a
+  44..50 px cell (the sway). 21 texts at 3 scroll positions, all within
+  0.3%.
+- Found [C]: RB's UILabel update (RB 0x8226E0A0) adds the label's kerning
+  to the font's (font +0x1044, put back after the layout); the port
+  replaced it. Fakir's and the list labels' kerning are 0, so the list is
+  unchanged; labels with their own kerning on fonts with one change (D48).
+- Found: the list never scrolled. drawList drew rows 0..6 only; past the
+  7th song the highlight left the cloth. A window of display_num rows now
+  follows the selection [I] (D48).
+- Left: where RB puts a sort heading (the port lifts heading.lbl to
+  list.lbl's height in its own slot [I]); a capture of RB's song list
+  would settle it. The HUD's labels (rb_hud_view.cpp) still replace the
+  kerning.

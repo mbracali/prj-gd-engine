@@ -1108,7 +1108,10 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
             if (band->fitText == 2 && band->width > 0 && band->height >= 1.8f * band->textSize * std::max(band->leading, 0.5f))
                 st.wrapWidth = band->width;
             st.align = band->alignment, st.capsMode = band->allCaps ? 2 : 0;
-            st.overrideKerning = true, st.kerning = band->kerning;
+            // RB's UILabel update (RB 0x8226E0A0) raises the font's kerning
+            // (+0x1044) by the label's while it lays the text out, then puts
+            // it back: the label's kerning adds to the font's [C].
+            st.overrideKerning = true, st.kerning = fm.kerning() + band->kerning;
         } else {
             st.size = tmpl->size, st.leading = tmpl->leading, st.wrapWidth = tmpl->wrapWidth;
             st.align = tmpl->align, st.capsMode = tmpl->capsMode;
@@ -1151,10 +1154,22 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
     world = scene::compose(scaleXfm(lt->fit[0], 1, lt->fit[1]), world);
     const Mat4 wm = toMat4(world);
     texts_.probeName = l.name;
+    setProbeStyle(band, *lt);
     texts_.draw(r, &l, *lt->font, lt->layout, wm, matColor);
     // Buttons, and RB's labels too (the help bar's actions take clicks).
     if (l.as<scene::BandButton>() || l.cls == "UIButton" || l.bigEndian) addLayoutHit(l.name, lt->layout, wm);
     ++textsDrawn_;
+}
+
+// The label's text fields for the next text probe (the songlist_text walk).
+void UiView::setProbeStyle(const scene::BandText* band, const LabelText& lt) {
+    TextProbe& p = texts_.probeStyle;
+    p = TextProbe{};
+    if (!texts_.probes || !band) return;
+    p.hasStyle = true, p.text = lt.str, p.font = lt.font;
+    p.dataSize = band->textSize, p.leading = band->leading, p.boxW = band->width, p.boxH = band->height, p.kerning = band->kerning;
+    p.fitType = band->fitText, p.align = band->alignment, p.capsMode = band->allCaps ? 2 : 0;
+    p.fitX = lt.fit[0], p.fitZ = lt.fit[1];
 }
 
 float UiView::templateWidth(const scene::Text& tmpl, const std::string& str) {
@@ -1185,7 +1200,7 @@ float UiView::drawTemplate(MaterialRenderer& r, const std::string& key, const sc
         if (style) {
             st.size = style->textSize, st.leading = style->leading, st.wrapWidth = style->wrapWidth;
             st.align = align >= 0 ? align : int(style->alignment), st.capsMode = style->allCaps ? 2 : tmpl.capsMode;
-            st.overrideKerning = true, st.kerning = style->kerning;
+            st.overrideKerning = true, st.kerning = fm.kerning() + style->kerning;  // RB 0x8226E0A0: added to the font's [C]
         }
         lt->layout = layoutText(&fm, str, st);
         lt->fit = style ? fitScale(lt->layout, st, style->fitText, style->width, style->height) : std::array<float, 2>{1, 1};
@@ -1193,6 +1208,7 @@ float UiView::drawTemplate(MaterialRenderer& r, const std::string& key, const sc
     const float tint[4] = {1, 1, 1, alpha};
     const Mat4 wm = toMat4(scene::compose(scaleXfm(lt->fit[0], 1, lt->fit[1]), world));
     texts_.probeName = key;
+    setProbeStyle(style, *lt);
     texts_.draw(r, lt.get(), *font, lt->layout, wm, rgb, alpha < 1 ? tint : nullptr);
     addLayoutHit(key, lt->layout, wm);
     ++textsDrawn_;
@@ -1325,13 +1341,26 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
     }
     const scene::UiState st = state(o.name);
     const scene::Xfm lw = componentWorld(o);
-    const ListState& s = ls->second;
+    ListState& s = ls->second;
     const int shown = list->displayNum > 0 ? list->displayNum : int(s.rows.size());
+    // A list with more rows than its display_num shows display_num of them
+    // from `first`, moved to keep the selected row in view (RB's song list:
+    // display_num 7 of 60-odd rows; it only ever drew the first 7 and the
+    // highlight left the list) [I: the window moves by the rows it must].
+    if (int(s.rows.size()) > shown) {
+        if (s.selected >= 0 && s.selected < s.first) s.first = s.selected;
+        if (s.selected >= s.first + shown) s.first = s.selected - shown + 1;
+        s.first = std::clamp(s.first, 0, int(s.rows.size()) - shown);
+    } else {
+        s.first = 0;
+    }
+    auto slotOf = [&](int row) { return s.rows[size_t(row)].slot > -1 ? s.rows[size_t(row)].slot : float(row); };
+    const float firstSlot = s.first > 0 ? slotOf(s.first) : 0.0f;
     // The selected row's highlight: (highlight "highlight.mesh" (colors
     // (normal r g b) (selecting ...) (disabled ...))) [C data], the mesh at
     // its own place in the row, tinted by the list's state.
     if (const ::DataNode* hl = style.node->find("highlight"); hl && hl->children.size() > 1 && hl->children[1].isText() &&
-                                                               s.selected >= 0 && s.selected < int(s.rows.size()) && s.selected < shown)
+                                                               s.selected >= s.first && s.selected < int(s.rows.size()) && s.selected < s.first + shown)
         if (const scene::Mesh* hm = res->find<scene::Mesh>(hl->children[1].s)) {
             float tint[4] = {1, 1, 1, 1};
             if (const ::DataNode* hc = hl->find("colors")) {
@@ -1339,17 +1368,16 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
                 if (c && c->children.size() >= 4)
                     for (int k = 0; k < 3; ++k) tint[k] = c->floatAt(size_t(k + 1));
             }
-            const ListRow& sr = s.rows[size_t(s.selected)];
-            const float off = (sr.slot > -1 ? sr.slot : float(s.selected)) * list->spacing;
+            const float off = (slotOf(s.selected) - firstSlot) * list->spacing;
             const scene::Xfm at = scene::compose(hm->trans.local, scene::compose(vertical ? moveXfm(0, 0, -off) : moveXfm(off, 0, 0), lw));
             if (cache_.mesh(hm)) {
                 drawMesh(r, cache_, *hm, toMat4(at), &pose_, findMat(*hm, hm->mat), tint);
                 ++meshesDrawn_;
             }
         }
-    for (int row = 0; row < int(s.rows.size()) && row < shown; ++row) {
+    for (int row = s.first; row < int(s.rows.size()) && row < s.first + shown; ++row) {
         const ListRow& lr = s.rows[size_t(row)];
-        const float off = (lr.slot > -1 ? lr.slot : float(row)) * list->spacing;
+        const float off = (slotOf(row) - firstSlot) * list->spacing;
         const scene::Xfm rowWorld = scene::compose(vertical ? moveXfm(0, 0, -off) : moveXfm(off, 0, 0), lw);
         const char* kind = lr.disabled ? "disabled" : row == s.selected ? "highlight" : "normal";
         for (size_t e = 0; e < elements.size(); ++e) {

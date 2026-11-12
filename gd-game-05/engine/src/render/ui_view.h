@@ -257,9 +257,11 @@ public:
 
 private:
     struct LabelText;
+    void setProbeStyle(const scene::BandText* band, const LabelText& lt);
     struct ListState {
         std::vector<ListRow> rows;
         int selected = 0;
+        int first = 0;  // the first row shown (a list longer than its display_num scrolls)
     };
     struct EntryState {
         std::string entered, picking;
