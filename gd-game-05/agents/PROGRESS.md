@@ -84,6 +84,32 @@ bottom. "Verified" lines quote the command and its output; "built only" and
 - **rb_keys_rebind**: a load flake (26 of 30 hits with eight walks at
   once); hit floor 80% as the device walks; walk save folders unique.
 
+## 2026-11-12: the now bar under the HUD, LOADING graded as the icons (GD05-064 / 065)
+
+- **Highway (GD05-064).** Causes [C data]: (1) the gem tracks never took
+  trackpanel.milo's track_configuration (track_paneldir.dta update ->
+  gem_track.dta set_pitch / set_fov / set_cam_pos / set_fade): the camera
+  stayed tracksystem's own (0 -57.6 17.6, 27 degrees), so the HUD's
+  Overdrive meter and multiplier sat across the smashers; (2) rig.grp's
+  rig_movement.tnm (repeat_trans) stopped at its last key, y 100, a second
+  in: the smashers and camera stayed 100 units ahead of the gems' now, so
+  gems crossed the smashers 1.2 s before they were struck. Fix: 1_player_wide
+  applied (pitch -44.5, camera 0 -81 18.7, fov 21, fade 60 + 40, top_y 105,
+  y_per_second = top_y / view_time, the panel's 2.4 .. 1.2 s), the rig kept
+  at its origin, TransAnim repeat_trans (D50). Check (quickplay,
+  rb_guitar_play, rb_pad_play, band_quickplay): a gem in each lane at the
+  now bar, then the HUD drawn over it: 39% of the gems' pixels covered
+  before, 0% now (`rb now bar` log, counters rb_nowbar_*). Shots at
+  20 / 30 / 45 s for guitar and drums: gems pass the smashers, the meter
+  under them. Open: the surface's track_reflect scroll (it rode the rig).
+- **LOADING (GD05-065).** D44's flat white replaced (owner: graded like the
+  icons, D49): the word at its focus colour lit by instruments.lit as the
+  four icons take it, plus loading.tnm's sweep light. rb_bright: word luma
+  194, blue/red 0.69; icons 172 / 0.68 (D44: 232 white, 1.00); shots at
+  1.2 / 1.6 / 2.0 s show the sweep crossing the word.
+- Gate (own build, the w6 gate1 list): 29 walks OK, selftest, scenetest,
+  scripttest, videotest, sfxtest OK.
+
 ## Wave 06 (owner's 0.0.6 report, 2026-11-11, 14:50 -> ~18:30, me + 4 subagents)
 
 Each item: cause, fix, how verified.

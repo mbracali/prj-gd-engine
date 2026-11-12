@@ -496,7 +496,7 @@ pattern). Each says what, why and how to undo it.
   lights and the D25 curve; walk rb_text_colors).
 - **Undo:** sortDraws in render/ui_view.cpp.
 
-## D44 (Owner decision)
+## D44 (Owner decision; replaced by D49 on 2026-11-12)
 - **What (2026-11-11):** LOADING reads bright from the moment the loading
   screen shows: drawn at its own focus colour (custom_colors 0xfdfdfd) in
   RB's UI environ (ambient 1). RB draws it at normal 0x3b3b3b under
@@ -554,3 +554,35 @@ pattern). Each says what, why and how to undo it.
   the list was stuck on its first seven rows.
 - **Undo:** UiView::drawLabel / drawTemplate (kerning), UiView::drawList
   and ListState::first.
+
+## D49 (Owner decision, replaces D44)
+- **What (2026-11-12, GD05-065):** LOADING (loading.milo's loading.lbl) is
+  drawn at its focus colour (custom_colors 0xfdfdfd) lit as the four band
+  icons are: intruments.env's instruments.lit (1 1 0.68, range 500, falloff
+  from 200, parented to ornate_leader.grp, the label's own group) moved by
+  the word's offset from the icons, plus loading.tnm's sweep light
+  loading.lit (range 35) from ornate_leader.env [C data: lights, colours,
+  sweep; I: that RB lights the word so].
+- **Why:** the owner rejected D44's flat white: in the original the word has
+  the icons' colour grading and effects. Lit at its own place (normal
+  0x3b3b3b, ornate_leader.env, ambient 0) it is grey (p97 25..44).
+  Measured: word luma 194, blue/red 0.69 vs the icons' 172 / 0.68.
+- **Undo:** the loading.lbl block in UiView::drawObject.
+
+## D50
+- **What (2026-11-12, GD05-064):** each gem track takes the panel's
+  track_configuration as track_paneldir.dta's update gives it [C data]:
+  rotater.grp pitch, game.cam's y_fov and place (0, y_pos, z_pos),
+  track.env's fade and the far plane from the camera to fade_start and
+  fade_start + fade_length, top_y = fade_start + fade_length + 5,
+  y_per_second = top_y / view_time (view_time_easy .. _expert by the gem
+  players' mean difficulty; the GH2 per-difficulty speed is not used). The
+  one-player configuration (1_player_wide) for every track; the band's are
+  that picture on their meters (D45) [I]. rig.grp is kept at its origin
+  (the gems are placed relative to now) [I]; TransAnim repeat_trans goes on
+  past the keys, each span adding last - first [C data: the flag; I: form].
+- **Why:** the owner's "something on top of where the notes pass": the
+  Overdrive meter and multiplier covered 39% of a gem at the now bar; the
+  rig stopped at y 100 and the gems crossed the smashers 1.2 s early.
+- **Undo:** RbTrackView::configure, App::drawRbTracks' configure block, the
+  rig reset in RbTrackView::draw, ScenePose::transAnim's repeat.
