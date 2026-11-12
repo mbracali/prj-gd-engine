@@ -2003,8 +2003,6 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // 4 s apart (a pause on a blackout has no lit background to measure:
         // skipped; at least one must be measured).
         check("look:shot:");
-        check("look:eval");
-    } else if (scenario == "rb_win_sparks") {
         for (int k = 0; k < 3; ++k) {
             key(SDLK_ESCAPE);
             at("pause_screen", 10000);
@@ -2024,6 +2022,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             at("game_screen", 10000);
             wait(4000);
         }
+        check("look:eval");
+    } else if (scenario == "rb_win_sparks") {
         // GD05-090: arena_04's win fountains (sparks_fountain_blue_WIN..07,
         // WorldInstances of sparks_fountain_blue_win.milo in
         // win_fx_draw_first.grp) stay idle in play: their start_hide.trig
@@ -5766,6 +5766,21 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             else SDL_setenv_unsafe("GD05_FORCE_SHOT", ("#" + n).c_str(), 1);
             return pass();
         }
+        if (what == "pausehide" || what == "pauseshow" || what == "pauserestore") {
+            // The pause screen's panels (pause.dta: pause_panel, helpbar):
+            // hidden; shown with its art left out (pause.milo's octopus.grp,
+            // octoarms.grp and the trim reach into the measured strips, placed
+            // differently each pause) so black_bg.mesh alone is over the world;
+            // then as it was.
+            const bool hide = what == "pausehide", art = what == "pauserestore";
+            ui.interp().send("pause_panel", "set_showing", {Value::integer(hide ? 0 : 1)});
+            ui.interp().send("helpbar", "set_showing", {Value::integer(art ? 1 : 0)});
+            if (ui::ScreenObj* sc = ui.screen(ui.currentScreen()))
+                for (ui::PanelObj* p : sc->panels())
+                    if (p->name() == "pause_panel" && p->view)
+                        for (const char* n : {"octopus.grp", "octoarms.grp", "trim01.mesh", "trim02.mesh"}) p->view->setShowing(n, art);
+            return pass();
+        }
         const int draws = ui.host().gameCounter(0, "world_draws"), holds = ui.host().gameCounter(0, "world_holds");
         if (what == "frame" && lookPace_[0] < 0) lookPace_ = {nowMs, double(draws), double(draws + holds)};
         if (what == "eval") {
@@ -5785,7 +5800,9 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             std::printf("  look: %zu frames: luma %.1f (movies %.1f, %+.0f%%), contrast %.1f (%.1f, %+.0f%%), saturation %.3f (%.3f), grain %.2f (%.2f, %+.0f%%)\n",
                         lookFrames_.size(), m[0], kLuma, 100 * (m[0] / kLuma - 1), m[1], kContrast, 100 * (m[1] / kContrast - 1), m[2], kSat, m[3],
                         kGrain, 100 * (m[3] / kGrain - 1));
+            std::printf("  look: pauses measured %d, on a dark world %d\n", lookPauseOk_, lookPauseDark_);
             if (!lookPauseError_.empty()) return fail(lookPauseError_);
+            if (lookPauseOk_ == 0) return fail("look: no pause on a lit world to measure (" + std::to_string(lookPauseDark_) + " dark)");
             // GD05-069: a SpotlightDrawer's proxy (every venue type's stage
             // fog / smoke group) is its draw child, never drawn (RB
             // 0x82299DD0 / 0x821B3A48, D79).
@@ -5863,21 +5880,6 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (lookPrePause_.size() == y.size())
                 for (int j = 0; j < h; ++j)
                     for (int i = 0; i < w; ++i)
-        if (what == "pausehide" || what == "pauseshow" || what == "pauserestore") {
-            // The pause screen's panels (pause.dta: pause_panel, helpbar):
-            // hidden; shown with its art left out (pause.milo's octopus.grp,
-            // octoarms.grp and the trim reach into the measured strips, placed
-            // differently each pause) so black_bg.mesh alone is over the world;
-            // then as it was.
-            const bool hide = what == "pausehide", art = what == "pauserestore";
-            ui.interp().send("pause_panel", "set_showing", {Value::integer(hide ? 0 : 1)});
-            ui.interp().send("helpbar", "set_showing", {Value::integer(art ? 1 : 0)});
-            if (ui::ScreenObj* sc = ui.screen(ui.currentScreen()))
-                for (ui::PanelObj* p : sc->panels())
-                    if (p->name() == "pause_panel" && p->view)
-                        for (const char* n : {"octopus.grp", "octoarms.grp", "trim01.mesh", "trim02.mesh"}) p->view->setShowing(n, art);
-            return pass();
-        }
                         if (i < 45 || i >= 595)
                             if (const float b = lookPrePause_[size_t(j) * size_t(w) + size_t(i)]; b > 25)
                                 r.push_back(y[size_t(j) * size_t(w) + size_t(i)] / std::max(1.0f, rule(b)));
@@ -5900,9 +5902,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         int gn = 0;
         for (int j = 1; j + 1 < h; ++j)
             for (int i = 1; i + 1 < w; ++i) {
-            std::printf("  look: pauses measured %d, on a dark world %d\n", lookPauseOk_, lookPauseDark_);
                 const float l = y[size_t(j) * size_t(w) + size_t(i)];
-            if (lookPauseOk_ == 0) return fail("look: no pause on a lit world to measure (" + std::to_string(lookPauseDark_) + " dark)");
                 if (l <= 20) continue;
                 float b = 0;
                 for (int dy = -1; dy <= 1; ++dy)
