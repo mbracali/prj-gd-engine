@@ -256,6 +256,9 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     auto rbQuickplay = [&] {
         // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
+        // Every song listed (the long cheat): the walks were written against
+        // the whole list; a new profile has ten (rb_qp_locked, GD05-073).
+        check("unlock_all_songs");
         press(kX);
         at("main_screen");
         press(kX);  // SOLO (solo.btn, the focus)
@@ -1312,6 +1315,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         endMs_ = 30000;
         // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
+        check("unlock_all_songs");  // the songs the walk was written for (rb_qp_locked, GD05-073)
         press(kX);
         at("main_screen");
         press(kDown), wait(200);
@@ -1647,6 +1651,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         checkS(pad ? "dev_attach 045e:028e" : "dev_attach 1bad:0002:rbguitar", 10000);
         if (owner) check("dev_owner_json");
         at("splash_screen", 30000);
+        check("unlock_all_songs");  // the songs the walk was written for (rb_qp_locked, GD05-073)
         wait(500);  // the device settles (its first 300 ms are its rest values)
         if (pad || none) key(SDLK_RETURN); else dev(start);
         at("main_screen");

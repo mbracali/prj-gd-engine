@@ -1085,3 +1085,13 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   deploy / stop / failed triggers added (D66); the rest in GD05-078 /
   GD05-079 (fills, BRE, unison, spotlight sparkles, super streak, crowd
   meter warning / glow / peak arrows / sparkler particles).
+- **Gate** (agents/scratch/gen6/gate.sh: gate1.sh's walks with GD05-073's
+  and GD05-072's, rb_highway, rb_crowd, the five tests, 7 at a time, each
+  its own XDG_DATA_HOME, another agent's tests running too): 38 of 47 OK
+  at first. Alone: rb_lose (a segfault under load) and rb_stutter (55 >
+  40 under load) passed; quickplay, band_quickplay, rb_pad_play,
+  rb_guitar_play, rb_guitar_none (and rb_highway's meter_flickers 1) failed
+  because the lock rule changed the songs their list positions pick: they
+  now take the long cheat (every song, as they were written) and pass
+  alone. Selftest exit 0 (its 7 GH2 rule FAIL lines are the same before the
+  wave); `milo loads` ratio 0.11.
