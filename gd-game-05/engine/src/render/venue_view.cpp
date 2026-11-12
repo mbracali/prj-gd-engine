@@ -43,9 +43,28 @@ const scene::Environ* dirEnv(const scene::Directory& d) {
 std::vector<const scene::Object*> drawList(const std::vector<const scene::Directory*>& dirs) {
     std::set<const scene::Object*> children;
     std::vector<const scene::Object*> all;
+    // A TexRenderer's draw (rev 3: its draw, then its output texture) goes
+    // into that texture, not into the world: RB's tattoo and vehicle
+    // directories (small_club_02's tattoos_a, vehicles) drew over the whole
+    // venue [I: RndTexRenderer as the UI's RenderDir, render/ui_view.cpp].
+    std::set<const scene::Directory*> rendered;
     for (const scene::Directory* d : dirs)
         d->forEach([&](scene::Object& o) {
-            if (!o.decoded) return;
+            if (o.cls != "TexRenderer" || !o.dir) return;
+            for (const std::string& n : scene::recordNames(o.record)) {
+                if (const scene::Object* c = o.dir->resolve(n); c && c != &o) children.insert(c);
+                for (const auto& [owner, sub] : o.dir->subdirs)
+                    if (sub && owner == n) rendered.insert(sub.get());
+            }
+        });
+    auto inRendered = [&](const scene::Directory* d) {
+        for (; d; d = d->parent)
+            if (rendered.count(d)) return true;
+        return false;
+    };
+    for (const scene::Directory* d : dirs)
+        d->forEach([&](scene::Object& o) {
+            if (!o.decoded || inRendered(o.dir)) return;
             if (auto* g = o.as<scene::Group>())
                 for (const std::string& n : g->objects)
                     if (const scene::Object* c = g->dir ? g->dir->resolve(n) : nullptr; c && c != g) children.insert(c);

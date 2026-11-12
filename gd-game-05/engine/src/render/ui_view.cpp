@@ -74,20 +74,7 @@ UiView::~UiView() {
 }
 
 namespace {
-// The length-prefixed names in a raw record (a class the port keeps raw).
-std::vector<std::string> recordNames(const Bytes& rec) {
-    std::vector<std::string> out;
-    for (size_t i = 0; i + 4 < rec.size(); ++i) {
-        const uint32_t n = uint32_t(rec[i]) << 24 | uint32_t(rec[i + 1]) << 16 | uint32_t(rec[i + 2]) << 8 | uint32_t(rec[i + 3]);
-        if (n < 3 || n > 64 || i + 4 + n > rec.size()) continue;
-        bool printable = true;
-        for (size_t k = 0; k < n && printable; ++k) printable = rec[i + 4 + k] >= 0x20 && rec[i + 4 + k] < 0x7f;
-        if (!printable) continue;
-        out.emplace_back(reinterpret_cast<const char*>(rec.data() + i + 4), n);
-        i += 3 + n;
-    }
-    return out;
-}
+using scene::recordNames;
 // A RenderDir record's RndTransformable (rev 9: local then world 3x4
 // matrices, both with unit rows): the first such block in the record [I:
 // found by its shape; the RenderDir class is not decoded].

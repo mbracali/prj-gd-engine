@@ -494,6 +494,9 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
 // The shared sub-records for decoders in other files (scene/ui_objects.cpp):
 // each reads at record[pos] and advances pos; throws on malformed data.
 ObjectHeader readObjectHeaderAt(const Bytes& record, size_t& pos);
+// The length-prefixed (big-endian u32) printable names in a raw record: the
+// object names a class the port keeps raw refers to.
+std::vector<std::string> recordNames(const Bytes& record);
 void readTransAt(const Bytes& record, size_t& pos, Trans& t);
 void readDrawAt(const Bytes& record, size_t& pos, Draw& d);
 
