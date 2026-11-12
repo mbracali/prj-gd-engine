@@ -1575,3 +1575,39 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   (GD05-093). The movies' white haze in the beams (theater, big club) is
   most likely this composite [I]: the remaining dark gap of theater_02
   (-38 %) and big_club_03 (-20 %) waits for it; nothing was tuned.
+- **rb_look, before (fix8, D79) -> after (the gate's run)** (movies: luma
+  69.3, contrast 55.4; +-15 %):
+
+  | venue | luma | contrast | grain (1.97, +-40 %) |
+  |---|---|---|---|
+  | small_club_02 | 73.0 (+5 %) -> 71.7 (+3 %) | 68.8 (+24 %) -> 68.2 (+23 %) | 3.01 -> 3.04 |
+  | big_club_03 | 52.4 (-24 %) -> 55.2 (-20 %) | 61.7 (+11 %) -> 61.1 (+10 %) | 3.10 -> 3.22 |
+  | arena_04 | 81.0 (+17 %) -> 69.2 (0 %) | 78.5 (+42 %) -> 60.4 (+9 %) | 2.31 -> 2.26 |
+  | theater_02 | 42.6 (-39 %) -> 41.1 (-41 %) | 61.6 (+11 %) -> 59.2 (+7 %) | 2.88 -> 3.09 |
+
+  arena_04 passes rb_look (the win fountains hidden: with
+  GD05_PARTICLES_LEGACY=1 it reads 67.0 / 60.7, so the hiding (D85) does
+  most of it; D86 stops their hidden emission: rb_win_sparks reads 5,681
+  started before the win with the legacy rule). The 30-shot means move with
+  the timing (the presets' keyframes and blackouts at the moment of each
+  shot): arena_04 read 65.0 / 65.4 / 62.5 / 69.2 in four runs and 49.6 in
+  one of five at a time. Left, not tuned: theater_02
+  and big_club_03 too dark, small_club_02's contrast, the grain (GD05-093,
+  GD05-095).
+- **Gate** (a clean export of eaa0f69 + 83bc1f0's walk fix, built with
+  FFmpeg; agents/scratch/fix9/gate_par.sh, gate1.sh's walks + rb_highway,
+  rb_crowd x3, rb_win_sparks, rb_look x4, rb_lose x9 perturbed, five
+  tests, bandcheck; 6 at a time): 59 of 64 walks OK, 5 of 5 tests OK,
+  bandcheck 4 of 4 passed (7,433..14,061 frames; the legacy run FAILED as
+  it should). Failed: rb_look small_club_02 (contrast +23 %),
+  big_club_03 (luma -20 %), theater_02 (luma -41 % and one pause at 0.22:
+  the art, fixed in 13f1514); rb_crowd arena_01 (crowd_px 0 under the
+  load; alone right after: OK, 700 characters, 1.43M px) and rb_lose_quit
+  (reached qp_endgame_screen instead of the lose screen under the load;
+  alone: OK).
+- **The pause check, 10 runs** (13f1514, the four venues in turn, 5 at a
+  time): 10 of 10 runs passed the pause check: 27 pauses measured, all
+  1.00..1.01 of the rule, 3 on a blackout skipped (big_club_03); the
+  rb_look runs themselves: arena_04 OK once (65.1), the others fail on
+  luma (big_club_03 56.6..59.0, theater_02 42.1 / 46.3, arena_04 49.6 once),
+  small_club_02's contrast (+23..26 %) or the grain.
