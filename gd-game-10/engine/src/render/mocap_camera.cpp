@@ -68,7 +68,8 @@ void MocapCameras::init(const Venue& v, const Globals& g, const std::vector<qb::
         for (size_t i = 0; !cs && songFiles && i < songFiles->size(); ++i) cs = structOf((*songFiles)[i].find(clipKey));
         if (!cs) continue;
         const qb::Value* sf = params->find(K("startframe"));
-        const float offset = sf ? float(sf->number()) / anim::Clip::kFps : 0.0f;
+        // startframe in 1/30 s [C 0x8219F088], as the members' clips.
+        const float offset = sf ? float(sf->number()) / 30.0f : 0.0f;
         const double t = tv->number();
         if (const qb::Value* cams = cs->find(K("cameras")); cams && cams->type == qb::Type::Array && cams->arr)
             for (size_t i = 0; i < cams->arr->values.size() && i < 10; ++i) {

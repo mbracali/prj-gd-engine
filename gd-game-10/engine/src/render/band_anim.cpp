@@ -18,6 +18,8 @@ namespace {
 
 constexpr uint32_t K(const char* s) { return qbkey::key(s); }
 constexpr double kFrameMs = 1000.0 / 60.0;  // a game frame [I: 60 Hz]
+// Band_PlayClip's startframe / endframe unit: 1/30 s [C 0x8219F088: DAT_8200B6F0 = 0.0333].
+constexpr float kClipFrameSec = 1.0f / 30.0f;
 
 uint32_t keyOf(const qb::Value* v) {
     return v && (v->type == qb::Type::Key || v->type == qb::Type::KeyPtr) ? v->key : 0;
@@ -361,6 +363,11 @@ bool Animator::init(const Setup& s, std::string& error) {
         return false;
     }
     role_ = model_->member.role;
+    vocalPlays_ = model_->member.gh4 && role_ == band::Role::Vocalist &&
+                  (model_->member.part == K("guitar") || model_->member.part == K("rhythm") || model_->member.part == K("bass"));
+    ikSwitch_.clear();
+    mocapPlaying_ = false;
+    strumMod_ = fretMod_ = chordMod_ = Ramp{};
     rig_.init(*model_->skeleton);
     rng_ = 0x6A09E667F3BCC908ull ^ (uint64_t(s.seed) << 17) ^ s.seed;
     fretbars_ = s.chart->fretbars;
@@ -400,7 +407,12 @@ bool Animator::init(const Setup& s, std::string& error) {
         } else if (role_ == band::Role::Vocalist) {
             ikKey = K("singer_ik_params");
         }
-        if (const qb::Value* ik = ikKey ? g.find(ikKey) : nullptr; ik && ik->type == qb::Type::Array && ik->arr)
+        // gh4's vocalist_static_tree: Singer_IK_Params_Arms, then
+        // Singer_IK_Params_Legs (no Singer_IK_Params) [C data].
+        std::vector<uint32_t> ikKeys{ikKey};
+        if (model_->member.gh4 && ikKey == K("singer_ik_params")) ikKeys = {K("singer_ik_params_arms"), K("singer_ik_params_legs")};
+        for (const uint32_t ikk : ikKeys)
+        if (const qb::Value* ik = ikk ? g.find(ikk) : nullptr; ik && ik->type == qb::Type::Array && ik->arr)
             for (const qb::Value& e : ik->arr->values) {
                 const qb::Struct* st = structOf(&e);
                 if (!st) continue;
@@ -413,6 +425,11 @@ bool Animator::init(const Setup& s, std::string& error) {
                 c.b2 = rig_.find(keyOf(st->find(K("bone2"))));
                 c.target = rig_.find(tgt);
                 c.right = tgt == K("bone_ik_hand_guitar_r") || tgt == K("bone_ik_hand_slave_r");
+                if (tgt == K("bone_ik_hand_guitar_l") || tgt == K("bone_ik_hand_slave_l") || c.right) {
+                    c.hand = c.right ? 1 : 0;
+                    c.guitarBone = rig_.find(c.right ? K("bone_ik_hand_guitar_r") : K("bone_ik_hand_guitar_l"));
+                    c.slaveBone = rig_.find(c.right ? K("bone_ik_hand_slave_r") : K("bone_ik_hand_slave_l"));
+                }
                 if (const qb::Value* h = st->find(K("hingeaxis")); h && h->type == qb::Type::Vector) c.hinge = {h->f[0], h->f[1], h->f[2]};
                 if (const qb::Value* v = st->find(K("cosmaxhingeangle"))) c.cosMax = float(v->number());
                 if (const qb::Value* v = st->find(K("cosminhingeangle"))) c.cosMin = float(v->number());
@@ -450,7 +467,8 @@ bool Animator::init(const Setup& s, std::string& error) {
         fixed_.push_back(e);
     };
     if (guitarLike()) {
-        const bool guitar = role_ == band::Role::Guitarist || s.guitarPart;
+        // James (the vocalist on rhythm) strums the guitar part [I].
+        const bool guitar = !bassLike() || s.guitarPart;
         const std::vector<ChartNote>& notes = s.chart->notes(guitar ? Part::Guitar : Part::Rhythm, 3);
         for (const ChartNote& n : notes) {
             if (n.length > 0) add(n.time - strumLead, Ev::Strum, n.length, 0);
@@ -459,7 +477,10 @@ bool Animator::init(const Setup& s, std::string& error) {
         for (const ChartEvent& e : s.chart->anim)
             if (guitar ? (e.note >= 118 && e.note <= 127) : (e.note >= 101 && e.note <= 110)) add(e.time - strumLead, Ev::Fret, e.note, 0);
     }
-    if (role_ == band::Role::Drummer) {
+    // gh4's drummer_static_tree has no arm nodes and the XEX no
+    // Drum_iterator: the drummer's arms are his body / mocap clips [C data
+    // guitar_anim_tree.qb; C: no Drum_iterator script or string].
+    if (role_ == band::Role::Drummer && !model_->member.gh4) {
         for (const ChartEvent& e : s.chart->drums) {
             if ((e.note >= 37 && e.note <= 45) || (e.note >= 49 && e.note <= 57)) {
                 add(e.time - drumLead, Ev::DrumArm, e.note, 0);
@@ -513,10 +534,10 @@ bool Animator::init(const Setup& s, std::string& error) {
     if (guitarLike()) {
         const uint32_t strumSet = extendKey(role_ == band::Role::Bassist && !model_->member.gh4 ? K("normal") : strumStyle_, "_Strums");
         if (const qb::Struct* ss = structOf(g.find(strumSet))) rightArm_.play(clip(keyOf(ss->find(K("no_strum_anim")))), t0, 0.2f);
-        if (fretAnims_) leftArm_.play(clip(keyOf(fretAnims_->find(K(role_ == band::Role::Bassist ? "track_106" : "track_123")))), t0, fretBlend_);
+        if (fretAnims_) leftArm_.play(clip(keyOf(fretAnims_->find(K(bassLike() ? "track_106" : "track_123")))), t0, fretBlend_);
         if (fingerAnims_) leftHand_.play(clip(keyOf(fingerAnims_->find(K("track_none")))), t0, 0.2f);
     }
-    if (role_ == band::Role::Drummer) {
+    if (role_ == band::Role::Drummer && !model_->member.gh4) {
         twistClip_ = clip(K("test_drum_bodytwist_d"));
         schedule(t0 + kFrameMs, Ev::Twist);
     }
@@ -971,27 +992,77 @@ void Animator::handle(const Event& e) {
         break;
     }
     case Ev::Mocap: {
-        // The mocap clip from its start frame (frames at 60 Hz [I]), the
-        // random loops after it; arms.<member>: strum / fret off turn the
-        // procedural arms off (the clip's own) [I].
+        // Band_PlayClip_CFunc [C 0x8219EF48]: startframe x 1/30 s (0x8219F088,
+        // the constant 0.0333); each member's anim plays on the moment branch
+        // with blendduration and blendoutduration 0 (0x82196C18..34: the
+        // moment_blend switch, no cross-fade); disable_arms 0 for the
+        // guitarist and the bassist, the call's (default 2) for the vocalist
+        // and the drummer (0x8219F7EC..0x8219F894); then arms.<member>
+        // (0x8219ED08): ik_targetl / ik_targetr guitar | slave
+        // (ik_setchaintarget, blend 0), strum / fret / chord on | off
+        // (strum_anim_mod over enable_strum_blend_time, fret_anim_mod over
+        // enable_fret_blend_time, chord_anim_mod at once).
         const Mocap& mc = mocaps_[size_t(e.a)];
-        const float offset = std::min(mc.startFrame / anim::Clip::kFps, mc.clip->duration);
-        body_.play(mc.clip, t, 0.3f, offset);
+        const float offset = std::min(mc.startFrame * kClipFrameSec, mc.clip->duration);
+        static const bool mocapLog = std::getenv("GD10_ANIMLOG") != nullptr;
+        if (mocapLog)
+            SDL_Log("anim: %.0f ms role %d mocap %s from %.2f s (%.2f s long)", t, int(role_), qbkey::name(mc.key).c_str(), double(offset),
+                    double(mc.clip->duration));
+        const bool gh4 = model_->member.gh4;
+        body_.play(mc.clip, t, gh4 ? 0.0f : 0.3f, offset);
         bodyKey_ = mc.key; bodyHist_.push_back({mc.key, body_.plays.back().start, body_.plays.back().offset});
         ++bodyGen_;
         ++stats_.bodyAnims;
-        int arms = 0;
-        if (mc.arms) {
-            const bool strumOff = keyOf(mc.arms->find(K("strum"))) == K("off");
-            const bool fretOff = keyOf(mc.arms->find(K("fret"))) == K("off") && keyOf(mc.arms->find(K("chord"))) == K("off");
-            arms = strumOff && fretOff ? 2 : strumOff ? 1 : 0;
+        mocapPlaying_ = true;
+        if (gh4) {
+            // The mocap clips leave the forearms unanimated (Bone_Forearm_L/R
+            // have no keys and are masked off in every _S_ / _B_ / _G_ clip
+            // [C data]): the elbows come from the IK onto the clip's
+            // Bone_IK_Hand_Slave_L/R, so the hand chains stay on whatever the
+            // call's disable_arms says [I: disable_arms reaches the C
+            // animation, not the IK strength; with the IK off James' arms hung
+            // by his sides, his hands off the guitar].
+            if (guitarLike()) setArms(0, t, 0.0f);
+            if (mc.arms) {
+                auto target = [&](uint32_t k) { return k == K("guitar") ? 0 : k == K("slave") ? 1 : -1; };
+                setIkTargets(t, target(keyOf(mc.arms->find(K("ik_targetl")))), target(keyOf(mc.arms->find(K("ik_targetr")))));
+                if (role_ != band::Role::Drummer) {
+                    auto onOff = [&](uint32_t key, Ramp& r, float blend) {
+                        const uint32_t v = keyOf(mc.arms->find(key));
+                        if (v == K("on")) r.set(1, t, blend);
+                        else if (v) r.set(0, t, blend);
+                    };
+                    onOff(K("strum"), strumMod_, numOf(*g_, "enable_strum_blend_time", 0.2f));
+                    onOff(K("fret"), fretMod_, numOf(*g_, "enable_fret_blend_time", 0.0f));
+                    onOff(K("chord"), chordMod_, 0.0f);
+                }
+            }
+        } else {
+            int arms = 0;
+            if (mc.arms) {
+                const bool strumOff = keyOf(mc.arms->find(K("strum"))) == K("off");
+                const bool fretOff = keyOf(mc.arms->find(K("fret"))) == K("off") && keyOf(mc.arms->find(K("chord"))) == K("off");
+                arms = strumOff && fretOff ? 2 : strumOff ? 1 : 0;
+            }
+            if (guitarLike()) setArms(arms, t, 0.25f);
         }
-        if (guitarLike()) setArms(arms, t, 0.25f);
         schedule(t + std::max(kFrameMs, double(mc.clip->duration - offset) * 1000.0), Ev::BodyDone, 0, 0, bodyGen_);
         break;
     }
     case Ev::BodyDone:
-        if (e.gen == bodyGen_) bodyFinished(t);
+        if (e.gen == bodyGen_) {
+            if (mocapPlaying_ && model_->member.gh4) {
+                // end_moment_anim: the moment_blend switch off and the body
+                // timer unpaused at once (blendduration 0); band_setikchain
+                // guitar for a guitar / bass / rhythm part, else slave [C script].
+                mocapPlaying_ = false;
+                bodyBlend_ = 0.0f;
+                const bool guitarChain = guitarLike();
+                setIkTargets(t, guitarChain ? 0 : 1, guitarChain ? 0 : 1);
+            }
+            mocapPlaying_ = false;
+            bodyFinished(t);
+        }
         break;
     case Ev::ClipEvent:
         if (e.gen == bodyGen_ && e.params)
@@ -1110,10 +1181,16 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
     static const bool noFace = std::getenv("GD10_NO_FACE") != nullptr;  // development aid: the bind face
     if (!noFace) evalNode(rig_, face_, ms, pose, false, tmp);
     if (guitarLike()) {
-        const float l = leftStrength_.at(ms), r = rightStrength_.at(ms);
-        evalDelta(rig_, leftArm_, ms, l, pose, tmp);
-        evalDelta(rig_, leftHand_, ms, l, pose, tmp);
-        evalDelta(rig_, rightArm_, ms, r, pose, tmp);
+        if (model_->member.gh4) {
+            evalDelta(rig_, leftArm_, ms, fretMod_.at(ms), pose, tmp);
+            evalDelta(rig_, leftHand_, ms, chordMod_.at(ms), pose, tmp);
+            evalDelta(rig_, rightArm_, ms, strumMod_.at(ms), pose, tmp);
+        } else {
+            const float l = leftStrength_.at(ms), r = rightStrength_.at(ms);
+            evalDelta(rig_, leftArm_, ms, l, pose, tmp);
+            evalDelta(rig_, leftHand_, ms, l, pose, tmp);
+            evalDelta(rig_, rightArm_, ms, r, pose, tmp);
+        }
     }
     if (role_ == band::Role::Drummer) {
         for (const Node& n : drumArm_) evalNode(rig_, n, ms, pose, false, tmp);
@@ -1145,7 +1222,16 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
             const float s = c.leg || !guitarLike() ? 1.0f : c.right ? rightStrength_.at(ms) : leftStrength_.at(ms);
             if (s <= 0) continue;
             const Vec A = posOf(world[size_t(c.b0)]), B = posOf(world[size_t(c.b1)]), C = posOf(world[size_t(c.b2)]);
-            const Vec T = posOf(world[size_t(c.target)]);
+            // gh4: the hand chain's target as ik_setchaintarget left it.
+            int tgt = c.target;
+            if (c.hand >= 0 && model_->member.gh4) {
+                bool slave = c.slaveBone >= 0 && c.target == c.slaveBone;
+                for (const IkSwitch& sw : ikSwitch_)
+                    if (sw.t <= ms) slave = c.hand ? sw.slaveR : sw.slaveL;
+                const int b = slave ? c.slaveBone : c.guitarBone;
+                if (b >= 0) tgt = b;
+            }
+            const Vec T = posOf(world[size_t(tgt)]);
             const Vec BA = vsub(A, B), BC = vsub(C, B);
             const float lab = vlen(BA), lbc = vlen(BC);
             if (lab < 1e-5f || lbc < 1e-5f) continue;
@@ -1184,7 +1270,7 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
             // (the two 90-degree turns cancel), and stores it as the end
             // bone's model rotation [C 0x823F6D1C..0x823F715C].
             {
-                const Quat want = rotOf(world[size_t(c.target)]);
+                const Quat want = rotOf(world[size_t(tgt)]);
                 const Quat endModel = qmul(w1b, pose[size_t(c.b2)].q);
                 pose[size_t(c.b2)].q = qmul(qconj(w1b), nlerp(endModel, want, s));
             }
@@ -1247,6 +1333,18 @@ void Animator::applyConstraints(Pose& pose) const {
         }
         }
     }
+}
+
+void Animator::setIkTargets(double t, int left, int right) {
+    IkSwitch sw;
+    if (!ikSwitch_.empty()) sw = ikSwitch_.back();
+    else
+        for (const Chain& c : chains_)
+            if (c.hand >= 0) (c.hand ? sw.slaveR : sw.slaveL) = c.slaveBone >= 0 && c.target == c.slaveBone;
+    sw.t = t;
+    if (left >= 0) sw.slaveL = left == 1;
+    if (right >= 0) sw.slaveR = right == 1;
+    ikSwitch_.push_back(sw);
 }
 
 void Animator::endSongEvents(double t) {

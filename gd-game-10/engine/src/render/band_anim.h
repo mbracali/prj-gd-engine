@@ -10,6 +10,7 @@
 
 #include "data/anim.h"
 #include "data/band.h"
+#include "data/qbkey.h"
 #include "game/chart.h"
 #include "render/venue_camera.h"
 
@@ -214,7 +215,14 @@ private:
     uint32_t queuedStance_ = 0;  // a stance change waiting behind the pending one
     void strum(int length, double t);
     void facial(double t, float blend = 0);
-    bool guitarLike() const { return role_ == band::Role::Guitarist || role_ == band::Role::Bassist; }
+    // A member on the guitarist tree: the guitarist, the bassist and a gh4
+    // vocalist playing an instrument (James: rhythm, Lemmy: bass):
+    // create_band_member picks the tree by the instrument, not the object
+    // (vocals: vocalist_static_tree, drum: drummer_static_tree, else
+    // guitarist_static_tree) [C script create_band_member].
+    bool guitarLike() const { return role_ == band::Role::Guitarist || role_ == band::Role::Bassist || vocalPlays_; }
+    bool bassLike() const { return role_ == band::Role::Bassist || (vocalPlays_ && model_->member.part == qbkey::key("bass")); }
+    bool vocalPlays_ = false;
     // The struct with anim_set, strum_anims, finger_anims, fret_anims: GH3's
     // profile, gh4's anim struct member (band::Member::animPart).
     const qb::Struct* animProfile() const;
@@ -266,12 +274,31 @@ private:
 
     // The tree's nodes.
     Node body_, face_, rightArm_, leftArm_, leftHand_, drumArm_[2], cymbal_[4];
+    // GH3: the arms' strengths (deltas and IK). gh4: the IK chains'
+    // strengths only (hero_toggle_arms: ik_setchainstrength) [C script].
     Ramp leftStrength_, rightStrength_;
+    // gh4 hero_arm_branch's modulators: fret_anim_mod (leftarm),
+    // chord_anim_mod (lefthand), strum_anim_mod (rightarm), strength 1, set
+    // by Band_PlayClip's arms.<member> strum / fret / chord on / off [C data
+    // guitar_anim_tree.qb, C 0x8219ED08].
+    Ramp strumMod_, fretMod_, chordMod_;
+    // gh4 Band_PlayClip ik_targetl / ik_targetr (ik_setchaintarget) and
+    // end_moment_anim's band_setikchain: each hand chain's target from `t`
+    // on, true = the slave bone, false = the guitar's [C 0x82192B20, script].
+    struct IkSwitch {
+        double t = 0;
+        bool slaveL = false, slaveR = false;
+    };
+    std::vector<IkSwitch> ikSwitch_;
+    void setIkTargets(double t, int left, int right);  // -1 keep, 0 guitar, 1 slave
+    bool mocapPlaying_ = false;  // a Band_PlayClip clip in the body (the moment branch)
     const anim::Clip* twistClip_ = nullptr;
     // Two-bone IK chains: bicep, forearm, palm -> target bone [C data Hero_Ik_params].
     struct Chain {
         int b0 = -1, b1 = -1, b2 = -1, target = -1;
         bool right = false, leg = false;
+        int hand = -1;                         // 0 left, 1 right: a hand chain (guitar / slave target)
+        int guitarBone = -1, slaveBone = -1;   // Bone_IK_Hand_Guitar_<L|R>, Bone_IK_Hand_Slave_<L|R>
         Vec hinge{0, 0, -1};                   // hingeaxis, in bone1's frame
         float cosMax = -1, cosMin = 1;         // cosmaxhingeangle / cosminhingeangle (Function_823F78E0's defaults)
         float gain1 = 1, gain2 = 1;            // strength (first / second joint gains)

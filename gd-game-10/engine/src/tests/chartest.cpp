@@ -670,6 +670,35 @@ int runCharTest(const std::string& discPath) {
                     std::snprintf(name, sizeof name, "%s/band_%s_%06d.bmp", shots, zone.c_str(), int(t));
                     SDL_SaveBMP(px, name);
                     SDL_DestroySurface(px);
+                    // GD10_CHARTEST_MEMBERS=<metres>: each member framed from
+                    // the front at that distance too (development aid).
+                    if (const char* md = SDL_getenv("GD10_CHARTEST_MEMBERS")) {
+                        const float dist = std::max(0.5f, float(std::atof(md)));
+                        for (const Band::Entry& e : s.band()->members()) {
+                            venue::Vec3 chest;
+                            if (!s.band()->bonePos(e.model->member.object, K("bone_chest"), chest)) continue;
+                            bandanim::Vec f = bandanim::xformDir(e.root, {0, 0, 1});
+                            const float fl = std::sqrt(f.x * f.x + f.z * f.z);
+                            if (fl < 1e-6f) continue;
+                            f = {f.x / fl, 0, f.z / fl};
+                            venue::CamPose cp;
+                            cp.pos = {chest[0] + f.x * dist, chest[1] + 0.1f, chest[2] + f.z * dist};
+                            const float yaw = std::atan2(-f.x, -f.z), pitch = std::atan2(0.1f, dist);
+                            const venue::Quat qy{0, std::sin(yaw * 0.5f), 0, std::cos(yaw * 0.5f)}, qp{std::sin(pitch * 0.5f), 0, 0, std::cos(pitch * 0.5f)};
+                            cp.rot = {qy[3] * qp[0], qy[1] * qp[3], -qy[1] * qp[0], qy[3] * qp[3]};
+                            cp.fov = 45;
+                            s.setFixedCamera(&cp);
+                            renderer.beginFrame(black);
+                            s.draw(t);
+                            SDL_Surface* mp = renderer.readPixels();
+                            renderer.endFrame();
+                            s.setFixedCamera(nullptr);
+                            if (!mp) continue;
+                            std::snprintf(name, sizeof name, "%s/member_%s_%s_%06d.bmp", shots, zone.c_str(), band::roleName(e.model->member.role), int(t));
+                            SDL_SaveBMP(mp, name);
+                            SDL_DestroySurface(mp);
+                        }
+                    }
                 }
             }
         }
