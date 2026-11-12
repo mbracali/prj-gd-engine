@@ -78,7 +78,7 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
                           "StartPreloadedStream", "PauseSound", "SetLastGuitarVolume",
                           // Achievements and leaderboard posts, dropped (GD10-013) [C scripts
                           // Achievements_SongWon, send_leader_board_message].
-                          "AddParam", "GetNetID", "CheckAndWriteMakerAchievement"})
+                          "GetNetID", "CheckAndWriteMakerAchievement"})
         vm.addNative(n, yes);
     for (const char* n : {"IsHost", "EnumContentFiles", "IsEnumContentFilesDamaged", "GetLatestContentIndexFile",
                           "GetContentFolderIndexFromFile", "French", "German", "Spanish", "Italian", "IsCreated", "CompositeObjectExists",

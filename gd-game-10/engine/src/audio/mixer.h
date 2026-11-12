@@ -95,6 +95,8 @@ public:
     // audio clock never shows up as uneven scrolling (gd01 B54). Main thread only.
     double frameTimeMs();
     bool playing() const { return source_ != nullptr; }
+    // The source ended and every frame of it has been played.
+    bool drained() const { return source_ && sourceEnded_.load() && read_.load() >= written_.load(); }
     // Frames the callback found missing in the ring (decoder behind).
     int64_t underruns() const { return underruns_.load(); }
 

@@ -1633,6 +1633,10 @@ void App::frame() {
                 SDL_Log("practice preview: %s still playing as the song started", front_->songPreview.prefix.c_str());
                 front_->songPreview.leaked = true, front_->songPreview.active = front_->songPreview.playing = false;
             }
+            if (front_->setlistPreview.active) {
+                SDL_Log("setlist preview: %s still playing as the song started", front_->setlistPreview.prefix.c_str());
+                front_->setlistPreview.active = false;
+            }
             front_->songPlaying = true;
             song_->setHoldAfterWin(true);  // GH3's scripts end a won song (songOutro)
             // Common_Intro_Transition's GH_SFX_Intro_WarmUp: the zone's crowd

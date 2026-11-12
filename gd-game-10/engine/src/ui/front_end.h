@@ -113,6 +113,13 @@ public:
         int starts = 0;
         std::function<double()> positionMs;
     } songPreview;
+    // The set list's song preview (SongPlayPreview, setlist_songpreview_monitor):
+    // the song's <prefix>_preview bank on the music_setlist buss (GD10-050).
+    struct SetlistPreview {
+        bool active = false;
+        std::string prefix;
+        int starts = 0;
+    } setlistPreview;
     // Paused with Start in a song: GH3's pause menu runs over the frozen song
     // (gh3_start_pressed); songKill: its quit / restart killed the gem scroller.
     bool songPaused = false, songKill = false;

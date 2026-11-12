@@ -83,8 +83,8 @@ first level are not audited yet.
 | Settings | uistate_options | items, highlight, help bar + ENHANCED | - |
 | Cheats | uistate_options_cheats | title, list, highlight on the focused item, snakes, scroll bar (the cheat bone hides: new_cheat_alpha) | - |
 | Music Studio | uistate_jam | sign-in, memcard, download scan, jam | jam screen itself not audited (band characters missing: CAS) |
-| Set list | uistate_setlist | songs (squeezed to 630 per axis), icons after each title, focused song's info panel (difficulty skulls, stars), sections, fade under the help bar (subtract gradient), custom set circles, scroll, help bar | - |
-| Difficulty pop-up | uistate_select_difficulty | frame, five items, icons, title | - |
+| Set list | uistate_setlist | songs (squeezed to 630 per axis), icons after each title, focused song's info panel (difficulty skulls, stars), sections, fade under the help bar (subtract gradient), custom set circles, scroll, help bar, the focused song's preview (music_setlist, D81) | - |
+| Difficulty pop-up | uistate_select_difficulty | frame, five items, icons, title, the scribble highlight on the focused item (ui_setlist_diff_focus / ui_setlist_scribbles, D80) | - |
 | Loading | create_loading_screen | tip, picture | - |
 | Gameplay pause | uistate_pausemenu | PAUSED, six items 35 apart (selection_height 50, spacing_between -15 [C script]), focus colours, Back resumes | - |
 | Results | uistate_song_breakdown | title, stars, score, highest multiplier, player row (rank, cut, icons), help bar | name shows the desc's placeholder (no gamertag), notes N/A and streak 0 (detailed stats); black sides (venue not drawn behind) |

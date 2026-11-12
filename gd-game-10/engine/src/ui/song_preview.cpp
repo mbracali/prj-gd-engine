@@ -178,6 +178,7 @@ void addSongPreviewNatives(qs::Vm& vm, FrontEnd& fe, Mixer& mixer, const Disc& d
             tracks[size_t(2 - p1 + c)].buss = sb.index(K("Single_Player_Rhythm_Playback"));
             tracks[size_t(4 + c)].buss = sb.index(K("Band_Playback"));
         }
+        fp->setlistPreview.active = false;  // the mixer is the practice preview's now
         mp->play(std::move(stream), std::move(tracks), 0);
         mp->setPaused(true);
         if (st->pitch != 1.0f) mp->setSlomo(st->pitch, 1.0f);
@@ -195,6 +196,62 @@ void addSongPreviewNatives(qs::Vm& vm, FrontEnd& fe, Mixer& mixer, const Disc& d
         if (!pause && !pv.playing) ++pv.starts;
         pv.playing = !pause;
         return true;
+    });
+    // gh4's set list preview [C 0x8219DD60 SongPlayPreview filename =
+    // <prefix> content_index: 0x820E45E8 stops the last one, opens
+    // "<prefix>_preview.fsb" (its key from "<prefix>_preview", 0x820E24F8);
+    // 0x820E49F8 plays it once the stream is open, unpaused, on the buss
+    // music_setlist (0x4A0087AE), no loop, no fade (its end callback
+    // 0x820E3F80 frees the channel); 0x82190010 SongStopPreview stops it;
+    // 0x82190020 SongIsPreviewPlaying: the channel still exists. The
+    // scripts do the rest: setlist_songpreview_monitor plays it again when
+    // it ended, the menus fade the buss (gig_posters_song_focus, 7 s then
+    // -100 dB over 1 s) and Menu_Music_Off stops the menu music].
+    auto setlistStop = [fp, mp](const char* why) {
+        FrontEnd::SetlistPreview& sp = fp->setlistPreview;
+        if (!sp.active) return;
+        if (!fp->songPlaying && !fp->songPreview.active) mp->stop();
+        SDL_Log("setlist preview: %s stopped (%s)", sp.prefix.c_str(), why);
+        sp.active = false;
+    };
+    vm.addNative("SongPlayPreview", [fp, mp, dp, setlistStop](Vm& v, ScriptRun&, qb::Struct& p) {
+        setlistStop("SongPlayPreview");
+        const qb::Value* f = Vm::param(p, K("filename"));
+        if (!f || fp->songPlaying || fp->songPreview.active) return false;
+        std::string prefix = f->type == qb::Type::String || f->type == qb::Type::WString ? f->str : qbkey::name(f->key);
+        std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+        std::string err;
+        auto stream = SongStream::openPreview(*dp, prefix, err);
+        if (!stream) {
+            v.logOnce("setlist preview: cannot play " + prefix + ": " + err);
+            return false;
+        }
+        std::vector<Mixer::Track> tracks(6);
+        const int buss = soundBusses().index(K("music_setlist"));
+        for (int c = 0; c < 6; ++c) tracks[size_t(c)].pan = (c & 1) ? 1.0f : -1.0f, tracks[size_t(c)].buss = buss;
+        mp->play(std::move(stream), std::move(tracks), 0);
+        FrontEnd::SetlistPreview& sp = fp->setlistPreview;
+        sp.active = true, sp.prefix = prefix, ++sp.starts;
+        SDL_Log("setlist preview: %s playing", prefix.c_str());
+        return true;
+    });
+    // SongCheckIfDownloaded filename = <prefix>: the preview is downloaded
+    // content ("a<prefix>_preview.fsb" in a content folder) [C 0x8218FDD8,
+    // 0x820E27E8]; the port has no downloads, so the disc's (an unknown
+    // native passed as true: the monitor took the download path and gave up
+    // with DownloadContentLost).
+    vm.addNative("SongCheckIfDownloaded", [](Vm&, ScriptRun&, qb::Struct&) { return false; });
+    vm.addNative("SongStopPreview", [setlistStop](Vm&, ScriptRun&, qb::Struct&) {
+        setlistStop("SongStopPreview");
+        return true;
+    });
+    vm.addNative("SongIsPreviewPlaying", [fp, mp](Vm&, ScriptRun&, qb::Struct&) {
+        FrontEnd::SetlistPreview& sp = fp->setlistPreview;
+        if (sp.active && (fp->songPlaying || !mp->playing() || mp->drained())) {
+            if (!fp->songPlaying) mp->stop();
+            sp.active = false;
+        }
+        return sp.active;
     });
     // StopStream: the preview's song stream, or every stream (no unique_id
     // and no name: StopAudioStreams, end_song's); a song's own streams keep

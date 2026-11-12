@@ -54,8 +54,8 @@ ui_system.cpp setTexture / applyProps.
 ## D7. FSB key: the XEX's generator (2026-11-11)
 
 What: song banks are decrypted with the key 0x820E24F8 makes from the bank's
-name ("<song>_<n>"), plain = bit-reverse(stored) XOR key [C]. Previews use
-another key (not done). Undo: none.
+name ("<song>_<n>"), plain = bit-reverse(stored) XOR key [C]. Previews: the
+same generator on "<song>_preview" (D81). Undo: none.
 
 ## D8. The song's pairs and stems [I] (2026-11-11)
 
@@ -446,3 +446,32 @@ emits emit_rate for that long per Create and then counts as not created;
 createdatstart ones start expired [I: the emitter's lifetime; the Top_1
 moment SafeCreates them, which needs them gone].
 Undo: the ring of Topsparks emits for ever; no gh4 pyro.
+
+## D80. RemoveParameter and AddParam do their work (2026-11-12)
+
+What: RemoveParameter {$x} drops x (named, or an unnamed flag) from the
+calling script's parameters; AddParam name = n value = v [structure_name =
+s] adds n = v to them, or to their struct s; se_setprops takes an unnamed
+struct's fields (`se_setprops <s>`). Both natives were no-op stubs.
+Why: user_control_helper_get_buttonchar removes all_buttons on the Xbox 360
+(IsXenon), so every help pill shows the guitar glyph (\m0 -> \b4, the
+green fret) and not "\b3\b4" (A + green); ui_setlist_scribbles cycles the
+difficulty pop-up's highlight scribbles with AddParam + se_setprops, so the
+focused difficulty had no highlight [C scripts; natives 0x823946C0 and
+0x823980E8, whose bodies Ghidra cuts short: I the rest from the callers].
+Undo: natives_misc.cpp (both stubs back), ui_system.cpp se_setprops.
+
+## D81. The set list's song previews (2026-11-12)
+
+What: SongPlayPreview filename = <prefix> plays DATA/MUSIC/<prefix>_preview
+.fsb.xen (one stereo XMA2 sample, about 21 s, key from "<prefix>_preview"
+as the song banks') once, from its start, on the music_setlist buss;
+SongStopPreview stops it; SongIsPreviewPlaying is true until it ends.
+SongCheckIfDownloaded is false (no downloads). No fade, loop or offset in
+the native: setlist_songpreview_monitor plays it again when it ended, the
+gig posters fade the buss (-100 dB over 1 s after 7 s), Menu_Music_Off
+stops the menu music [C 0x8219DD60, 0x820E45E8 ("%s_preview"),
+0x820E49F8 (buss 0x4A0087AE music_setlist, end callback 0x820E3F80),
+0x82190010, 0x82190020, 0x8218FDD8]. The port plays it on the song mixer
+while no song or practice preview has it [I].
+Undo: song_preview.cpp's four natives, SongStream::openPreview.

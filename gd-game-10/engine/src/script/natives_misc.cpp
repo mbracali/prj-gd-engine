@@ -7,6 +7,7 @@
 // behaviour [I] unless marked.
 #include "script/natives_misc.h"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 
@@ -128,9 +129,53 @@ void addMiscNatives(qs::Vm& vm) {
     // DeBounce { $x time = t }: ignores the button for t [I: the dialogs' double presses]; the menus already debounce.
     // Bookkeeping with nothing to do in the port (assets come from the paks as they load).
     for (const char* n : {"DeBounce", "SetSearchAllAssetContexts", "PushAssetContext", "PopAssetContext", "TextOutput", "TextOutputStart",
-                          "TextOutputEnd", "EnableInput", "UpdateGuitarVolume", "EnableDuplicateSymbolWarning", "RemoveParameter",
+                          "TextOutputEnd", "EnableInput", "UpdateGuitarVolume", "EnableDuplicateSymbolWarning",
                           "SetNetworkPreference", "WriteAchievements", "LoadSound", "ClearEventHandler"})
         vm.addNative(n, [](Vm&, ScriptRun&, qb::Struct&) { return true; });
+    // RemoveParameter {$name}: the calling script's parameter goes (named, or
+    // an unnamed flag), so GotParam no longer finds it [C 0x823946C0: the
+    // unnamed key, then a remove from the script's params (0x822B7140); I
+    // from its callers]. A no-op until GD10-051: user_control_helper_get_buttonchar
+    // kept all_buttons on the Xbox 360 and the help bar drew A + the green fret.
+    vm.addNative("RemoveParameter", [](Vm&, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* n = firstUnnamed(p);
+        if (!n || run.frames.empty() || !run.frames.back().locals) return true;
+        if (n->type != qb::Type::Key && n->type != qb::Type::KeyPtr) return true;
+        auto& items = run.frames.back().locals->items;
+        items.erase(std::remove_if(items.begin(), items.end(),
+                                   [&](const qb::Item& it) {
+                                       return it.name == n->key ||
+                                              (it.name == 0 && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr) && it.value.key == n->key);
+                                   }),
+                    items.end());
+        return true;
+    });
+    // AddParam name = n value = v [structure_name = s]: n = v joins the
+    // calling script's parameters, or its struct s (made if missing), so
+    // `se_setprops <s>` sets every collected prop at once [C 0x823980E8
+    // reads name (0xA1DC81F9); I the rest from its callers:
+    // ui_setlist_scribbles cycles the difficulty pop-up's highlight
+    // scribbles this way; a stub until GD10-052 left them all at alpha 0].
+    vm.addNative("AddParam", [](Vm&, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* n = Vm::param(p, K("name"));
+        const qb::Value* v = Vm::param(p, K("value"));
+        if (!n || !v || run.frames.empty()) return true;
+        if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
+        qb::Struct& l = *run.frames.back().locals;
+        const qb::Value* sn = Vm::param(p, K("structure_name"));
+        if (!sn) {
+            Vm::set(l, n->key, *v);
+            return true;
+        }
+        qb::Value st;
+        for (const qb::Item& it : l.items)
+            if (it.name == sn->key && it.value.type == qb::Type::Struct && it.value.st) st = it.value;
+        auto copy = std::make_shared<qb::Struct>(st.st ? *st.st : qb::Struct{});
+        Vm::set(*copy, n->key, *v);
+        st.type = qb::Type::Struct, st.st = copy;
+        Vm::set(l, sn->key, st);
+        return true;
+    });
     // ForEachIn <array> do = script params = {...}: the script once per element,
     // with the element's fields and the params [C use: create_snazzy_dialog_box].
     vm.addNative("ForEachIn", [](Vm& v, ScriptRun&, qb::Struct& p) {

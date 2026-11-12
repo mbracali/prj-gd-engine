@@ -94,8 +94,9 @@ headers as FSB3 plus, for XMA, u32 0 x3, u32 size, u32 streams, u32
 entries, the seek table), each one sample of interleaved stereo XMA streams
 (8 / 6 / 4 channels), 48 kHz [C data]. Encrypted: plain = bit-reverse(stored)
 XOR key, the key made from the bank's name by 0x820E24F8 [C] (see
-data/fsb.cpp fsbKeyGh4). `<song>_preview.fsb.xen` uses another key (not
-done). streamall.fsb.xen is FSB4, not encrypted, 2,629 samples; its .dat as
+data/fsb.cpp fsbKeyGh4). `<song>_preview.fsb.xen`: the same
+generator on "<song>_preview" (0x820E45E8), one stereo XMA2 sample of
+about 21 s (D81). streamall.fsb.xen is FSB4, not encrypted, 2,629 samples; its .dat as
 GH3's.
 
 XMA packets: gh4's FSB4 samples (the song banks and streamall) are XMA2

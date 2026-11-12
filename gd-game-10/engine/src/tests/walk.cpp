@@ -130,6 +130,24 @@ Walk::Walk(const std::string& name) : name_(name) {
             steps_.push_back({"uistate_cash_rewards_3", {"wait", "wait", "wait", "wait", "wait", "wait", C}, 30000, true});
             steps_.push_back({"uistate_setlist", {Op("wait", 2500), "check:song_quiet"}, 30000});
         }
+    } else if (name == "setlist_preview") {
+        // The set list plays the focused song's preview (its <song>_preview
+        // bank), the next song's after Down, none after Back (GD10-050).
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "shot:sp_main@", D, C}, 10000});
+        steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
+        steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"uistate_setlist", {Op("wait", 3000), "check:slpreview:on", "shot:sp_setlist@", D, Op("wait", 3000), "check:slpreview:on",
+                                              Op("wait", 8000), "check:slpreview:on", B, Op("wait", 1500), "check:slpreview:off"}, 40000});
+        // Back on the set list, a song to the difficulty pop-up: its focus shown (GD10-052).
+        steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", C, "wait", "wait", "key:Return"}, 20000});
+        steps_.push_back({"uistate_select_difficulty", {Op("wait", 1500), "shot:sp_diff0@", D, Op("wait", 600), "shot:sp_diff1@", D, Op("wait", 600),
+                                                        "shot:sp_diff2@", D, Op("wait", 600), "shot:sp_diff3@", B}, 20000});
     } else if (name == "qp4" || name == "quickplay") {
         // gh4 (Metallica) Quickplay (M4): the main menu's
         // QUICKPLAY (second item), single player, guitar, the set list.
@@ -1668,6 +1686,21 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
             if (!r->finished && r->name == qbkey::key("Loading_Screen_Crowd_Swell")) swell = true;
         if (swell) return fail("crowd density: Loading_Screen_Crowd_Swell still runs in the song");
         return rate <= limit ? true : fail("crowd density: " + std::to_string(rate) + " crowd sounds / s");
+    }
+    if (starts("check:slpreview:")) {
+        // check:slpreview:on: the set list plays the focused song's preview
+        // (setlist_songpreview_monitor: current = target, SongPlayPreview's
+        // bank playing); off: none plays (GD10-050).
+        const FrontEnd::SetlistPreview& sp = fe.setlistPreview;
+        const qb::Value* cur = fe.vm().global(qbkey::key("current_setlist_songpreview"));
+        const qb::Value* tgt = fe.vm().global(qbkey::key("target_setlist_songpreview"));
+        const uint32_t ck = cur ? cur->key : 0, tk = tgt ? tgt->key : 0;
+        std::printf("  setlist preview: %s %s, %d starts; current %s, target %s\n", sp.active ? "playing" : "off", sp.prefix.c_str(), sp.starts,
+                    qbkey::name(ck).c_str(), qbkey::name(tk).c_str());
+        if (rest("check:slpreview:") == "off") return sp.active ? fail("setlist preview: still playing") : true;
+        if (!sp.active) return fail("setlist preview: not playing");
+        if (ck != tk || tk == qbkey::key("none")) return fail("setlist preview: not the focused song's");
+        return true;
     }
     if (starts("check:global:")) {  // check:global:<name>=<number>: a GH3 global's value
         const std::string kv = rest("check:global:");

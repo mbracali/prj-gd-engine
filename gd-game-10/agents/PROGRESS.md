@@ -638,3 +638,33 @@ quickplay (load window worst 26.1 ms, 0 over 50), menus, qp_pause, enhanced,
 gamepads passed; `--selftest` 31 FAILED (as expected); `--scripttest`,
 `--sfxtest`, `--venuetest` (entersandman, 10 venues) pass;
 `tools/fuzz_seeds.sh` 13 / 13 passed.
+
+## 2026-11-12 09:30 Owner's menus: help bar glyph, song previews, difficulty focus (GD10-050..052)
+
+- Help bar: every pill showed A + the green fret ("\b3\b4") because
+  RemoveParameter was a stub: user_control_helper_get_buttonchar removes
+  all_buttons on the Xbox 360 and then picks \m0 (the green fret, \b4);
+  now only the fret glyphs show, every screen (D80).
+- Set list previews: the previews' key is the song banks' generator on
+  "<song>_preview" (the "other key" was the name); the natives
+  SongPlayPreview / SongStopPreview / SongIsPreviewPlaying and
+  SongCheckIfDownloaded were missing (the monitor took the download path
+  and gave up). Now the focused song's preview plays on music_setlist, the
+  next song's after a move, none after Back (D81).
+- Difficulty pop-up: the focus is the desc's scribble highlight
+  (alias_highlight moved and stretched to the item by ui_setlist_diff_focus,
+  its three scribbles cycled by ui_setlist_scribbles); AddParam was a stub,
+  so every scribble stayed at alpha 0. Now the red scribble marks the
+  focused difficulty (D80). The set list's own focus bar was already right.
+
+Checked: walk setlist_preview (new): preview playing for the first song
+(aceofspades), then albatross after Down, still 8 s later, off after Back;
+GD10_AUDIODUMP song mix peak 0.13..0.27 per second while a song row is
+focused, 0.000 before the set list and after Back. Screenshots: main menu
+help bar (green fret + SELECT, yellow + GAMEPADS), the difficulty pop-up
+with the scribble on BEGINNER / EASY / HARD after 0 / 1 / 3 Downs.
+
+Gate (engine/build/pfx, headless, scratch XDG): walks boot, quickplay,
+menus, qp_pause, enhanced, gamepads, setlist_preview passed;
+`tools/fuzz_seeds.sh` 13 / 13 passed; `--selftest` 31 FAILED (as
+expected); `--scripttest`, `--sfxtest` pass.

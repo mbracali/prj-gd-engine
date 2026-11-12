@@ -81,6 +81,41 @@ std::unique_ptr<SongStream> SongStream::open(const Disc& disc, const std::string
     return s;
 }
 
+std::unique_ptr<SongStream> SongStream::openPreview(const Disc& disc, const std::string& song, std::string& error) {
+    auto s = std::unique_ptr<SongStream>(new SongStream());
+    s->disc_ = &disc;
+    s->gh4_ = true;
+    const std::string path = "DATA/MUSIC/" + song + "_preview.fsb.xen";
+    if (!disc.exists(path)) {
+        error = "no " + path;
+        return nullptr;
+    }
+    try {
+        auto src = std::make_unique<Source>();
+        src->bank = loadFsb(disc, path, "");
+        if (src->bank.samples.empty()) {
+            error = path + ": no sample";
+            return nullptr;
+        }
+        src->sample = &src->bank.samples[0];
+        src->channels = src->sample->channels;
+        if (src->channels < 2 || src->channels % 2 || src->channels > 8) {
+            error = path + ": " + std::to_string(src->channels) + " channels";
+            return nullptr;
+        }
+        for (int p = 0; p < src->channels / 2; ++p) src->pairStem.push_back(Song);
+        s->sources_.push_back(std::move(src));
+    } catch (const std::exception& e) {
+        error = e.what();
+        return nullptr;
+    }
+    Source& src = *s->sources_[0];
+    s->rate_ = src.sample->rate;
+    s->length_ = src.sample->length;
+    if (!src.xma.open(2, src.sample->rate, src.channels, error)) return nullptr;
+    return s;
+}
+
 bool SongStream::seek(double ms) {
     const uint64_t target = uint64_t(std::max(0.0, ms) * rate_ / 1000.0);
     for (auto& sp : sources_) {

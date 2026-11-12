@@ -1789,6 +1789,23 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
     // se_getprops, desc_resolvealias {name = <alias> [param = <local>]}.
     if (method == K("se_setprops")) {
         if (!e) return false;
+        // An unnamed struct among the props gives its fields (`se_setprops
+        // <alpha>`: ui_setlist_scribbles' AddParam-built struct of the
+        // difficulty pop-up's scribble alphas) [C script; I: the params'
+        // include rule, as a script call's (GD10-052)].
+        bool nested = false;
+        for (const qb::Item& it : p.items) nested = nested || (it.name == 0 && it.value.type == qb::Type::Struct && it.value.st);
+        if (nested) {
+            qb::Struct flat;
+            for (const qb::Item& it : p.items) {
+                if (it.name == 0 && it.value.type == qb::Type::Struct && it.value.st) {
+                    for (const qb::Item& sub : it.value.st->items) flat.items.push_back(sub);
+                } else {
+                    flat.items.push_back(it);
+                }
+            }
+            p = std::move(flat);
+        }
         if (e->desc) descSetProps(*e, p);
         else applyProps(*e, p, false);
         // With time = s: pos / scale / alpha / rot_angle / rgba move there

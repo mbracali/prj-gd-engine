@@ -23,6 +23,11 @@ class SongStream : public AudioSource {
 public:
     enum Stem { Guitar = 0, Rhythm = 1, Song = 2, StemCount = 3 };
     static std::unique_ptr<SongStream> open(const Disc& disc, const std::string& song, std::string& error);
+    // gh4's set list preview: DATA/MUSIC/<song>_preview.fsb.xen, one stereo
+    // XMA sample (about 21 s), its key made from "<song>_preview" as the
+    // song banks' [C 0x820E45E8: "%s_preview", 0x820E24F8]; the pair is the
+    // Song stem.
+    static std::unique_ptr<SongStream> openPreview(const Disc& disc, const std::string& song, std::string& error);
 
     int channels() const override { return 2 * StemCount; }
     int sampleRate() const override { return rate_; }
