@@ -1481,6 +1481,22 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   random_int, 0x8248F908; seldiff.dta's two-guitar part pick) was unknown;
   outside a band lobby add_local_player keeps the port's single player 0
   (a pad joining as player 2 made the solo modes a two-player game).
-- **Gate (car8 build = HEAD 8959475 + these changes; gate_par.sh 6 at a
-  time, each its own XDG_DATA_HOME):** see the section below for the final
-  run.
+- **Gate (44907b0 built in engine/build/car8; agents/scratch/car8/gate_par.sh,
+  6 at a time, each its own XDG_DATA_HOME, while another agent's 6-way gate
+  ran too):** gate1.sh's 45 walks (with rb_band_lobby, rb_shop_drum,
+  rb_shop_mic, rb_body_deform) + rb_highway, rb_crowd: 44 of 47 OK at
+  first, the five tests OK, bandcheck passed (5,205 frames; the premades'
+  deform keeps every bone within 1.2 x its deformed rest). rb_band_start
+  (timed out on qp_endgame_screen), rb_guitar_none (rb_hud_box_err_px 5)
+  and rb_highway (meter_frames 118) failed under the load and passed run
+  alone. An earlier run had caught two regressions, fixed before the
+  commit: the solo modes became two-player games when a pad other than
+  the first joined (rb_pad_play, rb_keys_play, rb_od_pad, rb_od_guitar,
+  rb_guitar_*), and bandcheck's stretch measured the premades' deformed
+  bones against the undeformed bind (1.46 x).
+- **Not done:** GD05-084's skins (the TexRenderer skin proxies: no render
+  to texture for characters, GD05-022) and so the tattoos, make-up and
+  face paint, the patch creator (ui/patchcreator.dta PatchPanel); GD05-083's
+  menu cameras (select_cam shots) and the lobby slots' characters;
+  GD05-091 (seldiff's per-player slots), GD05-092 (the deform's MeshDeform
+  bake, CharCuff, CharIKScale).
