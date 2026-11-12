@@ -1161,3 +1161,50 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   texture yet, GD05-022); weight / height sliders not checked; the
   characters are not drawn in the menus; the tours' [I] rules (song
   order by rank, unlocks, fans / buzz) are still the wave 02 guesses.
+
+## 2026-11-12: Rock Band on the shared core only, Vulkan by default (G06 7, GD05-074)
+
+- **Done (D71, docs/backend.md):** every draw through gd-engine-core
+  (Vulkan default, then SDL3, then OpenGL3, each with its window made again),
+  every sound through a core output (miniaudio default, then the others);
+  gd05's OpenGL device, GL loader, EGL HDR surface and SDL audio path
+  deleted; True HDR on the Vulkan HDR swapchain; XDVDFS, random-access
+  files, the pref folder and the CPU BCn decoder are the core's. No core
+  change was needed, so no other game's code or binary changed. Remaining
+  (not in the core yet, or not moved): input / MIDI (core `inputs/` is a
+  plan), the UI, the settings / save file IO and the desktop entry.
+- **Pixels** (fixed-clock song shots, 1920 x 1080, NVIDIA RTX 3060 on the
+  offscreen driver, `agents/scratch/be6/shots.sh` + `cmp.py`, git-ignored:
+  inbloom at 20 s / 45 s, wanteddeadoralive drums at 30 s, blitzkriegbop
+  vocals at 25 s): two runs of one binary 0 differing pixels; **new default
+  (Vulkan) vs Vulkan before: 0 px in all four**; **core OpenGL3 now vs the
+  old default local: 0 px in all four**; Vulkan vs the old default local
+  (the change a player sees): 0.03 % / 0.00 % / 0.51 % / 0.41 % of the
+  pixels (mean |delta| <= 0.003, max 56 / 49 / 34 / 66: single pixels at
+  mesh edges and in the blurs, as gd02's 6b results).
+  CPU BCn decode (GD05_DECODE_TEXTURES=1) vs the GPU's own: gd05's decoder
+  mean |delta| 0.20-0.60, core bcdec 0.13-0.40 (closer in every shot).
+- **Fallbacks** (`VK_DRIVER_FILES=/nonexistent.json`): `vulkan did not
+  start` -> `sdl3 did not start` -> `making the window again for opengl3`,
+  the song plays. Audio `GD05_AUDIO_BACKEND=bogus` -> miniaudio; openal and
+  faudio each play (null devices). True HDR saved: Vulkan says why it is
+  Emulated (no HDR colour space on this surface), opengl3 "not on the
+  opengl3 graphics backend yet". **Not tested:** the RGBA16F HDR output on
+  a real HDR display (none here); Windows, Steam Deck, Android, macOS
+  builds; the launcher module on a real display.
+- **Gate on the default backends** (Vulkan + miniaudio, headless offscreen
+  on the NVIDIA GPU; `agents/scratch/be6/gate.sh`: gate1.sh's 40 walks +
+  rb_highway, rb_crowd + selftest, scenetest, scripttest, videotest,
+  sfxtest, 6 in parallel, each its own XDG_DATA_HOME): 46 of 47 OK;
+  rb_lose timed out once on qp_endgame_screen under load, then passed 4 of
+  4 (alone, 3 in parallel; the crash under load is GD05-086, fixed since).
+  `enhanced` / `enhanced_backends` (GH2 walks, not in the gate) fail the
+  same way before and after (they never reach options_screen on RB's menu).
+- **Other games** (no core change, so their code is as before; rebuilt in
+  their own build/be6 dirs, Linux): gd01 `tools/walks.sh` 24 / 24 PASS;
+  gd02 `--selftest`, `--scenetest`, walks quickplay / lose / pause /
+  attract OK; gd03 `tools/run_tests.sh` (tests + 15 walks) 25 / 25 rc=0;
+  gd04 `--formattest` all parse, `--shadertest` 5 / 5, headless smoke shot
+  saved; gd10 walks boot and quickplay passed, `tools/fuzz_seeds.sh` 13 / 13,
+  `--selftest` 31 FAILED (its expected 31). The launcher builds
+  (gd-engine-launcher/build/be6; build.sh not run, no packages).
