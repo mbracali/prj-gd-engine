@@ -25,6 +25,8 @@ struct WalkHost {
     virtual std::string walkSaveDir() = 0;
     virtual std::string walkEnhanced(const std::string& key) = 0;
     virtual void walkSetEnhanced(const std::string& key, const std::string& value) = 0;
+    // The song (its streams on the mixer) still alive (check:song_quiet).
+    virtual bool walkSongAudio() { return false; }
 };
 
 // --walktest <walk>: plays through GH3's own menus with scripted buttons
@@ -132,6 +134,7 @@ private:
     bool act(const std::string& what, FrontEnd& fe, WalkHost& host);
     std::array<int, size_t(Action::Start) + 1> presses_{};
     int sideBase_ = 0, rightBase_ = 0;
+    uint64_t crowdMark_ = 0, crowdMarkAt_ = 0;  // mark:crowd (check:crowd_rate)
     int seek_ = 0;  // setlist:<song> presses so far
     // fuzz:<n> (the fuzz walk): presses left, the random state, when a menu
     // was last seen focused and the presses made.

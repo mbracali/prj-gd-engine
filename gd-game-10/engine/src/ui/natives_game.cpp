@@ -407,11 +407,18 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
     });
     // SongUnLoadFSBIfDownloaded: kill_gem_scroller's (quit / restart from the
     // pause menu, the attract mode's end) -- a playing song is abandoned [C script kill_gem_scroller].
-    vm.addNative("SongUnLoadFSBIfDownloaded", [&fe](Vm&, ScriptRun&, qb::Struct&) {
+    // gh4's kill_gem_scroller calls SongUnLoad instead (not on a restart);
+    // unhandled, a quit song played on under the menus, unpaused by
+    // ui_deinit_gameplay's UnpauseGame, and its end (GuitarEvent_SongWon)
+    // pulled the menus back to gameplay (owner, GD10-043) [C script
+    // kill_gem_scroller (gh4); I: the native unloads the song's streams].
+    auto songUnload = [&fe](Vm&, ScriptRun&, qb::Struct&) {
         if (fe.songPlaying) fe.songKill = true;
         fe.songRequest.pending = false;  // a song asked for but not started yet goes too (show_boss_helper_now)
         return true;
-    });
+    };
+    vm.addNative("SongUnLoadFSBIfDownloaded", songUnload);
+    vm.addNative("SongUnLoad", songUnload);
     // GetHeldPattern [controller = n] -> hold_pattern: the frets held, green
     // 0x10000 .. orange 0x1 [C use: the cheat entry, create_cheat_guitar_strum].
     vm.addNative("GetHeldPattern", [&fe](Vm&, ScriptRun& run, qb::Struct&) {

@@ -229,6 +229,7 @@ uint32_t Sfx::play(uint32_t sample, float volume, float pitch, uint32_t buss, in
     }
     if (!job && (e.bad || e.pcm.empty())) return 0;
     ++stats_.plays;
+    if (buss && soundBusses().under(buss, qbkey::key("User_Crowd"))) ++stats_.crowdPlays;
     const uint32_t id = nextVoice_++;
     if (!device_) return id;
     SDL_AudioSpec src{SDL_AUDIO_F32, e.channels, e.rate};
@@ -289,14 +290,14 @@ void Sfx::stop(uint32_t voice) {
         for (const Voice& v : voices_)
             if (v.id == voice) SDL_Log("sfx: stop %s", qbkey::name(v.sample).c_str());
     for (Voice& v : voices_)
-        if (v.id == voice) SDL_ClearAudioStream(v.stream), v.job.reset(), v.loops = 0;
+        if (v.id == voice) SDL_ClearAudioStream(v.stream), v.job.reset(), v.loops = 0, v.paused = false;
 }
 
 void Sfx::stopSample(uint32_t sample) {
     static const bool log = SDL_getenv("GD10_SFXLOG") != nullptr;
     if (log) SDL_Log("sfx: stop sample %s", qbkey::name(sample).c_str());
     for (Voice& v : voices_)
-        if (v.sample == sample) SDL_ClearAudioStream(v.stream), v.job.reset(), v.loops = 0;
+        if (v.sample == sample) SDL_ClearAudioStream(v.stream), v.job.reset(), v.loops = 0, v.paused = false;
 }
 
 bool Sfx::samplePlaying(uint32_t sample) const {
@@ -305,9 +306,16 @@ bool Sfx::samplePlaying(uint32_t sample) const {
     return false;
 }
 
+std::vector<Sfx::Active> Sfx::active() const {
+    std::vector<Active> out;
+    for (const Voice& v : voices_)
+        if (v.paused || v.job || v.loops != 0 || SDL_GetAudioStreamAvailable(v.stream) > 0) out.push_back({v.sample, v.buss, v.loops, v.paused});
+    return out;
+}
+
 void Sfx::stopBuss(uint32_t buss) {
     for (Voice& v : voices_)
-        if (buss && soundBusses().under(v.buss, buss)) SDL_ClearAudioStream(v.stream), v.job.reset(), v.loops = 0;
+        if (buss && soundBusses().under(v.buss, buss)) SDL_ClearAudioStream(v.stream), v.job.reset(), v.loops = 0, v.paused = false;
 }
 
 void Sfx::pauseBuss(uint32_t buss, bool paused) {

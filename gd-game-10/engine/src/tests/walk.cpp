@@ -16,6 +16,7 @@
 #include <sstream>
 
 #include "audio/audio_device.h"
+#include "audio/sound_buss.h"
 #include "data/band.h"
 #include "data/json.h"
 #include "data/qbkey.h"
@@ -67,6 +68,68 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"song", {Op("wait", 2000), "key:Escape"}, 20000});
         steps_.push_back({"uistate_pausemenu", {"wait", "wait", "wait", D, "wait", "shot:pause_1@", D, "wait", "shot:pause_2@", D, "wait",
                                                 "shot:pause_3@", D, "wait", "shot:pause_4@", D, "wait", "shot:pause_5@", "wait"}, 20000});
+    } else if (name == "qp_quit" || name == "qp_restart" || name == "qp_finish") {
+        // The song's lifecycle (the owner: a quit song played on, the crowd
+        // screamed for ever): Quickplay to a song; qp_quit: pause -> Quit ->
+        // the warning's Quit, three times in a row; qp_restart: pause ->
+        // Restart -> the warning's Restart, the song again, then Quit;
+        // qp_finish: the song to its end, the results, back to the set list.
+        // After each, check:song_quiet; in each song, the crowd's density.
+        steps_ = boot;
+        auto toSong = [&](bool first) {
+            if (first) {
+                steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", D, C}, 10000});
+                steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
+                steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
+                steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+                steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+            }
+            steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 30000});
+            steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+            steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+            steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000, true});
+            steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, "wait", C}, 20000});
+        };
+        // In the song: past the intro (fastintro 3 s), the crowd counted for 15 s.
+        auto inSong = [&](bool thenPause) {
+            std::vector<Op> k = {Op("wait", 6000), "mark:crowd", Op("wait", 15000), "check:crowd_rate<=1.0"};
+            if (thenPause) k.push_back("key:Escape");
+            steps_.push_back({"song", k, 40000});
+        };
+        // The pause menu (Quickplay, one song): Resume, Restart, Change
+        // Difficulty, Practice, Options, Quit [C script ui_create_pausemenu];
+        // the warnings: option 1 back, option 2 go [C create_quit_warning_menu].
+        auto quit = [&] {
+            steps_.push_back({"uistate_pausemenu", {"wait", "wait", "wait", D, D, D, D, D, "wait", C}, 20000});
+            steps_.push_back({"uistate_pausemenu_quit_warning", {"wait", "wait", D, "wait", C}, 20000});
+            // quit_warning_select_quit -> uistate_pausemenu_song_ended: Retry
+            // Song, New Song, Quit; New Song -> the set list [C scripts
+            // create_song_ended_menu, song_ended_menu_select_new_song].
+            steps_.push_back({"uistate_pausemenu_song_ended", {"wait", "wait", "wait", D, "wait", C}, 20000});
+        };
+        if (name == "qp_quit") {
+            for (int i = 0; i < 3; ++i) {
+                toSong(i == 0);
+                inSong(true);
+                quit();
+                steps_.push_back({"uistate_setlist", {Op("wait", 2500), "check:song_quiet"}, 30000});
+            }
+        } else if (name == "qp_restart") {
+            toSong(true);
+            inSong(true);
+            steps_.push_back({"uistate_pausemenu", {"wait", "wait", "wait", D, "wait", C}, 20000});
+            steps_.push_back({"uistate_pausemenu_restart_warning", {"wait", "wait", D, "wait", C}, 20000});
+            inSong(true);
+            quit();
+            steps_.push_back({"uistate_setlist", {Op("wait", 2500), "check:song_quiet"}, 30000});
+        } else {
+            toSong(true);
+            inSong(false);
+            steps_.push_back({"song_over", {}, 600000});
+            steps_.push_back({"uistate_song_breakdown", {"wait", "wait", "wait", "wait", "wait", "wait", C}, 30000});
+            steps_.push_back({"uistate_cash_rewards_3", {"wait", "wait", "wait", "wait", "wait", "wait", C}, 30000, true});
+            steps_.push_back({"uistate_setlist", {Op("wait", 2500), "check:song_quiet"}, 30000});
+        }
     } else if (name == "qp4" || name == "quickplay") {
         // gh4 (Metallica) Quickplay (M4): the main menu's
         // QUICKPLAY (second item), single player, guitar, the set list.
@@ -1531,6 +1594,74 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         if (std::fabs(pv.speed - 1.0f) > 0.001f) return fail("preview: not at full speed");
         if (pos < pv.startMs || pos > pv.startMs + 15000.0) return fail("preview: the stream is not where it started");
         return true;
+    }
+    if (what == "check:song_quiet") {
+        // The song's lifecycle (GD10-043..): after a quit / restart / the
+        // song's end, nothing of the song is left: no song stream on the
+        // mixer, no crowd voice (a voice under User_Crowd, or a crowd sample
+        // on another buss), no loading-screen swell or song script still
+        // running [C scripts GH_SFX_Intro_WarmUp*, GH3_SFX_fail_song_stop_sounds,
+        // kill_gem_scroller]. SpawnedOneShotBeginRepeatLoop may still wait
+        // (it breaks on crowd_in_Front_End_state = 1, set by kill_gem_scroller).
+        int bad = 0;
+        if (fe.songPlaying) std::printf("  song_quiet: the song still plays\n"), ++bad;
+        if (host.walkSongAudio()) std::printf("  song_quiet: the song (its streams) still alive\n"), ++bad;
+        // The menus' own crowd bed: Skate8_SFX_Background_Play's loop of the
+        // current area (FrontEnd_Menu_Music: EXT_MD_Crowd_Good_Loop at 10%,
+        // frontend: Silence_Front_End_Crowd_Loop) [C data
+        // Skate8_SFX_Background_Areas_And_States, scripts ui_create_setlist,
+        // Menu_Music_On_Spawned]; anything else of the crowd is the song's.
+        const uint32_t userCrowd = qbkey::key("User_Crowd");
+        const qb::Value* area = fe.vm().global(qbkey::key("SFX_Background_Current_Area"));
+        const qb::Value* bed = fe.vm().global(qbkey::key("SFX_Background_Current_Checksum"));
+        const bool menuArea = area && (area->key == qbkey::key("FrontEnd_Menu_Music") || area->key == qbkey::key("frontend"));
+        const std::string bedName = bed ? qbkey::name(bed->key) : std::string();
+        for (const Sfx::Active& a : fe.sfx.active()) {
+            std::string n = qbkey::name(a.sample);
+            std::string low = n;
+            for (char& ch : low) ch = char(std::tolower((unsigned char)ch));
+            const bool crowd = soundBusses().under(a.buss, userCrowd) || low.find("crowd") != std::string::npos;
+            const bool menuBed = crowd && menuArea && !bedName.empty() && a.loops < 0 && (n == bedName + "_FT" || n == bedName + "_BK");
+            std::printf("  song_quiet: voice %s on %s%s%s%s\n", n.c_str(), qbkey::name(a.buss).c_str(), a.loops < 0 ? " (looping)" : "",
+                        a.paused ? " (paused)" : "", menuBed ? " (the menus' crowd bed)" : crowd ? " <- crowd" : "");
+            if (crowd && !menuBed) ++bad;
+            if (a.paused) ++bad;  // paused by the pause menu and never stopped or resumed: a leak
+        }
+        static const char* const kSongScripts[] = {"Loading_Screen_Crowd_Swell", "Crowd_Loading_Whistle", "OneShotsBetweenSongs",
+                                                   "SurgeBetweenSongs", "Crowd_Anticipation", "GuitarEvent_SongWon_Spawned",
+                                                   "GuitarEvent_SongFailed_Spawned", "star_power_activate_and_drain"};
+        for (const auto& r : fe.vm().runs()) {
+            if (r->finished) continue;
+            bool songScript = r->type == qbkey::key("song_event_scripts");
+            for (const char* n : kSongScripts) songScript = songScript || r->name == qbkey::key(n);
+            if (songScript) std::printf("  song_quiet: script %s still running\n", qbkey::name(r->name).c_str()), ++bad;
+        }
+        const qb::Value* fes = fe.vm().global(qbkey::key("crowd_in_Front_End_state"));
+        if (fes && fes->number() != 1) std::printf("  song_quiet: crowd_in_Front_End_state %g (the one-shots go on)\n", double(fes->number())), ++bad;
+        std::printf("  song_quiet: %d problem(s)\n", bad);
+        return bad ? fail("song_quiet: the song left " + std::to_string(bad) + " thing(s) running") : true;
+    }
+    if (what == "mark:crowd") {
+        crowdMark_ = fe.sfx.stats().crowdPlays, crowdMarkAt_ = SDL_GetTicksNS();
+        return true;
+    }
+    if (starts("check:crowd_rate<=")) {
+        // The crowd's density in a song: crowd voices started (under
+        // User_Crowd) per second since mark:crowd. The original's in-song
+        // crowd: the beds (two loops, once per area change), a one-shot every
+        // 4.5..8 s after the last ended (SpawnedOneShotBeginRepeatLoop: 0.9..1.6
+        // x waittime 5), the chart's crowd notes, Star Power / streak cheers
+        // [C scripts]. The loading screen's swell (Loading_Screen_Crowd_Swell,
+        // 2..4 swells every 0.5..1 s) must be gone (GH_SFX_Intro_WarmUp*).
+        const double secs = double(SDL_GetTicksNS() - crowdMarkAt_) / 1e9;
+        const uint64_t n = fe.sfx.stats().crowdPlays - crowdMark_;
+        const double rate = secs > 0 ? double(n) / secs : 0, limit = std::atof(rest("check:crowd_rate<=").c_str());
+        std::printf("  crowd density: %llu crowd sounds in %.1f s = %.2f / s (limit %.2f)\n", (unsigned long long)n, secs, rate, limit);
+        bool swell = false;
+        for (const auto& r : fe.vm().runs())
+            if (!r->finished && r->name == qbkey::key("Loading_Screen_Crowd_Swell")) swell = true;
+        if (swell) return fail("crowd density: Loading_Screen_Crowd_Swell still runs in the song");
+        return rate <= limit ? true : fail("crowd density: " + std::to_string(rate) + " crowd sounds / s");
     }
     if (starts("check:global:")) {  // check:global:<name>=<number>: a GH3 global's value
         const std::string kv = rest("check:global:");

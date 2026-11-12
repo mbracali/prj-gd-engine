@@ -42,6 +42,14 @@ public:
     // StopSound <sample>: every voice of that sample.
     void stopSample(uint32_t sample);
     bool samplePlaying(uint32_t sample) const;
+    // The voices still sounding (or paused): sample and buss keys (the walks'
+    // check:song_quiet, the lifecycle's leak check).
+    struct Active {
+        uint32_t sample = 0, buss = 0;
+        int loops = 0;
+        bool paused = false;
+    };
+    std::vector<Active> active() const;
     // StopSoundsByBuss / PauseSoundsByBuss / UnPauseSoundsByBuss.
     void stopBuss(uint32_t buss);
     void pauseBuss(uint32_t buss, bool paused);
@@ -60,6 +68,7 @@ public:
     struct Stats {
         uint64_t plays = 0, decoded = 0, failures = 0, unknown = 0;
         uint64_t lost = 0;  // played but not taken by the device (nothing heard)
+        uint64_t crowdPlays = 0;  // voices started under User_Crowd (the walks' crowd density)
     };
     const Stats& stats() const { return stats_; }
 

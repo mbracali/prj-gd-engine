@@ -112,6 +112,7 @@ public:
     PortScreens* walkPorts() override { return ports_.get(); }
     Input& walkInput() override { return input_; }
     std::string walkSaveDir() override { return saveDir_; }
+    bool walkSongAudio() override { return song_ != nullptr; }
     std::string walkEnhanced(const std::string& key) override { return enhanced_.get(key); }
     void walkSetEnhanced(const std::string& key, const std::string& value) override { enhanced_.set(key, value), applyEnhanced(key); }
 
@@ -1642,7 +1643,39 @@ void App::frame() {
                 const std::string& z = song_->venue()->venue().zone;
                 if (zonesHeard.insert(z).second) front_->sfx.addPak(*disc_, "DATA/COMPRESSED/ZONES/" + z + ".pak.xen");
             }
-            if (song_->introCameras() == "cameras_intro") front_->vm().spawn(qbkey::key("GH_SFX_Intro_WarmUp"), qb::Struct{});
+            // The transition's own sound entry (Common_<t>_Transition's
+            // ScriptTable: FastIntro GH_SFX_Intro_WarmUp_Fast, Intro
+            // GH_SFX_Intro_WarmUp, MetallicaVOIntro GH_MetallicaVO_Intro_WarmUp,
+            // at 100 ms): the zone's applause, Loading_Screen_Crowd_Swell and
+            // Crowd_Loading_Whistle killed (menu_soundevent_in spawns the swell
+            // as play_song opens; it loops for ever) and Crowd_Beds back from
+            // the swell's +12 dB [C data Common_*_Transition, scripts
+            // GH_SFX_Intro_WarmUp*, Loading_Screen_Crowd_Swell]. Only Intro's
+            // ran: Quickplay's FastIntro kept the swell screaming through the
+            // song and after it (owner). Restart / encore / boss / practice /
+            // loading tables have none (the swell is not started for them).
+            {
+                std::string tname = qbkey::name(setup.transition);
+                if (setup.transition == qbkey::key("debugintro")) tname = "Intro";  // Transition_SelectTransition
+                const qb::Value* tab = nullptr;
+                // An unknown one plays as FastIntro (as the song's intro: song_screen's introTransition).
+                for (const std::string& n : {tname, std::string("FastIntro")}) {
+                    const qb::Value* c = front_->vm().global(qbkey::key("Common_" + n + "_Transition"));
+                    if (c && c->st) tab = c->st->find(qbkey::key("ScriptTable"));
+                    if (tab) break;
+                    tname = "FastIntro";
+                }
+                static const uint32_t kWarmUps[] = {qbkey::key("GH_SFX_Intro_WarmUp"), qbkey::key("GH_SFX_Intro_WarmUp_Fast"),
+                                                    qbkey::key("GH_MetallicaVO_Intro_WarmUp")};
+                if (tab && tab->arr)
+                    for (const qb::Value& e : tab->arr->values)
+                        if (const qb::Value* scr = e.st ? e.st->find(qbkey::key("scr")) : nullptr)
+                            for (uint32_t w : kWarmUps)
+                                if (scr->key == w) {
+                                    SDL_Log("song: transition %s: %s", tname.c_str(), qbkey::name(w).c_str());
+                                    front_->vm().spawn(w, qb::Struct{});
+                                }
+            }
             // GD10_SP_CHARACTER=<id> (AXEL, JUDY, ...): player 1's character_id for
             // the Star Power stage FX (development aid: Do_StarPower_StageFX's switch).
             if (const char* ch = SDL_getenv("GD10_SP_CHARACTER"))
