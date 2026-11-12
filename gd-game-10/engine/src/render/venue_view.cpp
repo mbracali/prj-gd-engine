@@ -167,6 +167,11 @@ void VenueView::shutdown() {
     if (coneIb_) dev_->destroyBuffer(coneIb_);
     if (smoke_) dev_->destroyTexture(smoke_);
     smoke_ = {};
+    if (lvFalloff_) dev_->destroyTexture(lvFalloff_);
+    if (lvPattern_) dev_->destroyTexture(lvPattern_);
+    if (vol2dVb_) dev_->destroyBuffer(vol2dVb_);
+    if (vol2dIb_) dev_->destroyBuffer(vol2dIb_);
+    lvFalloff_ = {}, lvPattern_ = {}, vol2dVb_ = {}, vol2dIb_ = {};
     for (auto& [k, f] : flares_) {
         if (f.a) dev_->destroyQuery(f.a);
         if (f.b) dev_->destroyQuery(f.b);
@@ -177,6 +182,7 @@ void VenueView::shutdown() {
     cones_.clear();
     rays_.clear();
     projectors_.clear();
+    vol2d_.clear();
     gh3_.shutdown();
     mats_.clear();
     for (auto& [k, t] : textures_) dev_->destroyTexture(t.id);
@@ -194,6 +200,7 @@ struct VenueView::Prepared {
     std::vector<gh3tex::Texture> textures;  // the zone's, global_ad_tex's, then the housings' (upload order)
     std::unordered_map<uint32_t, std::unique_ptr<scene::Scene>> models;  // the housings' models by path key
     std::vector<gh3tex::Texture> smoke;     // global_gfx.tex's 0xa500318e
+    std::vector<gh3tex::Texture> lv2d;      // sys_lightvolume2d's falloff and pattern (global_gfx.tex)
     size_t zoneTextures = 0;                // of `textures`, the zone's and global_ad_tex's
     std::string error;
     int step = 0;
@@ -208,6 +215,32 @@ struct VenueView::Prepared {
 };
 
 namespace {
+
+// sys_lightvolume2d (global_gfx.scn): template _LightVolume2D, blend 1
+// (SRC_ALPHA + ONE), no depth write (+0xcc 0x20); textures s0 0x94191135 (the
+// falloff), s1 0x49263059 (the pattern), s2 0xa500318e (the smoke) [C data].
+constexpr uint32_t kLvFalloff = 0x94191135u, kLvPattern = 0x49263059u;
+
+// A 2D light volume's template: _LightVolume2D + _smoke0 (smokeeffect false)
+// + _softedge1 (volume2dsoftedge) + _pattern0 (no volume2dpatterntexture), in
+// the library's name order [C data: the template names; I: which node field
+// picks which part, 824496D0 does not decompile]. Empty: not a 2D volume.
+std::string lightVolume2DTemplate(const venue::Node& n) {
+    if (!n.st) return {};
+    const qb::Value* lt = n.st->find(K("lightvolumetype"));
+    if (!lt) return {};
+    const bool soft = lt->key == K("volume2dsoftedge"), plain = lt->key == K("volume2d");
+    // volume3d (_LightVolume3D's ray-marched cone) drawn as a soft 2D volume [I: approximation].
+    const bool v3 = lt->key == K("volume3d");
+    if (!soft && !plain && !v3) return {};
+    std::string name = "_LightVolume2D";
+    const qb::Value* smoke = n.st->find(K("smokeeffect"));
+    if (smoke && smoke->key == K("false")) name += "_smoke0";
+    if (soft || v3) name += "_softedge1";
+    const qb::Value* pat = n.st->find(K("volume2dpatterntexture"));
+    if (!pat || pat->key == 0 || pat->key == K("none")) name += "_pattern0";
+    return name;
+}
 
 // A light housing's model path key (lightvolumetype nodes with a Model), or 0.
 uint32_t housingModelKey(const venue::Node& n) {
@@ -276,6 +309,7 @@ void VenueView::prepare(const Disc& disc, const venue::Venue& v) {
             auto [tp, ts] = gpPtr->data(*te);
             for (gh3tex::Texture& t : gh3tex::decodeTexDict(tp, ts))
                 if (t.key == 0xa500318eu && t.supported && !t.levels.empty()) pr->smoke.push_back(std::move(t));
+                else if ((t.key == kLvFalloff || t.key == kLvPattern) && t.supported && !t.levels.empty()) pr->lv2d.push_back(std::move(t));
         }
     } catch (const std::exception& ex) {
         SDL_Log("venue: the beams' smoke: %s", ex.what());
@@ -347,6 +381,8 @@ VenueView::InitStep VenueView::initStep(gfx::RenderDevice& dev, const Disc& disc
             for (const venue::Part& part : v.parts) want(part.scene);
             for (const auto& [k, sc] : pr.models)
                 if (sc) want(*sc);
+            for (const venue::Node& n : v.nodes)
+                if (const std::string t = lightVolume2DTemplate(n); !t.empty()) pr.programs.emplace_back(K(t.c_str()), matlib::Default);
         }
         std::sort(pr.programs.begin(), pr.programs.end());
         pr.programs.erase(std::unique(pr.programs.begin(), pr.programs.end()), pr.programs.end());
@@ -637,6 +673,7 @@ VenueView::InitStep VenueView::build(gfx::RenderDevice& dev, const venue::Venue&
             const qb::Value* pt = n.st->find(K("projectortype"));
             const bool everything = pt && pt->key == K("everything");
             if (lt && lt->key == K("ConeImpostor")) cones_.push_back(int(ni));
+            if (!lightVolume2DTemplate(n).empty()) vol2d_.push_back(int(ni));
             // Raytraced: the `volume` beams, and the `everything` projectors (light on
             // whatever the cone meets, through the depth buffer).
             if ((lt && lt->key == K("volume")) || everything) rays_.push_back(int(ni));
@@ -658,6 +695,27 @@ VenueView::InitStep VenueView::build(gfx::RenderDevice& dev, const venue::Venue&
             smoke_ = dev.createTexture(t.desc(), levels.data(), err);
         }
         if (!smoke_) SDL_Log("venue: the beams' smoke (global_gfx.tex 0xa500318e) not found; drawn with white");
+    }
+    if (!vol2d_.empty() && !smoke_)
+        for (const gh3tex::Texture& t : pr.smoke) {
+            std::string err;
+            auto levels = t.texLevels();
+            smoke_ = dev.createTexture(t.desc(), levels.data(), err);
+        }
+    if (!vol2d_.empty()) {
+        for (const gh3tex::Texture& t : pr.lv2d) {
+            std::string err;
+            auto levels = t.texLevels();
+            (t.key == kLvFalloff ? lvFalloff_ : lvPattern_) = dev.createTexture(t.desc(), levels.data(), err);
+        }
+        if (!lvFalloff_ || !lvPattern_) SDL_Log("venue: sys_lightvolume2d's falloff / pattern textures not found; drawn with white");
+        // A trapezoid per volume (position, TEXCOORD0 xyz), rewritten every frame.
+        std::vector<float> vv(vol2d_.size() * 4 * 7, 0.0f);
+        std::vector<uint32_t> vi;
+        for (uint32_t q = 0; q < vol2d_.size(); ++q)
+            for (uint32_t k : {0u, 1u, 2u, 0u, 2u, 3u}) vi.push_back(q * 4 + k);
+        vol2dVb_ = dev.createBuffer(gfx::BufferKind::Vertex, vv.size() * sizeof(float), vv.data(), true);
+        vol2dIb_ = dev.createBuffer(gfx::BufferKind::Index, vi.size() * sizeof(uint32_t), vi.data(), false);
     }
     if (verts.empty()) {
         error = v.zone + ": no geometry";
@@ -1503,5 +1561,153 @@ void VenueView::drawProjectors(const venue::CamPose& cam, const venue::LightShow
         c.first = uint32_t(qi * 6), c.count = 6;
         d.draw(c);
         ++stats_.projected;
+    }
+}
+
+// gh4's 2D light volumes [C: the _LightVolume2D shaders' maths and constant
+// tables, sys_lightvolume2d's textures and state; I: the geometry and the
+// constants' values, the CPU side (8244E0F0, VMX128) not decoded]. The vertex
+// shader takes world positions and a projective TEXCOORD0 (u q, v, q): the
+// pixel shader reads the falloff at (u, v), the pattern at (u, v) x
+// g_VolumeUVScale + g_VolumeUVOffset, the smoke three times from the world
+// position x g_UVScale + g_UVOffset (yz, zx, xy weighted by
+// g_TexturePlainWeight); colour = falloff x g_ConeColor x pattern x smoke,
+// softened over 0.3 m in front of the scene's depth; alpha x (1 - g_Burn).
+// Drawn here as a camera-facing trapezoid along the beam (2 startradius at
+// the lens, 2 endradius at range, q the half-width so u stays straight).
+void VenueView::drawVolumes2D(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth) {
+    if (!dev_ || vol2d_.empty() || !vol2dVb_ || !gh3_.ready()) return;
+    static const bool off = SDL_getenv("GD10_NO_VOLUMES2D") != nullptr;  // development aid: compare without them
+    if (off) return;
+    gfx::RenderDevice& d = *dev_;
+    const double ms = seconds_ * 1000.0;
+    struct Beam {
+        int node;
+        venue::HousingState h;
+        float fade;
+    };
+    std::vector<Beam> beams;
+    std::vector<float> data;
+    for (int ni : vol2d_) {
+        const venue::Node& n = v_->nodes[size_t(ni)];
+        if (!n.createdAtStart && !(n.createdOn && show.flag(n.createdOn))) continue;
+        venue::HousingState h;
+        if (!show.housing(n.name, ms, h)) continue;
+        if (h.density <= 0 || h.range <= 1e-4f) continue;
+        const venue::Vec3 az = venue::rotate(h.rot, {0, 0, 1});
+        const venue::Vec3 dir{-az[0], -az[1], -az[2]};  // the beam runs along the housing's -z
+        const venue::Vec3 e{h.pos[0] + dir[0] * h.range, h.pos[1] + dir[1] * h.range, h.pos[2] + dir[2] * h.range};
+        // The side vector: across the beam, square to the sight line to its middle.
+        const venue::Vec3 mid{(h.pos[0] + e[0]) * 0.5f - cam.pos[0], (h.pos[1] + e[1]) * 0.5f - cam.pos[1], (h.pos[2] + e[2]) * 0.5f - cam.pos[2]};
+        venue::Vec3 side{mid[1] * dir[2] - mid[2] * dir[1], mid[2] * dir[0] - mid[0] * dir[2], mid[0] * dir[1] - mid[1] * dir[0]};
+        const float sl = std::sqrt(side[0] * side[0] + side[1] * side[1] + side[2] * side[2]);
+        const float ml = std::sqrt(mid[0] * mid[0] + mid[1] * mid[1] + mid[2] * mid[2]);
+        if (sl < 1e-5f || ml < 1e-5f) continue;
+        for (float& c : side) c /= sl;
+        // Seen down its axis the flat volume thins to nothing: faded out as the
+        // sight line turns onto the beam [I].
+        const float fade = std::min(1.0f, sl / ml * 2.0f);
+        const float qs = std::max(h.startRadius, 1e-3f), qe = std::max(h.endRadius, 1e-3f);
+        const venue::Vec3 ends[2] = {h.pos, e};
+        const float rad[2] = {h.startRadius, h.endRadius}, q[2] = {qs, qe};
+        // Corners: lens -side, lens +side, end +side, end -side.
+        static const int kEnd[4] = {0, 0, 1, 1};
+        static const float kS[4] = {-1, 1, 1, -1}, kU[4] = {0, 1, 1, 0};
+        for (int i = 0; i < 4; ++i) {
+            const int k = kEnd[i];
+            for (int a = 0; a < 3; ++a) data.push_back(ends[k][size_t(a)] + side[size_t(a)] * kS[i] * rad[k]);
+            data.push_back(1);
+            data.push_back(kU[i] * q[k]), data.push_back(float(k)), data.push_back(q[k]);
+        }
+        beams.push_back({ni, h, fade});
+    }
+    static const bool vlog = SDL_getenv("GD10_VOL2D_LOG") != nullptr;  // development aid
+    if (vlog) {
+        SDL_Log("volumes2d t=%.0f: %zu of %zu drawn", ms, beams.size(), vol2d_.size());
+        for (const Beam& b : beams)
+            SDL_Log("  %s dens %.2f fade %.2f r %.2f..%.2f range %.2f col %.2f %.2f %.2f", qbkey::names().get(v_->nodes[size_t(b.node)].name).c_str(),
+                    b.h.density, b.fade, b.h.startRadius, b.h.endRadius, b.h.range, b.h.volumeColor[0], b.h.volumeColor[1], b.h.volumeColor[2]);
+    }
+    if (beams.empty()) return;
+    d.updateBuffer(vol2dVb_, 0, data.data(), data.size() * sizeof(float));
+    gh3shader::Globals globals;
+    gfx::Mat4 viewM, viewProjM;
+    cameraGlobals(cam, d.info().clipDepthZeroToOne, seconds_, globals, &viewProjM, 16.0f / 9.0f, false, &viewM);
+    {
+        const float zn = 0.05f, zf = 4000.0f;  // cameraGlobals' planes
+        const float* ip = globals.reg(gh3shader::kRegInvProj);
+        globals.set(gh3shader::kRegInvProj, ip[0], ip[1], -(zf - zn) / (zf * zn), 1.0f / zn);  // viewZ = 1 / (depth x z + w)
+    }
+    static const gfx::VertexLayout layout = [] {
+        gfx::VertexLayout l;
+        l.stride = 28;
+        l.attribs[0] = {0, 4, gfx::AttribType::Float, 0};
+        l.attribs[1] = {3, 3, gfx::AttribType::Float, 16};  // TEXCOORD0 (u q, v, q)
+        return l;
+    }();
+    gfx::DrawCall c;
+    c.layout = &layout;
+    c.vertices = vol2dVb_;
+    c.indices = vol2dIb_;
+    c.indices32 = true;
+    c.uniforms[0] = d.stageUniforms(&globals, sizeof globals);
+    gh3shader::ObjectConstants obj;
+    obj.setMatrix(gh3shader::kRegWorld, gfx::Mat4::identity(), 4);
+    c.uniforms[3] = d.stageUniforms(&obj, sizeof obj);
+    // sys_lightvolume2d's blend 1: SRC_ALPHA + ONE; no depth write, depth tested [C data].
+    c.state.blend = true;
+    c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
+    c.state.depthTest = true, c.state.depthWrite = false;
+    c.state.depthFunc = gfx::CompareFunc::LessEqual;
+    c.state.cull = gfx::Cull::None;
+    const gfx::TextureId white = gh3_.white();
+    for (size_t bi = 0; bi < beams.size(); ++bi) {
+        const venue::Node& n = v_->nodes[size_t(beams[bi].node)];
+        std::string tn = lightVolume2DTemplate(n);
+        if (!depth) {  // no scene depth: the hard-edged variant
+            const size_t at = tn.find("_softedge1");
+            if (at != std::string::npos) tn.erase(at, 10);
+        }
+        const gh3shader::Program* prog = gh3_.get(K(tn.c_str()));
+        if (vlog && bi == 0) SDL_Log("  template %s: %s, falloff %d pattern %d smoke %d depth %d", tn.c_str(), prog ? "ok" : "missing", lvFalloff_ ? 1 : 0, lvPattern_ ? 1 : 0, smoke_ ? 1 : 0, depth ? 1 : 0);
+        if (!prog) continue;
+        c.program = prog->id;
+        for (int k = 0; k < 16; ++k) {
+            c.textures[k] = (prog->samplers >> k & 1) ? white : gfx::TextureId{};
+            c.samplers[k] = {gfx::Filter::Linear, gfx::Wrap::Repeat, 0};
+        }
+        c.textures[0] = lvFalloff_ ? lvFalloff_ : white;  // m_FalloffSampler
+        c.samplers[0] = {gfx::Filter::Linear, gfx::Wrap::Clamp, 0};
+        c.textures[1] = lvPattern_ ? lvPattern_ : white;  // m_PatternSampler
+        c.textures[2] = smoke_ ? smoke_ : white;          // m_SmokeTextureSamp
+        if (depth) {
+            c.textures[4] = depth;  // g_DepthBufferSamp
+            c.samplers[4] = {gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
+        }
+        const venue::HousingState& h = beams[bi].h;
+        float vs[64][4] = {};
+        float ps[64][4] = {};
+        // g_UVOffset c2 / g_UVScale c3: the smoke's world scale and drift [I: 0.25 a metre,
+        // drifting 0.02 a second, a fixed per-node offset].
+        const float drift = float(seconds_) * 0.02f;
+        for (int k = 0; k < 3; ++k) {
+            vs[2][k] = float((n.name * 2654435761u >> (k * 8)) % 10000u) * 0.0001f + drift;
+            vs[3][k] = 0.25f;
+        }
+        vs[63][0] = -1;
+        // g_ConeColor c1 = volumecolor x density (alpha the density) as GH3's impostor [I].
+        const float dens = h.density * beams[bi].fade;
+        for (int k = 0; k < 3; ++k) ps[1][k] = h.volumeColor[size_t(k)] * dens;
+        ps[1][3] = dens;
+        static const float plane = SDL_getenv("GD10_VOL2D_PLANE") ? float(std::atof(SDL_getenv("GD10_VOL2D_PLANE"))) : 1.0f;  // development aid
+        ps[2][0] = ps[2][1] = ps[2][2] = plane;  // g_TexturePlainWeight [I]
+        ps[3][0] = 0;                                   // g_Burn [I]
+        ps[4][0] = 0, ps[4][1] = 0;                     // g_VolumeUVOffset: lightvolumepatternuvoffset (0, 0) [C data snapshots]
+        ps[5][0] = 1, ps[5][1] = 1;                     // g_VolumeUVScale: lightvolumepatternuvscale (1, 1)
+        ps[63][0] = -1;
+        c.uniforms[1] = d.stageUniforms(vs, sizeof vs);
+        c.uniforms[2] = d.stageUniforms(ps, sizeof ps);
+        c.first = uint32_t(bi * 6), c.count = 6;
+        d.draw(c);
     }
 }

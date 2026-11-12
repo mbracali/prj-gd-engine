@@ -64,6 +64,12 @@ public:
     // empty texture: not drawn.
     void drawRaytraced(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth);
     bool hasRaytraced() const { return !rays_.empty(); }
+    // gh4's 2D light volumes (lightvolumetype volume2dsoftedge / volume2d, and
+    // for now volume3d): the _LightVolume2D templates (sys_lightvolume2d's
+    // falloff, pattern and smoke textures) on a camera-facing trapezoid from
+    // the lens to range, softened against the scene's depth (`depth`; empty:
+    // no soft edge).
+    void drawVolumes2D(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth);
     // The projectortype stageonly housings: GH3's _Projector_StageOnly on the
     // quad where the beam's frustum meets the stage plane (y 0), shadowed by
     // the band's dynamic shadow map.
@@ -151,6 +157,9 @@ private:
     std::vector<int> cones_;  // nodes of the ConeImpostor housings
     std::vector<int> rays_;   // nodes of the `volume` housings (raytraced)
     std::vector<int> projectors_;  // nodes of the projectortype stageonly housings
+    std::vector<int> vol2d_;       // nodes of the 2D light volume housings (gh4)
+    gfx::TextureId lvFalloff_, lvPattern_;  // sys_lightvolume2d's textures s0, s1
+    gfx::BufferId vol2dVb_, vol2dIb_;
     gfx::TextureId smoke_;    // the beams' smoke texture
     struct Flare {
         gfx::QueryId a, b;   // all pixels / depth-tested pixels of the occlusion quad

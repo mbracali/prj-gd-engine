@@ -5,11 +5,14 @@
 #include <SDL3/SDL.h>
 
 #include <cstdio>
+#include <exception>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "data/disc.h"
+#include "data/pak.h"
+#include "data/scene.h"
 #include "data/qbkey.h"
 #include "render/gh3_shader.h"
 #include "render/renderer.h"
@@ -42,6 +45,27 @@ int runShaderTest(const std::string& discPath) {
             std::printf("shader test: no material library on %s%s\n", discPath.c_str(), disc ? "" : (": " + error).c_str());
             failed.push_back("material library");
         } else {
+            // GD10_SHADERTEST_SYSMAT=1: global.pak's .scn materials (the engine's sys_*
+            // materials: template, textures, constants; development aid).
+            if (SDL_getenv("GD10_SHADERTEST_SYSMAT")) {
+                try {
+                    const auto pak = Pak::shared(*disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
+                    for (const PakEntry& e : pak->entries()) {
+                        if (e.type != qbkey::key(".scn")) continue;
+                        auto [d, size] = pak->data(e);
+                        for (const scene::Material& m : scene::parse(d, size, scene::Kind::Scn).materials) {
+                            const matlib::Template* tp = lib->find(m.shader);
+                            std::printf("sysmat %s template %s d8 %u cc 0x%x e8 0x%x\n", qbkey::name(m.key).c_str(),
+                                        tp ? tp->name.c_str() : "?", m.d8, m.cc, m.e8);
+                            for (uint32_t t : m.textures) std::printf("  texture %08x %s\n", t, qbkey::name(t).c_str());
+                            for (const auto& c : m.constsA) std::printf("  A %g %g %g %g\n", c[0], c[1], c[2], c[3]);
+                            for (const auto& c : m.constsB) std::printf("  B %g %g %g %g\n", c[0], c[1], c[2], c[3]);
+                        }
+                    }
+                } catch (const std::exception& ex) {
+                    std::printf("sysmat: %s\n", ex.what());
+                }
+            }
             int untranslated = 0;
             for (const matlib::Template& t : lib->templates()) {
                 if (t.vs[matlib::Default] < 0 || t.ps[matlib::Default] < 0) continue;
@@ -52,6 +76,18 @@ int runShaderTest(const std::string& discPath) {
                     continue;
                 }
                 ++programs;
+                // GD10_SHADERTEST_DUMP=<substring>: the matching templates' constant
+                // tables and GLSL (development aid).
+                if (const char* dump = SDL_getenv("GD10_SHADERTEST_DUMP"); dump && t.name.find(dump) != std::string::npos) {
+                    for (int s : {t.vs[matlib::Default], t.ps[matlib::Default]}) {
+                        const matlib::Shader& sh = lib->shader(s);
+                        std::printf("== %s %s\n", sh.pixel ? "pixel" : "vertex", sh.name.c_str());
+                        for (const matlib::Constant& c : sh.constants)
+                            std::printf("  %s set %u c%u x%u\n", c.name.c_str(), unsigned(c.set), unsigned(c.reg), unsigned(c.count));
+                        for (const matlib::Fetch& f : sh.fetches) std::printf("  fetch usage %u index %u\n", unsigned(f.usage), unsigned(f.index));
+                    }
+                    std::printf("%s\n--\n%s\n", x.vertex.c_str(), x.fragment.c_str());
+                }
                 std::string err;
                 const gfx::ProgramId p = renderer.device().createProgram(gh3shader::programDesc(x, t.name, info.clipDepthZeroToOne), err);
                 if (p) {

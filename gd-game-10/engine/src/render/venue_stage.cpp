@@ -718,14 +718,17 @@ void VenueStage::draw(double ms) {
     static const bool noProjectors = SDL_getenv("GD10_NO_PROJECTORS") != nullptr;  // development aid: compare without them
     if (!noProjectors) view_->drawProjectors(cam, lights_);
     view_->drawVolumes(cam, lights_);
+    // The scene's depth once (the volumes and particles write none).
+    const gfx::TextureId sceneDepth = fx ? fx_.depthSnapshot() : gfx::TextureId{};
+    view_->drawVolumes2D(cam, lights_, sceneDepth);
     static const bool noRays = SDL_getenv("GD10_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
-    if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, fx_.depthSnapshot());
+    if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, sceneDepth);
     if (particles_) {
         VenueView* vv = view_.get();
         const auto* ls = &lightState_;
         const auto* show = &lights_;
         particles_->lightAt = [vv, ls, show](const venue::Vec3& at, float rgb[3]) { vv->lightAt(*ls, *show, at, rgb); };
-        particles_->sceneDepth = fx ? fx_.depthSnapshot() : gfx::TextureId{};
+        particles_->sceneDepth = sceneDepth;
         particles_->depthW = fx_.sceneW(), particles_->depthH = fx_.sceneH();
         particles_->draw(cam, ms);
     }
