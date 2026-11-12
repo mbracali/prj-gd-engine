@@ -1431,6 +1431,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(3000);
         check("counter:band_players:4");
         check("counter:rb_track_frames:30");
+        // GD05-087: the first member's Overdrive ready (be_ready.trig) when
+        // the HUD probe draws its meter alone, whatever the first song gives
+        // (Wave of Mutilation's guitar had it at 15 s: the box 26..33 px off).
+        check("od_set:60");
         at("endgame_waiting_screen", 90000);
         // GD05-058: RB's own HUD (render/rb_hud_view.h): each element drawn alone
         // lands within 4 px of the box its milo data gives; the score, the

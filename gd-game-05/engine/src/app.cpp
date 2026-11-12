@@ -3940,11 +3940,21 @@ void App::rbHudProbe() {
         float dx0 = 0, dy0 = 0, dx1 = 0, dy1 = 0;
         if (x1 >= 0) {
             dx0 = float(x0) * sx, dy0 = float(y0) * sy, dx1 = float(x1 + 1) * sx, dy1 = float(y1 + 1) * sy;
-            err = e.strict ? int(std::lround(std::max({std::fabs(dx0 - e.x0), std::fabs(dy0 - e.y0), std::fabs(dx1 - e.x1), std::fabs(dy1 - e.y1)})))
+            // A side past the meshes' box may reach the glows' (Box::ox0..oy1, GD05-087).
+            auto side = [](float drawn, float box, float glow, bool low) {
+                const bool out = low ? drawn < box : drawn > box;
+                return out ? std::max(0.0f, low ? glow - drawn : drawn - glow) : std::fabs(drawn - box);
+            };
+            err = e.strict ? int(std::lround(std::max({side(dx0, e.x0, e.ox0, true), side(dy0, e.y0, e.oy0, true), side(dx1, e.x1, e.ox1, false),
+                                                       side(dy1, e.y1, e.oy1, false)})))
                            : int(std::lround(std::max({0.0f, e.x0 - dx0, e.y0 - dy0, dx1 - e.x1, dy1 - e.y1})));  // inside the box
         }
-        SDL_Log("rb hud box %-20s expected %4.0f %4.0f - %4.0f %4.0f  drawn %4.0f %4.0f - %4.0f %4.0f  off %d px%s (%s)", e.name.c_str(), double(e.x0),
-                double(e.y0), double(e.x1), double(e.y1), double(dx0), double(dy0), double(dx1), double(dy1), err, e.strict ? "" : " outside", rbHud_->configuration().c_str());
+        SDL_Log("rb hud box %-20s expected %4.0f %4.0f - %4.0f %4.0f  drawn %4.0f %4.0f - %4.0f %4.0f  off %d px%s (%s)%s", e.name.c_str(), double(e.x0),
+                double(e.y0), double(e.x1), double(e.y1), double(dx0), double(dy0), double(dx1), double(dy1), err, e.strict ? "" : " outside",
+                rbHud_->configuration().c_str(),
+                e.ox0 < e.x0 || e.oy0 < e.y0 || e.ox1 > e.x1 || e.oy1 > e.y1
+                    ? (" glow to " + std::to_string(int(e.ox0)) + " " + std::to_string(int(e.oy0)) + " - " + std::to_string(int(e.ox1)) + " " + std::to_string(int(e.oy1))).c_str()
+                    : "");
         worst = std::max(worst, err);
         ++boxes;
     }

@@ -100,6 +100,12 @@ public:
         // arrow, a scoreboard star), whose textures leave clear edges, so
         // only its pixels inside the box are checked.
         bool strict = true;
+        // The element's glows (additive meshes: the Overdrive meter's
+        // player_meter_sun*.mesh while be_ready.trig's sunburst plays) with
+        // its meshes: a glow's texture fades to nothing towards its quad's
+        // edges, so its pixels may reach this far but need not
+        // (GD05-087). The strict box above leaves them out.
+        float ox0 = 0, oy0 = 0, ox1 = 0, oy1 = 0;
     };
 
     RbHudView();

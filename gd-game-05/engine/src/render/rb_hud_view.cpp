@@ -14,6 +14,7 @@
 #include "data/game_data.h"
 #include "render/anim_rate.h"
 #include "render/draw_order.h"
+#include "render/material.h"
 #include "render/renderer.h"
 #include "render/text_layout.h"
 #include "render/ui_view.h"
@@ -964,17 +965,18 @@ std::vector<RbHudView::Box> RbHudView::expectedBoxes() const {
                         if (auto it = animFrame_.find(ma); it != animFrame_.end() && it->second < gfx::ScenePose::endFrame(ma) - 1e-3f) partial = true;
                 if (partial) continue;
                 const gfx::Mat4 w = gfx::toMat4(pose_.world(m));
+                const bool glow = mat && (mat->blend == int(gfx::MatBlend::Add) || mat->blend == int(gfx::MatBlend::SrcAlphaAdd));
                 float mx0 = 1e9f, mx1 = -1e9f, my0 = 1e9f, my1 = -1e9f;
                 for (const auto& v : m->verts) {
                     float sx, sy;
                     if (!project(w.transformPoint({v.pos[0], v.pos[1], v.pos[2]}), sx, sy)) continue;
-                    b.x0 = std::min(b.x0, sx), b.y0 = std::min(b.y0, sy), b.x1 = std::max(b.x1, sx), b.y1 = std::max(b.y1, sy);
+                    if (!glow) b.x0 = std::min(b.x0, sx), b.y0 = std::min(b.y0, sy), b.x1 = std::max(b.x1, sx), b.y1 = std::max(b.y1, sy), b.valid = true;
+                    b.ox0 = std::min(b.ox0, sx), b.oy0 = std::min(b.oy0, sy), b.ox1 = std::max(b.ox1, sx), b.oy1 = std::max(b.oy1, sy);
                     mx0 = std::min(mx0, sx), my0 = std::min(my0, sy), mx1 = std::max(mx1, sx), my1 = std::max(my1, sy);
-                    b.valid = true;
                 }
                 if (SDL_getenv("GD05_HUDLOG"))
-                    SDL_Log("RB HUD:   %s mesh %s box %.0f %.0f - %.0f %.0f alpha %.2f mat %s", owner.c_str(), m->name.c_str(), double(mx0), double(my0), double(mx1),
-                            double(my1), double(alpha), m->mat.c_str());
+                    SDL_Log("RB HUD:   %s mesh %s box %.0f %.0f - %.0f %.0f alpha %.2f mat %s blend %d%s", owner.c_str(), m->name.c_str(), double(mx0), double(my0),
+                            double(mx1), double(my1), double(alpha), m->mat.c_str(), mat ? mat->blend : -1, glow ? " (glow)" : "");
             }
             // Its texts and labels as last drawn (their glyph quads).
             for (const auto& ob : dir.objects) {
@@ -991,6 +993,7 @@ std::vector<RbHudView::Box> RbHudView::expectedBoxes() const {
                     float sx, sy;
                     if (!project({p[0], p[1], p[2]}, sx, sy)) continue;
                     b.x0 = std::min(b.x0, sx), b.y0 = std::min(b.y0, sy), b.x1 = std::max(b.x1, sx), b.y1 = std::max(b.y1, sy);
+                    b.ox0 = std::min(b.ox0, sx), b.oy0 = std::min(b.oy0, sy), b.ox1 = std::max(b.ox1, sx), b.oy1 = std::max(b.oy1, sy);
                     b.valid = true;
                 }
             }
@@ -1003,19 +1006,21 @@ std::vector<RbHudView::Box> RbHudView::expectedBoxes() const {
                         }
                         Box nb;
                         nb.name = owner + "/" + o2, nb.strict = false;
-                        nb.x0 = nb.y0 = 1e9f, nb.x1 = nb.y1 = -1e9f;
+                        nb.x0 = nb.y0 = nb.ox0 = nb.oy0 = 1e9f, nb.x1 = nb.y1 = nb.ox1 = nb.oy1 = -1e9f;
                         walk(*sd, nb, false);
                         if (nb.valid) nestedBoxes.push_back(nb);
                     }
         };
         b.name = owner;
-        b.x0 = b.y0 = 1e9f, b.x1 = b.y1 = -1e9f;
+        b.x0 = b.y0 = b.ox0 = b.oy0 = 1e9f, b.x1 = b.y1 = b.ox1 = b.oy1 = -1e9f;
         walk(*d, b, true);
         nestedBoxes.insert(nestedBoxes.begin(), b);
         for (Box& bx : nestedBoxes)
             if (bx.valid) {
                 bx.x0 = std::clamp(bx.x0, 0.0f, 1280.0f), bx.x1 = std::clamp(bx.x1, 0.0f, 1280.0f);
                 bx.y0 = std::clamp(bx.y0, 0.0f, 720.0f), bx.y1 = std::clamp(bx.y1, 0.0f, 720.0f);
+                bx.ox0 = std::clamp(std::min(bx.ox0, bx.x0), 0.0f, 1280.0f), bx.ox1 = std::clamp(std::max(bx.ox1, bx.x1), 0.0f, 1280.0f);
+                bx.oy0 = std::clamp(std::min(bx.oy0, bx.y0), 0.0f, 720.0f), bx.oy1 = std::clamp(std::max(bx.oy1, bx.y1), 0.0f, 720.0f);
                 if (bx.x1 > bx.x0 + 2 && bx.y1 > bx.y0 + 2) out.push_back(bx);  // shrunk to a point (an intro's hide): not on screen
             }
     }
