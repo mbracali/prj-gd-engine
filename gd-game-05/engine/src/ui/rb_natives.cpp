@@ -325,19 +325,20 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     RbHost* session = add(std::make_unique<RbHost>(ui, "session"));
     session->on("mode", no);  // kNetLocal
     // The local players in the session: player 0 and the band lobby's (wave 02).
-    session->on("num_players", [&ui](std::vector<Value>&) {
-        int n = 1;
-        for (size_t k = 1; k < ui.session().players.size(); ++k) n += ui.session().players[k].participating;
-        return Value::integer(n);
-    });
+    session->on("num_players", [&ui](std::vector<Value>&) { return Value::integer(ui.session().numJoined()); });
     session->on("is_busy", no);
     session->on("disabled", no);
     // {session state}: kNetInGame (the .dtb's 2) while a song is loaded
     // (ui/game.dta on_pause) [C data], else 0 [I: the other states' values].
     // {session has_player n}: the one local player [I].
-    session->on("has_player", [&ui](std::vector<Value>& a) {
-        const int n = a.empty() ? -1 : a[0].integerValue();
-        return Value::integer(n == 0 || (n > 0 && n < 4 && ui.session().players[size_t(n)].participating) ? 1 : 0);
+    session->on("has_player", [&ui](std::vector<Value>& a) { return Value::integer(ui.session().joined(a.empty() ? -1 : a[0].integerValue()) ? 1 : 0); });
+    // session clear (main_panel enter): no player, no lobby, no leader [I: RB's Session::Clear not read].
+    session->on("clear", [&ui](std::vector<Value>&) {
+        Session& s = ui.session();
+        s.lobby = false;
+        for (Session::PlayerCfg& pc : s.players) pc.participating = false, pc.slot = -1;
+        s.cfgSet["leader_num"] = Value::integer(-1);
+        return Value::integer(0);
     });
     session->on("state", [&ui](std::vector<Value>&) { return Value::integer(ui.host().gameLoaded() ? 2 : 0); });
     session->on("num_open_slots", no);
@@ -359,7 +360,7 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         for (ScriptObject* o : sinks) ui.callScript(o, "start_loading_msg");
         return Value::integer(0);
     });
-    session->quiet({"clear", "send_to_all", "send_to_player", "set_all_local_ready_status", "set_invites_allowed", "ignore_remote_messages", "done_loading"});
+    session->quiet({"update_game_data", "send_to_all", "send_to_player", "set_all_local_ready_status", "set_invites_allowed", "ignore_remote_messages", "done_loading"});
     RbHost* platform = add(std::make_unique<RbHost>(ui, "platform_mgr"));
     // Signed in: every local player has the port's profile (rb_profile.json,
     // ui/rb_meta.cpp), never a guest; the Xbox save screens stay skipped
@@ -579,15 +580,81 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     RbHost* content = add(std::make_unique<RbHost>(ui, "content_mgr"));
     content->on("refresh_done", yes);
     content->quiet({"start_refresh"});
-    // session_mgr add_local_player: the local session is ready at once; the
-    // panel that asked (wait_for_session_ready) gets session_ready_complete_msg
-    // [I: the original's SessionMgr completes asynchronously].
+    // session_mgr (RB SessionMgr, handler 0x82834798): the local session is
+    // ready at once [I: RB's completes asynchronously].
+    // add_local_player <player> <controller type> (RB 0x82832788) [C]: the
+    // player joins with its controller; the first one of a band lobby
+    // leads unless the mode is the Band World Tour (whose leader
+    // update_band_leader picks); the sinks registered for new_local_player
+    // hear it (the band lobby's joining slot), the panel that asked
+    // (wait_for_session_ready) session_ready_complete_msg.
     RbHost* sessionMgr = add(std::make_unique<RbHost>(ui, "session_mgr"));
-    sessionMgr->on("add_local_player", [&ui](std::vector<Value>& a) {
-        // add_local_player <player> <controller type> (main.dta) [C data].
-        if (a.size() > 1) {
-            const int n = a[0].integerValue();
-            if (n >= 0 && size_t(n) < ui.session().players.size()) ui.session().players[size_t(n)].controllerType = a[1].integerValue();
+    static std::vector<std::pair<ScriptObject*, std::string>> mgrSinks;
+    mgrSinks.clear();
+    sessionMgr->on("add_sink", [](std::vector<Value>& a) {
+        if (a.empty() || !a[0].object) return Value::integer(0);
+        const std::string m = a.size() > 1 ? a[1].str() : std::string();
+        for (const auto& [o, msg] : mgrSinks)
+            if (o == a[0].object && msg == m) return Value::integer(0);
+        mgrSinks.emplace_back(a[0].object, m);
+        return Value::integer(0);
+    });
+    sessionMgr->on("remove_sink", [](std::vector<Value>& a) {
+        if (a.empty()) return Value::integer(0);
+        const std::string m = a.size() > 1 ? a[1].str() : std::string();
+        mgrSinks.erase(std::remove_if(mgrSinks.begin(), mgrSinks.end(),
+                                      [&](const auto& e) { return e.first == a[0].object && (m.empty() || e.second == m); }),
+                       mgrSinks.end());
+        return Value::integer(0);
+    });
+    // The sinks for `msg` still alive (a player slot goes with its screen).
+    auto notify = [&ui](const std::string& msg, std::vector<Value> args) {
+        mgrSinks.erase(std::remove_if(mgrSinks.begin(), mgrSinks.end(),
+                                      [&](const auto& e) { return ui.interp().findObject(e.first->name()) != e.first; }),
+                       mgrSinks.end());
+        const auto sinks = mgrSinks;
+        for (const auto& [o, m] : sinks)
+            if (m.empty() || m == msg) ui.callScript(o, msg, args);
+    };
+    // update_band_leader (RB 0x82831238) [C]: only in the Band World Tour
+    // with choose_leader_from_band; a known local band's leader is the
+    // player playing its leader (the first member [I]), otherwise the
+    // leader stays while in the session, else the first player in it [I:
+    // 0x82616DD8 not read].
+    auto updateLeader = [&ui]() {
+        Session& s = ui.session();
+        if (s.mode != "tour_world_local" || !gameCfgValue(ui, "choose_leader_from_band").truthy()) return;
+        int leader = gameCfgValue(ui, "leader_num").integerValue();
+        if (ui.interp().send("tour", "bwtmode", {}).integerValue() == 2) {
+            leader = -1;
+            ScriptObject* band = ui.interp().send("tour", "performer", {}).object;
+            const Value first = band ? ui.interp().send(band, "leader_char_name", {}) : Value::integer(0);
+            for (int p = 0; p < 4 && leader < 0; ++p) {
+                if (!s.joined(p) || !s.players[size_t(p)].hasChar) continue;
+                ScriptObject* c = ui.interp().findObject(s.players[size_t(p)].character);
+                if (c && first.isText() && ui.interp().send(c, "get_char_name", {}).str() == first.str()) leader = p;
+            }
+        } else if (leader < 0 || !s.joined(leader)) {
+            leader = -1;
+            for (int p = 0; p < 4 && leader < 0; ++p)
+                if (s.joined(p)) leader = p;
+        }
+        s.cfgSet["leader_num"] = Value::integer(leader);
+    };
+    sessionMgr->on("add_local_player", [&ui, notify, updateLeader](std::vector<Value>& a) {
+        Session& s = ui.session();
+        const int n = a.empty() ? -1 : a[0].integerValue();
+        if (n >= 0 && size_t(n) < s.players.size()) {
+            const bool first = s.numJoined() == 0;
+            if (a.size() > 1) s.players[size_t(n)].controllerType = a[1].integerValue();
+            // Outside a band lobby the port's game has its one player as
+            // player 0, whichever pad joined (the solo menus) [I].
+            if (s.lobby) {
+                s.players[size_t(n)].participating = true;
+                if (first && s.mode != "tour_world_local") s.cfgSet["leader_num"] = Value::integer(n);
+                else updateLeader();
+                notify("new_local_player", {Value::integer(n)});
+            }
         }
         if (ScriptObject* w = ui.sessionWaiter()) {
             ui.setSessionWaiter(nullptr);
@@ -595,8 +662,30 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         }
         return Value::integer(0);
     });
+    // remove_local_player <player> (RB 0x82834138) [C]: the player leaves;
+    // when it led, the first player left leads [I: RB's order of the
+    // session's players].
+    sessionMgr->on("remove_local_player", [&ui](std::vector<Value>& a) {
+        Session& s = ui.session();
+        const int n = a.empty() ? -1 : a[0].integerValue();
+        if (n < 0 || size_t(n) >= s.players.size()) return Value::integer(0);
+        s.players[size_t(n)].participating = false;
+        s.players[size_t(n)].hasChar = false;
+        if (gameCfgValue(ui, "leader_num").integerValue() == n) {
+            int leader = -1;
+            for (int p = 0; p < 4 && leader < 0; ++p)
+                if (s.joined(p)) leader = p;
+            s.cfgSet["leader_num"] = Value::integer(leader);
+        }
+        return Value::integer(0);
+    });
+    // get_gamertag_provider <slot> <slot num> <hth> <local network>: the
+    // signed-in gamertags a slot can join with (Xbox Live) [I: none in the
+    // port, whose players are its local pads: the script keeps the list's own].
+    in.addBuiltin("get_gamertag_provider", [](Interp&, const DataNode&) { return Value::integer(0); });
+    sessionMgr->on("update_band_leader", [updateLeader](std::vector<Value>&) { return updateLeader(), Value::integer(0); });
     sessionMgr->on("is_finding", no);
-    sessionMgr->quiet({"remove_local_player", "cancel_find", "update_band_leader", "send_to_all"});
+    sessionMgr->quiet({"cancel_find", "send_to_all"});
     {
         auto sp = std::make_unique<RbSongProvider>(ui);
         in.registerObject(sp.get());

@@ -45,6 +45,7 @@ target_sources(gd05 PRIVATE
   src/char/rb_midi_parser.cpp
   src/char/char_driver.cpp
   src/char/clip.cpp
+  src/char/deform.cpp
   src/char/skeleton.cpp
   src/char/rig.cpp
   src/char/character.cpp
@@ -62,6 +63,7 @@ target_sources(gd05 PRIVATE
   src/game/band.cpp
   src/game/rb_band.cpp
   src/ui/rb_meta.cpp
+  src/ui/rb_char_preview.cpp
   src/game/rb_bonus.cpp
   src/audio/vocal_input.cpp
   src/render/vocal_track_view.cpp

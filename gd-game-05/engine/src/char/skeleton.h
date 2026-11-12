@@ -35,6 +35,9 @@ public:
     void setLocal(int i, const scene::Xfm& x);
     // The bind (as loaded) local transform.
     const scene::Xfm& bind(int i) const { return nodes_[size_t(i)].bind; }
+    // A new rest for i (Rock Band's body deform, char/deform.h: the bones'
+    // posed locals stay the character's from then on).
+    void setBind(int i, const scene::Xfm& x) { nodes_[size_t(i)].bind = x; }
     const scene::Xfm& world(int i);
     // Sets a world transform (the local follows from the parent's world).
     void setWorld(int i, const scene::Xfm& w);

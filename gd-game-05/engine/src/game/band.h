@@ -61,6 +61,7 @@ public:
             std::string gender = "male";
             int skin = 0;
             uint32_t attitude = 0;  // the creator's kGenre* value (macros.dta: kGenreRocker 256 ...); 0: the premade's
+            float weight = 0.5f, height = 0.5f;  // the creator's sliders (char/deform.h)
             std::map<std::string, std::string> outfit;
         };
         std::map<std::string, RbLook> rbLooks;
@@ -68,6 +69,16 @@ public:
     // Rock Band's premade characters whose names start with `instrument`
     // (guitar0, guitar1 ... in config/gen/characters.dtb).
     static std::vector<std::string> rbPrefabs(const GameData& data, const std::string& instrument);
+    // A Rock Band character's outfit milos (char/<gender>/outfits/<cat>/gen/
+    // <piece>.milo_xbox; the instrument's own: char/instruments/<cat>/gen/,
+    // a drum kit the venue kind's <kind>_drums_<piece>) [C data], keyed in
+    // order ("+00"...); `missing` gets the paths the disc lacks.
+    static std::map<std::string, std::string> rbOutfitMilos(const GameData& data, const std::string& gender, const std::string& instrument,
+                                                          const std::vector<std::pair<std::string, std::string>>& pieces,
+                                                          const std::string& kind, std::vector<std::string>* missing = nullptr);
+    // The skin tone on the character's placeholder skin materials (a
+    // premade's skin_color_index, or `skinIndex`); see rb_band.cpp.
+    static void rbSkin(const GameData& data, chr::Character& c, const DataNode* prefab, int skinIndex = -1);
     // The premade character each instrument got (Rock Band).
     const std::map<std::string, std::string>& rbPrefabUsed() const { return rbPrefabUsed_; }
 
@@ -212,7 +223,6 @@ private:
 public:
     static bool rbLegacy();
 private:
-    void rbSkin(const GameData& data, chr::Character& c, const DataNode* prefab, int skinIndex = -1);
     void makeScripts(const DataNode* objects);
     void registerDir(Member& m, const scene::Directory& d);
     void setupFace(Member& m, scene::Object* servo);

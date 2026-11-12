@@ -27,6 +27,7 @@
 #include "audio/audio_device.h"
 #include "audio/mixer.h"
 #include "audio/synth.h"
+#include "char/character.h"
 #include "char/midi_parser.h"
 #include "data/dta.h"
 #include "data/game_data.h"
@@ -3068,10 +3069,10 @@ int App::gameCounter(int player, const std::string& key) const {
         return 0;
     }
     if (key == "spot_shadows") return venueView_ ? venueView_->spotlights().shadowsTotal() : 0;
-    // Rock Band (wave 02): the vocals, the band on stage, the part played.
     // GD05-069: SpotlightDrawer proxies (the stage fog) found / left in the venue's draw list.
     if (key == "venue_sd_proxies") return venueView_ ? venueView_->spotlightDrawerProxies() : -1;
     if (key == "venue_sd_proxies_listed") return venueView_ ? venueView_->spotlightDrawerProxiesListed() : -1;
+    // Rock Band (wave 02): the vocals, the band on stage, the part played.
     if (key == "vocal_notes_drawn") return vocalView_.notesDrawn();
     if (key == "vocal_lyrics_drawn") return vocalView_.lyricsDrawn();
     if (key == "vocal_score") return vocal_ ? vocal_->score() : 0;
@@ -3082,6 +3083,37 @@ int App::gameCounter(int player, const std::string& key) const {
         if (band_)
             for (const auto& m : band_->members())
                 for (const std::string& p : m->pieces) n += p.find("/" + key.substr(11) + ".milo") != std::string::npos;
+        return n;
+    }
+    if (key.rfind("band_bone:", 0) == 0) {  // GD05-084: band_bone:<slot>:<bone>:<axis 0..2>: the bone's local position x 1000 (the deform)
+        const std::string rest = key.substr(10);
+        const size_t a = rest.find(':'), b = rest.rfind(':');
+        if (band_ && a != std::string::npos && b > a)
+            for (const auto& m : band_->members())
+                if (m->slot == rest.substr(0, a) && m->character) {
+                    chr::Skeleton& sk = m->character->skeleton();
+                    const std::string bone = rest.substr(a + 1, b - a - 1);
+                    int i = sk.find(bone + ".trans");
+                    if (i < 0) i = sk.find(bone + ".mesh");
+                    if (i >= 0) return int(std::lround(sk.local(i).pos[size_t(std::clamp(std::atoi(rest.c_str() + b + 1), 0, 2))] * 1000));
+                }
+        return -999999;
+    }
+    if (key.rfind("band_piece_suffix:", 0) == 0) {  // GD05-083: the members built with a piece whose name ends so (the venue's drum kit)
+        int n = 0;
+        if (band_)
+            for (const auto& m : band_->members())
+                for (const std::string& p : m->pieces) n += p.find(key.substr(18) + ".milo") != std::string::npos;
+        return n;
+    }
+    if (key.rfind("band_slot_piece:", 0) == 0) {  // GD05-082: the member in a venue slot (player_guitar0...) built with that outfit piece
+        const std::string rest = key.substr(16);
+        const size_t c = rest.find(':');
+        int n = 0;
+        if (band_ && c != std::string::npos)
+            for (const auto& m : band_->members())
+                if (m->slot == rest.substr(0, c))
+                    for (const std::string& p : m->pieces) n += p.find("/" + rest.substr(c + 1) + ".milo") != std::string::npos;
         return n;
     }
     if (key.rfind("band_flags:", 0) == 0) {  // GD05-072: the members whose play flags hold all of these (the attitude kGenre*)
@@ -3435,6 +3467,8 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
                 look.gender = in.send(ch.object, "get_gender", {}).str();
                 look.skin = in.send(ch.object, "skin_color", {}).integerValue();
                 look.attitude = uint32_t(in.send(ch.object, "get_attitude", {}).integerValue());
+                look.weight = in.send(ch.object, "get", {Value::symbol("weight")}).number();
+                look.height = in.send(ch.object, "get", {Value::symbol("height")}).number();
                 const Value ol = in.send(ch.object, "outfit_list", {});
                 if (ol.array)
                     for (const Value& e : *ol.array)

@@ -1150,3 +1150,100 @@ pattern). Each says what, why and how to undo it.
   used: the Ng beam pass sets c82 = (base x 0.01, smoke x 0.01 x
   (1 - base x 0.01)) (0x822A8E78) [meaning I].
 - **Undo:** GD05_SD_PROXY_LEGACY=1.
+
+## D80
+- **What (2026-11-12, GD05-082):** the band lobby (matchmaking_band_screen)
+  runs its own scripts (ui/gen/matchmaking_band.dta, matchmaking.dta) [C
+  data]. A MultiFocusScreen gets one slot per (slots COOP_SLOTS_ORDER) entry
+  (guitar drum vocals guitar), each the PanelDir of its own directory
+  (slot0..3: its own focus, list, states; UiView keys a slot's components
+  "<slot>/<name>"); a slot's player_num is its type's command, evaluated as
+  the slot; a button goes to the slot whose player_num is the player's,
+  else to the first free slot whose allow_button_msg takes it (RB
+  0x8282EA48) [C], its handlers then its own focus, the screen's last; a
+  slot's update first runs its new state's init when current_option
+  changed (RB 0x8282E5E0) [C]; all_ready = every slot's is_ready and the
+  screen's (RB 0x8282DE20) [C]. session_mgr add_local_player puts the
+  player in the session, the first one leads unless the mode is the Band
+  World Tour (RB 0x82832788) [C], its new_local_player sinks hear it at once
+  [I: RB's session completes asynchronously]; update_band_leader acts only
+  in the Band World Tour with choose_leader_from_band (RB 0x82831238) [C]:
+  a known band's leader is the player playing its first member [I], else
+  the leader stays, else the first player [I: 0x82616DD8]; remove_local_player
+  hands the lead to the first player left [I]. get_char_provider <player>:
+  four lists (RB 0x828572F0, CharProvider 0x82857878) [C]: (Create New)
+  with the mode's allow_create_char, (Default) with its show_prefab_chars,
+  then the profile's characters of the player's instrument (RB 0x82857660 /
+  0x82855BD0) not taken by another player [I: 0x82421B68]. The lobby's
+  session: Game joining_allowed opens it (players 0..3 out until they
+  join); session clear (main_panel) ends it. A slot's instrument with no
+  free pad shows no_instrument (no microphone: the vocals slot) [C data].
+  Band Quickplay gives every player a premade character (modes.dta
+  auto_choose_char TRUE, allow_create_char FALSE) [C data]; the Band World
+  Tour has each pick or make one. GD05_BAND_PLAYERS=<n> (the walks that
+  test what comes after the lobby) still skips it as D10's stand-in; the
+  head-to-head lobby stays the stand-in [I].
+- **Why:** the stand-in put the profile's first character of the
+  instrument on stage; the players could not choose.
+- **Measured:** rb_band_lobby (PROGRESS 2026-11-12 car8).
+- **Undo:** the redirect without the GD05_BAND_PLAYERS condition;
+  multiSlotScreen false.
+
+## D81
+- **What (2026-11-12, GD05-083):** OutfitProvider's outfits as RB's (RB
+  0x82859E08) [C]: no (exclude TRUE) piece (the venues' drum kits), none
+  only with the category's allow_none (default TRUE; the instruments'
+  FALSE), in the creator no (creator FALSE) piece, with (filter <category>)
+  only the pieces named after the character's piece of that category (the
+  eyes of its head) [C]. The finish chosen in group_select_panel is worn
+  for any piece with finishes (the mic's mic1_silver, has_group_selection
+  RB 0x823E0700 counts every (outfits) entry containing the name, exclude
+  or not) [C]; a model the character owns: its finishes free (D76).
+  After confirm_outfit a panel of lists only (shop_instrument.milo) keeps
+  no focus, so its screen's back works [I: RB 0x8283E638 not read]. A
+  focused UISlider moves with left / right and sends the scroll message
+  (charcreator.dta / options_audio.dta give it the focus while it is set;
+  SCROLL_MSG sets the weight / height) [I: RB's UISlider not read]; its
+  frame / set_frame is current / (steps - 1).
+- **Why:** the drum list held 46 rows (none, the venues' kits); the mic's
+  finish was not worn and the shop could not be left; the creator's
+  sliders set nothing.
+- **Undo:** OutfitPanelObj::listFor's filters, OutfitList::wear, the
+  slider's focusedMove.
+
+## D82
+- **What (2026-11-12, GD05-084):** the body deform (char/deform.h) [C]:
+  char_objects.dta DEFORM_COMMON blends the character's deform_clips
+  "deform" clip (five samples: 0 neutral, 1 tall and fat, 2 short and fat,
+  3 tall and skinny, 4 short and skinny) with deform_frame's weights (RB
+  0x82300A00 over the constructor's fixed table, RB 0x822EA0C0 ->
+  0x823013A8: points (weight, height) (0.5 0.5) (1 1) (1 0) (0 1) (0 0),
+  triangles (0 2 1) (0 1 3) (0 3 4) (0 4 2), barycentric), char_utl_deform
+  (RB 0x82355918) poses the bones' positions, rotations, then scales (RB
+  0x823630F0). Applied to every band member as it is built: the player's
+  character's sliders, a premade's (height) / (weight) [C data]; the
+  deformed pose is the bones' rest from then on (Skeleton::setBind: the
+  IK's lengths, measured at its first poll, and GD05_BANDCHECK's stretch
+  compare against it).
+  Not done [I] (GD05-092): the outfit meshes' MeshDeform bake (the exo_*
+  bones' girth, RB 0x821E6D50 / 0x821E6398), the CharCuffs (0x82334FC8),
+  CharIKScale capture_before / after (the animated pelvis height scaled;
+  the IK hands measure their lengths from the deformed pose at their
+  first poll, as CharIKHand measure_lengths).
+- **Measured:** rb_body_deform: the sliders at the top give sample 1's
+  bone positions exactly (PROGRESS).
+- **Undo:** the applyDeform call in Band::assembleRb.
+
+## D83
+- **What (2026-11-12, GD05-083):** the characters in the menus
+  (ui/rb_char_preview.h): the Rock Shop's CharPanel draws the shopped
+  character at stores/store.milo's char0 (its CompositeCharacter slot) and
+  the creator's practice space at practice_space.milo's creator.trans [C
+  data: the slots], built as the band's members (Band::rbOutfitMilos,
+  rbSkin, the deform), playing the main driver's stand group (a drummer:
+  sit) with the attitude's flag [I: RB's shell clips]. Not done [I]: the
+  shots' cameras (select_cam: practice_space.milo's creator.shot, the
+  store's BandCamShots; CameraDirector::evaluate needs a venue): the
+  panels' own cameras, so the creator's character stands behind the menu;
+  the lobby slots' characters (CharLoadingPanel) are not drawn.
+- **Undo:** CharPanelObj / PracticeSpacePanelObj draw.

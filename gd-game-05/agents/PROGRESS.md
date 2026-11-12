@@ -1434,3 +1434,53 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   problem of the walk, not of the overlay (D57).
 - Screens: agents/scratch/fix8/compare.png (git-ignored): per venue
   before | after | a disc movie frame.
+
+## 2026-11-12: the band lobby, the drum and mic shops, the body deform, the characters in the menus (car8: GD05-082, GD05-083, GD05-084)
+
+- **Done (D80, GD05-082):** the band lobby runs Rock Band's own scripts:
+  four player slots (MultiFocusScreen, each slot directory its own focus
+  and states, buttons by player as RB 0x8282EA48, a slot's state init on
+  change as RB 0x8282E5E0, all_ready RB 0x8282DE20), session_mgr
+  add_local_player / remove_local_player / update_band_leader (RB
+  0x82832788 / 0x82834138 / 0x82831238), each player's own character list
+  (get_char_provider <player>, RB 0x828572F0 / 0x82857660: (Create New),
+  (Default), the profile's characters of the instrument), Create New opens
+  the creator for that player and comes back to the lobby, the leader's
+  CONTINUE goes on (goto_leader_confirmation); each player's character
+  plays in its slot's part. GD05_BAND_PLAYERS keeps D10's shortcut for the
+  walks that test what comes after the lobby.
+- **Done (D81, GD05-083):** the drum and mic shops walked; the outfit lists
+  as RB's OutfitProvider (RB 0x82859E08: exclude, allow_none, creator,
+  filter); a piece's chosen finish worn (the mic's mic1_silver); a
+  list-only panel's back after a purchase; the creator's sliders.
+- **Done (D82, GD05-084):** the height / weight deform (char/deform.h, RB
+  0x82300A00 / 0x82355918; the subagent's spec in
+  agents/scratch/car8/sub/NOTES.txt, git-ignored).
+- **Done (D83, GD05-083):** the characters in the menus
+  (ui/rb_char_preview.h): the Rock Shop's (store.milo char0) and the
+  creator's (practice_space.milo creator.trans), built as the band's.
+- **Walks (gate1.sh):** rb_band_lobby (+ _restarted), rb_shop_drum,
+  rb_shop_mic, rb_body_deform; rb_preview_drawn in rb_body_deform and
+  rb_shop_drum.
+- **Expected (data) vs measured** (this build; "before" = the same walks
+  on the code before, HEAD 501214c + only the walks' code, GD05_WALK_KEEP_GOING=1):
+
+  | check | expected (from the data) | measured | before |
+  | --- | --- | --- | --- |
+  | rb_lobby_slots, empty lobby (pads: guitar, drum) | join, join, no_instrument (no mic), join | the same | lobby skipped (timed out waiting for matchmaking_band_screen) |
+  | after player 1 / player 2 join | choose_character / choose_gender / ready_leader; ready_leader, choose_character, ..., ready_not_leader | the same at every step, num_players 1 then 2, leader 0 | - |
+  | rb_lobby_rows (Band World Tour: allow_create_char, no show_prefab_chars) | [create_new] then, restarted, [create_new, the saved character of the instrument] | [create_new]; [create_new rb_char2] / [create_new rb_char3] | - |
+  | rb_lobby_chars after the restart | the characters made in the lobby | 0=Jett 1=Nikki, the same | - |
+  | rb_lobby_stage | the guitarist in Jett's worntshirt_vintage, the drummer in Nikki's tanktop_solid | 1 and 1 | - |
+  | rb_kit (drum): first piece with a cost | oysterpearl 649, 5 outfits contain it (group_select_screen); cash 2100 - 649 = 1451; the drummer plays *_drums_oysterpearl | group_select_screen, 1451, worn, 1 member | 46-row list from none, X bought nothing (timed out) |
+  | rb_kit (mic) | mic1 99 owned by the singer, 4 finishes: the second, mic1_silver, worn free (2100) and on stage | 2100, mic1_silver worn, 1 member | the same timeout |
+  | rb_deform_sliders | weight 1, height 1 (5-step sliders at the top) | 1.00, 1.00 | 0.50, 0.50 |
+  | rb_deform_stage: the guitarist's bones = deform sample 1 (tall and fat) | spine1 2.813, L-foreArm 12.377, R-knee 17.129, neck 11.139 (neutral 4.417 / 11.754 / 18.654 / 9.596) | equal (error 0.000) | the neutral values (errors 1.60 / 0.62 / 1.53 / 1.54) |
+  | rb_preview_drawn (creator / shop) | meshes > 0, > 500 pixels changed by the preview | 285 meshes, 26,280 px / 253 meshes, 54,888 px | no preview |
+- **Also fixed on the way:** `{random a b}` (RB registers it with
+  random_int, 0x8248F908; seldiff.dta's two-guitar part pick) was unknown;
+  outside a band lobby add_local_player keeps the port's single player 0
+  (a pad joining as player 2 made the solo modes a two-player game).
+- **Gate (car8 build = HEAD 8959475 + these changes; gate_par.sh 6 at a
+  time, each its own XDG_DATA_HOME):** see the section below for the final
+  run.

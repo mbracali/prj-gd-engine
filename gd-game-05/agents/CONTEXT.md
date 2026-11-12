@@ -201,3 +201,24 @@ Wave G06 tour rules and finishes (GD05-085 / GD05-077 / GD05-083, D75 / D76):
 - `agents/scratch/car7/gate_par.sh [jobs]` (git-ignored): gate1.sh's walks
   + rb_highway, rb_crowd + the five tests, each its own XDG_DATA_HOME;
   B_OVERRIDE=<binary> runs another build.
+
+Wave G06 lobby, shops, deform, menu characters (GD05-082 / 083 / 084, D80..D83):
+- `--walktest rb_band_lobby`: Band World Tour > a new band > the real
+  lobby with two pads (GD05_INSTRUMENT guitar,drum, no GD05_BAND_PLAYERS):
+  the slots' states (`rb_lobby_slots`), each player's character list
+  (`rb_lobby_rows`), each makes a character from the lobby (the creator and
+  back), the leader's CONTINUE, the first gig: each player's own look in
+  its part (`rb_lobby_stage`, counter band_slot_piece:<slot>:<piece>);
+  restarted, a new band, each picks the saved one (`rb_lobby_chars`).
+  GD05_BAND_PLAYERS=<n> still skips the lobby (D10) for the other walks.
+- `--walktest rb_shop_drum | rb_shop_mic`: a new drummer / singer buys the
+  first drum kit / mic with a cost (char/instruments.dta) through
+  group_select_screen, worn on stage (band_piece_suffix:_drums_<finish>).
+- `--walktest rb_body_deform`: the creator's weight / height sliders at the
+  top, the guitarist's bones on stage against the deform clip's sample 1
+  (counter band_bone:<slot>:<bone>:<axis>, x 1000).
+- `rb_preview_drawn` (in rb_body_deform and rb_shop_drum): the menu's
+  character preview drew meshes and changes > 500 pixels (the frame with
+  and without it, RbCharPreview::hidden).
+- `agents/scratch/car8/gate_par.sh [jobs]` (git-ignored; WALKS="..."
+  for a subset, B_OVERRIDE=<binary>).

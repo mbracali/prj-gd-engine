@@ -33,6 +33,9 @@ public:
     PanelObj* panel;
     const scene::Object* object;  // nullptr: not in the milo (logged once)
     bool directory = false;       // the panel's milo itself (a RndDir: its animatables)
+    // A player slot's own copy (PanelObj::scopedComponent): its directory
+    // ("slot<N>"), and the key its view state is kept under (UiView::scopedKey).
+    std::string scope, key;
 
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override;
     Value getProp(Interp& in, const std::string& key) override;
@@ -88,7 +91,9 @@ public:
     std::string path;  // the loaded milo
     bool loaded = false, up = false, paused = false, showing = true;
     std::string focus, lastFocus;
-    std::set<std::string> disabled;
+    // The player slots' own focus (RB's MultiFocusScreen): per slot directory, a component of it.
+    std::map<std::string, std::string> scopeFocus;
+    std::set<std::string> disabled;  // component keys (ComponentObj::key)
     // Selection in progress (select_frames): the component and when it ends.
     std::string selecting;
     double selectEndMs = 0;
@@ -102,6 +107,12 @@ public:
     bool acceptsAnyName() const { return anyComponent_; }
     ComponentObj* focused() { return focus.empty() ? nullptr : component(focus); }
     void setFocus(const std::string& name, bool notify);
+    // A slot directory's focus (its own component `name`); notify routes component_focus.
+    void setScopeFocus(const std::string& scope, const std::string& name, bool notify);
+    // The component a key names ("<scope>/<name>" or a plain name).
+    ComponentObj* componentByKey(const std::string& key);
+    // PanelDir's navigation (0x82374160) inside a slot directory ("" the panel's own).
+    void navigate(int button, const std::string& scope);
     void enable(const std::string& name);
     void disable(const std::string& name, int navButton);
     bool isDisabled(const std::string& name) const { return disabled.count(name) != 0; }

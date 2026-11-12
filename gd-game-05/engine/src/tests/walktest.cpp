@@ -35,6 +35,7 @@
 #include "input/input.h"
 #include "render/scene_gpu.h"
 #include "render/ui_view.h"
+#include "char/char_objects.h"
 #include "scene/milo.h"
 #include "scene/ui_objects.h"
 #include "script/tasks.h"
@@ -45,6 +46,8 @@
 #include "ui/natives.h"
 #include "platform/paths.h"
 #include "ui/rb_meta.h"
+#include "ui/rb_multifocus.h"
+#include "ui/rb_char_preview.h"
 #include "ui/ui_objects.h"
 #include "ui/ui_host.h"
 #include "ui/ui_manager.h"
@@ -1112,6 +1115,91 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("tour_band_hub_screen", 30000);
         wait(1000);
         check("rb_band_reloaded");
+    } else if (scenario == "rb_band_lobby" || scenario == "rb_band_lobby_restarted") {
+        // GD05-082: RB's band lobby (matchmaking_band_screen) through its own
+        // scripts: four slots (COOP_SLOTS_ORDER guitar drum vocals guitar),
+        // each player's buttons to its slot (RB 0x8282EA48), session_mgr
+        // add_local_player / the leader (RB 0x82832788), each player's own
+        // character list (RB 0x82857660). The Band World Tour's (Band
+        // Quickplay gives everyone a premade one: modes.dta auto_choose_char):
+        // a new band, the guitarist (player 1) and the drummer (player 2)
+        // each make a character from the lobby (Create New, the creator,
+        // back to the lobby), the leader continues, both play the band's
+        // first gig in their own look; restarted, a new band again, each
+        // picks the saved one from the list. Expectations from the data in
+        // the checks.
+        const bool again = scenario == "rb_band_lobby_restarted";
+        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum", 1);
+        endMs_ = 30000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(800);
+        if (again) press(kDown), wait(300);  // after the saved band: a new one
+        press(kX);  // a new band
+        at("matchmaking_band_screen", 30000);
+        wait(1500);
+        // The slots' states from the data (ui/gen/matchmaking_band.dta
+        // current_option): a slot whose instrument no free pad has is
+        // no_instrument (no microphone here; the second guitar slot once the
+        // only guitar joined).
+        check("rb_lobby_slots join,join,no_instrument,join");
+        for (int p = 0; p < 2; ++p) {
+            auto slots = [p](const std::string& mine) {
+                return "rb_lobby_slots " + (p == 0 ? mine + ",join" : "ready_leader," + mine) + ",no_instrument,no_instrument";
+            };
+            pressP(kX, p), wait(1200);  // the player joins its instrument's slot
+            check(slots("choose_character").c_str());
+            check(("rb_lobby_rows " + std::to_string(p)).c_str());
+            if (again) {
+                pressP(kDown, p), wait(400);  // the saved character, after (Create New)
+                pressP(kX, p), wait(1500);
+            } else {
+                pressP(kX, p), wait(1500);  // (Create New)
+                check(slots("choose_gender").c_str());
+                if (p == 1) pressP(kDown, p), wait(400);  // female.btn
+                pressP(kX, p);
+                at("charcreator_maker_screen", 20000);
+                wait(1500);
+                pressP(kX, p);  // NAME (the offered name is taken)
+                wait(800);
+                check("focus_to create.btn", 5000);
+                pressP(kX, p);  // CREATE
+                at("charcreator_confirm_screen", 10000);
+                wait(1500);
+                pressP(kUp, p), wait(400), pressP(kX, p);  // yes
+                at("matchmaking_band_screen", 30000);
+                wait(1500);
+            }
+            check(slots(p == 0 ? "ready_leader" : "ready_not_leader").c_str());
+        }
+        check("rb_lobby_chars");
+        pressP(kX, 0);  // CONTINUE (the leader's continue.btn)
+        at("tour_band_create_screen", 30000);
+        if (!again) {
+            wait(1200);
+            press(kX);  // NAME (the offered name is taken)
+            wait(800);
+            for (int i = 0; i < 2; ++i) press(kDown), wait(200);
+            press(kX);  // ACCEPT
+            at("tour_band_hub_screen", 30000);
+            wait(1000);
+            press(kX);  // GIG GUIDE
+            for (int i = 0; i < 4; ++i) {  // the first-time hints (welcome, the event), each continued with X; the band's difficulty
+                wait(2500);
+                press(kX);
+            }
+            at("game_screen", 60000);
+            wait(3000);
+            check("rb_lobby_stage");
+            check("restart_app");
+        }
     } else if (scenario == "rb_tour_rules") {
         // GD05-085 / GD05-077: the Solo Tour's rules from RB's code, through
         // its menus. A new guitarist: the gig guide lists the open towns'
@@ -1275,6 +1363,134 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("tour_solo_event_screen|tour_solo_hub_screen|tour_solo_newtown_screen", 40000);
         wait(1500);
         check("restart_app");
+    } else if (scenario == "rb_shop_drum" || scenario == "rb_shop_mic") {
+        // GD05-083: the Rock Shop's drum kits and microphones
+        // (char/instruments.dta (drum (outfits ...)) / (mic (outfits ...))):
+        // a new drummer / singer, RB's cheat_add_money 2000, INSTRUMENTS
+        // (shop.dta: straight to shop_instrument_screen for a drum or a
+        // mic), the first piece with a price bought (its finishes offered
+        // when the catalog has several: has_group_selection RB 0x823E0700),
+        // the cash down by its cost, worn on stage in the first gig.
+        const bool drum = scenario == "rb_shop_drum";
+        SDL_setenv_unsafe("GD05_INSTRUMENT", drum ? "drum" : "vocals", 1);
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_kit_cheat_money");
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROKK SHOPPE
+        at("shop_screen", 20000);
+        wait(1000);
+        check("focus_to instruments.btn", 5000);
+        press(kX);  // INSTRUMENTS
+        at("shop_instrument_screen", 20000);
+        wait(1500);
+        check("rb_preview_drawn");
+        check("print_focus");
+        press(kX);  // the first piece
+        at("group_select_screen|shop_confirm_screen", 10000);
+        wait(1000);
+        check("rb_kit_offer");
+        wait(1000);
+        if (!drum) press(kDown), wait(400);  // the mic's second finish (the drum's others are the venues' kits, (exclude TRUE))
+        press(kX);  // the confirm screen, or yes
+        wait(1500);
+        check("rb_kit_confirm", 10000);
+        wait(1500);
+        check("rb_kit_bought");
+        at("shop_screen|shop_instrument_screen", 10000);
+        check("print_focus");
+        check("rb_kit_back_to_hub", 15000);
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);  // GIG GUIDE
+        at("tour_solo_diff_screen");
+        press(kX);
+        at("tour_solo_drum_welcome_screen|tour_solo_vocal_welcome_screen|tour_solo_guitar_welcome_screen|tour_solo_event_screen", 20000);
+        wait(800);
+        press(kX);
+        at("tour_solo_event_screen", 20000);
+        wait(1000);
+        press(kX);  // the first event
+        at("game_screen", 60000);
+        wait(3000);
+        check("rb_kit_on_stage");
+    } else if (scenario == "rb_body_deform") {
+        // GD05-084: the creator's weight and height sliders (5 steps,
+        // charcreator.dta) both at their top (1, 1: the deform clip's sample 1,
+        // tall and fat, RB 0x82300A00), the character on stage with its bones
+        // where the clip puts them (RB 0x82355918), not at the neutral sample 0.
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        check("focus_to appearance.btn", 5000);
+        press(kX);  // PHYSIQUE
+        at("charcreator_appearance_screen", 20000);
+        wait(1200);
+        for (const char* b : {"weight", "height"}) {
+            check((std::string("focus_to ") + b + ".btn").c_str(), 5000);
+            press(kX), wait(500);  // the slider
+            press(kRight), wait(300), press(kRight), wait(300), press(kRight), wait(300);  // to its top
+            press(kX), wait(500);  // confirm
+        }
+        check("rb_deform_sliders");
+        check("rb_preview_drawn");
+        check("focus_to done.btn", 5000);
+        press(kX);
+        at("charcreator_maker_screen", 20000);
+        wait(1000);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);  // GIG GUIDE
+        at("tour_solo_diff_screen");
+        press(kX);
+        at("tour_solo_guitar_welcome_screen|tour_solo_event_screen", 20000);
+        wait(800);
+        press(kX);
+        at("tour_solo_event_screen", 20000);
+        wait(1000);
+        press(kX);  // the first event
+        at("game_screen", 60000);
+        wait(3000);
+        check("rb_deform_stage");
     } else if (scenario == "rb_shop_items_restarted") {
         at("splash_screen", 30000);
         press(kX);
@@ -4005,6 +4221,104 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (hair.empty() || hair == "none") return fail("no hair chosen");
         return pass();
     }
+    // rb_band_lobby (GD05-082): the lobby's slots, each player's character
+    // list, the players' characters on stage.
+    if (s.screen.rfind("rb_lobby_", 0) == 0) {
+        Interp& in = ui.interp();
+        if (s.screen.rfind("rb_lobby_slots ", 0) == 0) {
+            // Expected: the slots' states in order (COOP_SLOTS_ORDER, from the data).
+            const std::string want = s.screen.substr(15);
+            std::string got;
+            for (auto& sl : ui.playerSlots()) {
+                const Value st = ui.callScript(sl.get(), "current_option");
+                got += (got.empty() ? "" : ",") + (st.isUnhandled() ? std::string("?") : st.str());
+            }
+            static std::string lastLine;
+            char line[512];
+            std::snprintf(line, sizeof line, "  lobby slots: expected %s; measured %s (num_players %d, leader %d)\n", want.c_str(), got.c_str(),
+                          in.send("session", "num_players", {}).integerValue(), in.send("gamecfg", "get", {Value::symbol("leader_num")}).integerValue());
+            if (line != lastLine) std::fputs(line, stdout), lastLine = line;
+            if (got != want) {
+                if (nowMs - (stepStart_ < 0 ? (stepStart_ = nowMs) : stepStart_) < 3000) return;  // the lobby may still be updating
+                return fail("lobby slots " + got + ", expected " + want);
+            }
+            return pass();
+        }
+        if (s.screen.rfind("rb_lobby_rows ", 0) == 0) {
+            // Expected (RB 0x82857660): (Create New) when the mode's
+            // allow_create_char, (Default) when its show_prefab_chars, then
+            // the profile's characters of the player's instrument.
+            const int p = std::atoi(s.screen.c_str() + 14);
+            const int slot = in.send("gamecfg", "get_slot_num_from_player_num", {Value::integer(p)}).integerValue();
+            const std::string inst = in.send("gamecfg", "get_instrument_from_controller", {Value::integer(p)}).str();
+            std::vector<std::string> want;
+            if (ui::gameCfgValue(ui, "allow_create_char").truthy()) want.push_back("create_new");
+            if (ui::gameCfgValue(ui, "show_prefab_chars").truthy()) want.push_back("prefab");
+            if (auto* all = dynamic_cast<ui::ListProvider*>(in.findObject("char_data_provider"))) {
+                all->initData();
+                for (int i = 0; i < all->numData(); ++i)
+                    if (ScriptObject* c = in.findObject(all->symbol(i)); c && in.send(c, "get_instrument", {}).str() == inst) want.push_back(c->name());
+            }
+            std::vector<std::string> got;
+            if (slot >= 0 && size_t(slot) < ui.playerSlots().size())
+                if (auto* l = ui.playerSlots()[size_t(slot)]->panel().scopedComponent(ui.playerSlots()[size_t(slot)]->scope(), "char.lst"))
+                    if (auto* pr = dynamic_cast<ui::ListProvider*>(l->provider))
+                        for (int i = 0; i < pr->numData(); ++i) got.push_back(pr->symbol(i));
+            auto join = [](const std::vector<std::string>& v) {
+                std::string o;
+                for (const std::string& x : v) o += (o.empty() ? "" : " ") + x;
+                return o;
+            };
+            std::printf("  player %d (%s, slot %d) char.lst: expected [%s]; measured [%s]\n", p, inst.c_str(), slot, join(want).c_str(), join(got).c_str());
+            if (got != want) return fail("player " + std::to_string(p) + "'s character list [" + join(got) + "], expected [" + join(want) + "]");
+            return pass();
+        }
+        if (s.screen == "rb_lobby_chars") {
+            // Each joined player's character: made in the lobby (part 1,
+            // recorded), the same one picked from the list after the restart.
+            std::string got;
+            for (int p = 0; p < 4; ++p) {
+                if (!in.send("gamecfg", "is_player_participating", {Value::integer(p)}).truthy()) continue;
+                const Value pc = in.send("game", "get_player_config", {Value::integer(p)});
+                ScriptObject* ch = pc.object && in.send(pc.object, "has_char", {}).truthy() ? in.send(pc.object, "get_char", {}).object : nullptr;
+                got += (got.empty() ? "" : " ") + std::to_string(p) + "=" + (ch ? in.send(ch, "get_char_name", {}).str() : std::string("none"));
+            }
+            const char* before = SDL_getenv("GD05_WALK_LOBBY");
+            std::printf("  lobby characters: %s; before the restart: %s\n", got.c_str(), before ? before : "-");
+            if (got.find("none") != std::string::npos || got.find(' ') == std::string::npos) return fail("lobby characters " + got);
+            if (before && got != before) return fail("picked " + got + ", expected the saved " + before);
+            SDL_setenv_unsafe("GD05_WALK_LOBBY", got.c_str(), 1);
+            return pass();
+        }
+        if (s.screen == "rb_lobby_stage") {
+            // Each joined player's own character: the band member of its
+            // part (the slot's track) built with its torso; two players, two
+            // different characters.
+            static const char* const kType[] = {"drum", "bass", "guitar", "vocals"};
+            std::set<std::string> chars;
+            std::string bad;
+            int players = 0;
+            for (int p = 0; p < 4; ++p) {
+                if (!in.send("gamecfg", "is_player_participating", {Value::integer(p)}).truthy()) continue;
+                ++players;
+                const Value pc = in.send("game", "get_player_config", {Value::integer(p)});
+                ScriptObject* ch = pc.object ? in.send(pc.object, "get_char", {}).object : nullptr;
+                const int tt = pc.object ? in.send(pc.object, "get_track_type", {}).integerValue() : -1;
+                if (!ch || ch->className() != "TourCharLocal" || tt < 0 || tt > 3) return fail("player " + std::to_string(p) + " has no character of its own");
+                chars.insert(ch->name());
+                const std::string torso = in.send(ch, "get_outfit", {Value::symbol("torso")}).str();
+                const int n = ui.host().gameCounter(0, std::string("band_slot_piece:player_") + kType[tt] + "0:" + torso);
+                std::printf("  player %d: %s (%s, %s); expected the %s in %s; measured %d (any member: %d)\n", p, in.send(ch, "get_char_name", {}).str().c_str(),
+                            ch->name().c_str(), in.send(ch, "get_gender", {}).str().c_str(), kType[tt], torso.c_str(), n,
+                            ui.host().gameCounter(0, "band_piece:" + torso));
+                if (n != 1) bad += std::string(bad.empty() ? "" : "; ") + "the " + kType[tt] + " is not player " + std::to_string(p) + "'s character";
+            }
+            if (!bad.empty()) return fail(bad);
+            if (players != 2 || chars.size() != 2) return fail("expected two players with two characters, measured " + std::to_string(players) + " / " + std::to_string(chars.size()));
+            return pass();
+        }
+        return fail("unknown check " + s.screen);
+    }
     // rb_career_band (GD05-072): the band (tour performer) and player 0's
     // character (its member); the event's reward_per_star from
     // config/tour_band.dta's (tiers (<tier> (<venue> (<event> ...)))).
@@ -4198,6 +4512,175 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (money != wMoney || skin != wSkin || hair != wHair || torso != wTorso) return fail("the character changed through the save");
             if (!won || !bought) return fail("the owned clothes were lost through the save");
             if (fame < 1) return fail("the played event was lost through the save");
+            return pass();
+        }
+        return fail("unknown check " + s.screen);
+    }
+    // rb_preview_drawn (GD05-083): the menu's character preview
+    // (ui/rb_char_preview.h) drew meshes, and the frame with it differs from
+    // the frame without it (RbCharPreview::hidden) in more than 500 pixels.
+    if (s.screen == "rb_preview_drawn") {
+        static int phase = 0, meshes0 = 0;
+        static double at = 0;
+        const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+        const std::string base = std::string(dir ? dir : SDL_GetBasePath()) + "/preview_";
+        if (phase == 0) {
+            meshes0 = ui::RbCharPreview::totalMeshes();
+            at = nowMs, phase = 1;
+            return;
+        }
+        if (phase == 1) {
+            if (nowMs - at < 300) return;
+            if (!ui.host().saveScreenshot(base + "on.bmp")) return fail("no screenshot");
+            ui::RbCharPreview::hidden = true;
+            at = nowMs, phase = 2;
+            return;
+        }
+        if (nowMs - at < 300) return;
+        const bool saved = ui.host().saveScreenshot(base + "off.bmp");
+        ui::RbCharPreview::hidden = false;
+        phase = 0;
+        const int meshes = ui::RbCharPreview::totalMeshes() - meshes0;
+        if (!saved) return fail("no screenshot");
+        SDL_Surface* a = SDL_LoadBMP((base + "on.bmp").c_str());
+        SDL_Surface* b = SDL_LoadBMP((base + "off.bmp").c_str());
+        SDL_Surface* ca = a ? SDL_ConvertSurface(a, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        SDL_Surface* cb = b ? SDL_ConvertSurface(b, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        long diff = 0;
+        if (ca && cb && ca->w == cb->w && ca->h == cb->h)
+            for (int y = 0; y < ca->h; ++y) {
+                const uint8_t* pa = static_cast<const uint8_t*>(ca->pixels) + y * ca->pitch;
+                const uint8_t* pb = static_cast<const uint8_t*>(cb->pixels) + y * cb->pitch;
+                for (int x = 0; x < ca->w; ++x)
+                    diff += std::abs(int(pa[x * 4]) - int(pb[x * 4])) + std::abs(int(pa[x * 4 + 1]) - int(pb[x * 4 + 1])) +
+                                std::abs(int(pa[x * 4 + 2]) - int(pb[x * 4 + 2])) > 24;
+            }
+        for (SDL_Surface* x : {a, b, ca, cb})
+            if (x) SDL_DestroySurface(x);
+        std::printf("  character preview on %s: expected meshes drawn > 0 and > 500 pixels changed by it; measured %d meshes, %ld pixels\n",
+                    ui.currentScreen().c_str(), meshes, diff);
+        if (meshes <= 0 || diff <= 500) return fail("the character is not drawn in the menu");
+        return pass();
+    }
+    // rb_body_deform (GD05-084): the sliders' values, then the guitarist's
+    // bones against char/male/gen/male_guitar.milo's deform clip.
+    if (s.screen == "rb_deform_sliders" || s.screen == "rb_deform_stage") {
+        Interp& in = ui.interp();
+        ScriptObject* c = s.screen == "rb_deform_sliders" ? in.send("charcreator_panel", "get_tour_char", {}).object : in.send("tour", "performer", {}).object;
+        if (!c) return fail(s.screen + ": no character");
+        const float w = in.send(c, "get", {Value::symbol("weight")}).number(), h = in.send(c, "get", {Value::symbol("height")}).number();
+        if (s.screen == "rb_deform_sliders") {
+            std::printf("  expected: weight 1, height 1 (the sliders' top); measured: weight %.2f, height %.2f\n", w, h);
+            if (w != 1.0f || h != 1.0f) return fail("the sliders did not set the character's weight and height");
+            return pass();
+        }
+        // The data: the clip's samples 0 (neutral) and 1 (tall and fat).
+        std::unique_ptr<scene::Milo> milo;
+        try {
+            milo = scene::loadMilo(ui.data(), "char/" + in.send(c, "get_gender", {}).str() + "/gen/" + in.send(c, "get_gender", {}).str() + "_guitar.milo_xbox");
+        } catch (const std::exception& e) {
+            return fail(std::string("the character milo: ") + e.what());
+        }
+        const scene::CharClipSamples* clip = nullptr;
+        milo->root().forEach([&](scene::Object& o) {
+            if (!clip && o.name == "deform") clip = o.as<scene::CharClipSamples>();
+        });
+        if (!clip) return fail("no deform clip in the character milo");
+        std::string bad;
+        // Not the pelvis: the clips animate its position, scaled by RB's
+        // CharIKScale (pelvis.ikscale, capture_before / after) [I: not in the port].
+        for (const char* bone : {"bone_spine1", "bone_L-foreArm", "bone_R-knee", "bone_neck"}) {
+            const scene::CharBonesSamples& set = clip->full;
+            int k = -1;
+            for (size_t i = 0; i < set.bones.size(); ++i)
+                if (set.bones[i].name == std::string(bone) + ".pos") k = int(i);
+            if (k < 0 || set.count < 2) {
+                bad += std::string(bad.empty() ? "" : "; ") + bone + ".pos not in the clip";
+                continue;
+            }
+            const float* s0 = set.sample(0) + set.offset[size_t(k)];
+            const float* s1 = set.sample(1) + set.offset[size_t(k)];
+            float got[3];
+            for (int a = 0; a < 3; ++a) got[a] = float(ui.host().gameCounter(0, std::string("band_bone:player_guitar0:") + bone + ":" + std::to_string(a))) / 1000.0f;
+            float err = 0, moved = 0;
+            for (int a = 0; a < 3; ++a) err = std::max(err, std::fabs(got[a] - s1[a])), moved = std::max(moved, std::fabs(s1[a] - s0[a]));
+            std::printf("  %s: expected (sample 1) %.3f %.3f %.3f, neutral %.3f %.3f %.3f; measured %.3f %.3f %.3f (error %.3f)\n", bone, s1[0], s1[1], s1[2],
+                        s0[0], s0[1], s0[2], got[0], got[1], got[2], err);
+            if (err > 0.01f) bad += std::string(bad.empty() ? "" : "; ") + bone + " off by " + std::to_string(err);
+        }
+        if (!bad.empty()) return fail(bad);
+        return pass();
+    }
+    // rb_shop_drum / rb_shop_mic (GD05-083): the drum and mic shops against
+    // char/instruments.dta: the first piece with a cost, its finishes (the
+    // category's outfits containing its name, RB 0x823E0700).
+    if (s.screen.rfind("rb_kit_", 0) == 0) {
+        Interp& in = ui.interp();
+        ScriptObject* c = in.send("tour", "performer", {}).object;
+        if (!c) return fail(s.screen + ": no character");
+        auto send = [&](const char* msg, std::vector<Value> a = {}) { return in.send(c, msg, a); };
+        const std::string inst = send("get_instrument").str();
+        const std::string cat = inst == "vocals" ? "mic" : inst, gender = send("get_gender").str();
+        std::string piece;
+        int cost = -1;
+        for (const std::string& o : ui::rbCategoryOutfits(ui, gender, cat))
+            if (const int k = ui::rbOutfitCost(ui, gender, cat, o); k > 0) {
+                piece = o, cost = k;
+                break;
+            }
+        std::vector<std::string> finishes;
+        for (const std::string& o : ui::rbCategoryOutfits(ui, gender, cat))
+            if (!piece.empty() && o.find(piece) != std::string::npos) finishes.push_back(o);
+        const int money = send("money").integerValue();
+        const std::string worn = send("get_outfit", {Value::symbol(cat)}).str();
+        if (piece.empty()) return fail("no " + cat + " piece with a cost in char/instruments.dta");
+        // The walk's pick: the mic's second finish, the drum's first.
+        const std::string pick = finishes.size() > 1 && inst == "vocals" ? finishes[1] : piece;
+        static bool ownedBefore = false;
+        if (s.screen == "rb_kit_cheat_money") {
+            ownedBefore = send("has_outfit", {Value::symbol(cat), Value::symbol(piece)}).truthy();
+            send("cheat_add_money", {Value::integer(2000)});
+            careerCash_ = send("money").integerValue();
+            std::printf("  cheat_add_money 2000: cash %d; data: the first %s with a cost: %s at %d (%d finish(es))\n", careerCash_, cat.c_str(), piece.c_str(),
+                        cost, int(finishes.size()));
+            return pass();
+        }
+        if (s.screen == "rb_kit_offer") {
+            const std::string want = finishes.size() > 1 ? "group_select_screen" : "shop_confirm_screen";
+            std::printf("  expected: %s (%d outfits contain %s); measured: %s\n", want.c_str(), int(finishes.size()), piece.c_str(), ui.currentScreen().c_str());
+            if (ui.currentScreen() != want) return fail("the shop offered " + ui.currentScreen() + ", expected " + want);
+            return pass();
+        }
+        if (s.screen == "rb_kit_confirm") {
+            // After group_select_screen's X, the confirm screen: yes.
+            if (ui.currentScreen() == "shop_confirm_screen") return ui.buttonDown(kX, 0), ui.buttonUp(kX, 0), pass();
+            if (ui.inTransition()) return;
+            return pass();
+        }
+        if (s.screen == "rb_kit_back_to_hub") {
+            if (ui.inTransition()) return;
+            if (ui.currentScreen() == "tour_solo_hub_screen") return pass();
+            ui.buttonDown(kTri, 0), ui.buttonUp(kTri, 0);
+            return;
+        }
+        if (s.screen == "rb_kit_bought") {
+            // A model the character owns: its finishes worn free (D76).
+            const int price = ownedBefore ? 0 : cost;
+            const bool owned = send("has_outfit", {Value::symbol(cat), Value::symbol(piece)}).truthy();
+            std::printf("  expected: cash %d - %d = %d (%s %s before), %s %s worn, owned; measured: cash %d, %s %s, owned %d\n", careerCash_, price,
+                        careerCash_ - price, piece.c_str(), ownedBefore ? "owned" : "not owned", cat.c_str(), pick.c_str(), money, cat.c_str(),
+                        worn.c_str(), int(owned));
+            if (money != careerCash_ - price) return fail("the " + cat + " cost " + std::to_string(careerCash_ - money));
+            if (worn != pick || !owned) return fail("the bought " + cat + " is not the character's (" + worn + ")");
+            return pass();
+        }
+        if (s.screen == "rb_kit_on_stage") {
+            // The drummer plays the venue's kit of the finish (rb_band.cpp:
+            // char/instruments/drum/gen/<venue kind>_drums_<finish>.milo [C data]).
+            const std::string key = inst == "drum" ? "band_piece_suffix:_drums_" + pick : "band_piece:" + pick;
+            const int n = ui.host().gameCounter(0, key);
+            std::printf("  expected: the %s's %s on stage (%s); measured %d member(s)\n", inst.c_str(), pick.c_str(), key.c_str(), n);
+            if (n < 1) return fail("the bought " + cat + " is not on stage");
             return pass();
         }
         return fail("unknown check " + s.screen);
@@ -5035,6 +5518,12 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                         lookFrames_.size(), m[0], kLuma, 100 * (m[0] / kLuma - 1), m[1], kContrast, 100 * (m[1] / kContrast - 1), m[2], kSat, m[3],
                         kGrain, 100 * (m[3] / kGrain - 1));
             if (!lookPauseError_.empty()) return fail(lookPauseError_);
+            // GD05-069: a SpotlightDrawer's proxy (every venue type's stage
+            // fog / smoke group) is its draw child, never drawn (RB
+            // 0x82299DD0 / 0x821B3A48, D79).
+            const int sdProxies = ui.host().gameCounter(0, "venue_sd_proxies"), sdListed = ui.host().gameCounter(0, "venue_sd_proxies_listed");
+            std::printf("  look: SpotlightDrawer proxies %d, in the draw list %d (RB: 0)\n", sdProxies, sdListed);
+            if (sdProxies < 1 || sdListed != 0) return fail("look: SpotlightDrawer proxies " + std::to_string(sdProxies) + ", drawn " + std::to_string(sdListed));
             if (std::fabs(m[0] / kLuma - 1) > 0.15) return fail("look: luma " + std::to_string(m[0]) + " not within 15% of the movies'");
             if (std::fabs(m[1] / kContrast - 1) > 0.15) return fail("look: contrast " + std::to_string(m[1]) + " not within 15% of the movies'");
             if (std::fabs(m[3] / kGrain - 1) > 0.40) return fail("look: grain " + std::to_string(m[3]) + " not within 40% of the movies'");
@@ -5518,12 +6007,6 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 const char* path = SDL_GetGamepadPathForID(ids[i]);
                 if (path && g_evdev.node == path && SDL_GetJoystickFromID(ids[i])) adapter_ = ids[i];
             }
-            // GD05-069: a SpotlightDrawer's proxy (every venue type's stage
-            // fog / smoke group) is its draw child, never drawn (RB
-            // 0x82299DD0 / 0x821B3A48, D79).
-            const int sdProxies = ui.host().gameCounter(0, "venue_sd_proxies"), sdListed = ui.host().gameCounter(0, "venue_sd_proxies_listed");
-            std::printf("  look: SpotlightDrawer proxies %d, in the draw list %d (RB: 0)\n", sdProxies, sdListed);
-            if (sdProxies < 1 || sdListed != 0) return fail("look: SpotlightDrawer proxies " + std::to_string(sdProxies) + ", drawn " + std::to_string(sdListed));
             SDL_free(ids);
         }
         if (adapter_) {

@@ -19,6 +19,7 @@
 // and buzz are met; the band towns' own events (tour/<town>.dta) are not
 // loaded.
 #include "ui/rb_meta.h"
+#include "ui/rb_char_preview.h"
 
 #include <SDL3/SDL.h>
 
@@ -55,6 +56,14 @@ int num(const DataNode* n, size_t i = 1, int def = 0) {
     if (!n || n->children.size() <= i) return def;
     const DataNode& c = n->children[i];
     return c.type == DataNode::Type::Int ? c.i : c.type == DataNode::Type::Float ? int(c.f) : def;
+}
+// A (key TRUE|FALSE|n) flag: a number's non-zero, TRUE; `def` without one.
+bool flag(const DataNode* n, bool def) {
+    if (!n || n->children.size() < 2) return def;
+    const DataNode& c = n->children[1];
+    if (c.type == DataNode::Type::Int) return c.i != 0;
+    if (c.type == DataNode::Type::Float) return c.f != 0;
+    return c.isText() ? c.s != "FALSE" : def;
 }
 // The children lists of `n` that start with a symbol (key, node).
 std::vector<std::pair<std::string, const DataNode*>> entries(const DataNode* n) {
@@ -878,6 +887,8 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "logo_patch" || msg == "edit_logo_patch") return true;  // no band logo yet (the patch creator, GD05-022)
     if (msg == "win_difficulty" || msg == "min_difficulty") return r = Value::integer(d.minDifficulty), true;
     if (msg == "min_difficulty_sym") return r = Value::symbol(kDiffSyms[std::clamp(d.minDifficulty, 0, 3)]), true;
+    // The band's leader's character (its first member [I]): session_mgr update_band_leader.
+    if (msg == "leader_char_name") return r = d.members.empty() ? Value::integer(0) : Value::string(d.members.front()), true;
     if (msg == "get_band_member_for_slot") {
         return r = Value::list({Value::integer(0), Value::string(""), Value::integer(0)}), true;
     }
@@ -1377,6 +1388,41 @@ private:
     std::set<std::string> quiet_;
 };
 
+// A profile character's look for its menu preview (ui/rb_char_preview.h).
+RbCharPreview::Look previewLook(const RbCharObj& c) {
+    RbCharPreview::Look l;
+    l.gender = c.d.gender.empty() ? "male" : c.d.gender;
+    l.instrument = c.d.instrument.empty() ? "guitar" : c.d.instrument;
+    l.outfit = c.d.outfit;
+    l.skin = c.d.skin, l.attitude = uint32_t(c.d.attitude), l.weight = c.d.weight, l.height = c.d.height;
+    return l;
+}
+
+// The creator's practice space (charcreator.dta's screens:
+// practice_space_panel, practice_space.milo): the character being made
+// stands at creator.trans (GD05-083, ui/rb_char_preview.h) [C data: the
+// milo's slot]; its cameras (select_cam) answered [I].
+class PracticeSpacePanelObj : public QuietPanelObj {
+public:
+    using QuietPanelObj::QuietPanelObj;
+    void poll(double dtMs) override {
+        QuietPanelObj::poll(dtMs);
+        preview_.poll(dtMs);
+    }
+    void draw() override {
+        QuietPanelObj::draw();
+        PanelObj* cc = ui.panel("charcreator_panel");
+        auto* c = cc && cc->up ? dynamic_cast<RbCharObj*>(ui.interp().send(cc, "get_tour_char", {}).object) : nullptr;
+        scene::Xfm at;
+        if (!showing || !view || !c || !view->worldXfm("creator.trans", at)) return;
+        preview_.set(ui, previewLook(*c));
+        preview_.draw(ui, *view, at);
+    }
+
+private:
+    RbCharPreview preview_;
+};
+
 // Rock Band's tutorial main panels (GuitarTutorialPanel, DrumTutorialPanel,
 // VocalsTutorialPanel; tutorial/*.dta) [C data: the messages; I: the
 // natives]: the voice-over plays tutorial/streams/<vo>.mogg through the
@@ -1525,9 +1571,12 @@ public:
             if (gs->children[i].isList() && key(gs->children[i]) == g) return &gs->children[i];
         return nullptr;
     }
-    // What a chosen symbol puts on the character: a model's default finish.
+    // What a chosen symbol puts on the character: the finish chosen in
+    // group_select_panel (a model's, or a piece with finishes: the mic's
+    // mic1_silver, has_group_selection RB 0x823E0700), else a model's
+    // default finish.
     std::string wear(const std::string& o) const {
-        if (auto it = gChosenFinish.find(o); it != gChosenFinish.end() && group(o)) return it->second;
+        if (auto it = gChosenFinish.find(o); it != gChosenFinish.end()) return it->second;
         const DataNode* g = group(o);
         return g && g->find("default_outfit") ? text(g->find("default_outfit")) : o;
     }
@@ -1572,8 +1621,10 @@ public:
         const Value g = getProp(ui.interp(), "genre");
         const std::string genre = g.isText() ? g.str() : std::string();
         const bool closet = getProp(ui.interp(), "closet").truthy();
+        const Value oc = getProp(ui.interp(), "outfit_char");
+        const bool creator = (oc.type == Value::Type::Object && oc.object ? oc.object->name() : oc.str()) == "charcreator_panel";
         OutfitList* raw = l;
-        l->build = [raw, genre, closet, c] {
+        l->build = [raw, genre, closet, creator, c] {
             std::vector<std::string> v;
             if (const DataNode* gs = raw->groups()) {
                 for (size_t i = 1; i < gs->children.size(); ++i) {
@@ -1585,10 +1636,24 @@ public:
                 }
                 return v;
             }
+            // OutfitProvider's outfits (RB 0x82859E08) [C]: no (exclude TRUE)
+            // piece; none only with the category's allow_none (default
+            // TRUE); in the creator not a (creator FALSE) piece; the genre's;
+            // with (filter <category>) only the pieces named after the
+            // character's piece of that category (eyes of its head) [C];
+            // the closet's owned ones [I: the port's rule for the free ones].
             const DataNode* outs = raw->cat ? raw->cat->find("outfits") : nullptr;
+            const bool allowNone = flag(raw->cat ? raw->cat->find("allow_none") : nullptr, true);
+            std::string prefix;
+            if (const DataNode* f = raw->cat ? raw->cat->find("filter") : nullptr; f && c)
+                if (auto it = c->d.outfit.find(text(f)); it != c->d.outfit.end()) prefix = it->second;
             for (const auto& [o, n] : entries(outs)) {
+                const bool none = o == "none";
+                if (flag(n->find("exclude"), false) || (none && !allowNone)) continue;
+                if (creator && !flag(n->find("creator"), true)) continue;
                 const std::string og = text(n->find("genre"));
                 if (!genre.empty() && og != genre) continue;
+                if (!none && !prefix.empty() && o.rfind(prefix, 0) != 0) continue;
                 if (closet && c && !c->d.owned.count(o) && num(n->find("cost")) > 0) continue;
                 v.push_back(o);
             }
@@ -1649,7 +1714,12 @@ public:
                     c->d.outfit[cat] = stored_[cat];
                 }
                 gMeta->save();
+                // The focus back on the category's button; a panel of lists
+                // only (shop_instrument.milo: guitar / bass / drum / mic.lst)
+                // keeps none, so its screen's back works again (RB
+                // 0x8283EAD0 / 0x8283EC08 -> 0x8283E638) [I: 0x8283E638 not read].
                 if (component(cat + ".btn")) setFocus(cat + ".btn", true);
+                else setFocus("", true);
             }
             return handler(msg) == nullptr;  // the script's camera runs next when it has one
         }
@@ -1698,6 +1768,20 @@ private:
 class CharPanelObj : public PanelObj {
 public:
     using PanelObj::PanelObj;
+    // The shopped character at the store's char0 (stores/store.milo's
+    // CompositeCharacter slot) in its look (GD05-083, ui/rb_char_preview.h).
+    void poll(double dtMs) override {
+        PanelObj::poll(dtMs);
+        preview_.poll(dtMs);
+    }
+    void draw() override {
+        PanelObj::draw();
+        auto* c = dynamic_cast<RbCharObj*>(ui.interp().send(this, "get_tour_char", {}).object);
+        scene::Xfm at;
+        if (!showing || !view || !c || !view->worldXfm("char0", at)) return;
+        preview_.set(ui, previewLook(*c));
+        preview_.draw(ui, *view, at);
+    }
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         if (msg == "select_cam" || msg == "update_appearance" || msg == "load_char") return r = Value::integer(0), true;
         // get_tour_char, or the property ({shop_char_panel get tour_char}: shop.dta's back of shop_instrument_screen).
@@ -1708,6 +1792,9 @@ public:
         }
         return PanelObj::handleNative(in, msg, args, r);
     }
+
+private:
+    RbCharPreview preview_;
 };
 
 // AudioLatencyPanel (ui/options.dta, the A/V calibration): its click track
@@ -1819,7 +1906,7 @@ std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& 
         return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"in_vocal_mode", "set_in_vocal_mode", "set_pitch_shift_ratio"});
     if (cls == "PracticeBackgroundPanel") return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"select_cam", "select_camera_shot"});
     if (name == "practice_space_panel")
-        return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"select_cam", "set_creator_player_num", "play_attitude_group", "set_char_player_num"});
+        return std::make_unique<PracticeSpacePanelObj>(ui, name, cls, std::set<std::string>{"select_cam", "set_creator_player_num", "play_attitude_group", "set_char_player_num"});
     return nullptr;
 }
 
@@ -2059,7 +2146,73 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
         return false;
     };
     in.addBuiltin("get_solo_char_provider", [&m](Interp&, const DataNode&) { return Value::obj(m.charList); });
-    in.addBuiltin("get_char_provider", [&m](Interp&, const DataNode&) { return Value::obj(m.charList); });
+    // The band lobby's character lists, one per player (get_char_provider
+    // <player>: RB 0x828572F0 makes four, CharProvider handler RB
+    // 0x82857878) [C]: first (Create New) when the mode's allow_create_char,
+    // then (Default) (the instrument's premade character) when its
+    // show_prefab_chars, then the profile's characters of the instrument
+    // filter (RB 0x82857660 / 0x82855BD0) that another player has not
+    // taken [I: 0x82421B68 not read]. is_create_new / is_non_prefab_char /
+    // get_char by those header rows (RB 0x828560C8, 0x82855DB8, 0x82856558).
+    for (int p = 0; p < 4; ++p) {
+        RbList* l = list("rb_band_char_provider" + std::to_string(p));
+        struct State {
+            std::string filter;
+            int saved = 0;
+        };
+        auto st = std::make_shared<State>();
+        auto header = [&m] {
+            return int(gameCfgValue(m.ui(), "allow_create_char").truthy()) + int(gameCfgValue(m.ui(), "show_prefab_chars").truthy());
+        };
+        l->build = [&m, st, p, header] {
+            std::vector<std::string> v;
+            if (gameCfgValue(m.ui(), "allow_create_char").truthy()) v.push_back("create_new");
+            if (gameCfgValue(m.ui(), "show_prefab_chars").truthy()) v.push_back("prefab");
+            const Session& s = m.ui().session();
+            for (RbCharObj* c : m.chars) {
+                if (!st->filter.empty() && st->filter != "none" && c->d.instrument != (st->filter == "bass" ? "guitar" : st->filter)) continue;
+                bool taken = false;
+                for (int q = 0; q < 4; ++q) taken |= q != p && s.joined(q) && s.players[size_t(q)].hasChar && s.players[size_t(q)].character == c->name();
+                if (!taken) v.push_back(c->name());
+            }
+            (void)header;
+            return v;
+        };
+        l->label = [&m](const std::string& sym) {
+            if (sym == "create_new") return m.localizeOr("char_provider_create_new");
+            if (sym == "prefab") return m.localizeOr("char_provider_prefab");
+            for (RbCharObj* c : m.chars)
+                if (c->name() == sym) return c->d.name;
+            return sym;
+        };
+        l->extra = [&m, l, st, p, header](Interp& in2, const std::string& msg, std::vector<Value>& a, Value& r) {
+            if (msg == "set_instrument_filter") return st->filter = a.empty() ? std::string() : a[0].str(), l->refresh(), true;
+            if (l->data.empty()) l->refresh();
+            const int pos = iArg(a, 0);
+            const bool create = gameCfgValue(m.ui(), "allow_create_char").truthy() && pos == 0;
+            if (msg == "is_create_new") return r = Value::integer(create ? 1 : 0), true;
+            if (msg == "is_char") return r = Value::integer(create ? 0 : 1), true;
+            if (msg == "is_non_prefab_char") return r = Value::integer(pos >= header() ? 1 : 0), true;
+            if (msg == "get_char") {
+                if (pos < header()) {
+                    const std::string inst = st->filter.empty() || st->filter == "none" ? std::string("guitar") : st->filter;
+                    return r = Value::obj(in2.findObject("prefab_" + inst)), true;
+                }
+                ScriptObject* o = in2.findObject(l->symbol(pos));
+                return r = o ? Value::obj(o) : Value::integer(0), true;
+            }
+            if (msg == "get_pos_from_char") return r = Value::integer(a.empty() || !a[0].object ? -1 : l->indexOf(a[0].object->name())), true;
+            if (msg == "save_relative_pos") return st->saved = pos, true;
+            if (msg == "get_saved_pos") return r = Value::integer(std::clamp(st->saved, 0, std::max(0, l->numData() - 1))), true;
+            (void)p;
+            return false;
+        };
+    }
+    in.addBuiltin("get_char_provider", [&m](Interp& in2, const DataNode& cmd) {
+        const int p = cmd.children.size() > 1 ? std::clamp(in2.eval(cmd.children[1]).integerValue(), 0, 3) : 0;
+        if (cmd.children.size() < 2) return Value::obj(m.charList);
+        return Value::obj(in2.findObject("rb_band_char_provider" + std::to_string(p)));
+    });
     m.bandList = list("rb_band_provider");
     m.bandList->build = [&m] {
         std::vector<std::string> v;
@@ -2100,15 +2253,16 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
         else if (type == 2) ui.popScreen("");
         return Value::integer(0);
     });
-    // The band lobby (matchmaking_band_screen), a stand-in [I] (DECISIONS
-    // D10): RB's lobby has each player join in a slot with a button, pick a
-    // character and a leader; the port joins every local player who has a
-    // controller (GD05_BAND_PLAYERS=<n> for the tests) with the premade
-    // character of their instrument, player 1 leading, and goes on to the
-    // mode's post_matchmaking_screen as the lobby's continue does.
+    // The band lobby (matchmaking_band_screen) runs its own scripts
+    // (GD05-082, DECISIONS D80: the slots of ui/rb_multifocus.h, session_mgr,
+    // the players' character lists). GD05_BAND_PLAYERS=<n> (the walks that
+    // test what comes after it) skips it as the stand-in did (D10): n
+    // players joined with their instrument's character, player 1 leading,
+    // straight to the mode's post_matchmaking_screen; the head to head
+    // lobby (matchmaking_hth_screen) is still the stand-in [I].
     ui.redirect = [&m, &ui](const std::string& name, bool back) -> std::string {
         const bool hth = name == "matchmaking_hth_screen";
-        if ((name != "matchmaking_band_screen" && !hth) || back || SDL_getenv("GD05_REAL_LOBBY")) return {};
+        if ((name != "matchmaking_band_screen" && !hth) || back || (!hth && !SDL_getenv("GD05_BAND_PLAYERS"))) return {};
         Session& s = ui.session();
         int want = 0;
         if (const char* e = SDL_getenv("GD05_BAND_PLAYERS")) want = std::clamp(std::atoi(e), 1, 4);

@@ -455,6 +455,12 @@ void Interp::installCoreBuiltins() {
         }
         return Value::string(neg ? "-" + out : out);
     });
+    // {random a b ...} (registered with random_int, RB 0x8248F908): one of
+    // its arguments (seldiff.dta's {random 0 1}) [I: Milo's DataRandom].
+    addBuiltin("random", [arg](Interp& in, const DataNode& c) {
+        if (c.children.size() < 2) return Value::integer(0);
+        return arg(in, c, size_t(in.randomInt(1, int(c.children.size()))));
+    });
     addBuiltin("random_int", [arg](Interp& in, const DataNode& c) {
         return Value::integer(in.randomInt(arg(in, c, 1).integerValue(), arg(in, c, 2).integerValue()));
     });

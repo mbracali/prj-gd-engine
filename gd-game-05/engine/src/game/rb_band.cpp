@@ -35,6 +35,7 @@
 #include "data/dta.h"
 #include "data/game_data.h"
 #include "game/band.h"
+#include "char/deform.h"
 #include "game/song_db.h"
 #include "game/world.h"
 #include "char/char_objects.h"
@@ -142,38 +143,15 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
         const std::string gender = look ? look->gender : text(pre->find("gender")).empty() ? "male" : text(pre->find("gender"));
         const std::string baseInst = instrument == "bass" ? "guitar" : instrument;
         const std::string base = "char/" + gender + "/gen/" + gender + "_" + baseInst + ".milo_xbox";
-        std::map<std::string, std::string> outfits;
-        int order = 0;
-        auto add = [&](const std::string& path) {
-            if (data.exists(path)) {
-                char key[16];
-                SDL_snprintf(key, sizeof key, "+%02d", order++);
-                outfits[key] = path;
-            } else {
-                problems_.push_back(text(pre, 0) + ": no " + path);
-            }
-        };
         std::vector<std::pair<std::string, std::string>> pieces;
         if (look) {
             for (const auto& [cat, name] : look->outfit) pieces.emplace_back(cat, name);
         } else if (const DataNode* o = pre->find("outfit")) {
             for (size_t i = 1; i < o->children.size(); ++i) pieces.emplace_back(text(&o->children[i], 0), text(&o->children[i], 1));
         }
-        {
-            for (const auto& [cat, name] : pieces) {
-                if (cat.empty() || name.empty() || name == "none") continue;
-                if (cat == "guitar" || cat == "bass" || cat == "mic" || cat == "drum") {
-                    // The member's own instrument only (a guitarist's bass stays in the closet).
-                    const bool mine = (cat == "guitar" && instrument == "guitar") || (cat == "bass" && instrument == "bass") ||
-                                      (cat == "mic" && instrument == "vocals") || (cat == "drum" && instrument == "drum");
-                    if (!mine) continue;
-                    if (cat == "drum") add("char/instruments/drum/gen/" + kind + "_drums_" + name + ".milo_xbox");
-                    else add("char/instruments/" + cat + "/gen/" + name + ".milo_xbox");
-                    continue;
-                }
-                add("char/" + gender + "/outfits/" + cat + "/gen/" + name + ".milo_xbox");
-            }
-        }
+        std::vector<std::string> missing;
+        const std::map<std::string, std::string> outfits = rbOutfitMilos(data, gender, instrument, pieces, kind, &missing);
+        for (const std::string& path : missing) problems_.push_back(text(pre, 0) + ": no " + path);
         auto m = std::make_unique<Member>();
         m->slot = it->first;
         m->miloPath = base;
@@ -187,6 +165,15 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
             continue;
         }
         rbSkin(data, *m->character, pre, look ? look->skin : -1);
+        {
+            // The body's height and weight (char/deform.h, GD05-084): the
+            // player's character's, else the premade's (characters.dtb) [C data].
+            auto f = [&](const char* k) {
+                const DataNode* n = pre->find(k);
+                return n && n->children.size() > 1 ? n->floatAt(1) : 0.5f;
+            };
+            chr::applyDeform(*m->character, look ? look->weight : f("weight"), look ? look->height : f("height"));
+        }
         m->character->setXfm(slotXfm(*m));
         if (!it->second->rnd.environment.empty() && it->second->dir)
             m->character->slotEnviron = it->second->dir->resolve<scene::Environ>(it->second->rnd.environment);
@@ -234,6 +221,36 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
     return true;
 }
 
+std::map<std::string, std::string> Band::rbOutfitMilos(const GameData& data, const std::string& gender, const std::string& instrument,
+                                                     const std::vector<std::pair<std::string, std::string>>& pieces, const std::string& kind,
+                                                     std::vector<std::string>* missing) {
+    std::map<std::string, std::string> outfits;
+    int order = 0;
+    auto add = [&](const std::string& path) {
+        if (data.exists(path)) {
+            char key[16];
+            SDL_snprintf(key, sizeof key, "+%02d", order++);
+            outfits[key] = path;
+        } else if (missing) {
+            missing->push_back(path);
+        }
+    };
+    for (const auto& [cat, name] : pieces) {
+        if (cat.empty() || name.empty() || name == "none") continue;
+        if (cat == "guitar" || cat == "bass" || cat == "mic" || cat == "drum") {
+            // The member's own instrument only (a guitarist's bass stays in the closet).
+            const bool mine = (cat == "guitar" && instrument == "guitar") || (cat == "bass" && instrument == "bass") ||
+                              (cat == "mic" && instrument == "vocals") || (cat == "drum" && instrument == "drum");
+            if (!mine) continue;
+            if (cat == "drum") add("char/instruments/drum/gen/" + kind + "_drums_" + name + ".milo_xbox");
+            else add("char/instruments/" + cat + "/gen/" + name + ".milo_xbox");
+            continue;
+        }
+        add("char/" + gender + "/outfits/" + cat + "/gen/" + name + ".milo_xbox");
+    }
+    return outfits;
+}
+
 // The skin [C data: char/gen/skin.milo skin.pal; the heads' and bodies'
 // diffuse textures are empty placeholders the game renders at run time
 // (PatchRenderer / TexRenderer: the skin tone, tattoos and make-up)].
@@ -253,7 +270,7 @@ void Band::rbSkin(const GameData& data, chr::Character& c, const DataNode* prefa
         }
     }
     int idx = 0;
-    if (const DataNode* n = prefab->find("skin_color_index"); n && n->children.size() > 1) idx = n->intAt(1);
+    if (const DataNode* n = prefab ? prefab->find("skin_color_index") : nullptr; n && n->children.size() > 1) idx = n->intAt(1);
     if (skinIndex >= 0) idx = skinIndex;
     std::array<float, 4> tone{0.8f, 0.62f, 0.5f, 1};
     if (idx >= 0 && size_t(idx) < skin.size()) tone = skin[size_t(idx)];

@@ -105,6 +105,18 @@ public:
         if (showing) hiddenScopes_.erase(scope);
         else hiddenScopes_.insert(scope);
     }
+    // A player slot's directory keeps its components' state apart from
+    // the other slots' copies of the same names (RB's MultiFocusScreen:
+    // each slot a PanelDir of its own, its own focus): once registered, an
+    // object of the directory `scope` reads its text, state, list, focus
+    // under "<scope>/<name>" first, then under its plain name.
+    void registerScope(const std::string& scope);
+    // Whether the panel's milo has an inline directory named `scope`.
+    bool hasScope(const std::string& scope) const;
+    // The key a component of `scope` is set under ("<scope>/<name>"; the plain name without a scope).
+    static std::string scopedKey(const std::string& scope, const std::string& name) { return scope.empty() ? name : scope + "/" + name; }
+    // The focused component of a registered scope (its own focus).
+    void setScopeFocus(const std::string& scope, const std::string& component) { scopeFocus_[scope] = component; }
     bool showing(const std::string& object) const;
     // set_local_pos / set_local_scale: replace one part of the object's local transform.
     void setLocalPos(const std::string& object, float x, float y, float z);
@@ -339,6 +351,18 @@ private:
     void drawRoots(MaterialRenderer& r, const scene::Directory& dir);
     std::map<const scene::Object*, TargetId> rdTargets_;
     std::set<std::string> hiddenScopes_;
+    std::map<const scene::Directory*, std::string> scopeDirs_;  // registerScope
+    std::map<std::string, std::string> scopeFocus_;              // setScopeFocus
+    // The key of an object: "<scope>/<name>" in a registered scope, else its name.
+    std::string keyOf(const scene::Object& o) const;
+    // A keyed map's entry for the object: its scoped key, then its name.
+    template <class M>
+    auto findKeyed(M& m, const scene::Object& o) const -> decltype(m.find(o.name)) {
+        if (!scopeDirs_.empty())
+            if (auto it = m.find(keyOf(o)); it != m.end()) return it;
+        return m.find(o.name);
+    }
+    scene::UiState stateOf(const scene::Object& o) const;
     std::set<const scene::Directory*> texRendered_;  // the TexRenderers' panels
     // A RenderDir's swaying cloth (render/ui_cloth.h), polled once a frame.
     std::unique_ptr<UiCloth> cloth_;
