@@ -199,6 +199,17 @@ private:
     class RbPart;
     friend class RbPart;
     std::unique_ptr<RbMidiParserSet> rbParsers_;
+    // GD05_BANDCHECK=1: per-frame measurements of the band (rb_band.cpp),
+    // reported when the band goes. GD05_BAND_LEGACY=1: the band as before
+    // wave G06 (no parsers, GH2's weight setters, no draw_only, no RB face),
+    // to show the checks failing without the fixes.
+    struct RbCheck;
+    std::shared_ptr<RbCheck> rbCheck_;
+    void rbCheckFrame();
+    void rbCheckReport();
+public:
+    static bool rbLegacy();
+private:
     void rbSkin(const GameData& data, chr::Character& c, const DataNode* prefab, int skinIndex = -1);
     void makeScripts(const DataNode* objects);
     void registerDir(Member& m, const scene::Directory& d);

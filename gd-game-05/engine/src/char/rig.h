@@ -78,6 +78,8 @@ public:
     std::vector<std::string> order() const;
 
     struct Impl;
+    // GD05_BAND_LEGACY=1: GH2's weight setters (weight = the flag weight).
+    static bool legacySetters;
 
 private:
     std::unique_ptr<Impl> impl_;

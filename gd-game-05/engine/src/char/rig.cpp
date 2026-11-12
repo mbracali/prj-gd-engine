@@ -2,8 +2,6 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "char/rig.h"
 
-#include <SDL3/SDL.h>
-
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -229,6 +227,7 @@ struct Rig::Impl {
         std::string name;
         float offset = 0;
         int hand = -1, twist2 = -1;
+        float lengthScale = 0;  // RB rev 2: twist2 at hand x x this (none when <= 0)
     };
     // CharLookAt (Poll 0x8216E4E8, limits 0x8216DDF0).
     struct LookAt {
@@ -409,7 +408,7 @@ void Rig::Impl::build() {
             p.reads = {u->upperArm};  // 0x82182F80
             p.writes = {u->twist1, u->twist2};
         } else if (auto* f = o->as<scene::CharForeTwist>()) {
-            fores.push_back({o->name, f->offset, bone(f->hand), bone(f->twist2)});
+            fores.push_back({o->name, f->offset, bone(f->hand), bone(f->twist2), f->lengthScale});
             p.kind = kFore, p.index = fores.size() - 1;
             p.reads = {f->hand};  // 0x82182398
             p.writes = {f->twist2, parentName(bone(f->twist2))};
@@ -527,6 +526,24 @@ void Rig::Impl::build() {
             if (w.owner == p.name && n != p.name) p.writes.push_back(n);
     }
     sort();
+    // Rock Band's CharPollGroup (RB 0x82345C38: hand_iks = left_hand.ikhand,
+    // fret.ikhand, right_hand.ikhand, strum.ikhand ...) polls its members in
+    // its own order [C data]: they swap among the places the sort gave them,
+    // so the strum IK runs after the right hand's hip / mouth IK.
+    for (const auto& o : dir.objects) {
+        const auto* g = o->as<scene::CharPollGroup>();
+        if (!g) continue;
+        std::vector<size_t> slots;
+        std::vector<Pollable> members;
+        // [I] Only its IK hands swap: the drivers it also lists (expression.drv,
+        // face_accent.dmidi) write the face and keep the sort's places.
+        for (const std::string& name : g->polls)
+            for (size_t i = 0; i < pollables.size(); ++i)
+                if (pollables[i].name == name && pollables[i].kind == kHand) slots.push_back(i), members.push_back(pollables[i]);
+        std::vector<size_t> sorted = slots;
+        std::sort(sorted.begin(), sorted.end());
+        for (size_t k = 0; k < sorted.size(); ++k) pollables[sorted[k]] = members[k];
+    }
 }
 
 // 0x82156B78 / 0x821563C8: the directory's pollables ordered so that each
@@ -623,8 +640,14 @@ void Rig::Impl::poll(const RigContext& ctx) {
 
 // ---- CharWeightSetter ------------------------------------------------------
 
+bool Rig::legacySetters = false;
+
 void Rig::Impl::pollSetter(Setter& s, const RigContext& ctx) {
     Weight& w = weights[s.name];
+    if (Rig::legacySetters) {
+        if (!s.driver.empty() && ctx.driverFlagWeight) w.weight = ctx.driverFlagWeight(s.driver, s.flags);
+        return;
+    }
     if (!s.driver.empty() && ctx.driverFlagWeight) s.base = ctx.driverFlagWeight(s.driver, s.flags) * s.scale + s.offset;
     if (s.base == w.weight) return;
     if (s.beatsPerWeight > 0) {
@@ -653,8 +676,25 @@ void Rig::Impl::lengths(IkHand& h) {
 
 void Rig::Impl::pollHand(IkHand& h) {
     lengths(h);
-    const float w = weightOf(h.name);
+    float w = weightOf(h.name);
     if (w == 0 || h.hand < 0 || h.targets.empty()) return;
+    // Rock Band (Poll RB 0x8232EB48) [C]: several targets weigh 144 / their
+    // squared local offset (0.001 at least) each; under a sum of 1 the IK's
+    // weight shrinks by that sum. A clip calls a target by bringing it onto
+    // its parent (bone_R-hand_mouth for the mic, _R-hip for a hand on the
+    // hip); a target left at its rest offset (tens of units) barely pulls.
+    std::vector<float> rbWeights;
+    if (h.targets.size() > 1) {
+        float sum = 0;
+        for (int t : h.targets) {
+            const scene::Xfm& l = sk.local(t);
+            const float d2 = l.pos[0] * l.pos[0] + l.pos[1] * l.pos[1] + l.pos[2] * l.pos[2];
+            rbWeights.push_back(144.0f / (d2 <= 0.001f ? 0.001f : d2));
+            sum += rbWeights.back();
+        }
+        if (sum < 1) w *= sum;
+        for (float& k : rbWeights) k /= sum;
+    }
     // The target: one target's world position (and orientation with
     // orient), or the targets' average weighted by 1 / |their local offset|.
     V3 target{0, 0, 0};
@@ -664,16 +704,8 @@ void Rig::Impl::pollHand(IkHand& h) {
         target = t.pos;
         if (h.orient) rot = mToQuat(orthoY(row(t.rot, 1), row(t.rot, 2)));
     } else {
-        std::vector<float> inv;
-        float sum = 0;
-        for (int t : h.targets) {
-            float l = len(sk.local(t).pos);
-            if (l <= 0.001f) l = 0.001f;
-            inv.push_back(1.0f / l);
-            sum += 1.0f / l;
-        }
         for (size_t i = 0; i < h.targets.size(); ++i) {
-            const float k = inv[i] / sum;
+            const float k = rbWeights[i];
             const scene::Xfm& t = sk.world(h.targets[i]);
             target = add(target, mul(t.pos, k));
             if (h.orient) quatAccumulate(rot, mToQuat(orthoY(row(t.rot, 1), row(t.rot, 2))), k);
@@ -793,7 +825,9 @@ void Rig::Impl::pollFore(ForeTwist& f) {
     const float t = wrapAngle(f.offset * kDeg + twistAboutX(hand.rot)) * 0.333333f;
     scene::Xfm b = sk.local(f.twist2);
     b.rot = rotX(t);
-    b.pos[0] = hand.pos[0] * 0.5f;
+    // Rock Band (Poll RB 0x8233DE58) [C]: twist2's x = the hand's x x
+    // length_scale, left alone without one (GH2 put it halfway).
+    if (f.lengthScale > 0) b.pos[0] = hand.pos[0] * f.lengthScale;
     scene::Xfm a = sk.local(twist1);
     a.rot = mulRot(b.rot, sk.local(forearm).rot);
     sk.setLocal(twist1, a);

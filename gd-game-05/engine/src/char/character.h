@@ -126,6 +126,7 @@ public:
     // the group's saved one unless a script set it. Empty: every member.
     void setDrawOnly(const std::string& group, const std::string& member);
     std::string drawOnly(const scene::Group& group) const;
+    static bool ignoreDrawOnly;  // GD05_BAND_LEGACY=1: every member draws, as before
 
     // LOD (0x82153090): picks and shows the LOD group for `screenSize`.
     void updateLod(float screenSize);
@@ -155,6 +156,15 @@ public:
     // bones posed from that buffer (0x821A51E0). No pose when the player has
     // stopped or no song was played.
     const scene::FaceFxLipSyncServo* faceServo() const { return faceServo_; }
+    // Rock Band's face (RB 0x823252C8 servo; char_objects.dta sync_objects):
+    // the viseme clip set (char/male/anim/male_viseme_head_1.milo, or the
+    // character's own `visemes`), its clips relative to `Base` (CharClipSamples
+    // init: viseme clips are relative to Base). Each poll the face is Base
+    // plus, per bone pose node the FaceFX graph lights, weight x (its clip -
+    // Base), scaled by the servo's weight (expression.weight /
+    // singalong.weight). `names[i]` is the clip of pose frame i.
+    void setRbFace(ClipSet* set, const std::vector<std::string>& names);
+    bool rbFace() const { return faceBase_ != nullptr; }
     ClipSet* faceClips() const { return faceSet_; }
     void attachFace(facefx::LipSync* lip) { lip_ = lip; }
     facefx::LipSync* lipSync() const { return lip_; }
@@ -212,6 +222,10 @@ private:
     ClipSet* faceSet_ = nullptr;
     const scene::CharClipSamples* visemes_ = nullptr;
     const scene::CharClipSamples* neutral_ = nullptr;
+    const scene::CharClipSamples* faceBase_ = nullptr;           // RB: Base
+    std::vector<const scene::CharClipSamples*> faceClips_;       // RB: per pose frame
+    std::unordered_map<const scene::CharClipSamples*, std::unique_ptr<Bones>> facePose_;  // RB: each clip's pose
+    const Bones& facePoseOf(const scene::CharClipSamples& clip);
     facefx::LipSync* lip_ = nullptr;
     Bones faceBones_;
     std::vector<int> faceChannelBone_;

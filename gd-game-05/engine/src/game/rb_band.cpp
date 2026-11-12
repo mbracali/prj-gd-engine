@@ -25,6 +25,8 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cmath>
+#include <set>
 #include <functional>
 #include <map>
 #include <string>
@@ -38,6 +40,7 @@
 #include "char/char_objects.h"
 #include "char/rb_midi_parser.h"
 #include "data/midi.h"
+#include "game/chart.h"
 #include "script/script.h"
 #include "scene/milo.h"
 #include "scene/objects.h"
@@ -188,6 +191,23 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
             m->character->slotEnviron = it->second->dir->resolve<scene::Environ>(it->second->rnd.environment);
         if (log) {
             SDL_Log("band: %s <- %s (%s, %d pieces)", m->slot.c_str(), look ? "the player's own character" : text(pre, 0).c_str(), base.c_str(), int(outfits.size()));
+            std::string order;
+            for (const std::string& n : m->character->rig().order()) {
+                char w[32];
+                SDL_snprintf(w, sizeof w, "=%.2f", m->character->rig().weightOf(n));
+                order += " " + n + w;
+            }
+            SDL_Log("band:   rig order:%s", order.c_str());
+            chr::Skeleton& sk = m->character->skeleton();
+            for (const char* b : {"bone_R-hand.mesh", "bone_L-hand.mesh", "bone_pick.mesh", "bone_pick_strum.mesh", "bone_tip.mesh", "bone_mic.mesh", "bone_L-tip.mesh"}) {
+                std::string chain;
+                for (int i = sk.find(b), n = 0; i >= 0 && n < 8; i = sk.parent(i), ++n) {
+                    char e[96];
+                    SDL_snprintf(e, sizeof e, " <- %s(%.1f)", sk.name(i).c_str(), std::sqrt(sk.bind(i).pos[0] * sk.bind(i).pos[0] + sk.bind(i).pos[1] * sk.bind(i).pos[1] + sk.bind(i).pos[2] * sk.bind(i).pos[2]));
+                    chain += e;
+                }
+                if (!chain.empty()) SDL_Log("band:   %s", chain.c_str());
+            }
             for (const std::string& b : m->character->unresolvedBones()) SDL_Log("band:   unresolved bone %s", b.c_str());
         }
         rbPrefabUsed_[instrument] = text(pre, 0);
@@ -206,6 +226,9 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
         members_.push_back(std::move(m));
     }
     world_.band = this;
+    chr::Rig::legacySetters = rbLegacy();
+    chr::Character::ignoreDrawOnly = rbLegacy();
+    if (const char* c = SDL_getenv("GD05_BANDCHECK"); c && *c && *c != '0') rbCheck_ = std::make_shared<RbCheck>();
     return true;
 }
 
@@ -633,4 +656,209 @@ void Band::rbShotTargets(const std::vector<std::pair<std::string, std::string>>&
         }
     for (const auto& [slot, to] : moves)
         if (Member* m = member(slot); m && m->character) m->character->teleport(to);
+}
+
+// ---- measurements (GD05_BANDCHECK=1) -----------------------------------------
+//
+// Objective checks of the band, frame by frame (the owner's rule: measured,
+// not eyeballed), printed as "bandcheck:" lines when the band goes:
+// - stretch: every body bone that skins a mesh (not the face's, which the
+//   visemes move, nor CharHair strands) keeps its distance to its parent within
+//   1.2 x its bind length (the "bubble gum" arms);
+// - reach: with the hand IK fully on, the guitarist's fret finger (bone_tip)
+//   on its target on the neck (bone_tip_fret) and the pick (bone_pick) on
+//   the strum target (bone_pick_strum), in world units;
+// - drums: the share of the drum chart's notes for which a hand or the kick
+//   foot moves over 2 units in the 250 ms up to the note;
+// - lips: the singer's jaw / lip bones away from their bind pose (degrees /
+//   units) while the song's .voc drives the face;
+// - mic: the mic bone's distance to the nearer hand, and hands.grp drawing
+//   only mic.grp.
+struct Band::RbCheck {
+    struct Hit {
+        double ms;
+        float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+        std::array<std::array<float, 3>, 3> first{};
+        bool seen = false;
+        float move = 0;
+    };
+    int frames = 0;
+    std::map<std::string, float> maxStretch;
+    std::map<std::string, std::string> worstBone;
+    std::map<std::string, int> stretchFrames;
+    std::map<std::string, float> minStretch;  // informative: bones the clips shorten
+    std::map<std::string, std::string> shortBone;
+    std::map<std::string, std::vector<float>> reachFret, reachPick;
+    std::map<std::string, int> ikFrames;
+    std::vector<Hit> hits;
+    bool hitsBuilt = false;
+    float jawMax = 0, lipMax = 0;
+    int faceFrames = 0, faceMoving = 0;
+    float prevJaw = 0;
+    std::vector<float> micDist;
+    std::string micDrawOnly;
+};
+
+bool Band::rbLegacy() {
+    const char* l = SDL_getenv("GD05_BAND_LEGACY");
+    return l && *l && *l != '0';
+}
+
+namespace {
+
+float dist3(const std::array<float, 3>& a, const std::array<float, 3>& b) {
+    const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+float len3(const std::array<float, 3>& a) { return std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]); }
+
+// The angle (degrees) between two rotations (rows), through the trace.
+float angleBetween(const std::array<float, 9>& a, const std::array<float, 9>& b) {
+    float tr = 0;
+    for (int i = 0; i < 3; ++i)
+        for (int k = 0; k < 3; ++k) tr += a[size_t(i * 3 + k)] * b[size_t(i * 3 + k)];
+    return std::acos(std::clamp((tr - 1) * 0.5f, -1.0f, 1.0f)) * 57.29578f;
+}
+
+float percentile(std::vector<float> v, float p) {
+    if (v.empty()) return 0;
+    std::sort(v.begin(), v.end());
+    return v[std::min(v.size() - 1, size_t(p * float(v.size() - 1) + 0.5f))];
+}
+
+}  // namespace
+
+void Band::rbCheckFrame() {
+    RbCheck& k = *rbCheck_;
+    ++k.frames;
+    const double ms = song_ ? song_->tempo.tickToMs(beat_ * song_->tempo.division()) : beat_ * 500.0;
+    if (!k.hitsBuilt && song_) {
+        k.hitsBuilt = true;
+        for (const Gem& g : song_->chart(Part::Drums, Difficulty::Expert).gems) k.hits.push_back({g.ms});
+    }
+    for (auto& mp : members_) {
+        Member& m = *mp;
+        chr::Character& c = *m.character;
+        chr::Skeleton& sk = c.skeleton();
+        // Stretch: the skinned bones.
+        static std::map<const chr::Character*, std::vector<int>> skinned;
+        auto& bones = skinned[&c];
+        if (bones.empty()) {
+            std::set<int> b;
+            std::set<std::string> strands;  // CharHair points: the hair sim moves them
+            c.forEachObject([&](scene::Object& o) {
+                if (auto* h = o.as<scene::CharHair>())
+                    for (const auto& st : h->strands)
+                        for (const auto& pt : st.points) strands.insert(pt.bone);
+            });
+            c.forEachObject([&](scene::Object& o) {
+                if (auto* mesh = o.as<scene::Mesh>())
+                    for (const auto& mb : mesh->bones)
+                        if (int i = sk.find(mb.name); i >= 0 && sk.parent(i) >= 0) {
+                            // The body: not the face (the visemes move its
+                            // bones by design) nor the hair strands.
+                            bool body = sk.name(i).find("hair") == std::string::npos && !strands.count(sk.name(i));
+                            for (int p = i; p >= 0 && body; p = sk.parent(p)) body = sk.name(p) != "bone_head.mesh";
+                            if (body) b.insert(i);
+                        }
+            });
+            bones.assign(b.begin(), b.end());
+        }
+        bool bad = false;
+        for (int i : bones) {
+            const float rest = len3(sk.bind(i).pos);
+            if (rest < 0.5f) continue;
+            const float r = len3(sk.local(i).pos) / rest;
+            if (r > k.maxStretch[m.slot]) k.maxStretch[m.slot] = r, k.worstBone[m.slot] = sk.name(i);
+            if (r > 1.2f) bad = true;
+            if (auto it = k.minStretch.find(m.slot); it == k.minStretch.end() || r < it->second) k.minStretch[m.slot] = r, k.shortBone[m.slot] = sk.name(i);
+        }
+        if (bad) ++k.stretchFrames[m.slot];
+        auto at = [&](const char* n, std::array<float, 3>& out) {
+            const int i = sk.find(n);
+            if (i < 0) return false;
+            out = sk.world(i).pos;
+            return true;
+        };
+        std::array<float, 3> a{}, b{};
+        if (m.type == "rb_guitar" || m.type == "rb_bass") {
+            if (c.rig().weightOf("left_hand.weight") >= 0.99f && at("bone_tip.mesh", a) && at("bone_tip_fret.mesh", b)) k.reachFret[m.slot].push_back(dist3(a, b)), ++k.ikFrames[m.slot];
+            if (c.rig().weightOf("right_hand.weight") >= 0.99f && at("bone_pick.mesh", a) && at("bone_pick_strum.mesh", b)) k.reachPick[m.slot].push_back(dist3(a, b));
+        } else if (m.type == "rb_drum") {
+            const char* limbs[3] = {"bone_R-hand.mesh", "bone_L-hand.mesh", "bone_R-ankle.mesh"};
+            for (auto& h : k.hits) {
+                if (ms < h.ms - 250 || ms > h.ms) continue;
+                for (int l = 0; l < 3; ++l)
+                    if (at(limbs[l], a)) {
+                        if (!h.seen) h.first[size_t(l)] = a;
+                        h.move = std::max(h.move, dist3(a, h.first[size_t(l)]));
+                    }
+                h.seen = true;
+            }
+        } else if (m.type == "rb_vocals") {
+            const int jaw = sk.find("bone_jaw.mesh");
+            const int lip = sk.find("bone_lowlip_mid.mesh");
+            if (jaw >= 0 && ms > 0) {
+                const float ang = angleBetween(sk.local(jaw).rot, sk.bind(jaw).rot);
+                k.jawMax = std::max(k.jawMax, ang);
+                ++k.faceFrames;
+                if (std::fabs(ang - k.prevJaw) > 0.2f) ++k.faceMoving;
+                k.prevJaw = ang;
+            }
+            if (lip >= 0) k.lipMax = std::max(k.lipMax, dist3(sk.local(lip).pos, sk.bind(lip).pos));
+            if (at("bone_mic.mesh", a)) {
+                float d = 1e30f;
+                if (at("bone_R-hand.mesh", b)) d = std::min(d, dist3(a, b));
+                if (at("bone_L-hand.mesh", b)) d = std::min(d, dist3(a, b));
+                k.micDist.push_back(d);
+            }
+            if (const scene::Object* g = c.dir().get("hands.grp"))
+                if (const auto* grp = g->as<scene::Group>()) k.micDrawOnly = c.drawOnly(*grp);
+        }
+    }
+}
+
+void Band::rbCheckReport() {
+    const RbCheck& k = *rbCheck_;
+    int problems = 0;
+    auto line = [&](bool ok, const std::string& what) {
+        if (!ok) ++problems;
+        SDL_Log("bandcheck: %s %s", ok ? "ok  " : "FAIL", what.c_str());
+    };
+    char buf[256];
+    for (auto& mp : members_) {
+        const Member& m = *mp;
+        const float st = k.maxStretch.count(m.slot) ? k.maxStretch.at(m.slot) : 0;
+        if (k.minStretch.count(m.slot))
+            SDL_Log("bandcheck: info %s shortest %.3f x bind (%s)", m.slot.c_str(), k.minStretch.at(m.slot), k.shortBone.at(m.slot).c_str());
+        const int sf = k.stretchFrames.count(m.slot) ? k.stretchFrames.at(m.slot) : 0;
+        SDL_snprintf(buf, sizeof buf, "%s stretch: worst %.3f x bind (%s), %d of %d frames past 1.2", m.slot.c_str(), st,
+                     k.worstBone.count(m.slot) ? k.worstBone.at(m.slot).c_str() : "-", sf, k.frames);
+        line(sf == 0, buf);
+        if (m.type == "rb_guitar" || m.type == "rb_bass") {
+            const auto fret = k.reachFret.count(m.slot) ? k.reachFret.at(m.slot) : std::vector<float>{};
+            const auto pick = k.reachPick.count(m.slot) ? k.reachPick.at(m.slot) : std::vector<float>{};
+            SDL_snprintf(buf, sizeof buf, "%s fret hand on the neck: IK on %zu of %d frames, finger to target p95 %.2f max %.2f", m.slot.c_str(),
+                         fret.size(), k.frames, percentile(fret, 0.95f), percentile(fret, 1));
+            line(fret.size() * 2 > size_t(k.frames) && percentile(fret, 0.95f) < 1.0f, buf);
+            SDL_snprintf(buf, sizeof buf, "%s pick on the strings: IK on %zu of %d frames, pick to target p95 %.2f max %.2f", m.slot.c_str(),
+                         pick.size(), k.frames, percentile(pick, 0.95f), percentile(pick, 1));
+            line(pick.size() * 2 > size_t(k.frames) && percentile(pick, 0.95f) < 1.0f, buf);
+        } else if (m.type == "rb_drum") {
+            int seen = 0, moved = 0;
+            for (const auto& h : k.hits)
+                if (h.seen) ++seen, moved += h.move > 2.0f ? 1 : 0;
+            SDL_snprintf(buf, sizeof buf, "%s moves on the drum notes: %d of %d notes (a hand or the kick foot over 2 units in the 250 ms before)",
+                         m.slot.c_str(), moved, seen);
+            line(seen > 0 && moved * 10 >= seen * 8, buf);
+        } else if (m.type == "rb_vocals") {
+            SDL_snprintf(buf, sizeof buf, "%s lips: jaw up to %.1f deg from bind, moving on %d of %d frames, low lip up to %.2f units", m.slot.c_str(),
+                         k.jawMax, k.faceMoving, k.faceFrames, k.lipMax);
+            line(k.jawMax > 3 && k.faceMoving * 10 > k.faceFrames, buf);
+            SDL_snprintf(buf, sizeof buf, "%s mic: to the nearer hand p95 %.2f, hands.grp draws %s", m.slot.c_str(), percentile(k.micDist, 0.95f),
+                         k.micDrawOnly.empty() ? "every member" : k.micDrawOnly.c_str());
+            line(!k.micDist.empty() && percentile(k.micDist, 0.95f) < 8 && k.micDrawOnly == "mic.grp", buf);
+        }
+    }
+    SDL_Log("bandcheck: %s (%d problem(s), %d frames)", problems ? "FAILED" : "passed", problems, k.frames);
 }
