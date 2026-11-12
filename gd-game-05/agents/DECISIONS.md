@@ -659,3 +659,62 @@ pattern). Each says what, why and how to undo it.
   char/male/, and RB has no `visemes` clip of frames as GH2).
 - **Undo:** Character::setRbFace and pollFace's RB branch, Band::setupFace's
   RB branch.
+
+## D54
+- **What (2026-11-12, GD05-069):** the world's post-process is Rock Band's
+  NgPostProc (DoPost RB 0x827DA600, ark/xbox_shaders "postprocess" /
+  "bloom" / "downsample" / "blur", read with gd04's Xenos translator as a
+  read-only helper) [C]: the film grain is an overlay blend of two
+  noise_map layers, mix(c, overlay(c, n0 * n1), noise_intensity)
+  (0x827D9190: c112 phase, c113 scale / top / intensity; stationary: fixed
+  phase); the ColorXfm's 3x3 times the flicker (0x827D93D8; 0x8218E948:
+  1 - smoothstep towards random(intensity) every random(secs_range) s);
+  bloom when intensity > 0 and not (threshold >= 4 and alpha <= 0)
+  (0x827D94D0): rgb x sat((bloom_color . rgb - threshold) / (4 - threshold))
+  (gBloomColor 0x827D8C18), two 2x downsamples, a 15-tap blur at
+  (i + 0.5) x bloom_size / 7 of 1/180 / 1/320 (0x827D8970), added x
+  bloom_intensity. [I]: the mask from the colour (RB's scene shaders write
+  it in alpha), the blur's centre tap and normalisation, the world clamped
+  at 1 before the composite (RB's buffer is 8-bit with the mask in alpha).
+  PostProc rev 18 fields named from SyncProperty 0x8218FC00.
+- **Why:** the port added the noise (n0 * n1 * 0.3: +0.075 on every pixel,
+  white noise, no ProFilm noise_mono.tex) and drew no flicker: brighter,
+  flat, no grain (owner: "darker with a stronger film grain").
+- **Undo:** render/post_fx.cpp (kFragment's composite / bright passes,
+  end()), postProcState.
+
+## D55
+- **What (2026-11-12, GD05-069):** Rnd paces the world by the selected
+  PostProc's emulate_fps (RB 0x8218EF80 / 0x8218EEA0, Rnd 0x821876F0 sets
+  the frame's mode; DxRnd begins the world on bit 1 (0x8246F358), resolves
+  and post-processes it on bit 2 (0x8246DAB0)) [C]: 120 / fps half frames
+  rounded, n = that / 2 frames at 60 Hz, alternating n + r and n (r the
+  remainder); the world is drawn in the period's first frame and the last
+  picture is shown in the others. ProFilm_a / ProFilm_b (every band shot)
+  ask for 24: the venue and the band at 24 a second in a 3:2 pattern; the
+  track and HUD at the display's rate; the default PostProc's 30
+  (constructor 0x8218F3E8). The port counts 60 Hz ticks of the clock [I]
+  (any display rate); GD05_WORLD_FPS overrides (0: every frame).
+- **Why:** the owner saw the band update at a different rate from the
+  highway: it is RB's film look.
+- **Undo:** PostFx::hold and its call in App::drawWorld.
+
+## D56
+- **What (2026-11-12, GD05-069):** a TexRenderer's draw and its directory
+  are left out of the venue's draw list (as the UI's RenderDir already
+  did) [I: RB's RndTexRenderer draws its directory into its texture];
+  small_club_02's tattoos_a / vehicles RndDirs drew their white paisley
+  over the whole venue. RB's NgMat select (0x827D4750) sets gAmbient (c1)
+  to the environ's ambient for a use_environ material, else white, and the
+  particle vertex shader multiplies each particle's colour by it [C]; the
+  particle draw (0x82476498) scales gParticleUp by screen_aspect [C].
+- **Undo:** venue_view.cpp drawList, material.cpp standardKey's particles,
+  particles.cpp appendQuads.
+
+## D57
+- **What (2026-11-12, GD05-069):** pause: pause.milo's black_bg.mesh
+  (black_bg.mat: black, alpha 0.7, kBlendSrcAlpha, the whole 853 x 480
+  screen) is the original's rule for the game behind the pause menu: 0.3
+  of its luma [C data]. The port already draws it (measured 0.28..0.30);
+  the pause looked bright because the world under it was.
+- **Undo:** none (a check: rb_look's look:pause).

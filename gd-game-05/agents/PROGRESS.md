@@ -964,3 +964,48 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   list.lbl's height in its own slot [I]); a capture of RB's song list
   would settle it. The HUD's labels (rb_hud_view.cpp) still replace the
   kerning.
+
+## 2026-11-12, the world's look, film grain, pause, frame rate (GD05-069)
+
+- **Proof (new walk rb_look):** the world alone (GD05_TRACK / GD05_HUD 0)
+  in 30 fixed shots (GD05_FORCE_SHOT=#N: the venue's BandCamShots by name,
+  every 7th), luma mean / contrast / saturation / grain at 640x360 against
+  the disc's own gameplay movies (videos/entersandman, tomsawyer,
+  learntofly, gowiththeflow, wanteddeadoralive .bik, 289 frames, title
+  cards out, through the display curve): luma 69.3, contrast 55.4, grain
+  1.97; fails outside 15% (grain 40%). Also the pause rule and the world's
+  pace.
+- **Causes found and fixed:** (1) RB's post-process was GH2's: the grain
+  was added (+0.075 on every pixel, white noise) where RB overlays two
+  noise_mono.tex layers (darkens), no flicker (ColorXfm x 0.8..0.9 under
+  ProFilm), GH2's bright pass for bloom (D54). (2) small_club_02's
+  TexRenderer directories (tattoos_a, vehicles) drew over the whole venue:
+  the white paisley over walls, floor and band (D56). (3) particles ignored
+  the environ's ambient (use_environ) and screen_aspect (D56).
+- **Numbers, fixed shots, luma before -> after (movies 69.3):**
+  small_club_02 158.8 -> 113.4, big_club_03 185.3 -> 174.8, theater_02
+  87.4 -> 63.1 (-9%: within), arena_04 166.0 -> 153.5. Grain 4.22 / 3.07 /
+  5.10 / 3.74 -> 2.74 / 1.34 / 3.04 / 1.77 (movies 1.97). Contrast within
+  15% in big_club_03 (58.9) only. Post off on small_club_02: 132.3 (RB's
+  post now darkens, as the original's); spotlights off: 113.6 (not the
+  cause in these shots).
+- **Left (not fixed, measured):** big_club_03 with every particle system
+  off is 51.6: its stage fog (stage_fog.part, smoke_02.mat, additive, 23
+  particles of 200..500 units) fills close-ups white; RB's particle maths
+  read the same as the port's (particles shader, draw 0x82476498, init
+  0x821D33E8, pre-spawn 0x821D8FE8: emission per frame, sizes, colours)
+  so the difference is still open. Band members lit near white under the
+  presets' lights (band.env ambient 0.34 0.78 0.80, light 1.19 1.79 3.0)
+  in close-ups. rb_look fails on luma in three of four venues.
+- **Pause:** pause.milo's black_bg.mesh (black, alpha 0.7, SrcAlpha, the
+  whole screen) is the rule; the port already draws it: the background at
+  1.03 of the rule (0.3 of the colour before the display curve; median of
+  32400 pixels) (D57). It looked bright because the world was.
+- **Frame rate (finding):** RB paces the world by the PostProc's
+  emulate_fps (D55): ProFilm (the band shots) 24, the default 30: the
+  venue and the band are drawn on 2 of every 5 frames at 60 Hz (3:2), the
+  track and HUD every frame. Done as the default; measured: the world drawn
+  24.0 times a second while frames run at 235. Backlog GD05-075
+  (Enhancement): separate world / highway rates.
+- Verified: rb_look on four venues (numbers above); the gd05 gate (see the
+  final report).
