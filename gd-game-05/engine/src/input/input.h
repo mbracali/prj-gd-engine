@@ -135,6 +135,9 @@ public:
 
     Input();
     ~Input();
+    // GD05-061 (Linux): reads what each pad's kernel device sent (the
+    // report's "Kernel device" line); poll() does it each frame.
+    void drainKernel() const;
     // Closes all controllers; must run before SDL_Quit().
     void close();
     void handle(const SDL_Event& e, std::vector<InputEvent>& out);
@@ -497,6 +500,17 @@ private:
     std::function<void(const std::string&)> traceSink_;
     bool traceLog_ = false;
     std::map<SDL_JoystickID, std::array<uint64_t, 2>> eventCounts_;  // joystick, gamepad events by device
+    // GD05-061 (Linux): each pad's kernel device read by a reader of our
+    // own beside SDL's, to tell in the report whether the controller sent
+    // anything to the system at all (events, not SYN) while SDL passed on
+    // nothing. Drained each frame (poll) and by the report.
+    struct KernelProbe {
+        int fd = -1;
+        std::string path;
+        uint64_t events = 0, dropped = 0;
+    };
+    mutable std::map<SDL_JoystickID, KernelProbe> kernel_;
+    void closeKernel(SDL_JoystickID id);
     std::vector<RawEvent> raw_;  // the last kRawEvents, oldest first (for the report)
     std::unordered_map<SDL_JoystickID, Pad> pads_;
     ControllerMode lastMode_ = ControllerMode::Guitar;

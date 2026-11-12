@@ -2,6 +2,11 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "input/input.h"
 
+#if defined(__linux__)
+#include <fcntl.h>
+#include <linux/input.h>
+#include <unistd.h>
+#endif
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -375,6 +380,7 @@ void Input::closeShake() {
 
 void Input::close() {
     closeShake();
+    while (!kernel_.empty()) closeKernel(kernel_.begin()->first);
     for (auto& [id, p] : pads_) SDL_CloseGamepad(p.pad);
     pads_.clear();
     midiDevs_.clear();
@@ -721,6 +727,14 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
             for (int s = 0; s < kPlayers && np.slot < 0; ++s)
                 if (!slotTaken(s, nullptr) && playerEnabled(s)) np.slot = s;
         pads_[id] = np;
+#if defined(__linux__)
+        if (const char* path = SDL_GetGamepadPath(pad); path && SDL_strncmp(path, "/dev/input/event", 16) == 0) {
+            KernelProbe k;
+            k.path = path;
+            k.fd = ::open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+            kernel_[id] = k;
+        }
+#endif
         SDL_Log("Controller connected: %s (%04x:%04x, %s, %s)", np.name.c_str(), SDL_GetGamepadVendorForID(id),
                 SDL_GetGamepadProductForID(id), profileName(profile), np.slot < 0 ? "no player" : np.slot == 0 ? "player 1" : "player 2");
         break;
@@ -731,6 +745,7 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
             // moving a direction held as it went away (a wireless pad asleep).
             device_ = int64_t(it->first);
             releaseAll(it->second, e.gdevice.timestamp, out);
+            closeKernel(it->first);
             SDL_CloseGamepad(it->second.pad);
             pads_.erase(it);
         }
@@ -859,6 +874,7 @@ std::string Input::gh2Type(const std::string& id) const {
 }
 
 bool Input::writeReport() const {
+    drainKernel();
     std::ofstream out(reportPath());
     if (!out) return false;
     const int v = SDL_GetVersion();
@@ -887,6 +903,20 @@ bool Input::writeReport() const {
             << (j ? SDL_GetNumJoystickHats(j) : 0) << " hats\n"
             << "  Type: " << deviceType(sid) << ", GH2 type " << gh2Type(sid) << ", player "
             << (p.slot < 0 ? std::string("none") : std::to_string(p.slot + 1)) << "\n";
+        if (auto k = kernel_.find(id); k != kernel_.end()) {
+            const auto c = eventCounts_.find(id);
+            const uint64_t sdl = c == eventCounts_.end() ? 0 : c->second[0];  // joystick events: one per kernel event
+            out << "  Kernel device " << k->second.path << ": "
+                << (k->second.fd < 0 ? std::string("cannot be read")
+                                     : std::to_string(k->second.events) + " events from the controller" +
+                                           (k->second.dropped ? " (" + std::to_string(k->second.dropped) + " buffer overflows)" : ""))
+                << ", SDL joystick events " << sdl << "\n";
+            if (k->second.fd >= 0 && !k->second.events)
+                out << "  -> The controller sent nothing to the system while the game ran (its cable / USB port, the\n"
+                       "     guitar itself, or the xpad driver): not a setting of the game.\n";
+            else if (k->second.events && !sdl)
+                out << "  -> The system had the controller's events but SDL gave the game none.\n";
+        }
         if (char* m = SDL_GetGamepadMapping(p.pad)) {
             out << "  SDL mapping: " << m << "\n";
             SDL_free(m);
@@ -1869,7 +1899,32 @@ void Input::pollShake(uint64_t nowNs, std::vector<InputEvent>& out) {
     }
 }
 
+void Input::drainKernel() const {
+#if defined(__linux__)
+    for (auto& [id, k] : kernel_) {
+        input_event e[64];
+        for (ssize_t n; k.fd >= 0 && (n = read(k.fd, e, sizeof e)) > 0;)
+            for (ssize_t i = 0; i < n / ssize_t(sizeof(input_event)); ++i) {
+                if (e[i].type == EV_SYN && e[i].code == SYN_DROPPED) ++k.dropped;
+                else if (e[i].type != EV_SYN && e[i].type != EV_MSC) ++k.events;
+            }
+    }
+#endif
+}
+
+void Input::closeKernel(SDL_JoystickID id) {
+#if defined(__linux__)
+    if (auto it = kernel_.find(id); it != kernel_.end()) {
+        if (it->second.fd >= 0) ::close(it->second.fd);
+        kernel_.erase(it);
+    }
+#else
+    kernel_.erase(id);
+#endif
+}
+
 void Input::poll(uint64_t nowNs, std::vector<InputEvent>& out) {
+    drainKernel();
     pollShake(nowNs, out);
     pollMidi(nowNs, out);
     for (int p = 0; p < kPlayers; ++p) {

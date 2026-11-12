@@ -4551,6 +4551,7 @@ void App::startCapture() {
 }
 
 void App::frameCapture() {
+    input_.drainKernel();  // the report's kernel line (GD05-061)
     const SDL_Color text{235, 235, 240, 255}, dim{150, 150, 165, 255}, accent{255, 210, 80, 255};
     canvas_.begin({14, 12, 20, 255});
     canvas_.textCentered(kScreenW * 0.5f, 40, 3, text, "Input capture");

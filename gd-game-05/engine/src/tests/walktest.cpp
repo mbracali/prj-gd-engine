@@ -4,6 +4,16 @@
 
 #include <set>
 #include <SDL3/SDL.h>
+#if defined(__linux__)
+#include <fcntl.h>
+#include <linux/input.h>
+#include <linux/uinput.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -70,7 +80,123 @@ bool whitelisted(const std::string& key, const std::vector<std::string>& wl) {
     return false;
 }
 
+// GD05-061: the device walks' controller as a kernel input device
+// (GD05_WALK_EVDEV): "uinput" makes one that is the owner's Harmonix Rock
+// Band Guitar as the kernel shows it (gd-game-05/tools/uinput_guitar.c:
+// name, 1bad:0002 v0103, 11 buttons, 6 axes, a hat), a /dev/input/eventN
+// path writes into that device (the real guitar's own node: evdev passes
+// written events to every reader as the device's). Either way SDL reads it
+// as the real controller (evdev, its real GUID), in the launcher too;
+// without it the walks use an SDL virtual joystick.
+struct EvdevOut {
+    int fd = -1;
+    bool created = false;
+    std::string node;  // /dev/input/eventN the game reads
+    ~EvdevOut() { close(); }
+    void close() {
+#if defined(__linux__)
+        if (fd >= 0) {
+            if (created) ioctl(fd, UI_DEV_DESTROY);
+            ::close(fd);
+        }
+#endif
+        fd = -1, created = false, node.clear();
+    }
+};
+EvdevOut g_evdev;
+
+#if defined(__linux__)
+void evdevEmit(int type, int code, int value) {
+    input_event e[2];
+    std::memset(e, 0, sizeof e);
+    e[0].type = Uint16(type), e[0].code = Uint16(code), e[0].value = value;
+    e[1].type = EV_SYN, e[1].code = SYN_REPORT;
+    if (write(g_evdev.fd, e, sizeof e) != ssize_t(sizeof e)) SDL_Log("walk: evdev write: %s", std::strerror(errno));
+}
+// SDL's evdev numbering: buttons and axes in code order.
+constexpr int kEvdevButtons[11] = {BTN_A, BTN_B, BTN_X, BTN_Y, BTN_TL, BTN_TR, BTN_SELECT, BTN_START, BTN_MODE, BTN_THUMBL, BTN_THUMBR};
+constexpr int kEvdevAxes[6] = {ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ};
+#endif
+
+// Opens GD05_WALK_EVDEV; "" when the walk is to use a virtual joystick.
+std::string evdevOpen(const std::string& spec) {
+#if defined(__linux__)
+    g_evdev.close();
+    if (spec != "uinput") {
+        g_evdev.fd = ::open(spec.c_str(), O_WRONLY | O_CLOEXEC);
+        if (g_evdev.fd < 0) return "cannot open " + spec + ": " + std::strerror(errno);
+        g_evdev.node = spec;
+    } else {
+        g_evdev.fd = ::open("/dev/uinput", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+        if (g_evdev.fd < 0) return std::string("cannot open /dev/uinput: ") + std::strerror(errno);
+        ioctl(g_evdev.fd, UI_SET_EVBIT, EV_KEY);
+        ioctl(g_evdev.fd, UI_SET_EVBIT, EV_ABS);
+        for (const int b : kEvdevButtons) ioctl(g_evdev.fd, UI_SET_KEYBIT, b);
+        // The owner's guitar's ranges and rest values (EVIOCGABS of his event9).
+        uinput_abs_setup abs[] = {
+            {ABS_X, {0, -32768, 32767, 16, 128, 0}},        {ABS_Y, {0, -32768, 32767, 16, 128, 0}},
+            {ABS_Z, {229, 0, 255, 0, 0, 0}},                {ABS_RX, {-32768, -32768, 32767, 16, 128, 0}},
+            {ABS_RY, {-32768, -32768, 32767, 16, 128, 0}},  {ABS_RZ, {0, 0, 255, 0, 0, 0}},
+            {ABS_HAT0X, {0, -1, 1, 0, 0, 0}},               {ABS_HAT0Y, {0, -1, 1, 0, 0, 0}},
+        };
+        for (const uinput_abs_setup& a : abs) ioctl(g_evdev.fd, UI_SET_ABSBIT, a.code), ioctl(g_evdev.fd, UI_ABS_SETUP, &a);
+        uinput_setup setup;
+        std::memset(&setup, 0, sizeof setup);
+        setup.id.bustype = BUS_USB, setup.id.vendor = 0x1bad, setup.id.product = 0x0002, setup.id.version = 0x0103;
+        std::snprintf(setup.name, sizeof setup.name, "Harmonix Rock Band Guitar");
+        if (ioctl(g_evdev.fd, UI_DEV_SETUP, &setup) < 0 || ioctl(g_evdev.fd, UI_DEV_CREATE) < 0) {
+            const std::string why = std::strerror(errno);
+            g_evdev.close();
+            return "uinput: " + why;
+        }
+        g_evdev.created = true;
+        char sys[64] = "";
+        ioctl(g_evdev.fd, UI_GET_SYSNAME(sizeof sys), sys);
+        std::error_code ec;
+        for (const auto& d : std::filesystem::directory_iterator(std::string("/sys/devices/virtual/input/") + sys, ec))
+            if (d.path().filename().string().rfind("event", 0) == 0) g_evdev.node = "/dev/input/" + d.path().filename().string();
+        if (g_evdev.node.empty()) return std::string("uinput: no event node under ") + sys;
+    }
+    return "";
+#else
+    (void)spec;
+    return "GD05_WALK_EVDEV is Linux only";
+#endif
+}
+
 }  // namespace
+
+// The walk's controller: the SDL virtual joystick, or the kernel device.
+static void devButton(SDL_Joystick* j, int button, bool on) {
+#if defined(__linux__)
+    if (g_evdev.fd >= 0) {
+        if (button >= 0 && button < 11) evdevEmit(EV_KEY, kEvdevButtons[button], on ? 1 : 0);
+        return;
+    }
+#endif
+    SDL_SetJoystickVirtualButton(j, button, on);
+}
+static void devHat(SDL_Joystick* j, int hat, Uint8 v) {
+#if defined(__linux__)
+    if (g_evdev.fd >= 0) {
+        evdevEmit(EV_ABS, ABS_HAT0X, (v & SDL_HAT_RIGHT) ? 1 : (v & SDL_HAT_LEFT) ? -1 : 0);
+        evdevEmit(EV_ABS, ABS_HAT0Y, (v & SDL_HAT_DOWN) ? 1 : (v & SDL_HAT_UP) ? -1 : 0);
+        return;
+    }
+#endif
+    SDL_SetJoystickVirtualHat(j, hat, v);
+}
+static void devAxis(SDL_Joystick* j, int axis, Sint16 v) {
+#if defined(__linux__)
+    if (g_evdev.fd >= 0) {
+        if (axis < 0 || axis >= 6) return;
+        const bool trigger = axis == 2 || axis == 5;  // 0..255 on this device
+        evdevEmit(EV_ABS, kEvdevAxes[axis], trigger ? (int(v) + 32768) * 255 / 65535 : int(v));
+        return;
+    }
+#endif
+    SDL_SetJoystickVirtualAxis(j, axis, v);
+}
 
 static void measureTextColors(ui::UiManager& ui, const std::string& tag, std::vector<std::string>& bad);
 
@@ -1018,7 +1144,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         auto dev = [&](const std::string& what) { checkS("dev_set " + what + " 1"), wait(90), checkS("dev_set " + what + " 0"), wait(220); };
         const std::string green = "b0", strumDown = "hat4", start = pad ? "b6" : "b7";
         if (owner) check("dev_owner_guid");
-        checkS(pad ? "dev_attach 045e:028e" : "dev_attach 1bad:0002:rbguitar");
+        checkS(pad ? "dev_attach 045e:028e" : "dev_attach 1bad:0002:rbguitar", 10000);
         if (owner) check("dev_owner_json");
         at("splash_screen", 30000);
         wait(500);  // the device settles (its first 300 ms are its rest values)
@@ -3612,12 +3738,39 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (nowMs - stepStart_ > s.ms) return fail(od ? "Overdrive was never deployed with the keyboard" : "the song ended before the keyboard played its gems");
         return;
     }
+    if (s.screen.rfind("dev_attach ", 0) == 0 && SDL_getenv("GD05_WALK_EVDEV") && *SDL_getenv("GD05_WALK_EVDEV") &&
+        s.screen.find("rbguitar") != std::string::npos) {
+        // The guitar as a kernel device (GD05-061): the game's own Input opens
+        // it when SDL announces it; this step waits for that.
+        if (g_evdev.fd < 0) {
+            const std::string why = evdevOpen(SDL_getenv("GD05_WALK_EVDEV"));
+            if (!why.empty()) return fail(why);
+            std::printf("  device: kernel input device %s (%s)\n", g_evdev.node.c_str(), g_evdev.created ? "uinput, the owner's guitar" : "written into");
+            for (int b = 0; b < 11; ++b) devButton(nullptr, b, false);
+            devHat(nullptr, 0, SDL_HAT_CENTERED);
+        }
+        int n = 0;
+        if (SDL_JoystickID* ids = SDL_GetGamepads(&n)) {
+            for (int i = 0; i < n && !adapter_; ++i) {
+                const char* path = SDL_GetGamepadPathForID(ids[i]);
+                if (path && g_evdev.node == path && SDL_GetJoystickFromID(ids[i])) adapter_ = ids[i];
+            }
+            SDL_free(ids);
+        }
+        if (adapter_) {
+            char guid[64];
+            SDL_GUIDToString(SDL_GetGamepadGUIDForID(adapter_), guid, sizeof guid);
+            std::printf("  device: SDL gamepad %u, %s, GUID %s, opened by the game\n", unsigned(adapter_), SDL_GetGamepadNameForID(adapter_), guid);
+            return pass();
+        }
+        return nowMs - stepStart_ > s.ms ? fail("SDL never opened " + g_evdev.node) : void();
+    }
     if (s.screen.rfind("dev_attach ", 0) == 0) {
         adapter_ = Input::attachVirtualPad(s.screen.substr(11));
         // A pad's triggers rest at the axis' bottom (SDL maps -32768..32767 to 0..32767).
         if (SDL_Joystick* j = adapter_ && s.screen.find("rbguitar") == std::string::npos ? SDL_OpenJoystick(adapter_) : nullptr) {
-            SDL_SetJoystickVirtualAxis(j, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, -32768);
-            SDL_SetJoystickVirtualAxis(j, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, -32768);
+            devAxis(j, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, -32768);
+            devAxis(j, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, -32768);
             SDL_UpdateJoysticks();
         }
         return adapter_ ? pass() : fail("no virtual device");
@@ -3628,8 +3781,8 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (!j) return fail("the virtual device is not open");
         const std::string what = s.screen.substr(8, s.screen.rfind(' ') - 8);
         const bool on = s.screen.back() == '1';
-        if (what.rfind("hat", 0) == 0) SDL_SetJoystickVirtualHat(j, 0, on ? Uint8(std::atoi(what.c_str() + 3)) : SDL_HAT_CENTERED);
-        else SDL_SetJoystickVirtualButton(j, std::atoi(what.c_str() + 1), on);
+        if (what.rfind("hat", 0) == 0) devHat(j, 0, on ? Uint8(std::atoi(what.c_str() + 3)) : SDL_HAT_CENTERED);
+        else devButton(j, std::atoi(what.c_str() + 1), on);
         return pass();
     }
     const std::string devId = "pad:" + std::to_string(adapter_);
@@ -3707,7 +3860,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             // No frets; one strum on the first gem (a wrong fret: a miss) and
             // then nothing until three gems passed with the guitar muted.
             if (devTarget_ < 0) devTarget_ = pl->passes() + 3, devReleaseMs_ = -1, devSustainSince_ = ui.host().gameTimeMs();
-            if (devStrumDown_) SDL_SetJoystickVirtualHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
+            if (devStrumDown_) devHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
             const double t = ui.host().gameTimeMs();
             const auto& gems = pl->chart().gems;
             while (devGem_ < gems.size() && (gems[devGem_].ms < t - 60 || !gems[devGem_].ownedBy(0))) ++devGem_;
@@ -3715,18 +3868,18 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             const unsigned wrong = devGem_ < gems.size() ? ((gems[devGem_].frets & 1) ? 2u : 1u) : 1u;
             for (const int f : {0, 1, 2, 3, 4}) {
                 static const int kGuitar[5] = {0, 1, 3, 2, 4};
-                SDL_SetJoystickVirtualButton(j, kGuitar[f], devReleaseMs_ < 0 && ((wrong >> f) & 1));
+                devButton(j, kGuitar[f], devReleaseMs_ < 0 && ((wrong >> f) & 1));
             }
             devHeld_ = 0;
             if (devReleaseMs_ < 0 && nowMs - stepStart_ > 150 && devGem_ < gems.size() && t >= gems[devGem_].ms - 8)  // the hat let go frames ago
-                SDL_SetJoystickVirtualHat(j, 0, SDL_HAT_DOWN), devStrumDown_ = true, devReleaseMs_ = t;
+                devHat(j, 0, SDL_HAT_DOWN), devStrumDown_ = true, devReleaseMs_ = t;
             if (pl->passes() >= devTarget_ && !pl->guitarAudible()) {
                 int sounds = 0;
                 for (const auto& [name, at] : ui.host().gameSfx())
                     if (name.rfind("miss_", 0) == 0 && at >= devSustainSince_) ++sounds;  // miss_gtr.cue (config/player.dta)
                 std::printf("  device: %d gems passed, %d penalties, guitar stem muted, %d miss sound(s), rock meter %.2f, streak %d\n", pl->passes(), pl->penalties(), sounds,
                             pl->rockMeter(), pl->streak());
-                if (devStrumDown_) SDL_SetJoystickVirtualHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
+                if (devStrumDown_) devHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
                 if (!sounds) {
                     std::string heard;
                     for (const auto& [name, at] : ui.host().gameSfx())
@@ -3744,20 +3897,20 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         // Last frame's strum and tilt end.
         // (A hat let go and pressed again in one frame would be no event: the next strum waits a frame.)
         const bool strumWait = devStrumDown_;
-        if (devStrumDown_) SDL_SetJoystickVirtualHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
-        if (devTilt_) SDL_SetJoystickVirtualAxis(j, pad ? 0 : 4, 0), SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_BACK, false), devTilt_ = false;
+        if (devStrumDown_) devHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
+        if (devTilt_) devAxis(j, pad ? 0 : 4, 0), devButton(j, SDL_GAMEPAD_BUTTON_BACK, false), devTilt_ = false;
         auto hold = [&](unsigned mask) {
             for (int f = 0; f < 5; ++f) {
                 const bool on = (mask >> f) & 1;
                 if (on == bool((devHeld_ >> f) & 1)) continue;
                 if (!pad) {
                     static const int kGuitar[5] = {0, 1, 3, 2, 4};  // A B Y X LB (the report's mapping)
-                    SDL_SetJoystickVirtualButton(j, kGuitar[f], on);
+                    devButton(j, kGuitar[f], on);
                 } else if (f == 0 || f == 3) {  // LT / RT (the virtual pad's axes 4 / 5)
-                    SDL_SetJoystickVirtualAxis(j, f == 0 ? SDL_GAMEPAD_AXIS_LEFT_TRIGGER : SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, on ? 32767 : -32768);
+                    devAxis(j, f == 0 ? SDL_GAMEPAD_AXIS_LEFT_TRIGGER : SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, on ? 32767 : -32768);
                 } else {
                     static const int kPad[5] = {0, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, 0, SDL_GAMEPAD_BUTTON_SOUTH};
-                    SDL_SetJoystickVirtualButton(j, kPad[f], on);
+                    devButton(j, kPad[f], on);
                 }
             }
             devHeld_ = mask;
@@ -3771,7 +3924,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (!pad) {
                 if (t >= g.ms - 70 && devHeld_ != g.frets) hold(g.frets);
                 if (t >= g.ms - 8 && !strumWait) {
-                    SDL_SetJoystickVirtualHat(j, 0, SDL_HAT_DOWN), devStrumDown_ = true;
+                    devHat(j, 0, SDL_HAT_DOWN), devStrumDown_ = true;
                     ++devGem_, ++devPlayed_;
                 }
             } else if (t >= g.ms - 8) {
@@ -3786,7 +3939,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         // The whammy while a sustain is held: right stick X (a guitar's bar from -32768; a pad's left stick).
         const bool sustaining = pl->sustainGem() >= 0;
-        SDL_SetJoystickVirtualAxis(j, pad ? SDL_GAMEPAD_AXIS_LEFTX : 3, sustaining ? 20000 : pad ? 0 : -32768);
+        devAxis(j, pad ? SDL_GAMEPAD_AXIS_LEFTX : 3, sustaining ? 20000 : pad ? 0 : -32768);
         if (sustaining) {
             if (devSustainSince_ < 0) devSustainSince_ = t;
             devWhammied_ = devWhammied_ || pl->whammying();
@@ -3794,14 +3947,14 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             devSustainSince_ = -1;
         }
         if (od && pl->starPowerReady() && !devOdAsked_) {
-            if (pad) SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_BACK, true);
-            else SDL_SetJoystickVirtualAxis(j, 4, 32767);  // tilt
+            if (pad) devButton(j, SDL_GAMEPAD_BUTTON_BACK, true);
+            else devAxis(j, 4, 32767);  // tilt
             devTilt_ = devOdAsked_ = true;
         }
         auto done = [&] {
             hold(0), devTarget_ = -1, devReleaseMs_ = -1;
-            if (devStrumDown_) SDL_SetJoystickVirtualHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
-            SDL_SetJoystickVirtualAxis(j, pad ? SDL_GAMEPAD_AXIS_LEFTX : 3, pad ? 0 : -32768);
+            if (devStrumDown_) devHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
+            devAxis(j, pad ? SDL_GAMEPAD_AXIS_LEFTX : 3, pad ? 0 : -32768);
             return pass();
         };
         if (od && pl->starPowerActive()) return std::printf("  device: Overdrive deployed at %.0f ms\n", t), done();
