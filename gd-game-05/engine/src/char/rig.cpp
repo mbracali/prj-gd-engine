@@ -729,10 +729,13 @@ void Rig::Impl::pollHand(IkHand& h) {
     const int upper = forearm >= 0 ? sk.parent(forearm) : -1;
     if (forearm >= 0 && upper >= 0) {
         // The elbow: law of cosines from the shoulder distance, cos clamped
-        // to [-0.985, 0.88]; the forearm's local rotation becomes that bend
-        // about z (whole matrix, position kept).
+        // to [-1, 1] (Rock Band, RB 0x8232EB48 [C]: the arm or leg straightens
+        // to reach; GH2's [-0.985, 0.88] kept it bent, and a stretch hand
+        // then pulled the hand off the forearm: GD05-066 / 067); the
+        // forearm's local rotation becomes that bend about z (whole matrix,
+        // position kept).
         const V3 d = sub(sk.world(upper).pos, goal);
-        const float c = std::clamp((dot(d, d) - h.a2b2) * h.inv2ab, -0.985f, 0.88f);
+        const float c = std::clamp((dot(d, d) - h.a2b2) * h.inv2ab, -1.0f, 1.0f);
         const float s = -std::sqrt(1 - c * c);
         scene::Xfm fl = sk.local(forearm);
         fl.rot = {c, s, 0, -s, c, 0, 0, 0, 1};

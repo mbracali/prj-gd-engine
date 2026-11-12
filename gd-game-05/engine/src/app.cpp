@@ -773,7 +773,7 @@ private:
         int meterJumps = 0, meterFlickers = 0, meterBeats = 0, meterFrames = 0;
         int starTails = 0, starTailsWrong = 0;   // summed over the frames
         int tailPx = 0, tailChromaPct = -1;       // the last star-tail probe
-        int crowdPx = 0, crowdPxMax = 0, crowdProbes = 0, crowdFrames = 0;
+        int crowdPx = 0, crowdPxMax = 0, crowdProbes = 0, crowdFrames = 0, crowdCharsMax = 0;
         int trackOrderErrors = 0, trackOrderParts = 0, hudOrderInversions = 0, hudOrderDirs = 0;
     } rbProbe_;
     // The venue behind the track (M8): set by the venue code once a venue is
@@ -3103,6 +3103,7 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "star_tail_chroma_pct") return rbProbe_.tailChromaPct;
     if (key == "crowd_px") return rbProbe_.crowdPx;
     if (key == "crowd_px_max") return rbProbe_.crowdPxMax;
+    if (key == "crowd_chars_max") return rbProbe_.crowdCharsMax;
     if (key == "crowd_probes") return rbProbe_.crowdProbes;
     if (key == "crowd_clips") {
         int n = 0;
@@ -3899,6 +3900,7 @@ void App::rbProbes() {
         venueView_->setOnlyCrowd(false);
         const Px p = measure();
         rbProbe_.crowdPx = int(p.n), rbProbe_.crowdPxMax = std::max(rbProbe_.crowdPxMax, int(p.n)), ++rbProbe_.crowdProbes;
+        rbProbe_.crowdCharsMax = std::max(rbProbe_.crowdCharsMax, venueView_->crowdView().charactersDrawn());
         SDL_Log("crowd probe: %s %s: %ld px, %d characters drawn", venue_ ? venue_->name().c_str() : "-",
                 director_ && director_->shot() ? director_->shot()->name.c_str() : "-", p.n, venueView_->crowdView().charactersDrawn());
     }

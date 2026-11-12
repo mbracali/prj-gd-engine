@@ -1581,6 +1581,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("counter:crowd_probes:3");
         check("counter:crowd_clips:8");
         check("counter:crowd_px_max:20000");  // 1% of the 1920 x 1080 picture
+        // ... and from the audience's characters: in the theaters (crowds
+        // hidden in the data, GD05-076) the audience-alone picture had the
+        // whole frame covered with 0 characters drawn and passed.
+        check("counter:crowd_chars_max:1");
         at("endgame_waiting_screen", 90000);
     } else if (scenario == "rb_look") {
         // GD05-069 (owner: "everything is overbright", "the original is

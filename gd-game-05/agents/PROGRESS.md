@@ -1208,3 +1208,54 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   saved; gd10 walks boot and quickplay passed, `tools/fuzz_seeds.sh` 13 / 13,
   `--selftest` 31 FAILED (its expected 31). The launcher builds
   (gd-engine-launcher/build/be6; build.sh not run, no packages).
+
+## 2026-11-12: G06 follow-ups (fix6: rb_lose crash, band HUD box, band stretch, venue light, theater crowds)
+
+- **rb_lose segfault (GD05-086, D72):** the core of the 11-12 gate
+  (gd05_gate6) and three new ones show RbHudView::draw -> reset ->
+  runTasks -> animFrames -> TempoMap::msToTick on freed memory: on a
+  retry the HUD's reset ran the panel's reset anims on the last song's
+  TempoMap. Not MusicLoader nor the parallel inflate (the core's
+  RandomAccessFile reads with pread or a lock). Fixed: reset takes the new
+  song's tempo. rb_lose 9 times, 6 at a time, MALLOC_PERTURB_=165: 5291eb3
+  3 segfaults, fixed 0 (and 9 / 9 again in the final gate).
+- **band_quickplay HUD box (GD05-087, D73):** the expected box of
+  star_power_01 took in the additive sun glow be_ready.trig shows when a
+  member's Overdrive is ready (41..442 vs the meter's 71..409); the drawn
+  glow fades out inside its quad. Glows now only bound the box; the walk
+  sets Overdrive 60 % before the probe: before 17 px (33 in the gen6 gate),
+  after 0 px (3_player_wide: drawn 67..415 within the glow's 40..441).
+- **Band stretch (GD05-066 / 067, D74):** RB's CharIKHand elbow clamp
+  [-1, 1] (RB 0x8232EB48) instead of GH2's [-0.985, 0.88]; every band IK
+  hand has stretch TRUE. GD05_BANDCHECK, inbloom 60 s:
+
+  | bone | before (5291eb3) | after |
+  |---|---|---|
+  | guitar L-hand | 1.243 x bind, 11 of 14,165 frames past 1.2 | 1.111..1.120, 0 |
+  | bass L-hand | 1.389, 103 | 1.159..1.190, 0 |
+  | drummer L-ankle | 1.208, 3,982 of 14,451 | 1.153, 0 |
+  | drummer L-hand (high fps runs) | 2.0..253.9 on 4 of 9 runs | 1.51 / 2.40 on 2 of 5 runs (GD05-088) |
+
+  CharIKScale, pelvis IK and height / weight deform were not the cause of
+  the guitar / bass / ankle cases. The drummer's left hand: its kit
+  targets' local offsets grow without bound (6e4..3e5 units) at high
+  frame rates; an add driver's channel nobody scales down [I] (GD05-088).
+- **Venue brightness (GD05-069): not fixed.** Vulkan now: luma 110.5 /
+  174.1 / 147.2 / 69.9 (small_club_02, big_club_03, arena_04, theater_02;
+  movies 69.3), contrast +41 / +23 / +46 / +25 %, saturation 0.19 / 0.11 /
+  0.13 / 0.26 (0.40), grain 2.37 / 1.21 / 1.72 / 2.39 (1.97). Checked
+  against RB: the light upload (0x827D6F00: colour, w = full until
+  falloff_start, zero at range) is the port's; the particle basis x 0.5
+  (0x82476498) is the port's. big_club_03's white frames are its stage
+  fog systems (stage_fog*.part, additive, black at birth, keyed by their
+  anims to 0.06..0.3, 16..30 quads of 100..400 units).
+- **Theater crowds (GD05-076): not fixed.** rb_crowd passed in theater_01
+  with 0 characters drawn (the audience-alone picture fully covered: 2,073,600
+  px); it now also checks crowd_chars_max >= 1 and fails there (arena_01:
+  700). CamShot show_list is read but never applied: the next lead.
+- **Gate** (fresh build of ad8320f + this, gate1.sh's 41 walks + rb_highway,
+  rb_crowd (default, arena_01, theater_01), rb_look in four venues, rb_lose
+  x9 perturbed, five tests, bandcheck; 6 at a time, each its own
+  XDG_DATA_HOME, `agents/scratch/fix6/gate_par.sh`): 52 of 57 walks OK, 5 of 5
+  tests OK, bandcheck passed. Failed: rb_look in all four venues
+  (GD05-069) and rb_crowd theater_01 (GD05-076), both expected.

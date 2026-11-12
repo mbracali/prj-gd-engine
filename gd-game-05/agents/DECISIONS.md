@@ -949,3 +949,50 @@ pattern). Each says what, why and how to undo it.
 - **Undo:** core_backend.cpp kOrder / kDefaultBackend and
   audiodev::kDefaultBackend choose the defaults; local itself is in git
   history (before this decision's commit).
+
+## D72
+- **What (2026-11-12, GD05-086):** the in-song HUD (render/rb_hud_view.h)
+  keeps no tempo pointer across songs: `RbHudView::reset(introAtMs, tempo)`
+  takes the new song's TempoMap, and `draw` sets it before its own reset;
+  RbTrackView takes its song's before its effects' reset. The reset runs
+  the panel's reset anims (runTasks(0)) at their beat rates; on a retry
+  (rb_lose's) it ran them on the last song's TempoMap, freed by the new
+  load: a segfault in TempoMap::msToTick when the freed memory had been
+  reused (core of the 11-12 gate: RbHudView::draw -> reset -> runTasks ->
+  animFrames -> msToTick). Not a thread race: MusicLoader's reads go
+  through the core's RandomAccessFile (pread or a lock).
+- **Measured:** rb_lose 9 times, 6 at a time, MALLOC_PERTURB_=165: 5291eb3
+  3 segfaults (same stack), fixed 0 (gate: lose_stress_1..9).
+- **Undo:** the `tempo` argument of RbHudView::reset.
+
+## D73
+- **What (2026-11-12, GD05-087):** an in-song HUD element's expected box
+  (RbHudView::expectedBoxes, the walks' rb_hud_box_err_px and the band
+  layout's meterBox) is its meshes' without its glows: additive meshes
+  (blend Add / SrcAlphaAdd), whose textures fade out before their quads'
+  edges, only bound how far its pixels may reach (Box::ox0..oy1). The
+  Overdrive meter's player_meter_sun*.mesh (be_ready.trig's sunburst.anim,
+  alpha pulsing) reached 30 px past the meter's background: whenever a
+  member's Overdrive was ready at the probe the box check failed by 17..33
+  px (band_quickplay: Wave of Mutilation's guitar was ready at 15 s).
+  band_quickplay now sets the first member's meter to 60 % before the probe.
+- **Undo:** Box::ox0..oy1 and the `side` rule in App's HUD probe.
+
+## D74
+- **What (2026-11-12, GD05-066 / 067):** CharIKHand's elbow cosine is
+  clamped to [-1, 1] as Rock Band's (Poll RB 0x8232EB48 [C]: DAT_820071d8
+  -1.0, DAT_8200097c 1.0); the [-0.985, 0.88] was GH2's. Every band IK hand
+  has stretch TRUE (RB moves the hand onto the goal after the elbow), so
+  an arm or leg that could not straighten stretched its hand / ankle bone.
+- **Measured (GD05_BANDCHECK, inbloom 60 s):** guitar L-hand 1.243 x bind
+  (11 frames past 1.2) -> 1.11..1.12 (0); bass 1.39 (103) -> 1.16..1.19 (0);
+  drummer's L-ankle 1.208 (~27 % of frames) -> 1.153 (0).
+- **Not fixed:** at a high frame rate (~14,000 frames in 60 s) the drummer's
+  left_hand.ikhand targets (bone_L-tip_<pad>, children of the kit's
+  bone_target_*) drift to 6e4..3e5 units and keep growing, and the hand's
+  local position leaves the forearm (1.5..254 x bind, 2 of 5 runs): a
+  channel the add driver (CharDriver apply != 0, skipScaleDown) adds into
+  every frame while no blend driver scales it down [I]. Scaling the add
+  drivers down too only reduced it (254 frames past 1.2). RB's CharDriver
+  Poll for apply add has to be read (GD05-088).
+- **Undo:** the clamp in Rig::Impl::pollHand.
