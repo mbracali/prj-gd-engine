@@ -1500,3 +1500,15 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   menu cameras (select_cam shots) and the lobby slots' characters;
   GD05-091 (seldiff's per-player slots), GD05-092 (the deform's MeshDeform
   bake, CharCuff, CharIKScale).
+- **Gate** (a clean build of 8959475 exported to agents/scratch/fix8/head,
+  with FFmpeg; `agents/scratch/fix8/gate_par.sh`, 6 at a time): 50 of 62
+  walks OK, 5 of 5 tests OK, bandcheck 4 of 4 passed (6,263..14,179
+  frames; drummer channels 1.000 x, stretch worst 1.188 x bind) and the
+  legacy run FAILED as it should (8,487 x). Failed: rb_look in all four
+  venues (luma 71.4 / 53.8 / 78.1 / 42.3, contrast +22 / +10 / +37 /
+  +13 %; small_club_02 and big_club_03 on the pause check, GD05-089);
+  rb_crowd arena_01, rb_guitar_none (HUD box 6 px) and rb_highway
+  (meter_frames) under the load, all OK when run alone right after (and
+  rb_crowd arena_01 with GD05_SD_PROXY_LEGACY=1 too); rb_band_lobby,
+  rb_body_deform, rb_shop_drum, rb_shop_mic are another task's new walks
+  in gate1.sh, not in this commit (unknown walk).
