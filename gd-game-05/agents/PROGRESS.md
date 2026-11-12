@@ -33,7 +33,12 @@ bottom. "Verified" lines quote the command and its output; "built only" and
   frame-rate check is not conclusive; the drummer's worst stretch varies
   between runs (1.22 / 7.92). Shots (GD05_FACE_CAM per member, GD05_POST=0)
   looked at: guitarist fretting and strumming, singer singing into the mic.
-- **Left:** the drummer's hand IK over-reaches on some frames (FAIL),
+- **Later the same day:** the drum hand clip sets key a different target
+  bone per clip; the driver scaled down only the newest clip's channels, so
+  the older ones summed for ever (targets 1e4 .. 1e5 units away). Older
+  clips' channels now scale too (ClipDriver::poll, Bones::scaleDownOthers)
+  [I]: drummer worst 7.92 -> 1.208 x bind (the ankle, 3849 of 14095 frames).
+- **Left:** the drummer's ankle just past 1.2 (FAIL),
   guitar / bass hands past 1.2 x bind on 0.1% / 0.7% of frames (FAIL;
   RB's height / weight deform and CharIKScale are not applied),
   expression.drv faces, the guitarists' singalong, Overdrive / crowd

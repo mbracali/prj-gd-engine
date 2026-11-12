@@ -47,6 +47,10 @@ public:
     void scaleAdd(const scene::CharClipSamples& clip, float w, float frame, float dframe);
     // The clip's channels times `f`.
     void scaleDown(const scene::CharClipSamples& clip, float f);
+    // The older clips' channels that the newest lacks, once each, times `f`
+    // [I: Rock Band's hand / drum clip sets key different target bones per
+    // clip; scaled with the newest's only, those channels summed for ever].
+    void scaleDownOthers(const scene::CharClipSamples& newest, const std::vector<const scene::CharClipSamples*>& older, float f);
     // The clip's pose at `frame` as an additive layer (CharClip slot 7,
     // 0x82161F98 -> 0x8215E6A0): positions and angles added, quaternions
     // q = clip * q. The static set at its sample, the full set at the frame.

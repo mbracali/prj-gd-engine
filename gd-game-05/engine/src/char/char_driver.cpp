@@ -524,7 +524,13 @@ void ClipDriver::poll(double beat, float dBeats, float dSeconds, Bones* bones) {
     }
     if (!bones) return;
     const float w = weight ? weight() : 1.0f;
-    if (!skipScaleDown) bones->scaleDown(*chain_.back().clip, 1 - total * w);
+    if (!skipScaleDown) {
+        bones->scaleDown(*chain_.back().clip, 1 - total * w);
+        std::vector<const scene::CharClipSamples*> older;
+        for (size_t k = 0; k + 1 < chain_.size(); ++k)
+            if (chain_[k].clip != chain_.back().clip && std::find(older.begin(), older.end(), chain_[k].clip) == older.end()) older.push_back(chain_[k].clip);
+        if (!older.empty()) bones->scaleDownOthers(*chain_.back().clip, older, 1 - total * w);
+    }
     // 0x821A4988: newest first, each its eased share of what is left.
     float left = w;
     for (size_t k = chain_.size(); k-- > 0 && left != 0;) {

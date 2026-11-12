@@ -185,6 +185,26 @@ void Bones::scaleDown(const scene::CharClipSamples& clip, float f) {
     }
 }
 
+void Bones::scaleDownOthers(const scene::CharClipSamples& newest, const std::vector<const scene::CharClipSamples*>& older, float f) {
+    std::vector<char> done(ch_.size(), 0);
+    for (const Set* set : {&newest.one, &newest.full}) {
+        const auto& idx = map(*set);
+        for (int i : idx)
+            if (i >= 0) done[size_t(i)] = 1;
+    }
+    for (const scene::CharClipSamples* c : older)
+        for (const Set* set : {&c->one, &c->full}) {
+            const auto& idx = map(*set);
+            for (int i : idx) {
+                if (i < 0 || done[size_t(i)]) continue;
+                done[size_t(i)] = 1;
+                Channel& ch = ch_[size_t(i)];
+                for (int k = 0; k < floatsOf(ch.type); ++k) ch.v[k] *= f;
+                ch.weight *= f;
+            }
+        }
+}
+
 void Bones::rotateBy(const scene::CharClipSamples& clip, float frame) {
     // 0x82161F98: t clamped to [0, 1] for the full set, 0 for the static one.
     const float t = std::clamp(clipT(clip, frame), 0.0f, 1.0f);
