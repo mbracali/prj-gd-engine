@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "data/qbkey.h"
@@ -148,12 +149,13 @@ void addCoreNatives(Vm& vm) {
         if (!s || s->type != qb::Type::Key) return false;
         qb::Struct params;
         if (const qb::Value* ps = Vm::param(p, K("params")); ps && ps->st) params = *ps->st;
-        // GD10_SPAWNLOG=<script>: who spawns it (development aid).
+        // GD10_SPAWNLOG=<script>: who spawns it; =all: every spawn (and,
+        // below, every KillSpawnedScript: the song's lifecycle) (development aid).
         static const char* spawnLog = SDL_getenv("GD10_SPAWNLOG");
-        if (spawnLog && qbkey::key(spawnLog) == s->key) {
+        if (spawnLog && (qbkey::key(spawnLog) == s->key || std::strcmp(spawnLog, "all") == 0)) {
             std::string w;
             for (auto& f : run.frames) w += " > " + qbkey::name(f.code->name);
-            SDL_Log("spawn %s by%s", spawnLog, w.c_str());
+            SDL_Log("spawn %s by%s", qbkey::name(s->key).c_str(), w.c_str());
         }
         const uint32_t id = v.spawn(s->key, params, run.id);
         if (const qb::Value* sid = Vm::param(p, K("id")))
@@ -169,6 +171,16 @@ void addCoreNatives(Vm& vm) {
         return spawn(v, run, p, Vm::number(Vm::param(p, K("updateimmediately")), 0) != 0);
     });
     vm.addNative("KillSpawnedScript", [](Vm& v, ScriptRun& run, qb::Struct& p) {
+        static const char* spawnLog = SDL_getenv("GD10_SPAWNLOG");
+        if (spawnLog && std::strcmp(spawnLog, "all") == 0) {
+            const qb::Value* n = Vm::param(p, K("name"));
+            const qb::Value* i = Vm::param(p, K("id"));
+            int alive = 0;
+            for (auto& r : v.runs())
+                if (!r->finished && ((n && r->name == n->key) || (i && r->type == i->key)) && r.get() != &run) ++alive;
+            SDL_Log("kill %s%s (%d running) by %s", n ? qbkey::name(n->key).c_str() : "id ", i ? qbkey::name(i->key).c_str() : "", alive,
+                    qbkey::name(run.name).c_str());
+        }
         if (const qb::Value* n = Vm::param(p, K("name"))) v.killByName(n->key);
         if (const qb::Value* id = Vm::param(p, K("id")))
             for (auto& r : v.runs())

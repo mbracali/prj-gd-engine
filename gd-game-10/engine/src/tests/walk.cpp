@@ -1596,7 +1596,7 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         return true;
     }
     if (what == "check:song_quiet") {
-        // The song's lifecycle (GD10-043..): after a quit / restart / the
+        // The song's lifecycle (GD10-060): after a quit / restart / the
         // song's end, nothing of the song is left: no song stream on the
         // mixer, no crowd voice (a voice under User_Crowd, or a crowd sample
         // on another buss), no loading-screen swell or song script still
@@ -1635,6 +1635,12 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
             bool songScript = r->type == qbkey::key("song_event_scripts");
             for (const char* n : kSongScripts) songScript = songScript || r->name == qbkey::key(n);
             if (songScript) std::printf("  song_quiet: script %s still running\n", qbkey::name(r->name).c_str()), ++bad;
+        }
+        {
+            std::string alive;
+            for (const auto& r : fe.vm().runs())
+                if (!r->finished) alive += " " + qbkey::name(r->name);
+            std::printf("  song_quiet: scripts running:%s\n", alive.c_str());
         }
         const qb::Value* fes = fe.vm().global(qbkey::key("crowd_in_Front_End_state"));
         if (fes && fes->number() != 1) std::printf("  song_quiet: crowd_in_Front_End_state %g (the one-shots go on)\n", double(fes->number())), ++bad;

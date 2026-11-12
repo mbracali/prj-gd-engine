@@ -410,7 +410,7 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
     // gh4's kill_gem_scroller calls SongUnLoad instead (not on a restart);
     // unhandled, a quit song played on under the menus, unpaused by
     // ui_deinit_gameplay's UnpauseGame, and its end (GuitarEvent_SongWon)
-    // pulled the menus back to gameplay (owner, GD10-043) [C script
+    // pulled the menus back to gameplay (owner, GD10-060) [C script
     // kill_gem_scroller (gh4); I: the native unloads the song's streams].
     auto songUnload = [&fe](Vm&, ScriptRun&, qb::Struct&) {
         if (fe.songPlaying) fe.songKill = true;

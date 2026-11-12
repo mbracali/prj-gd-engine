@@ -345,6 +345,23 @@ void SongHooks::begin(SongScreen& s) {
     // start_gem_scroller's own sound setup: the venue's crowd echo / reverb
     // and the guitar buss dry [C script start_gem_scroller].
     vm.run(K("GuitarEvent_EnterVenue"), qb::Struct{});
+    // start_gem_scroller's crowd: crowd_in_Front_End_state = 0 (the one-shots
+    // may play), then per player crowd_reset (with the HUD, not Lou's finish's
+    // restart): the meters at 1, change_crowd_looping_sfx neutral (good for a
+    // boss / an intro_zakk / ted / Metallifacts) -> the venue's crowd bed
+    // (Skate8_SFX_Backgrounds_New_Area, a cross-fade from the menus' 10% bed)
+    // and its one-shots every 4.5..8 s (One_Shot_SoundEvent, waittime 5).
+    // Never run: the venue's crowd stayed the menus' quiet bed until the
+    // meter first crossed a threshold, no one-shots before [C script
+    // start_gem_scroller, crowd_reset, do_actual_changing_of_looping_sound].
+    vm.setGlobal(K("crowd_in_Front_End_state"), Vm::makeInt(0));
+    if (Vm::number(vm.global(K("tutorial_disable_hud")), 0) == 0 && Vm::number(vm.global(K("end_credits")), 0) == 0)
+        for (int p = 1; p <= players_; ++p) {
+            qb::Struct cp;
+            Vm::set(cp, K("player"), Vm::makeInt(p));
+            Vm::set(cp, K("player_status"), Vm::makeKey(K("player" + std::to_string(p) + "_status")));
+            vm.spawn(K("crowd_reset"), cp);
+        }
     vm.run(K("GH3_Set_Guitar_Verb_And_Echo_to_Dry"), qb::Struct{});
     // reset_score: current_section_array = <song>_markers, its entry 0 [C
     // script reset_score]; the entry then follows the song (frame()) [I: the
