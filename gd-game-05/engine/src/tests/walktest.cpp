@@ -1066,8 +1066,9 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     } else if (scenario == "rb_look") {
         // GD05-069 (owner: "everything is overbright", "the original is
         // darker with a stronger film grain", "the pause background stays
-        // too bright"): the world alone (no track or HUD) sampled every
-        // 1.5 s from 12 s into a song, each frame's luma mean, contrast (its
+        // too bright"): the world alone (no track or HUD) in 30 fixed shots
+        // (the venue's BandCamShots by name, every 7th, 1.5 s each) from 12 s
+        // into a song, each frame's luma mean, contrast (its
         // standard deviation), saturation and grain (the mean |luma - its 3x3
         // box| where luma > 20) at 640x360, against the disc's own gameplay
         // movies (videos/entersandman, tomsawyer, learntofly, gowiththeflow,
@@ -1098,13 +1099,20 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);
         at("game_screen", 60000);
         wait(12000);
-        for (int i = 0; i < 30; ++i) wait(1500), check("look:frame");
-        check("look:eval");
+        // Fixed shots: the venue's BandCamShots by name, every 7th (#0, #7,
+        // ... GD05_FORCE_SHOT), 1.5 s into each.
+        for (int i = 0; i < 30; ++i) {
+            const std::string next = "look:shot:" + std::to_string(i * 7);
+            check(next.c_str());
+            wait(1500), check("look:frame");
+        }
         check("look:prepause");
         key(SDLK_ESCAPE);
         at("pause_screen", 10000);
         wait(1500);
         check("look:pause");
+        check("look:shot:");
+        check("look:eval");
     } else if (scenario == "quickplay") {
         endMs_ = 30000;  // the song ends early (the walk's end time; GD05_WALK_END overrides)
         if (const char* e = SDL_getenv("GD05_WALK_END")) endMs_ = float(std::atof(e));
@@ -3738,6 +3746,12 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         // rb_look: the frame (saved as look_NN.bmp / look_pause.bmp under
         // GD05_WALK_SHOTS) at 640x360 (2x2 boxes of the 1280x720 picture).
         const std::string what = s.screen.substr(5);
+        if (what.rfind("shot:", 0) == 0) {  // the next fixed shot (empty: the director's again)
+            const std::string n = what.substr(5);
+            if (n.empty()) SDL_unsetenv_unsafe("GD05_FORCE_SHOT");
+            else SDL_setenv_unsafe("GD05_FORCE_SHOT", ("#" + n).c_str(), 1);
+            return pass();
+        }
         const int draws = ui.host().gameCounter(0, "world_draws"), holds = ui.host().gameCounter(0, "world_holds");
         if (what == "frame" && lookPace_[0] < 0) lookPace_ = {nowMs, double(draws), double(draws + holds)};
         if (what == "eval") {
@@ -3797,9 +3811,9 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 for (int i = x0 / 2; i < x1 / 2 && i < w; ++i) s += y[size_t(j) * size_t(w) + size_t(i)], ++c;
             return c ? s / c : 0.0;
         };
-        // Free of the pause art (pause.milo at 1280x720): the strip under the
-        // help bar's top and above it, left of the menu.
-        const double bg = box(20, 560, 240, 640);
+        // Free of the pause art (pause.milo at 1280x720): the top right
+        // corner, right of the octopus.
+        const double bg = box(1190, 10, 1270, 80);
         SDL_DestroySurface(img);
         if (what == "prepause") {
             lookPrePause_ = bg;
@@ -3809,8 +3823,9 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (what == "pause") {
             const double ratio = lookPrePause_ > 1 ? bg / lookPrePause_ : 0;
             std::printf("  look: paused, background box luma %.1f = %.2f of the game's (black_bg.mat: 0.30)\n", bg, ratio);
-            if (lookPrePause_ <= 1) return fail("look: the box before the pause is black");
-            if (std::fabs(ratio - 0.30) > 0.06) return fail("look: the pause background is " + std::to_string(ratio) + " of the game's, not 0.30");
+            if (lookPrePause_ <= 20) return fail("look: the box before the pause is too dark to measure");
+            // The flicker (x 0.8..0.9 under ProFilm) and the grain move it a little.
+            if (std::fabs(ratio - 0.30) > 0.08) return fail("look: the pause background is " + std::to_string(ratio) + " of the game's, not 0.30");
             return pass();
         }
         double grain = 0;

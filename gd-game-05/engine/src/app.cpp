@@ -299,6 +299,8 @@ public:
     std::array<SongResult, 2> lastResult_{};
     const BandPerformer* gameBand() const override { return coopBand_.get(); }
     int gameCounter(int player, const std::string& key) const override;
+    // GD05_FORCE_SHOT: a CamShot by name, or #N the venue's N-th BandCamShot by name.
+    const scene::CamShot* forcedShot(const std::string& spec) const;
     void setPlayerSwitch(int index, const std::string& name, bool on) override {
         Player* p = index == 0 ? player_.get() : player2_.get();
         if (!p) return;
@@ -2557,9 +2559,10 @@ void App::updateSong(float t) {
             director_->setStarPower(player_->starPowerActive() || (player2_ && player2_->starPowerActive()));
             rbShots(t);
             director_->update();
-            // Development aid: GD05_FORCE_SHOT=<CamShot> plays that shot whenever another starts.
+            // Development aid: GD05_FORCE_SHOT=<CamShot> plays that shot whenever another starts;
+            // #N the venue's N-th BandCamShot by name (the rb_look walk's fixed shots).
             if (const char* fs = SDL_getenv("GD05_FORCE_SHOT"))
-                if (const auto* shot = venue_->find<scene::CamShot>(fs); shot && director_->shot() != shot) {
+                if (const auto* shot = forcedShot(fs); shot && director_->shot() != shot) {
                     director_->forceShot(shot);
                     director_->update();
                 }
@@ -2844,6 +2847,15 @@ void App::gameBegin() {
         for (int p = 0; p < 2; ++p)
             if (Player* pl = p == 0 ? player_.get() : player2_.get()) pl->setCrowdRating(1.0f);
     beginSong();
+}
+
+const scene::CamShot* App::forcedShot(const std::string& spec) const {
+    if (!venue_) return nullptr;
+    if (spec.empty() || spec[0] != '#') return venue_->find<scene::CamShot>(spec);
+    std::vector<scene::BandCamShot*> shots = venue_->all<scene::BandCamShot>();
+    if (shots.empty()) return nullptr;
+    std::sort(shots.begin(), shots.end(), [](const scene::BandCamShot* a, const scene::BandCamShot* b) { return a->name < b->name; });
+    return shots[size_t(std::max(0, std::atoi(spec.c_str() + 1))) % shots.size()];
 }
 
 int App::gameCounter(int player, const std::string& key) const {

@@ -357,7 +357,10 @@ void ParticleSystem::appendQuads(Vec3 camRight, Vec3 camUp, std::vector<float>& 
         const scene::Xfm inv = inverse(drawSpace_);
         right = xfmDir(inv, camRight), up = xfmDir(inv, camUp);
     }
-    right = right * 0.5f, up = up * 0.5f;
+    // RB's particle draw (0x82476498) [C]: gParticleRight = the camera's
+    // right x 0.5, gParticleUp = its up x 0.5 x screen_aspect (the object's
+    // +0x1f0, read after life by Load 0x821D7870).
+    right = right * 0.5f, up = up * (0.5f * (def_->screenAspect > 0 ? def_->screenAspect : 1.0f));  // 0: as 1 [I]
     const Vec3 normal = normalize(cross(right, up));
     auto addParticle = [&](Vec3 pos, const float* color, float size, float angle) {
         if (verts.size() / 16 + 4 > 65535) return;
