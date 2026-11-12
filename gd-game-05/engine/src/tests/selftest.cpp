@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "scene/ui_styles.h"
 #include "tests/selftest.h"
+#include <SDL3/SDL.h>
 
 #include <cstring>
 #include <cctype>
@@ -28,8 +29,193 @@
 #include "game/song_db.h"
 #include "game/song_setup.h"
 #include "input/input_selftest.h"
+#include "scene/milo.h"
 
 namespace {
+
+// GD05-073: the reference raw-deflate decoder the engine had before (Mark
+// Adler's puff.c, a bit at a time), to check scene/inflate.cpp's output and
+// its speed against in the same process.
+class PuffInflater {
+public:
+    PuffInflater(const uint8_t* d, size_t n) : in_(d), size_(n) {}
+    Bytes run() {
+        int last;
+        do {
+            last = bits(1);
+            switch (bits(2)) {
+            case 0: stored(); break;
+            case 1: fixed(); break;
+            case 2: dynamic(); break;
+            default: fail();
+            }
+        } while (!last);
+        return std::move(out_);
+    }
+
+private:
+    struct Huffman {
+        short count[16];
+        short symbol[288];
+    };
+    [[noreturn]] static void fail() { throw std::runtime_error("corrupt deflate stream"); }
+    int bits(int need) {
+        long val = bitbuf_;
+        while (bitcnt_ < need) {
+            if (pos_ >= size_) fail();
+            val |= long(in_[pos_++]) << bitcnt_;
+            bitcnt_ += 8;
+        }
+        bitbuf_ = int(val >> need);
+        bitcnt_ -= need;
+        return int(val & ((1L << need) - 1));
+    }
+    void stored() {
+        bitbuf_ = 0, bitcnt_ = 0;
+        if (pos_ + 4 > size_) fail();
+        const unsigned len = in_[pos_] | in_[pos_ + 1] << 8, nlen = in_[pos_ + 2] | in_[pos_ + 3] << 8;
+        pos_ += 4;
+        if (len != (~nlen & 0xFFFF) || pos_ + len > size_) fail();
+        out_.insert(out_.end(), in_ + pos_, in_ + pos_ + len);
+        pos_ += len;
+    }
+    int decode(const Huffman& h) {
+        int code = 0, first = 0, index = 0;
+        for (int len = 1; len <= 15; ++len) {
+            code |= bits(1);
+            const int count = h.count[len];
+            if (code - count < first) return h.symbol[index + (code - first)];
+            index += count, first += count, first <<= 1, code <<= 1;
+        }
+        fail();
+    }
+    static void construct(Huffman& h, const short* length, int n) {
+        for (auto& c : h.count) c = 0;
+        for (int sy = 0; sy < n; ++sy) h.count[length[sy]]++;
+        short offs[16];
+        offs[1] = 0;
+        for (int len = 1; len < 15; ++len) offs[len + 1] = short(offs[len] + h.count[len]);
+        for (int sy = 0; sy < n; ++sy)
+            if (length[sy] != 0) h.symbol[offs[length[sy]]++] = short(sy);
+    }
+    void codes(const Huffman& lencode, const Huffman& distcode) {
+        static const short base[29] = {3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258};
+        static const short extra[29] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0};
+        static const short dbase[30] = {1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577};
+        static const short dextra[30] = {0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
+        for (;;) {
+            int symbol = decode(lencode);
+            if (symbol < 256) {
+                out_.push_back(uint8_t(symbol));
+            } else if (symbol == 256) {
+                return;
+            } else {
+                symbol -= 257;
+                if (symbol >= 29) fail();
+                const int len = base[symbol] + bits(extra[symbol]);
+                const int ds = decode(distcode);
+                if (ds >= 30) fail();
+                const size_t dist = size_t(dbase[ds] + bits(dextra[ds]));
+                if (dist > out_.size()) fail();
+                const size_t from = out_.size() - dist;
+                for (int i = 0; i < len; ++i) out_.push_back(out_[from + size_t(i)]);
+            }
+        }
+    }
+    void fixed() {
+        Huffman lencode, distcode;
+        short lengths[288];
+        int sy = 0;
+        for (; sy < 144; ++sy) lengths[sy] = 8;
+        for (; sy < 256; ++sy) lengths[sy] = 9;
+        for (; sy < 280; ++sy) lengths[sy] = 7;
+        for (; sy < 288; ++sy) lengths[sy] = 8;
+        construct(lencode, lengths, 288);
+        for (sy = 0; sy < 30; ++sy) lengths[sy] = 5;
+        construct(distcode, lengths, 30);
+        codes(lencode, distcode);
+    }
+    void dynamic() {
+        static const short order[19] = {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
+        const int nlen = bits(5) + 257, ndist = bits(5) + 1, ncode = bits(4) + 4;
+        if (nlen > 286 || ndist > 30) fail();
+        short lengths[320] = {};
+        for (int i = 0; i < ncode; ++i) lengths[order[i]] = short(bits(3));
+        Huffman lencode, distcode;
+        construct(lencode, lengths, 19);
+        int index = 0;
+        while (index < nlen + ndist) {
+            const int symbol = decode(lencode);
+            if (symbol < 16) {
+                lengths[index++] = short(symbol);
+                continue;
+            }
+            int len = 0, rep;
+            if (symbol == 16) {
+                if (index == 0) fail();
+                len = lengths[index - 1], rep = 3 + bits(2);
+            } else if (symbol == 17) {
+                rep = 3 + bits(3);
+            } else {
+                rep = 11 + bits(7);
+            }
+            if (index + rep > nlen + ndist) fail();
+            while (rep--) lengths[index++] = short(len);
+        }
+        if (lengths[256] == 0) fail();
+        construct(lencode, lengths, nlen);
+        construct(distcode, lengths + nlen, ndist);
+        codes(lencode, distcode);
+    }
+    const uint8_t* in_;
+    size_t size_, pos_ = 0;
+    int bitbuf_ = 0, bitcnt_ = 0;
+    Bytes out_;
+};
+
+// GD05-073 (loads): the guitarists' clip milos (28 MB each: the band's clip
+// sets are most of a song's load) through scene::decompressMilo against
+// the reference decoder on one thread: the same bytes, and at most half its
+// time (the best of 3 rounds each, back to back: load on the machine slows
+// both). It was the same code (ratio 1.0) before.
+int checkMiloLoads(const GameData& data) {
+    std::vector<Bytes> files;
+    for (const char* m : {"char/male/anim/gen/male_guitar.milo_xbox", "char/female/anim/gen/female_guitar.milo_xbox"})
+        if (data.exists(m)) files.push_back(data.read(m));
+    if (files.empty()) return std::printf("FAIL  milo loads: the guitarists' clip milos are not on the disc\n"), 1;
+    auto le32 = [](const uint8_t* q) { return uint32_t(q[0]) | uint32_t(q[1]) << 8 | uint32_t(q[2]) << 16 | uint32_t(q[3]) << 24; };
+    double refBest = 1e30, newBest = 1e30;
+    size_t bytes = 0;
+    bool same = true;
+    for (int round = 0; round < 3; ++round) {
+        const uint64_t t0 = SDL_GetTicksNS();
+        std::vector<Bytes> ref;
+        for (const Bytes& f : files) {
+            Bytes out;
+            const uint32_t header = le32(&f[4]), blocks = le32(&f[8]);
+            size_t pos = header;
+            for (uint32_t i = 0; i < blocks; ++i) {
+                const uint32_t n = le32(&f[16 + size_t(i) * 4]);
+                Bytes b = PuffInflater(f.data() + pos, n).run();
+                out.insert(out.end(), b.begin(), b.end());
+                pos += n;
+            }
+            ref.push_back(std::move(out));
+        }
+        const uint64_t t1 = SDL_GetTicksNS();
+        std::vector<Bytes> now;
+        for (const Bytes& f : files) now.push_back(scene::decompressMilo(f, nullptr));
+        const uint64_t t2 = SDL_GetTicksNS();
+        refBest = std::min(refBest, double(t1 - t0) / 1e6), newBest = std::min(newBest, double(t2 - t1) / 1e6);
+        if (round == 0) {
+            for (size_t k = 0; k < ref.size(); ++k) same = same && ref[k] == now[k], bytes += ref[k].size();
+        }
+    }
+    const double ratio = refBest > 0 ? newBest / refBest : 1;
+    std::printf("%s  milo loads: %zu clip milos, %.1f MB inflated, the same bytes: %s; %.1f ms against the reference's %.1f ms (ratio %.2f, want <= 0.50)\n",
+                same && ratio <= 0.5 ? "PASS" : "FAIL", files.size(), double(bytes) / 1e6, same ? "yes" : "NO", newBest, refBest, ratio);
+    return same && ratio <= 0.5 ? 0 : 1;
+}
 
 // Every .dtb in the archive decrypts and parses with every byte consumed.
 int checkScripts(const GameData& data) {
@@ -858,7 +1044,8 @@ int runSelfTest(const std::string& dataPath) {
             }
             std::printf("bass ranges (GH2's rule, not applied to RB yet): %zu notes below 36 in the PART tracks\n", ranges);
         }
-        const int wordingFailures = checkPcWording(data);
+        const int loadFailures = checkMiloLoads(data);
+        const int wordingFailures = checkPcWording(data) + loadFailures;
         std::printf(wordingFailures ? "%d string(s) still name the Xbox 360 or a console\n" : "PC wording: no Xbox 360 or console in any language\n",
                     wordingFailures);
         std::printf("%d song audio file(s) with problems, %d script(s) not decoded\n", audioFailures, scriptFailures);

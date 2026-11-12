@@ -460,6 +460,9 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                 check("od_drain");
                 check("od_set:0"), wait(400);
             }
+            // crowd_meter.dta's deploy / stop_deploy (band_energy_deploy.trig,
+            // the icon's deploy.trig ...) fired with each deploy and its end.
+            check("counter:rb_crowd_fx_triggers:2");
         }
     } else if (scenario == "rb_esc3") {
         // Wave 05 (GD05-033, universal-behaviors.md): Esc three times in a

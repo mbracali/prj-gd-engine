@@ -224,6 +224,7 @@ void RbHudView::reset(float introAtMs) {
     introPlayed_ = false;
     lastMs_ = -1e30f;
     seen_ = {};
+    crowdDeployed_ = 0;
     scoreShown_.clear();
     bandMultShown_ = 0;
     wonSeen_ = lostSeen_ = codaSeen_ = false;
@@ -615,8 +616,30 @@ void RbHudView::drive(const State& s, float nowMs) {
         }
         // crowd_meter.dta: each instrument's icon group at its health [I:
         // the rating 0..1 as the frame; the editor's range is -1..1].
-        if (scene::Directory* cm = subdir("crowd_meter"))
+        if (scene::Directory* cm = subdir("crowd_meter")) {
             if (const scene::Object* g = cm->get(t.part + ".grp")) setFrame(g, t.rating);
+            // GD05-073: crowd_meter.dta deploy / stop_deploy (the band's
+            // band_energy_deploy.trig as the first member deploys,
+            // band_energy_stop.trig as the last stops; the icon's
+            // deploy.trig / stop_deploy.trig) and set_player_icon_state
+            // failed / normal (state_failed.trig / state_normal.trig) [C data].
+            scene::Directory* icon = nullptr;
+            for (const auto& [o2, d2] : cm->subdirs)
+                if (o2 == t.part && d2) icon = d2.get();
+            if (t.deploying != w.deploying) {
+                crowdDeployed_ = std::max(0, crowdDeployed_ + (t.deploying ? 1 : -1));
+                if (t.deploying && crowdDeployed_ == 1) trigger(cm, "band_energy_deploy.trig", nowMs);
+                if (!t.deploying && crowdDeployed_ == 0) trigger(cm, "band_energy_stop.trig", nowMs);
+                if (icon) trigger(icon, t.deploying ? "deploy.trig" : "stop_deploy.trig", nowMs);
+                w.deploying = t.deploying;
+                ++fxCrowdTriggers_;
+            }
+            if (icon && t.failed != w.iconFailed) {
+                trigger(icon, t.failed ? "state_failed.trig" : "state_normal.trig", nowMs);
+                w.iconFailed = t.failed;
+                ++fxCrowdTriggers_;
+            }
+        }
     }
     // TrackPanel poll (0x82803750) [C]: the scoreboard's set_score.
     const std::string score = fmtScore(s.bandScore);

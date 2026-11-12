@@ -202,8 +202,16 @@ private:
         int state = -1;  // 0 none (filling), 1 ready, 2 deploying
         float energy = -1;
         bool failed = false, solo = false, intro = false;
+        bool deploying = false, iconFailed = false;  // crowd_meter's icon deploy / stop_deploy, state sent
     };
     std::array<TrackSeen, 3> seen_{};
+    int crowdDeployed_ = 0;  // crowd_meter.dta [deployed]: the members deploying
+    int fxCrowdTriggers_ = 0;  // crowd meter deploy / state triggers fired (the walks)
+
+public:
+    int crowdMeterTriggers() const { return fxCrowdTriggers_; }
+
+private:
     std::string scoreShown_;
     int bandMultShown_ = 0;
     bool wonSeen_ = false, lostSeen_ = false, codaSeen_ = false;

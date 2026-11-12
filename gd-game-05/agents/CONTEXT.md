@@ -134,3 +134,27 @@ Wave G06 highway and crowd (GD05-070 / GD05-071):
 - The same probes in `--song` runs: GD05_METER_PROBE / GD05_TAIL_PROBE /
   GD05_CROWD_PROBE=1 log `rb probe:` / `crowd probe:` lines;
   `agents/scratch/hwy6/crowd_sweep.sh` (git-ignored) ran every venue.
+
+Wave G06 general bugs (GD05-073):
+- `--walktest rb_songlist_highlight`: the song list scrolled down and up;
+  at each step exactly one drawn name (the selected row's) lies inside the
+  highlight's quad (`songlist highlight:` lines). GD05_SONGLIST_LEGACY=1:
+  rows without song_select_gap, every song listed (fails).
+- `--walktest rb_stutter`: previews while the list scrolls and a song's
+  start: `frame_spike:preview:30` (median of the previews' 30-frame
+  windows' longest frame / the run's median frame, x10, <= 40),
+  `frame_spike:song_begin!:240` (<= 150), `song_gpu_uploads` 0.
+  GD05_MUSIC_LEGACY=1 / GD05_WARM_LEGACY=1 run the code before.
+  GD05_FRAMELOG=1 logs the 240 frames after each mark (preview,
+  preview_play, song_begin); GD05_HITCHLOG=<ms> (wave 05) the slow ones.
+- `--walktest rb_qp_locked`: the quick play list against the data's
+  available songs, 300 Random Song picks, the song started.
+- `--walktest rb_od_keys | rb_od_pad | rb_od_guitar | rb_od_drums |
+  rb_od_vocals`: Overdrive by Tab / a pad's Back / the RB guitar's tilt and
+  Back / the drum fill / a shout in a gap: refused at 45 %, deployed at
+  60 %, drained over 32 beats; rb_od_keys also checks the crowd meter's
+  deploy triggers. Walk hooks: `od_set:<pct>`, setPlayerStarPower
+  `vocal_meter` / `vocal_shout`, `dev_axis <n> <v>`, `unlock_all_songs`.
+- Loads: GD05_UILOG=1 logs `ui: menu backdrop loaded in`, `world warmed:`,
+  each screen's enter / exit; agents/scratch/gen6/pmp.sh (git-ignored) is a
+  gdb stack sampler (`pmp.sh out N delay args...`, fold.py folds it).

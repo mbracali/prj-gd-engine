@@ -3076,6 +3076,7 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "vocal_od_meter_pct") return vocal_ ? int(std::lround(vocal_->overdriveMeter() * 100)) : -1;
     if (key == "vocal_freestyle") return vocal_ && vocal_->inFreestyle(lastT_) ? 1 : 0;
     if (key == "fills_deployed") return rbBonus_ ? rbBonus_->fillsDeployed() : 0;
+    if (key == "rb_crowd_fx_triggers") return rbHud_ ? rbHud_->crowdMeterTriggers() : 0;
     if (key.rfind("frame_marks:", 0) == 0) {
         int n = 0;
         for (const auto& m : frameMarks_) n += m.second == key.substr(12);

@@ -784,3 +784,78 @@ pattern). Each says what, why and how to undo it.
   tails kept their slot's coloured texture (chroma 100% -> 2%).
 - **Undo:** RbTrackView::drawPart / drawSmasherPlate, drawTails' material;
   GD05_HWY_LEGACY=1.
+
+## D62
+- **What (2026-11-12, GD05-073):** loads and the frame: milo blocks
+  inflate with a table-driven decoder (scene/inflate.cpp, the same bytes:
+  0 differences over the ark's 13,236 blocks, 2.37 GB) and side by side
+  (each block is its own deflate stream); version 11 moggs decipher in
+  parallel ranges (CTR: block i's counter is the nonce + i); the menus'
+  music streams (preview, meta loop, credits) open on a thread
+  (App's MusicLoader: one at a time, the latest request played); the
+  world's, track's and HUD's textures and meshes go to the GPU at the end of
+  the song's load (App::warmWorld), not on the frame that first draws them.
+- **Why:** the owner's "loads take too long" and the stutters at a preview
+  and a song's start: boot 3.3 s to the title (the band's clip milos, 2.5
+  s), 2.3 s frozen on the loading tip, a 100..250 ms frame at every
+  preview (the mogg read, deciphered and opened on the main thread), 23
+  texture / mesh uploads in the song's first 12 s. RB streams previews and
+  has its textures in memory once a milo is loaded [I].
+- **Undo:** GD05_MUSIC_LEGACY=1 (previews on the frame), GD05_WARM_LEGACY=1
+  (uploads on first draw); the inflater / ciphers have no switch (the walks
+  and the selftest check their output).
+
+## D63
+- **What (2026-11-12, GD05-073):** the song list lays its rows out as RB's
+  UIList (0x82271C58): row i at i x spacing plus the gaps of the rows above
+  it, each row's gap from its provider (vfunc +0x24; RB's SongProvider
+  0x82400180: band.dta's song_select_gap, 30) [C]; the highlight at the
+  selected row's place (0x82271F80) [C]. The provider's columns (0x82400A68)
+  [C]: details.lbl the artist (random_song: random_song_by_line), the
+  headings "<group> (<n> Songs)" (song_select_song / song_select_songs).
+- **Why:** list_song.milo's highlight.mesh is 65 units (the name and the
+  details line) and the rows were 33 apart: the yellow bar covered the next
+  row too (the owner's "highlights more than one song"); 63 apart it covers
+  one.
+- **Undo:** UiView::ListRow::gap; GD05_SONGLIST_LEGACY=1.
+
+## D64
+- **What (2026-11-12, GD05-073):** the song lists of every mode but
+  leaderboards hold only the songs RB's SongMgr makes available
+  (0x82432C60 -> 0x82431AC8) [C]: downloaded (none on the disc), all
+  unlocked (profile_mgr unlock_all_songs: long_cheats.dta's code), or one of
+  the mode's unlock_song_initial_num (modes.dta: 10) first songs by the rank
+  of its unlock_song_instrument (qp_solo: the leader's instrument; band
+  quick play: band) among the songs that are not (unlockable TRUE)
+  (0x82434020's ranked lists) [C]. The tours' unlocks (a song played in a
+  tour, 0x823D43D0; the tours' progress per instrument, 0x823D4738) wait
+  for the career (GD05-077) [I].
+- **Why:** quick play listed all 58 songs, and Random Song picked locked
+  ones (247 of 300 picks) (owner, G06 6).
+- **Undo:** RbSongProvider::availableSongs; GD05_SONGLIST_LEGACY=1.
+
+## D65
+- **What (2026-11-12, GD05-073):** Overdrive: an Xbox guitar's tilt is bound
+  one way (AxisPos on the right stick Y) and a captured tilt takes its
+  direction, not either way from the rest; a meter set from outside (a
+  cheat, a walk) under ready_level is not ready; the autoplay drummer strikes
+  a pad every 150 ms in a shown fill [test aid]; player.dta's enable_solos /
+  disable_solos are accepted (RbBonus shows a fill only when ready as it
+  starts, the same gate) [I: the 2400 ms lead].
+- **Why:** with the rest read before the guitar's first report (0, the
+  guitar level at -32768) the tilt read as held for good and never gave a
+  press: tilt never deployed (rb_od_guitar failed). The drummer's crash
+  needs crash_fill_ready_hits strikes in the fill (RB 0x824C1530) [C]; the
+  autoplay hit the crash alone.
+- **Undo:** Input::defaults' Gyro, the capture's Kind; App's fill strikes.
+
+## D66
+- **What (2026-11-12, GD05-073):** the HUD's crowd meter gets crowd_meter.dta's
+  deploy / stop_deploy (band_energy_deploy.trig with the first member
+  deploying, band_energy_stop.trig with the last stopping, the instrument
+  icon's deploy.trig / stop_deploy.trig) and set_player_icon_state failed /
+  normal (state_failed.trig / state_normal.trig) [C data].
+- **Why:** the visual FX pass (G06 6): the Overdrive activation showed on the
+  track and the meter but not on the band's crowd meter. The other effects
+  the data has and the port does not draw are backlog GD05-078 / GD05-079.
+- **Undo:** RbHudView's crowd_meter block.

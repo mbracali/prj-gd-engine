@@ -1046,3 +1046,42 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   counted as a jump; the threshold now adds the pulse's slope over the
   step's beats, then OK; legacy 62), rb_pad_play failed twice under load
   (20 of 30 gems hit) and passed alone (86 of 87).
+
+## 2026-11-12: loads, the song list, stutters, locked songs, Overdrive, FX (wave G06 6, GD05-073)
+
+- **Loads (measured alone, timestamps on the log, GD05_UILOG=1; profile:
+  gdb stack samples):** the hot spot was raw deflate (the band's clip
+  milos, puff.c's bit-at-a-time decoder). Table-driven inflater + the
+  milo's blocks side by side + moggs deciphered in parallel (D62). Boot
+  to the title (movies skipped) 3.25 s -> 1.50 s (the Enhanced backdrop's
+  venue and band 2.54 s -> 0.85 s); the song's load frame (on the last
+  loading tip) 2.29 s -> 0.97 s (0.74..0.86 s with the GPU warm-up);
+  difficulty confirmed -> playing 4.9 s -> 3.4 s, of which 2.33 s is
+  loading.milo's block_transition animation (RB's) and 1.0 s on the way
+  into the song list is main.dta's fx fade (25 frames, RB's). Inflater:
+  0 differences over the ark's 13,236 milo blocks (2.37 GB), 2.8x faster
+  on one thread; the selftest's `milo loads` line compares it with the
+  reference decoder (ratio <= 0.5).
+- **Song list:** RB's rows are 33 + song_select_gap 30 apart; the port had
+  33, so the 65-unit highlight covered the next row or heading (D63). Also
+  the artist (details.lbl) under each name and "<group> (<n> Songs)".
+  rb_songlist_highlight: names under the highlight 2 -> 1 at every step.
+- **Stutters:** a preview's mogg read, deciphered and opened on the frame
+  (100..240 ms) -> on a thread (MusicLoader); textures / meshes uploaded
+  on first draw (23 in the song's first 12 s) -> at the load's end
+  (warmWorld, 1,634 in ~120 ms). rb_stutter: previews' window max / median
+  frame 74.8 -> 2.0 (want <= 4.0); song_gpu_uploads 23 -> 0; the song's
+  first 240 frames' longest 4.9x the median (the world's 24 fps frames,
+  D55).
+- **Locked songs:** quick play listed all 58 songs; RB lists 10 on a new
+  profile (D64). rb_qp_locked: locked listed 48 -> 0, Random Song picks
+  of locked songs 247 / 300 -> 0. The tours' unlocks: GD05-077.
+- **Overdrive:** keyboard Tab and a pad's Back deployed; the guitar's tilt
+  never did when its rest was read before its first report (bound either
+  way from the rest; D65); the drummer's fill never deployed under the
+  autoplay. rb_od_*: refused at 45 %, deployed at 60 %, drain = beats / 32
+  within 1 % on every path (keys, pad, guitar tilt and Back, drums, vocals).
+- **FX pass:** 661 EventTriggers in track/gen's milos; the crowd meter's
+  deploy / stop / failed triggers added (D66); the rest in GD05-078 /
+  GD05-079 (fills, BRE, unison, spotlight sparkles, super streak, crowd
+  meter warning / glow / peak arrows / sparkler particles).
