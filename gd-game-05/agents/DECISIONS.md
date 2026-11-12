@@ -859,3 +859,67 @@ pattern). Each says what, why and how to undo it.
   track and the meter but not on the band's crowd meter. The other effects
   the data has and the port does not draw are backlog GD05-078 / GD05-079.
 - **Undo:** RbHudView's crowd_meter block.
+
+## D67
+- **What (2026-11-12, GD05-072):** a tour event's reward is the event's
+  reward_per_star times each song's stars, summed (TourPerformer reward
+  RB 0x823EEAE8 over the stars vector RB 0x8298F7D0 that complete_song RB
+  0x823D0640 appends to) [C]. The Band World Tour's complete_event (RB
+  0x823EF0F0) ends by paying it (vtable +0x74, RB 0x823EE4A0): every local
+  member's character gets the whole reward; a band's money is its members'
+  characters' money summed (RB 0x823EDAA0) [C]. Money stops at
+  config/tour_solo.dta's max_money [C data]. The band lobby stand-in (D10)
+  gives each joining player the profile's first character of the
+  player's instrument not taken yet (else the premade one, not a member)
+  [I: RB's lobby has the player pick or make one].
+- **Why:** the band paid nothing to its members (the band kept its own
+  money, 0 in the shop) and the lobby put premade characters on stage; the
+  solo reward counted only the last song's stars.
+- **Undo:** RbMeta::reward / pay / localMembers, RbBandObj money, the
+  lobby redirect's character pick.
+
+## D68
+- **What (2026-11-12, GD05-072):** the creator works through its own
+  scripts (ui/charcreator.dta) [C data]: the setters take the character
+  shown first ({$tour_char set_skin_color $char <pos>}: the value is the
+  last argument); skin.lst is a BandSwatch (Load RB 0x822D27F0: rev 1
+  adds a palette name, then the UIList rev 9) [C] whose set_colors
+  {$char get skin_color_palette} gives a row per colour of
+  char/gen/skin.milo's skin.pal (eyes.pal for the eyes) [I: the palette
+  file]; attitude.lst's set_data (<sym> ...) is its rows; the attitude is
+  the kGenre* value (macros.dta: the scripts compare numbers) and the
+  character on stage plays with it (its play flags). The OutfitPanel gives
+  catalog providers only to the catalog's categories (not skin.lst).
+- **Why:** the skin list had no rows (BandSwatch unknown, set_colors a
+  stub, the outfit panel replaced its provider), the attitude list was
+  empty, and every choice stored the character object instead of the
+  value (skin 0, attitude the object).
+- **Undo:** ComponentObj set_colors / set_data / store / undo / confirm,
+  readBandSwatch, RbCharObj get / setters, OutfitPanelObj
+  isOutfitCategory.
+
+## D69
+- **What (2026-11-12, GD05-072):** the Rock Shop's instruments are
+  char/instruments.dta's models (groups (<model> (cost n) (default_outfit
+  <finish>))): the list holds the models (a model without a cost only
+  when owned), the price is the model's (OutfitProvider RB 0x82859E08,
+  cost RB 0x828587E0) [C]; a model bought is worn in its default finish
+  [I: RB's finish choice (group_select_screen) not offered:
+  has_group_selection 0]. rb_profile.json keeps the creator's eye /
+  eyebrow / weight / height / attitude, the solo character's town, venue
+  and seen towns, the band's members, motto, venue and difficulty (new
+  keys, read with defaults). While a hint's (advance ...) runs, {tour
+  hint} stays that hint (ONEOFF_HINT's add_seen_hint).
+- **Why:** guitars cost nothing (the outfits' cost was read, the models
+  hold it); the save lost the look and the tour's place; the ONEOFF
+  advance recomputed the hint and marked "0" (or the next hint, unseen)
+  as seen.
+- **Undo:** OutfitList groups / wear, RbMeta save / load, RbTourObj hint.
+
+## D70
+- **What (2026-11-12, GD05-072):** the career walks check a restart:
+  restart_app asks the App to start again (Enhanced's Restart Now path,
+  runApp), the walk goes on as <walk>_restarted with the save read back;
+  GD05_WALK_KEEP_GOING=1 prints a failed check and goes on (also through
+  the restart) to run every check of a walk against an older build.
+- **Undo:** the walks' restart_app check; the fail lambda's keepGoing.

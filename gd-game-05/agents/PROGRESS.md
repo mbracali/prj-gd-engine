@@ -1095,3 +1095,64 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   now take the long cheat (every song, as they were written) and pass
   alone. Selftest exit 0 (its 7 GH2 rule FAIL lines are the same before the
   wave); `milo loads` ratio 0.11.
+
+## 2026-11-12: career, the Rock Shop and the creator (wave G06 5, GD05-072)
+
+- **At the start:** the walks solo_tour, band_tour, rock_shop and creator
+  passed, but none checked money, the save or the stage. Measured with new
+  walks (`--walktest rb_career`, `rb_career_band`, `rb_shop_items`; every
+  check run against the code before with GD05_WALK_KEEP_GOING=1):
+  - worked: a new character's 100 (config/tour.dta default_money); a
+    shirt bought at the catalog's price (100 - 99 = 1) and worn; a solo
+    gig's pay (5 a star) and its outfit; the character on stage in its
+    clothes; money, clothes and stars through a restart.
+  - broken: the creator's skin list had no rows (BandSwatch unknown,
+    set_colors a stub, the outfit panel took the list over) and every
+    creator choice stored the character object (skin 0); the attitude list
+    was empty (set_data ignored), the attitude a symbol the scripts never
+    matched; ONEOFF hints marked "0" (or the next hint, unseen) as seen;
+    `char_cache request` unhandled when a saved character is picked; the
+    Band World Tour paid nobody (the lobby gave premade characters, the
+    band kept its own money, 0 in the shop: "no band or no member
+    character"); guitars cost nothing (the models hold the price) and the
+    instrument list never got the focus (iterate UIList skipped BandLists);
+    the save lost the look, the tour's place and the band's motto /
+    members.
+- **Fixed (D67..D70):** the reward (reward_per_star x each song's stars,
+  RB 0x823EEAE8) paid to every local member's character (RB 0x823EE4A0),
+  a band's money its members' (RB 0x823EDAA0), max_money; the creator's
+  BandSwatch (RB 0x822D27F0), palettes, attitude list, setters; the
+  instrument models (RB 0x82859E08); the save's new keys; the hint advance.
+- **Expected (data) vs measured (fresh build):**
+
+  | check | expected | measured |
+  |---|---|---|
+  | new character's cash | 100 (tour.dta default_money) | 100 |
+  | creator attitude, one down from Rocker | 2048 (kGenreSpazz) | 2048 (before: 0) |
+  | creator skin, two downs | 2 | 2 (before: 0) |
+  | shirt flannelcoat_checked | 100 - 99 = 1, worn | 1, worn |
+  | on stage | flannelcoat_checked, bandanna, attitude 2048 | 1 / 1 / 1 member |
+  | solo gig tier1_1/small_club/song1, 1 star | 1 + 5 x 1 = 6, worntshirt_line6 won | 6, won |
+  | after the restart | 6, skin 2, bandanna, flannel, 2048, hints welcome_guitar | the same (before: hints "0,welcome_guitar") |
+  | band: money at the hub | the member's 100 | 100 (before: no member) |
+  | band gig small_club/song1, 2 stars | 100 + 5 x 2 = 110, band 110 | 110 / 110 |
+  | band after a restart | 110, 2 stars | 110 / 110, 2 |
+  | guitar 5120 with 100 | refused, 100 kept | shop_error_money_screen, 100 (before: never reached) |
+  | guitar 5120 after cheat_add_money 2000 | 2100 - 1299 = 801, 5120_paint | 801, 5120_paint, on stage, kept after a restart |
+
+- **Gate** (gate1.sh's 31 walks + the five tests, 6 at a time, each with
+  its own XDG_DATA_HOME, `agents/scratch/car6/gate_par.sh`): 25 of 31
+  walks OK, 5 of 5 tests OK. Failed: quickplay (rb_hud_box_err_px 6: my
+  `char_cache compression_done` answer moved the HUD probe's moment;
+  taken out, then quickplay OK at 3), band_quickplay (rb_hud_box_err_px
+  25..27: also with every career change taken out, after bec1ed4's
+  quick play song list), rb_pad_play / rb_guitar_play / rb_guitar_none
+  ("no sustain held with the whammy": also without the career changes),
+  rb_keys_rebind (OK alone).
+- **Not done:** the real band lobby (each player picks or makes a
+  character; the stand-in takes the profile's first of the instrument);
+  the instruments' finishes (group_select_screen) and drum / mic shops
+  not walked; tattoos, make-up and face paint (patches: no render to
+  texture yet, GD05-022); weight / height sliders not checked; the
+  characters are not drawn in the menus; the tours' [I] rules (song
+  order by rank, unlocks, fans / buzz) are still the wave 02 guesses.

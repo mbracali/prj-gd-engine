@@ -158,3 +158,25 @@ Wave G06 general bugs (GD05-073):
 - Loads: GD05_UILOG=1 logs `ui: menu backdrop loaded in`, `world warmed:`,
   each screen's enter / exit; agents/scratch/gen6/pmp.sh (git-ignored) is a
   gdb stack sampler (`pmp.sh out N delay args...`, fold.py folds it).
+
+Wave G06 career, shop and creator (GD05-072, D67..D70):
+- `--walktest rb_career`: Solo > Tour, a new character (attitude, skin and
+  hair chosen in the creator), the Rock Shop (a shirt at the catalog's
+  price), a gig on autoplay (the character on stage in its clothes and
+  attitude; the cash up by reward_per_star x stars, the event's outfit
+  won), then the game restarts (runApp) and `rb_career_restarted` reads it
+  all back from rb_profile.json (cash, look, clothes, seen hints).
+- `--walktest rb_career_band`: a guitarist made in the Solo Tour, a
+  restart, Band World Tour with a drummer (GD05_BAND_PLAYERS 2): the
+  member's character is paid the band event's reward, the band's money is
+  its members'; a second restart checks the band and the money.
+- `--walktest rb_shop_items`: the instrument shop (char/instruments.dta):
+  too dear for a new character (shop_error_money_screen), bought after
+  RB's cheat_add_money 2000 at the model's price, played on stage, kept
+  through a restart.
+- The walk's final line is `walktest <walk>_restarted: OK` (each
+  restart appends `_restarted`; the process's exit code is the last
+  part's). `GD05_WALK_KEEP_GOING=1` runs every check of a walk and prints
+  each failure (no verdict: for older builds).
+- `agents/scratch/car6/gate_par.sh [jobs]` (git-ignored) runs gate1.sh's
+  walks and the five tests in parallel, each with its own XDG_DATA_HOME.
