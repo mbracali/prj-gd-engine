@@ -10,6 +10,7 @@
 #include <random>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -3072,6 +3073,16 @@ int App::gameCounter(int player, const std::string& key) const {
     // GD05-069: SpotlightDrawer proxies (the stage fog) found / left in the venue's draw list.
     if (key == "venue_sd_proxies") return venueView_ ? venueView_->spotlightDrawerProxies() : -1;
     if (key == "venue_sd_proxies_listed") return venueView_ ? venueView_->spotlightDrawerProxiesListed() : -1;
+    // GD05-090: a venue milo's particles ("parts_started:<milo path part>",
+    // parts_alive, parts_drawn); the world's EventAnim triggers fired.
+    for (const char* k : {"parts_started:", "parts_alive:", "parts_drawn:"})
+        if (key.rfind(k, 0) == 0) {
+            if (!venueView_) return -1;
+            const VenueView::PartProbe p = venueView_->particleProbe(key.substr(std::strlen(k)));
+            if (p.systems == 0) return -1;
+            return k[6] == 's' ? int(std::min<long long>(p.started, 1 << 30)) : k[6] == 'a' ? p.alive : p.drawn;
+        }
+    if (key == "world_eventanim_triggers") return world_ ? world_->stats().eventAnimTriggers : -1;
     // Rock Band (wave 02): the vocals, the band on stage, the part played.
     if (key == "vocal_notes_drawn") return vocalView_.notesDrawn();
     if (key == "vocal_lyrics_drawn") return vocalView_.lyricsDrawn();

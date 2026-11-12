@@ -111,6 +111,27 @@ bool LightPresets::native(Interp& in, const std::string& msg, std::vector<Value>
         setLighting(categories_, hasAdj ? &adjs : nullptr, delayed);
         return true;
     }
+    // WorldDir force_preset (Handle RB 0x822A46A8 -> 0x822A2680 -> 0x822A2608)
+    // [C]: a preset is started now (StartPreset 0x822A1B50) and held as the
+    // override (+0x54), and StartPreset starts nothing while one is held;
+    // none (the BandCamShots' end_shot: {$world force_preset ''}) clears it
+    // and picks again now (0x822A1E10, delayed 0).
+    if (msg == "force_preset") {
+        const std::string name = args.empty() ? std::string() : text(in, args[0]);
+        const scene::LightPreset* p = nullptr;
+        for (const scene::LightPreset* c : all_)
+            if (c->name == name) p = c;
+        if (p) {
+            forced_ = nullptr;
+            start(p);
+            forced_ = p;
+        } else if (forced_) {
+            forced_ = nullptr;
+            rebuild();
+            choose(false);
+        }
+        return true;
+    }
     if (msg == "set_excitement") {
         if (!ignoreEvents_ && !args.empty()) setExcitement(in.evalValue(args[0]).integerValue());
         return true;
@@ -213,7 +234,7 @@ void LightPresets::setExcitement(int ex) {
 
 // 0x822629F8 / 0x822627E8: delayed so that the fade ends 4 beats from now.
 void LightPresets::choose(bool delayed) {
-    if (candidates_.empty()) return;
+    if (forced_ || candidates_.empty()) return;
     const scene::LightPreset* p = candidates_.front();
     if (!delayed && p == current_) return;
     const double delay = delayed ? 4.0 - double(p->fadeIn) / 480.0 : 0.0;

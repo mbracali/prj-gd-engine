@@ -117,7 +117,7 @@ Every typed class below decodes every instance on the disc exactly to its end ma
 | WorldCrowd | 8 | 24 | 0x822B91E0 |
 | WorldDir (own) | 17 | 102 | 0x8228C468 / 0x8228B6C8 |
 
-Classes kept raw (split by their markers, no C++ decoder yet; their layouts were decoded exactly in the research tools and are ported when the engine needs them): WorldInstance, PropAnim, MeshDeform, PatchRenderer, TexRenderer, BandMeshLauncher, Movie, EventAnim, DeferDraw, Distort, Blur, Line, MultiMesh, Fur, LightHue, Label3d, BandSwatch, SpotlightDrawer, RenderDir, the other FxSend classes (GD05-003).
+Classes kept raw (split by their markers, no C++ decoder yet; their layouts were decoded exactly in the research tools and are ported when the engine needs them): WorldInstance, PropAnim, MeshDeform, PatchRenderer, TexRenderer, BandMeshLauncher, Movie, DeferDraw, Distort, Blur, Line, MultiMesh, Fur, LightHue, Label3d, BandSwatch, SpotlightDrawer, RenderDir, the other FxSend classes (GD05-003).
 
 Differences from GH2 found on the way [C data]:
 - inline sub-directories follow their owner's end marker (GH2 nested them inside the record);
@@ -138,6 +138,16 @@ Differences from GH2 found on the way [C data]:
 - MIDI tracks: PART GUITAR, PART BASS, PART DRUMS, PART VOCALS, EVENTS, VENUE, BEAT in all 62 song charts. Gem lanes are base + 0..4 of each difficulty's octave (60, 72, 84, 96); special pitches read by the parser's note handler RB 0x8249F990: 116 Overdrive phrase, 103 solo, 120..124 fill / Big Rock Ending lanes; a gem shorter than 161 ticks has no sustain (RB 0x8249FB68) [C]. The parser's defaults (RB 0x824A1770): num_slots 5, phrase_slot 7, player_slot 9, the vocal range 36..84 [C].
 - PART VOCALS: notes 36..84 with MIDI lyric events (meta 5) at the note's tick; 105 / 106 phrase markers; 96 / 97 percussion; 116 Overdrive. Lyric suffixes `#`, `^` (talkies), `-` (joined), `=` (a shown hyphen), `+` (a slide) [C data; their scoring I].
 - Drum mix events `[mix <difficulty> drums<n>...]` select a beatmatcher.dtb submix.
+
+## EventAnim
+
+v0 (SetFrame RB 0x822CE3A0, EndFrame 0x822CE390) [C]: the Object header,
+an Animatable (u32 4, u32, u32 rate), u32 key count, then per key: f32
+frame, u32 n, n x (string proxy, string trigger). SetFrame fires the keys
+from the last frame set up to the frame; the engine decodes it
+(`scene/world_objects.cpp` readEventAnim; `game/world.cpp`
+eventAnimFrame). The win sequences' BandCamShots play them (their
+play_anim property).
 
 ## WorldInstance
 

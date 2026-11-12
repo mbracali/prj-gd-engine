@@ -219,6 +219,8 @@ private:
     float flicker_ = 1, flickerFrom_ = 0, flickerTo_ = 0, flickerT_ = 0, flickerPeriod_ = 0;
     uint64_t lastNs_ = 0;
     std::array<float, 2> stationaryPhase_{0, 0};  // NgPostProc +0x168 (random at construction)
+    std::array<float, 4> frozenPhase_{};  // the last grain phases (GD05_POST_FREEZE)
+    bool frozenPhaseSet_ = false;
     // The pacing (RB 0x8218EF80): 60 Hz ticks, the period's tick, its
     // length and the alternating remainder.
     uint64_t tick_ = 0, tickStartNs_ = 0;

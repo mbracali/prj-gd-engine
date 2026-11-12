@@ -1512,3 +1512,56 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   rb_crowd arena_01 with GD05_SD_PROXY_LEGACY=1 too); rb_band_lobby,
   rb_body_deform, rb_shop_drum, rb_shop_mic are another task's new walks
   in gate1.sh, not in this commit (unknown walk).
+
+## 2026-11-12: venue look, final pass (fix9: GD05-090, GD05-089, GD05-069)
+
+- **arena_04's win fountains (GD05-090, D85 / D86):** three causes [C].
+  (1) A WorldInstance's EventTriggers answer the world's events (RegisterEvents
+  RB 0x8220C770 sinks each trigger on its own directory); the port ran only
+  the chain's: sparks_fountain_blue_win.milo's start_hide.trig ("start")
+  never hid shared.grp. 24 shared fx triggers listen for "start", others for
+  game_won / bonusfx / bre_success / intro_end. (2) EventAnim (SetFrame RB
+  0x822CE3A0) was kept raw: the win sequence's shots (coop_fw_*, their
+  play_anim) fire the fountains' game_win.trig at frames 18 / 20. (3) RB's
+  RndParticleSys moves and emits only when drawn since its last Poll (Poll
+  0x821D94F0, DrawShowing 0x821D9408); the port ran every system every
+  frame, hidden or not. Walk rb_win_sparks (arena_04): particles started by
+  the win fountains' systems 15 s into the song 0 (fix8 build: 5,869), after
+  the forced win shot coop_fw_all05 1,186 (704 drawn), 69 EventAnim
+  triggers.
+- **force_preset (D87):** the BandCamShots' {$world force_preset ...} was
+  UNHANDLED (rb_look failed on it in every venue, fix8 too): WorldDir
+  0x822A2608 / StartPreset 0x822A1B50 [C].
+- **The pause check (GD05-089, D88):** measured on a still frame (paused,
+  flicker / grain held by GD05_POST_FREEZE, the pause screen hidden then
+  shown without its art): the paused world does not move (mean difference
+  0.00..0.52 of 255); with the art left out the background is 0.99..1.01
+  of black_bg.mat's rule in 11 of 11 measured pauses (4 venues x 3, one on
+  a blackout skipped); with the art in, the octopus, arms and trim reach
+  into the strips at a new place each pause (1.00..2.70). rb_look (this
+  build): small_club_02 luma 72.9, contrast 68.1 (+23 %); big_club_03 55.3
+  (-20 %), 60.6; arena_04 65.4 (-6 %), 60.0 (+8 %): OK; theater_02 42.9
+  (-38 %), 61.6; grain +46..58 % but arena_04's +14 % (GD05-095).
+- **The SpotlightDrawer's own draw (GD05-069): read, not implemented.**
+  NgSpotlightDrawer (vtable 0x82034824): DrawShowing empty, DrawWorld
+  0x8229BB38 per queued spotlight: the colour (x intensity) and up to four
+  passes by global switches (0x828EB665..668: the spot's +0x2EC objects,
+  its +0x1B0 mesh with the shared Mat, its +0xEC drawable, its +0xE8 Mat);
+  the volume beams 0x822ABC28: per spotlight with +0x1BC > 0, one of three
+  passes by its type (+0x1E8: 2, 3..4, other) with the gSpotPos / gSpotDir /
+  gRadii / gSpotXSectionMap / gExtrudePos shaders (ark/xbox_shaders, at
+  unaligned offsets the fix7 dumper skipped: agents/scratch/fix9/xs,
+  git-ignored), gFogColor c90 = colour x intensity x 8 x (+0x1E0); then
+  0x822A8E78 sets gFogDensity c82 = (base x 0.01, smoke x 0.01 x (1 - base
+  x 0.01)). The post-process shaders read it: out = sat(scene +
+  gFogDepth(s12).rgb x (c82.x + c82.y x gFogDensityMap(s6).x) x c91.x)
+  (#2397, the simplest variant) [C]. The drawer's record: total 1, base 1,
+  smoke 4 / 2 / 2 / 2.1 (small club, big club, arena, theater), colour
+  white / 0.16 / 0.12 / (0.09, 0.16, 0.13); the presets' keyframes (1, 1..6,
+  1) (15,223 entries: (1, 2, 1) 6,018, (1, 4, 1) 3,262 ...). So RB's beams
+  reach the picture only through the post composite, at 0.01..0.06 of the
+  beam buffer times the density map times c91.x; the density map (the
+  drawer's +0x64 object, drawn at EndWorld 0x822A9CC8) and c91.x in the
+  post are not traced, so how bright that is stays open. Implementing it
+  means RB's three volume passes, the density map and the composite, not
+  a gain on the port's GH2 beams: nothing changed (GD05-093).

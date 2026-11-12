@@ -168,6 +168,26 @@ void VenueView::build() {
         if (o.as<scene::ParticleSys>() || o.as<scene::ParticleSysAnim>()) particleSet_.add(&o, uint32_t(particleSet_.systems().size() + 7));
     });
     for (size_t i = 0; i < particleSet_.systems().size(); ++i) systemIndex_[&particleSet_.systems()[i].def()] = i;
+    systemMilo_.assign(particleSet_.systems().size(), std::string());
+    systemDrawn_.assign(particleSet_.systems().size(), 0);
+    auto tag = [&](const scene::Milo& m, const std::string& path) {
+        m.root().forEach([&](const scene::Object& o) {
+            if (auto* p = o.as<scene::ParticleSys>())
+                if (auto it = systemIndex_.find(p); it != systemIndex_.end()) systemMilo_[it->second] = path;
+        });
+    };
+    for (const auto& p : v.parts()) tag(*p.milo, p.milo->path());
+    for (const auto& p : v.proxies()) tag(*p.milo, p.path);
+}
+
+VenueView::PartProbe VenueView::particleProbe(const std::string& part) const {
+    PartProbe r;
+    for (size_t i = 0; i < systemMilo_.size(); ++i)
+        if (systemMilo_[i].find(part) != std::string::npos) {
+            const gfx::ParticleSystem& s = particleSet_.systems()[i];
+            ++r.systems, r.started += s.started(), r.alive += s.count(), r.drawn += systemDrawn_[i];
+        }
+    return r;
 }
 
 bool venueObjectXfm(const World& world, const std::string& name, bool multiplayer, scene::Xfm& out, const std::string& subpart) {
@@ -215,7 +235,13 @@ void VenueView::setShot(const scene::CamShot* shot, size_t k) {
 void VenueView::update() {
     const gfx::ScenePose& pose = world_.pose();
     particleSet_.sync(pose);
-    particleSet_.update(pose, scene::Xfm{}, float(world_.seconds() * 30.0));
+    // RB polls a venue system only when drawn since its last poll (D86);
+    // GD05_PARTICLES_LEGACY=1: every system every frame (the code before).
+    static const bool legacy = [] {
+        const char* e = SDL_getenv("GD05_PARTICLES_LEGACY");
+        return e && *e == '1';
+    }();
+    particleSet_.update(pose, scene::Xfm{}, float(world_.seconds() * 30.0), !legacy);
 }
 
 scene::Xfm VenueView::worldOf(const scene::Object* o, const scene::Xfm* base) const {
@@ -256,6 +282,7 @@ void VenueView::draw(gfx::Renderer& r, int viewW, int viewH, bool hdr) {
         world_.pose().setCamera(cam);
     }
     particleRenderer_->resetStats();
+    std::fill(systemDrawn_.begin(), systemDrawn_.end(), 0);
     crowdView_->resetStats();
     bandView_->resetStats();
     particleRenderer_->setHdr(hdr);
@@ -316,10 +343,12 @@ void VenueView::drawObject(gfx::MaterialRenderer& mr, const scene::Object* o, co
     } else if (auto* p = o->as<scene::ParticleSys>()) {
         auto it = systemIndex_.find(p);
         if (it == systemIndex_.end()) return;
-        const gfx::ParticleSystem& s = particleSet_.systems()[it->second];
+        gfx::ParticleSystem& s = particleSet_.systems()[it->second];
+        s.drawShowing(float(world_.seconds() * 30.0));  // RB DrawShowing 0x821D9408: zeroes the poll counter (catches up)
         if (s.count() == 0 && p->preserved.empty()) return;
         selectEnv(mr, env);
         particleRenderer_->draw(mr, cache_, s, camera_, base ? gfx::toMat4(*base) : Mat4::identity(), &pose);
+        systemDrawn_[it->second] += s.count();
     } else if (auto* d = o->as<scene::DirObj>()) {
         // A proxy directory: its milo's draw list at the proxy's transform.
         auto it = proxyRoots_.find(d);

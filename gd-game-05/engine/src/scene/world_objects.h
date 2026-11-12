@@ -126,6 +126,7 @@ public:
         std::vector<EnvEntry> environs;   // per `environs`
         std::vector<LightEntry> lights;   // per `lights`
         std::string description;
+        std::vector<std::array<float, 3>> drawers;  // per the preset's spotlightDrawers: total, base_intensity, smoke_intensity
         std::array<float, 9> extra{};     // RB rev 13: nine f32 after the drawers [names I]
     };
     Animatable anim;
@@ -227,6 +228,24 @@ public:
     std::string nextRandom;
     std::vector<std::pair<std::string, std::string>> proxyCalls;  // proxy dir, message
     std::vector<std::string> proxyEvents;  // RB: each proxy call's event (gem_smasher's hit.trig: break.trig)
+};
+
+// EventAnim v0 (RB; SetFrame RB 0x822CE3A0, EndFrame 0x822CE390) [C]: keys
+// of (frame, (proxy, trigger) pairs); SetFrame(f) fires every trigger of
+// the keys from the last frame set up to f (key frame >= last and <= f),
+// in key order, then keeps f as the last; EndFrame is the last key's frame.
+// The record (header, Animatable, keys: f32 frame, u32 n, n x (proxy,
+// trigger) strings) [C data: every record on the disc ends at its marker].
+// The win sequences' BandCamShots play them (band_objects.dta start_shot:
+// {[play_anim] animate}).
+class EventAnim : public Object {
+public:
+    struct Key {
+        float frame = 0;
+        std::vector<std::pair<std::string, std::string>> events;  // proxy, trigger
+    };
+    Animatable anim;
+    std::vector<Key> keys;
 };
 
 // RndPostProc rev 18 (Load RB 0x82190F08, names and offsets from

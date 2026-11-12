@@ -108,6 +108,7 @@ private:
     World& world_;
     std::map<std::string, std::vector<const scene::LightPreset*>> byCategory_;
     std::vector<const scene::LightPreset*> all_;
+    const scene::LightPreset* forced_ = nullptr;  // force_preset's override (WorldDir +0x54)
     std::vector<std::string> categories_, adjectives_;
     std::vector<const scene::LightPreset*> candidates_;
     int excitement_ = 2;  // kExcitementOkay (WORLD_OBJECT_BASE's start)

@@ -200,7 +200,7 @@ public:
 
     // Statistics for the tests and logs.
     struct Stats {
-        int eventsFired = 0, triggersFired = 0, animsStarted = 0, proxyCalls = 0, sounds = 0, shows = 0, hides = 0;
+        int eventsFired = 0, triggersFired = 0, eventAnimTriggers = 0, unresolvedSounds = 0, animsStarted = 0, proxyCalls = 0, sounds = 0, shows = 0, hides = 0;
         std::map<std::string, int> events;  // world events fired
     };
     const Stats& stats() const { return stats_; }
@@ -264,6 +264,8 @@ private:
     double seconds_ = 0, beats_ = 0;
     std::vector<AnimTask> tasks_;
     std::unordered_map<const scene::Object*, float> frames_;  // last frame set per anim
+    std::unordered_map<const scene::EventAnim*, float> eventAnimLast_;  // EventAnim +0x10: the last frame set
+    void eventAnimFrame(const scene::EventAnim& e, float frame);
     std::multimap<std::string, const scene::EventTrigger*> byEvent_, byEnable_, byDisable_, byWaitFor_;
     std::unordered_map<const scene::EventTrigger*, TriggerState> triggers_;
     std::vector<DelayedHide> hides_;

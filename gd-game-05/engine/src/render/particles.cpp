@@ -295,6 +295,7 @@ void ParticleSystem::emit(float frame, float dt) {
         free_.pop_back();
         init(pool_[i], frame);
         alive_.push_back(i);
+        ++startedTotal_;
         emitCount_ -= 1;
     }
 }
@@ -307,6 +308,7 @@ int ParticleSystem::launch(int n) {
         free_.pop_back();
         init(pool_[i], now);
         alive_.push_back(i);
+        ++startedTotal_;
     }
     return started;
 }
@@ -348,6 +350,21 @@ void ParticleSystem::poll(float clockFrames) {
     lastFrame_ = frame_, lastClock_ = clockFrames;
     move(now, dt);
     emit(now, dt);
+}
+
+void ParticleSystem::pollDrawn(float clockFrames, bool showing) {
+    if (!def_->preserved.empty()) return;
+    if (pollsSinceDraw_ == 0) {
+        if (showing) poll(clockFrames);
+        else lastFrame_ = frame_, lastClock_ = clockFrames;  // the time noted (+0x100)
+    }
+    ++pollsSinceDraw_;
+}
+
+void ParticleSystem::drawShowing(float clockFrames) {
+    if (!def_->preserved.empty()) return;
+    if (pollsSinceDraw_ >= 2) poll(clockFrames);  // the catch-up (move and emit)
+    pollsSinceDraw_ = 0;
 }
 
 void ParticleSystem::appendQuads(Vec3 camRight, Vec3 camUp, std::vector<float>& verts, std::vector<uint16_t>& indices) const {
@@ -469,7 +486,7 @@ void ParticleSet::setFrame(float frame) {
     for (ParticleSystem& s : systems_) s.setFrame(frame);
 }
 
-void ParticleSet::update(const ScenePose& pose, const scene::Xfm& base, float clockFrames) {
+void ParticleSet::update(const ScenePose& pose, const scene::Xfm& base, float clockFrames, bool drawGated) {
     for (ParticleSystem& s : systems_) {
         const scene::ParticleSys& d = s.def();
         const scene::Xfm world = scene::compose(pose.world(&d), base);
@@ -490,7 +507,8 @@ void ParticleSet::update(const ScenePose& pose, const scene::Xfm& base, float cl
         if (!d.mesh.empty() && d.dir)
             if (const scene::Mesh* m = d.dir->resolve<scene::Mesh>(d.mesh))
                 s.setEmitterMesh(m, scene::compose(pose.world(m), base));
-        s.poll(clockFrames);
+        if (drawGated) s.pollDrawn(clockFrames, pose.showing(&d));
+        else s.poll(clockFrames);
     }
 }
 

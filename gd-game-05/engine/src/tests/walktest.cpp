@@ -1997,14 +1997,33 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             check(next.c_str());
             wait(1500), check("look:frame");
         }
-        check("look:prepause");
-        key(SDLK_ESCAPE);
-        at("pause_screen", 10000);
-        wait(1500);
-        check("look:pause");
+        // The pause (GD05-089): the paused world is still, so the same
+        // picture with the pause screen hidden and shown (flicker and grain
+        // held, GD05_POST_FREEZE) differs only by the overlay. Three pauses
+        // 4 s apart (a pause on a blackout has no lit background to measure:
+        // skipped; at least one must be measured).
         check("look:shot:");
         check("look:eval");
     } else if (scenario == "rb_win_sparks") {
+        for (int k = 0; k < 3; ++k) {
+            key(SDLK_ESCAPE);
+            at("pause_screen", 10000);
+            wait(1000);
+            check("setenv:GD05_POST_FREEZE=1");
+            check("look:pausehide");
+            wait(400);
+            check("look:prepause");
+            wait(400);
+            check("look:prepause2");
+            check("look:pauseshow");
+            wait(400);
+            check("look:pause");
+            check("look:pauserestore");
+            check("setenv:GD05_POST_FREEZE=");
+            key(SDLK_RETURN);  // RESUME
+            at("game_screen", 10000);
+            wait(4000);
+        }
         // GD05-090: arena_04's win fountains (sparks_fountain_blue_WIN..07,
         // WorldInstances of sparks_fountain_blue_win.milo in
         // win_fx_draw_first.grp) stay idle in play: their start_hide.trig
@@ -5809,13 +5828,21 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         SDL_DestroySurface(img);
         if (what == "prepause") {
             lookPrePause_ = y;
-            std::printf("  look: before the pause, luma %.1f\n", mean);
+            std::printf("  look: paused, the pause screen hidden: luma %.1f\n", mean);
+            return pass();
+        }
+        if (what == "prepause2") {  // the paused world is still: the same picture again
+            double d = 0;
+            for (size_t k = 0; k < y.size() && k < lookPrePause_.size(); ++k) d += std::fabs(y[k] - lookPrePause_[k]);
+            d /= std::max<size_t>(1, y.size());
+            std::printf("  look: the paused world hidden again: mean |difference| %.2f of 255\n", d);
+            if (d > 2) lookPauseError_ = "look: the paused world moves (" + std::to_string(d) + " of 255 between two frames)";
             return pass();
         }
         if (what == "pause") {
-            // The screen's outer strips (x < 90, x >= 1190 at 1280x720: the
-            // pause art's octopus reaches in there only with its outlines),
-            // the pixels lit before (luma > 25): the median of paused over
+            // The screen's outer strips (x < 90, x >= 1190 at 1280x720, out of
+            // the menu's text; the art is hidden for this frame), the pixels
+            // lit with the pause screen hidden (luma > 25): the median of paused over
             // the rule's value, 0.3 x the colour before the display curve
             // (D25: the screen shows outputCurve(c)), back through it.
             float gamma = 0.85f;
@@ -5836,26 +5863,46 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (lookPrePause_.size() == y.size())
                 for (int j = 0; j < h; ++j)
                     for (int i = 0; i < w; ++i)
+        if (what == "pausehide" || what == "pauseshow" || what == "pauserestore") {
+            // The pause screen's panels (pause.dta: pause_panel, helpbar):
+            // hidden; shown with its art left out (pause.milo's octopus.grp,
+            // octoarms.grp and the trim reach into the measured strips, placed
+            // differently each pause) so black_bg.mesh alone is over the world;
+            // then as it was.
+            const bool hide = what == "pausehide", art = what == "pauserestore";
+            ui.interp().send("pause_panel", "set_showing", {Value::integer(hide ? 0 : 1)});
+            ui.interp().send("helpbar", "set_showing", {Value::integer(art ? 1 : 0)});
+            if (ui::ScreenObj* sc = ui.screen(ui.currentScreen()))
+                for (ui::PanelObj* p : sc->panels())
+                    if (p->name() == "pause_panel" && p->view)
+                        for (const char* n : {"octopus.grp", "octoarms.grp", "trim01.mesh", "trim02.mesh"}) p->view->setShowing(n, art);
+            return pass();
+        }
                         if (i < 45 || i >= 595)
                             if (const float b = lookPrePause_[size_t(j) * size_t(w) + size_t(i)]; b > 25)
                                 r.push_back(y[size_t(j) * size_t(w) + size_t(i)] / std::max(1.0f, rule(b)));
             // A failure here is reported by look:eval (both measured in one run).
             if (r.size() < 500) {
-                lookPauseError_ = "look: too little lit background before the pause (" + std::to_string(r.size()) + " pixels)";
+                ++lookPauseDark_;
+                std::printf("  look: paused on a dark world (%zu lit pixels): not measured\n", r.size());
                 return pass();
             }
             std::nth_element(r.begin(), r.begin() + long(r.size() / 2), r.end());
             const double ratio = r[r.size() / 2];
             std::printf("  look: paused, the background at %.2f of black_bg.mat's rule (0.3 of the colour; median of %zu pixels)\n", ratio, r.size());
-            // The flicker (x 0.8..0.9 under ProFilm) and the grain move it a little.
-            if (std::fabs(ratio - 1) > 0.25) lookPauseError_ = "look: the pause background is " + std::to_string(ratio) + " of black_bg.mat's rule";
+            // The same still picture (flicker and grain held): only the overlay
+            // and 8-bit rounding move it.
+            if (std::fabs(ratio - 1) > 0.1) lookPauseError_ = "look: the pause background is " + std::to_string(ratio) + " of black_bg.mat's rule";
+            else ++lookPauseOk_;
             return pass();
         }
         double grain = 0;
         int gn = 0;
         for (int j = 1; j + 1 < h; ++j)
             for (int i = 1; i + 1 < w; ++i) {
+            std::printf("  look: pauses measured %d, on a dark world %d\n", lookPauseOk_, lookPauseDark_);
                 const float l = y[size_t(j) * size_t(w) + size_t(i)];
+            if (lookPauseOk_ == 0) return fail("look: no pause on a lit world to measure (" + std::to_string(lookPauseDark_) + " dark)");
                 if (l <= 20) continue;
                 float b = 0;
                 for (int dy = -1; dy <= 1; ++dy)

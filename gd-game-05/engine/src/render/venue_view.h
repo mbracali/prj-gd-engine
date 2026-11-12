@@ -65,6 +65,14 @@ public:
     // still in the draw list (RB: none, GD05-069).
     int spotlightDrawerProxies() const { return sdProxies_; }
     int spotlightDrawerProxiesListed() const { return sdProxiesListed_; }
+    // The walks' particle probe: the systems of the milos whose path contains
+    // `part` (e.g. "sparks_fountain_blue_win"): particles started since the
+    // load, alive now, drawn in the last frame.
+    struct PartProbe {
+        long long started = 0;
+        int alive = 0, drawn = 0, systems = 0;
+    };
+    PartProbe particleProbe(const std::string& part) const;
     const CrowdView& crowdView() const { return *crowdView_; }
     BandView& bandView() { return *bandView_; }
     // The Enhanced Options' venue extras (render/enhanced_lights.h): the
@@ -96,6 +104,8 @@ private:
     std::unordered_map<const scene::Object*, std::vector<Root>> proxyRoots_;
     gfx::ParticleSet particleSet_;
     std::unordered_map<const scene::ParticleSys*, size_t> systemIndex_;
+    std::vector<std::string> systemMilo_;  // per system: its milo's path
+    std::vector<int> systemDrawn_;         // per system: particles drawn in the last frame
     std::unique_ptr<gfx::ParticleRenderer> particleRenderer_;
     std::unique_ptr<gfx::DynamicMesh> dynamic_;
     std::unique_ptr<gfx::SpotlightView> spotlights_;

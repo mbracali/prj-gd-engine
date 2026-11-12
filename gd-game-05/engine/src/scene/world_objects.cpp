@@ -268,8 +268,8 @@ void readLightPreset(Rd& r, LightPreset& p) {
             l.falloff = r.f();
         }
         k.description = r.str();
-        const uint32_t drawers = r.count(12);
-        for (uint32_t i = 0; i < drawers; ++i) r.f(), r.f(), r.f();
+        k.drawers.resize(r.count(12));
+        for (auto& d : k.drawers) d[0] = r.f(), d[1] = r.f(), d[2] = r.f();
         for (float& v : k.extra) v = r.f();
     }
     p.spotlights = r.strs();
@@ -400,6 +400,18 @@ void readEventTrigger(Rd& r, EventTrigger& e) {
     }
 }
 
+void readEventAnim(Rd& r, EventAnim& e) {
+    checkVersion(e.version, "EventAnim", 0);
+    e.header = r.header();
+    r.anim(e.anim);
+    e.keys.resize(r.count(8));
+    for (auto& k : e.keys) {
+        k.frame = r.f();
+        k.events.resize(r.count(8));
+        for (auto& [proxy, trig] : k.events) proxy = r.str(), trig = r.str();
+    }
+}
+
 // RndPostProc::Load RB 0x821913A0 -> RB 0x82190F08 (rev 18) [C]: bloom
 // colour, threshold, size, intensity, the luminance map, the shared
 // ColorXfm block (RB 0x8221A410), flicker, noise, trails, the frame rate,
@@ -522,6 +534,7 @@ const std::map<std::string, WorldDecoder>& worldDecoders() {
         {"Spotlight", dec<Spotlight>(readSpotlight)},
         {"WorldCrowd", dec<WorldCrowd>(readWorldCrowd)},
         {"EventTrigger", dec<EventTrigger>(readEventTrigger)},
+        {"EventAnim", dec<EventAnim>(readEventAnim)},
         {"PostProc", dec<PostProc>(readPostProc)},
         {"Flare", dec<Flare>(readFlare)},
         {"LightAnim", dec<LightAnim>(readLightAnim)},

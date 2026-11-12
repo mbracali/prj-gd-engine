@@ -1290,3 +1290,85 @@ pattern). Each says what, why and how to undo it.
   drawn in the skin tone): no face texture, no make-up, no tattoos.
 - **Measured:** rb_makeup (PROGRESS 2026-11-12 car9).
 - **Undo:** GD05_SKIN_LEGACY=1 (nothing rendered); BandView's skin_.
+
+## D85
+- **What (2026-11-12, GD05-090):** a WorldInstance's (proxy's) EventTriggers
+  answer the world's events, and EventAnims run. EventTrigger
+  RegisterEvents (RB 0x8220C770) [C] adds the trigger as a sink of its own
+  directory (dynamic_cast<MsgSource*>(Dir())) for its trigger / enable /
+  disable / wait_for events (handlers "trigger", "enable", ...); the
+  shared fx milos' triggers listen for world events [C data]: 24 on
+  "start" (the win fountains' and pin wheels' start_hide.trig hide their
+  shared.grp; the flashpots', fountains', lightwalls' start triggers),
+  game_won, bonusfx, bre_success, intro_end. The port registered only
+  the chain's triggers (a proxy's answered its proxy calls only); now
+  every proxy milo's too, once per milo (instances of one file share it
+  here, as they share their objects) [I: the path from the WorldDir's
+  events to an instance directory]. EventAnim v0 [C]: SetFrame (RB
+  0x822CE3A0) fires, in key order, every (proxy, trigger) of the keys
+  from the last frame set (inclusive) up to the frame and keeps the frame;
+  EndFrame (0x822CE390) is the last key's frame; no StartAnim of its own.
+  The record: header, Animatable, keys (f32 frame, u32 n, n x proxy and
+  trigger names) [C data: every record ends at its marker]. The win
+  sequence's shots (worldbase.dta win_sequence: coop_fw_<part>.shot)
+  play one through their play_anim property (band_objects.dta start_shot
+  {[play_anim] animate}); arena_04's win_drums.eventanm fires
+  sparks_fountain_blue_WIN..07 game_win.trig at frames 18 / 20 (show
+  shared.grp, play it 0..60). A proxy trigger's sound that neither its
+  milo nor the venue holds plays nothing (mushroom_burst.cue sits in
+  world/shared/gen/venuesfx_bank.milo, which nothing loads) [I].
+- **Why:** arena_04's win fountains emitted and drew in nearly every shot
+  (fix8: contrast +42 %); in RB they wait for the win.
+- **Measured:** walk rb_win_sparks (arena_04): particles started by
+  sparks_fountain_blue_win.milo's systems 15 s into the song 0 (before:
+  5,869), after the forced win shot coop_fw_all05 1,186, drawn 704;
+  EventAnim triggers 69.
+- **Undo:** World::registerTriggers' proxy milos; World::eventAnimFrame;
+  readEventAnim.
+
+## D86
+- **What (2026-11-12, GD05-090 / GD05-069):** a venue particle system
+  runs only while drawn, as RB's RndParticleSys [C]: Poll (RB 0x821D94F0)
+  moves and emits only when its counter (+0x104) is 0 (drawn since the
+  last Poll) and the system is showing and has something to do, else
+  notes the time; the counter then counts up. DrawShowing (0x821D9408)
+  zeroes it and, after two or more Polls without a draw, catches up (move
+  and emit over the time since). A hidden system, or one inside a hidden
+  group or not in the draw list, stays still; it emits nothing while the
+  win fountains' shared.grp is hidden. The port polled every venue system
+  every frame. ParticleSystem::pollDrawn / drawShowing, ParticleSet::update
+  (drawGated) for VenueView only. [I]: RB's draw also culls by the
+  bounding sphere (0x8218AC08); the port draws every listed system.
+- **Undo:** GD05_PARTICLES_LEGACY=1.
+
+## D87
+- **What (2026-11-12, GD05-069):** WorldDir force_preset (Handle RB
+  0x822A46A8 -> 0x822A2680 -> 0x822A2608) [C]: a LightPreset is started
+  now (StartPreset 0x822A1B50, delay 0) and held as the override (+0x54);
+  StartPreset starts nothing while one is held, so the picks
+  (set_lighting) leave it; none ('' from the BandCamShots' end_shot)
+  clears it and picks again now (0x822A1E10 with delayed 0: the first
+  candidate unless it is the current one). LightPresets::native.
+- **Why:** BandCamShots with lighting_override and a lighting_preset (win
+  shots, special shots) sent it and it was UNHANDLED: rb_look failed on it
+  in every venue (fix8's gate too).
+- **Undo:** the force_preset branch.
+
+## D88
+- **What (2026-11-12, GD05-089):** rb_look's pause check measures the
+  overlay on a still frame: paused, with the flicker and grain phases held
+  (GD05_POST_FREEZE=1, a test aid in PostFx), the pause screen's panels
+  (pause_panel, helpbar) hidden, then shown: the paused world must not move
+  (mean difference <= 2 of 255, measured 0.00) and the outer strips with
+  the screen shown must be 0.3 of the colour through the display curve
+  (D57 / D25) within 10 %; for that frame the pause art (pause.milo's
+  octopus.grp, octoarms.grp, trim01 / 02.mesh, placed differently each
+  pause and reaching into the strips) and the helpbar are left out, so
+  black_bg.mesh alone is over the world; three pauses 4 s apart, one on a
+  dark world (blackout) is skipped, at least one measured.
+- **Why:** it compared a frame before the pause with one during it; the
+  world changed between them (0.46..1.85 of the rule by the shot).
+- **Measured:** 11 of 11 measured pauses 0.99..1.01 of the rule (four
+  venues, three pauses each, one on a blackout skipped); the paused world
+  0.00..0.52 of 255 between two frames.
+- **Undo:** the walk's steps.

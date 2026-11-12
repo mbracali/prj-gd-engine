@@ -514,7 +514,12 @@ void PostFx::end() {
     }
     // The ColorXfm, its 3x3 times the flicker (RB 0x827D93D8) [C].
     const uint64_t nowNs = SDL_GetTicksNS();
-    updateFlicker(lastNs_ ? float(double(nowNs - lastNs_) / 1e9) : 0.0f);
+    // A test aid (the rb_look walk's pause check, GD05-089): GD05_POST_FREEZE=1
+    // holds the flicker and the grain's phases, so two pictures of a paused
+    // world differ only by what is drawn over it.
+    const char* fz = SDL_getenv("GD05_POST_FREEZE");
+    const bool frozen = fz && *fz == '1';
+    updateFlicker(lastNs_ && !frozen ? float(double(nowNs - lastNs_) / 1e9) : 0.0f);
     lastNs_ = nowNs;
     for (int r = 0; r < 3; ++r) {
         for (int c = 0; c < 3; ++c) b.colorXfm[r][c] = state_.colorXfm[size_t(r * 3 + c)] * flicker_;
@@ -526,8 +531,12 @@ void PostFx::end() {
     if (state_.noiseStationary) {
         b.noisePhase[0] = b.noisePhase[2] = stationaryPhase_[0];
         b.noisePhase[1] = b.noisePhase[3] = stationaryPhase_[1];
+    } else if (frozen && frozenPhaseSet_) {
+        for (int i = 0; i < 4; ++i) b.noisePhase[i] = frozenPhase_[size_t(i)];
     } else {
         for (float& v : b.noisePhase) v = random();
+        for (int i = 0; i < 4; ++i) frozenPhase_[size_t(i)] = b.noisePhase[i];
+        frozenPhaseSet_ = true;
     }
     b.noiseScale[0] = state_.noiseBaseScale[0], b.noiseScale[1] = state_.noiseBaseScale[1];
     b.noiseScale[2] = state_.noiseStationary ? 1.0f : state_.noiseTopScale, b.noiseScale[3] = state_.noiseIntensity;
