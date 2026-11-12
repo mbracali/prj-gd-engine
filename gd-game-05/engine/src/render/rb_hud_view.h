@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "render/rb_track_view.h"
 #include "render/scene_gpu.h"
 #include "scene/ui_styles.h"
 
@@ -121,6 +122,12 @@ public:
     // camera with x_offset / side_angle; the TrackDir's camera code is not
     // read]. Empty with one track.
     const std::vector<std::array<float, 4>>& trackRects() const { return trackRects_; }
+    // The one-player configuration's track camera and speed (1_player_wide:
+    // pitch, fov, y_pos, z_pos, fade_start, fade_length; the panel's
+    // view_time_easy / _expert), the type's defaults for what it leaves out
+    // [C data: track_paneldir.dta]. The band's tracks are this picture moved
+    // onto their meters (trackRects).
+    RbTrackView::Config trackConfig() const;
     // What the elements show (the walks compare these with the players).
     struct Shown {
         std::string score, multiplier;  // score.txt, streak_meter_01's multiplier.txt ("" hidden)

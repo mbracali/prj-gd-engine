@@ -542,6 +542,7 @@ private:
     std::vector<RbSeat> seats_;
     std::vector<GameSetup::RbMember> rbBandSetup_;
     bool player0Out_ = false;
+    float rbTrackDiff_ = -1;  // the mean difficulty the gem tracks were configured for
     std::array<int, 4> fails_{};
     std::array<float, 4> outMs_{};
 
@@ -674,6 +675,7 @@ private:
     bool rbHudProbeDue_ = false;
     float rbHudNextProbeMs_ = 15000;
     int rbHudProbes_ = 0, rbHudBoxes_ = 0, rbHudBoxErrPx_ = 0, rbHudValueErrors_ = 0;
+    int rbNowBarGemPx_ = -1, rbNowBarCoverPct_ = -1;  // the now-bar probe (rbHudProbe)
     // The venue behind the track (M8): set by the venue code once a venue is
     // loaded; draws the world with the renderer, materials with
     // DrawContext::hdr = `hdr` (GH2's HDR buffer, render/post_fx.h).
@@ -2868,6 +2870,8 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "part_vocals") return parts_[0] == "vocals" ? 1 : 0;
     if (key == "rb_track_frames") return rbTrackFrames_;
     if (key == "rb_hud_probes") return rbHudProbes_;
+    if (key == "rb_nowbar_gem_px") return rbNowBarGemPx_;
+    if (key == "rb_nowbar_cover_pct") return rbNowBarCoverPct_;
     if (key == "rb_hud_boxes") return rbHudBoxes_;
     if (key == "rb_hud_box_err_px") return rbHudBoxErrPx_;
     if (key == "rb_hud_value_errors") return rbHudValueErrors_;
@@ -3424,6 +3428,28 @@ void App::drawRbTracks(float t, float speed) {
             for (size_t i = 0; i < tracks.size(); ++i)
                 tracks[i]->setScreenRect(rects && rects->size() == tracks.size() ? (*rects)[i] : std::array<float, 4>{float(i) / n, 0.6f, 1.0f / n, 0.4f});
     }
+    // The panel's configuration for every gem track (track_paneldir.dta
+    // update / configure_tracks): the camera and y_per_second by the gem
+    // players' mean difficulty [C data].
+    if (rbHud_ && rbHud_->loaded()) {
+        float sum = 0;
+        int n = 0;
+        if (rbTrack_ && !vocal_) sum += float(difficulty_), ++n;
+        for (const RbSeat& st : seats_)
+            if (st.track) sum += float(st.difficulty), ++n;
+        const float mean = n ? sum / float(n) : 3.0f;
+        if (mean != rbTrackDiff_) {
+            rbTrackDiff_ = mean;
+            if (rbTrack_) rbTrack_->configure(rbHud_->trackConfig(), mean);
+            for (RbSeat& st : seats_)
+                if (st.track) st.track->configure(rbHud_->trackConfig(), mean);
+        }
+        auto ensure = [&](RbTrackView* tv) {
+            if (tv && tv->loaded() && !tv->configured()) tv->configure(rbHud_->trackConfig(), mean);
+        };
+        ensure(rbTrack_.get());
+        for (RbSeat& st : seats_) ensure(st.track.get());
+    }
     drawRbTrack0(t, speed);
     if (!seats_.empty()) drawSeats(t, speed);
     if (rbHud_) drawRbHud(t);
@@ -3559,6 +3585,47 @@ void App::rbHudProbe() {
                 double(e.y0), double(e.x1), double(e.y1), double(dx0), double(dy0), double(dx1), double(dy1), err, e.strict ? "" : " outside", rbHud_->configuration().c_str());
         worst = std::max(worst, err);
         ++boxes;
+    }
+    // The now bar (GD05-064): a gem in each lane at the now bar, alone, then
+    // with every HUD element shown drawn over it as the game draws them; the
+    // share of the gems' pixels the HUD covers. 0.0.6's track sat under the
+    // Overdrive meter and the multiplier (the panel's camera was not applied).
+    if (rbTrack_ && !vocal_ && rbTrack_->configured()) {
+        auto grab = [&]() {
+            SDL_Surface* raw = canvas_.readPixels();
+            SDL_Surface* c = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32) : nullptr;
+            if (raw) SDL_DestroySurface(raw);
+            return c;
+        };
+        r.device().clear(key, true);
+        const int lanes = rbTrack_->drawNowBarGems(r, *sceneCache_);
+        SDL_Surface* a = grab();
+        r.device().clear(key, true);
+        rbTrack_->drawNowBarGems(r, *sceneCache_);
+        for (const RbHudView::Box& e : rbHud_->expectedBoxes()) rbHud_->drawOnly(r, *sceneCache_, e.name);
+        SDL_Surface* b = grab();
+        if (a && b && a->w == b->w && a->h == b->h) {
+            long gem = 0, covered = 0;
+            int gy0 = a->h, gy1 = -1;
+            for (int y = 0; y < a->h; ++y) {
+                const uint8_t* ra = static_cast<const uint8_t*>(a->pixels) + size_t(y) * size_t(a->pitch);
+                const uint8_t* rb = static_cast<const uint8_t*>(b->pixels) + size_t(y) * size_t(b->pitch);
+                for (int x = 0; x < a->w; ++x) {
+                    const uint8_t* pa = ra + size_t(x) * 4;
+                    const uint8_t* pb = rb + size_t(x) * 4;
+                    if (255 - pa[0] + pa[1] + 255 - pa[2] <= 24) continue;  // magenta: no gem here
+                    ++gem, gy0 = std::min(gy0, y), gy1 = std::max(gy1, y);
+                    if (std::abs(pa[0] - pb[0]) + std::abs(pa[1] - pb[1]) + std::abs(pa[2] - pb[2]) > 24) ++covered;
+                }
+            }
+            const int pct = gem ? int(std::lround(100.0 * double(covered) / double(gem))) : 100;
+            SDL_Log("rb now bar: %d lanes, %ld gem px (rows %d..%d of %d, now bar at %.3f), %ld under the HUD (%d%%)", lanes, gem, gy0, gy1, a->h,
+                    double(rbTrack_->nowBarScreenY()), covered, pct);
+            rbNowBarGemPx_ = gem ? int(gem) : 0;
+            rbNowBarCoverPct_ = std::max(rbNowBarCoverPct_, pct);
+        }
+        if (a) SDL_DestroySurface(a);
+        if (b) SDL_DestroySurface(b);
     }
     r.device().clear(black, true);
     ++rbHudProbes_;

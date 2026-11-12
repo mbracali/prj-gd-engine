@@ -85,6 +85,20 @@ RbHudView::~RbHudView() = default;
 
 const scene::Object* RbHudView::panelObj(const std::string& name) const { return panel_ ? panel_->root().get(name) : nullptr; }
 
+RbTrackView::Config RbHudView::trackConfig() const {
+    RbTrackView::Config c;
+    auto num = [](const scene::DataNode* n, float& out) {
+        if (n) out = n->type == 1 ? n->asFloat() : float(int32_t(n->raw));
+    };
+    const scene::Object* cfg = panelObj("1_player_wide");
+    num(headerProp(cfg, "pitch"), c.pitch), num(headerProp(cfg, "fov"), c.fov);
+    num(headerProp(cfg, "y_pos"), c.yPos), num(headerProp(cfg, "z_pos"), c.zPos);
+    num(headerProp(cfg, "fade_start"), c.fadeStart), num(headerProp(cfg, "fade_length"), c.fadeLength);
+    const scene::Object* self = panel_ && panel_->root().self ? panel_->root().self.get() : nullptr;
+    num(headerProp(self, "view_time_easy"), c.viewTimeEasy), num(headerProp(self, "view_time_expert"), c.viewTimeExpert);
+    return c;
+}
+
 scene::Directory* RbHudView::subdir(const std::string& name) const {
     if (!panel_) return nullptr;
     for (const auto& [owner, d] : panel_->root().subdirs)

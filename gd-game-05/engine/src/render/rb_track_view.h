@@ -81,6 +81,23 @@ public:
     // The players' layout (wave 02): the share of the screen the track
     // draws in (x, y, w, h from the top left), else its camera's own.
     void setScreenRect(const std::array<float, 4>& r) { layout_ = r, hasLayout_ = true; }
+    // The panel's track_configuration (trackpanel.milo's 1_player_wide ...)
+    // as track_paneldir.dta's update gives it to each gem track, through
+    // gem_track.dta's set_pitch / set_fov / set_cam_pos / set_fade [C data]:
+    // rotater.grp's pitch, game.cam's y_fov and place, track.env's fade and
+    // the camera's far plane, top_y = fade_start + fade_length + 5; and
+    // configure_tracks' y_per_second = top_y / view_time (view_time_easy ..
+    // view_time_expert by the players' mean difficulty) [C data].
+    struct Config {
+        float pitch = -44, fov = 15, yPos = -229, zPos = 47, fadeStart = 330, fadeLength = 100;
+        float viewTimeEasy = 2.4f, viewTimeExpert = 1.5f;
+    };
+    void configure(const Config& c, float meanDifficulty);
+    bool configured() const { return configured_; }
+    // The walks' now-bar probe: one normal gem in each lane at the now bar
+    // (y 0), drawn through the last frame's camera and view; how many lanes.
+    int drawNowBarGems(gfx::Renderer& r, gfx::SceneCache& cache);
+    float nowBarScreenY() const { return nowBarY_; }  // the now bar's height in the view (0 top .. 1 bottom), last draw
     void draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song, const PlayerView& player, float nowMs, float trackSpeed);
 
 private:
@@ -114,6 +131,9 @@ private:
     bool frameSet_ = false;
     int viewW_ = 1280, viewH_ = 720;
     float yPerSecond_ = 60, bottomY_ = -10, topY_ = 120, speed_ = 1, nowY_ = 0;
+    bool configured_ = false;
+    float camFov_ = 0, camFar_ = 0, envFadeStart_ = 0, envFadeEnd_ = 0, nowBarY_ = -1;
+    const scene::Environ* fadeEnv_ = nullptr;  // track.env (set_fade)
     std::array<float, 5> slotX_{-8, -4, 0, 4, 8};
     // The drums' lanes: the kick (0) and the pads where smasher_plate_drum's
     // gem_smasher0..4 stand [C data].

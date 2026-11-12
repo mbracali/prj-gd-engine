@@ -975,6 +975,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("counter:rb_hud_boxes:9");
         check("counter_max:rb_hud_box_err_px:4");
         check("counter_max:rb_hud_value_errors:0");
+        // GD05-064: a gem in each lane at the now bar shows; the HUD covers
+        // none of it (0.0.6: the Overdrive meter and the multiplier sat
+        // across the smashers).
+        check("counter:rb_nowbar_gem_px:200");
+        check("counter_max:rb_nowbar_cover_pct:2");
         at("qp_endgame_screen", 30000);
     } else if (scenario == "quickplay_vocals" || scenario == "quickplay_drums") {
         // Rock Band's instrument per player (wave 02): the controller type
@@ -1070,6 +1075,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("counter:rb_hud_boxes:5");
         check("counter_max:rb_hud_box_err_px:4");
         check("counter_max:rb_hud_value_errors:0");
+        // GD05-064: a gem in each lane at the now bar shows; the HUD covers
+        // none of it (0.0.6: the Overdrive meter and the multiplier sat
+        // across the smashers).
+        check("counter:rb_nowbar_gem_px:200");
+        check("counter_max:rb_nowbar_cover_pct:2");
         at("qp_endgame_screen", 20000);       // the mode's endgame_screen once the stats are in
         wait(1000);
         press(kX);  // continue (SELECT_START_MSG: ui sync_screen qp_complete_screen)
@@ -1225,6 +1235,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("counter:rb_hud_boxes:5");
         check("counter_max:rb_hud_box_err_px:4");
         check("counter_max:rb_hud_value_errors:0");
+        // GD05-064: a gem in each lane at the now bar shows; the HUD covers
+        // none of it (0.0.6: the Overdrive meter and the multiplier sat
+        // across the smashers).
+        check("counter:rb_nowbar_gem_px:200");
+        check("counter_max:rb_nowbar_cover_pct:2");
         if (!pad) {
             // Gems let pass and a wrong strum: the miss sound, the guitar
             // stem muted; the next hits bring it back.

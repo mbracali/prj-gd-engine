@@ -376,7 +376,23 @@ void ScenePose::transAnim(const scene::TransAnim& a, float frame) {
         scaleRows(x.rot, s);
     }
     std::array<float, 3> p;
-    if (scene::sampleTrans(k.transKeys, frame, k.transSpline, p)) x.pos = p;  // trans_spline: 0x8226E560
+    // repeat_trans: past its keys the move goes on, each span of the keys
+    // adding the last key's position less the first's (tracksystem.milo's
+    // rig_movement.tnm, 0 -> 100 over frames 0 -> 100, carries the track's
+    // rig, surface and cameras along now_y for the whole song; clamped at
+    // 100 the rig stopped a second in while the gems kept their song
+    // places) [C data: the flag; I: the wrap's exact form].
+    float f = frame;
+    std::array<float, 3> extra{0, 0, 0};
+    if (a.repeatTrans && k.transKeys.size() > 1) {
+        const float f0 = k.transKeys.front().frame, f1 = k.transKeys.back().frame;
+        if (f1 > f0 && (frame < f0 || frame > f1)) {
+            const float n = std::floor((frame - f0) / (f1 - f0));
+            f = frame - n * (f1 - f0);
+            for (int i = 0; i < 3; ++i) extra[size_t(i)] = n * (k.transKeys.back().v[size_t(i)] - k.transKeys.front().v[size_t(i)]);
+        }
+    }
+    if (scene::sampleTrans(k.transKeys, f, k.transSpline, p)) x.pos = {p[0] + extra[0], p[1] + extra[1], p[2] + extra[2]};  // trans_spline: 0x8226E560
     local_[target] = x;
 }
 

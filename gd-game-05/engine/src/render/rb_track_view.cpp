@@ -197,6 +197,60 @@ void RbTrackView::load(const GameData& data, scene::MiloLibrary& library, const 
 }
 
 
+void RbTrackView::configure(const Config& c, float meanDifficulty) {
+    if (!track_ || !cam_) return;
+    // set_pitch: rotater.grp's local rotation x = pitch, its y / z kept (0
+    // in the data) [C data]; Hmx's rotation rows as RbHudView's.
+    if (const scene::Object* rot = obj("rotater.grp")) {
+        const float a = c.pitch * 3.14159265f / 180.0f, cx = std::cos(a), sx = std::sin(a);
+        scene::Xfm x = pose_.local(rot);
+        x.rot = {1, 0, 0, 0, cx, sx, 0, -sx, cx};
+        pose_.setLocal(rot, x);
+    }
+    // set_cam_pos 0 y_pos z_pos: game.cam's local place; set_fov: its y_fov
+    // (degrees) [C data].
+    scene::Xfm cx = pose_.local(cam_);
+    cx.pos = {0, c.yPos, c.zPos};
+    pose_.setLocal(cam_, cx);
+    camFov_ = c.fov * 3.14159265f / 180.0f;
+    // set_fade: track.env's fade from the camera to (0, fade_start, 0) and
+    // to fade_start + fade_length; the far plane at its end [C data].
+    auto dist = [&](float y) { return std::sqrt((y - c.yPos) * (y - c.yPos) + c.zPos * c.zPos); };
+    envFadeStart_ = dist(c.fadeStart), envFadeEnd_ = dist(c.fadeStart + c.fadeLength);
+    camFar_ = envFadeEnd_;
+    fadeEnv_ = get<scene::Environ>("track.env");
+    topY_ = c.fadeStart + c.fadeLength + 5;
+    const float d = std::clamp(meanDifficulty / 3.0f, 0.0f, 1.0f);  // / kDifficultyExpert
+    const float viewTime = c.viewTimeEasy + d * (c.viewTimeExpert - c.viewTimeEasy);
+    yPerSecond_ = topY_ / std::max(0.1f, viewTime);
+    configured_ = true;
+}
+
+
+int RbTrackView::drawNowBarGems(gfx::Renderer& r, gfx::SceneCache& cache) {
+    if (!track_ || !cam_) return 0;
+    int vx, vy, vw, vh;
+    r.pictureRect(vx, vy, vw, vh);
+    const std::array<float, 4> rect = hasLayout_ ? layout_ : screenRect_;
+    const bool sub = rect != std::array<float, 4>{0, 0, 1, 1};
+    viewW_ = std::max(1, int(float(vw) * rect[2])), viewH_ = std::max(1, int(float(vh) * rect[3]));
+    if (sub) r.device().setViewport(vx + int(float(vw) * rect[0]), vy + int(float(vh) * rect[1]), viewW_, viewH_);
+    frameSet_ = false;
+    gfx::MaterialRenderer& mr = r.materials();
+    setEnv(mr, cache, trackEnv_);
+    int lanes = 0;
+    for (int f = drums_ ? 1 : 0; f < 5; ++f) {
+        const scene::TrackWidget* w = sets_[size_t(f)].normal;
+        if (!w) continue;
+        drawWidget(mr, cache, w, !drums_ ? slotX(f) : drumX_[size_t(f)], 0, f);
+        ++lanes;
+    }
+    if (sub) r.device().setViewport(vx, vy, vw, vh);
+    viewW_ = vw, viewH_ = vh;
+    return lanes;
+}
+
+
 // PropAnim (RB rev 5) [C data: checked against all 120 PropAnims of
 // tracksystem.milo, each read to its end]: the object header, the
 // RndAnimatable part (its rev, the frame range's end, the rate), then
@@ -784,6 +838,7 @@ void RbTrackView::setEnv(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, cons
     frameSet_ = true;
     gfx::LightEnv le;
     if (env) le = cache.lightEnv(*env, &pose_);
+    if (env && env == fadeEnv_ && configured_) le.fade = true, le.fadeStart = envFadeStart_, le.fadeEnd = envFadeEnd_;  // set_fade
     mr.setFrame(camera_, le, viewW_, viewH_);
 }
 
@@ -1062,11 +1117,25 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
     viewW_ = std::max(1, int(float(vw) * rect[2])), viewH_ = std::max(1, int(float(vh) * rect[3]));
     if (sub) r.device().setViewport(vx + int(float(vw) * rect[0]), vy + int(float(vh) * rect[1]), viewW_, viewH_);
     frameSet_ = false;
-    speed_ = trackSpeed;
+    // A configured track's y_per_second is the panel's (top_y / view_time):
+    // the GH2 per-difficulty speed is not RB's.
+    speed_ = configured_ ? 1.0f : trackSpeed;
     nowY_ = yOf(nowMs);
     gfx::MaterialRenderer& mr = r.materials();
     // The anim group at frame now_y (TrackDir::Poll, as GH2's): the surface's scroll [C GH2; I RB].
     if (!animGroup_.empty()) pose_.setFrame(obj(animGroup_), nowY_);
+    // rig.grp (rig_movement.tnm, repeat_trans) carries the surface, the
+    // smashers and the cameras along now_y while RB places the gems at
+    // their song y [C data]. The port draws the gems relative to now, so it
+    // keeps the rig at its origin: the same picture. (Before, the rig's move
+    // stopped at its last key, y 100, a second into the song: the smashers
+    // and camera sat 100 units ahead of the gems' now, so the gems crossed
+    // the smashers 100 / y_per_second early and were struck below them.)
+    if (const scene::Object* rig = animGroup_.empty() ? nullptr : obj(animGroup_)) {
+        scene::Xfm x = pose_.local(rig);
+        x.pos = {0, 0, 0};
+        pose_.setLocal(rig, x);
+    }
     // static.grp holds every instrument's parts; the other instrument's are
     // hidden, and the effects that show on events (the bass superstreak,
     // the Overdrive spotlight, a Unison phrase hit) until those are done [I].
@@ -1101,7 +1170,13 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
     }
     camera_.world = gfx::toMat4(pose_.world(cam_));
     camera_.yFov = cam_->yFov, camera_.nearPlane = cam_->nearPlane, camera_.farPlane = cam_->farPlane;
+    if (configured_) camera_.yFov = camFov_, camera_.farPlane = camFar_;
     camera_.aspect = float(viewW_) / float(viewH_);
+    {
+        const gfx::Mat4 vp = camera_.viewProj(false);
+        const float cy = vp.at(1, 1) * 0 + vp.at(1, 3), cw = vp.at(3, 1) * 0 + vp.at(3, 3);
+        nowBarY_ = cw != 0 ? 0.5f - 0.5f * cy / cw : -1;
+    }
     if (static bool logged = false; !logged && SDL_getenv("GD05_TRACKLOG")) {
         logged = true;
         const gfx::Mat4 vp = camera_.viewProj(false);
