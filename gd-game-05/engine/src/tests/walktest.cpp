@@ -3156,11 +3156,38 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 dimmest = std::min(dimmest, v);
             }
             best["band_icons"] = dimmest;
+            // The lit pixels' (luma over 100) mean luma and blue / red: the
+            // word and the icons graded alike (GD05-065, D49).
+            auto grade = [&](float x0, float y0, float x1, float y1, double& luma, double& br) {
+                const float sx = float(img->w) / 1280.0f, sy = float(img->h) / 720.0f;
+                double l = 0, r = 0, b = 0;
+                long n = 0;
+                for (int y = std::max(0, int(y0 * sy)); y < std::min(img->h, int(y1 * sy)); ++y)
+                    for (int x = std::max(0, int(x0 * sx)); x < std::min(img->w, int(x1 * sx)); ++x) {
+                        const Uint8* px = static_cast<const Uint8*>(img->pixels) + y * img->pitch + x * 4;
+                        const int v = (299 * px[0] + 587 * px[1] + 114 * px[2]) / 1000;
+                        if (v <= 100) continue;
+                        l += v, r += px[0], b += px[2], ++n;
+                    }
+                luma = n ? l / double(n) : 0, br = r > 0 ? b / r : 0;
+                return n;
+            };
+            float ix0 = 1e9f, iy0 = 1e9f, ix1 = -1e9f, iy1 = -1e9f;
+            for (const gfx::UiView::Hit& h : p->view->hits())
+                if (h.key == "icon") ix0 = std::min(ix0, h.x0), iy0 = std::min(iy0, h.y0), ix1 = std::max(ix1, h.x1), iy1 = std::max(iy1, h.y1);
+            double iconLuma = 0, iconBr = 0;
+            grade(ix0, iy0, ix1, iy1, iconLuma, iconBr);
             // LOADING: its box's top 60% (the gold trim runs under its foot).
             for (const gfx::UiView::Hit& h : p->view->hits())
                 if (h.key == "loading.lbl") {
                     best["loading_word"] = p97(h.x0, h.y0, h.x1, h.y0 + 0.6f * (h.y1 - h.y0));
-                    std::printf("    loading word                 p97 %d\n", best["loading_word"]);
+                    double luma = 0, br = 0;
+                    const long n = grade(h.x0, h.y0, h.x1, h.y0 + 0.6f * (h.y1 - h.y0), luma, br);
+                    std::printf("    loading word                 p97 %d, lit px %ld luma %.0f blue/red %.2f; icons luma %.0f blue/red %.2f\n", best["loading_word"], n, luma,
+                                br, iconLuma, iconBr);
+                    // 0.0.6 (D44): flat white, blue / red 1.00 against the icons' 0.66.
+                    if (n < 100 || std::fabs(br - iconBr) > 0.10 || std::fabs(luma - iconLuma) > 40)
+                        return SDL_DestroySurface(img), fail("bright loading: LOADING not graded as the band icons");
                 }
         }
         SDL_DestroySurface(img);
@@ -3170,9 +3197,9 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         static const std::map<std::string, std::vector<std::pair<std::string, int>>> floors = {
             {"main", {{"solo.btn", 190}, {"multi.btn", 190}, {"tutorial.btn", 190}, {"options.btn", 190}, {"community.btn", 190}}},
             // The audio sliders were edge-on (2-3 px, 10..118; slider.grp's turn
-            // left out); the LOADING word bright from the start (owner
-            // decision D44: its focus colour in the UI environ; it was 25,
-            // unlit until loading.tnm's glint reached it).
+            // left out); the LOADING word bright from the start, graded as the
+            // band icons (D49, replacing D44's flat white; it was 25, unlit
+            // until loading.tnm's glint reached it).
             {"audio", {{"instruments.sld", 120}, {"background.sld", 120}, {"crowd.sld", 120}, {"sfx.sld", 120}}},
             {"options", {{"audio.btn", 170}, {"gameplay.btn", 80}, {"characterdata.btn", 80}, {"calibrate_av.btn", 80}, {"port_enhanced.btn", 75}}},
             {"solo", {{"quickplay.btn", 150}, {"tour.btn", 80}}},

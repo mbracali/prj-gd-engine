@@ -929,17 +929,48 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
     }
     if (const auto* t = o.as<scene::Text>()) return drawText(r, *t);
     if (const auto* l = o.as<scene::BandLabel>()) {
-        // Owner decision (D44): LOADING (loading.milo's loading.lbl, beside
-        // loading.tnm) reads bright from the moment the loading screen shows:
-        // its own focus colour (custom_colors 0xfdfdfd) in RB's UI environ
-        // (ambient 1, no lights). RB draws it at its normal 0x3b3b3b under
-        // ornate_leader.env (ambient 0), bright only while loading.tnm's
-        // glint (loading.lit, range 35) crosses the word, ~4.5 s in.
+        // LOADING (loading.milo's loading.lbl) is graded as the band icons
+        // beside it (owner, 11-12, from the original; D49, replaces D44's
+        // flat white): its focus colour (custom_colors 0xfdfdfd, white as the
+        // icons' materials) lit as the icons are lit: intruments.env's
+        // instruments.lit (warm 1 1 0.68, range 500, falloff from 200;
+        // parented to ornate_leader.grp, the label's group) where the four
+        // icons stand relative to it, so the word takes the light the icons
+        // take; with loading.tnm's sweep light loading.lit (range 35, keys 0
+        // / 25 / 50 across the word, from the label's own ornate_leader.env)
+        // [C data: the lights, colours and the sweep; I: that RB lights the
+        // word so]. Lit at its own place the word stayed grey (p97 44).
         if (l->bigEndian && l->name == "loading.lbl" && l->textStyle == "custom_colors" && l->dir && l->dir->find<scene::TransAnim>("loading.tnm")) {
             std::array<float, 3> c{};
-            if (styles_.textStyleColor(l->textStyle, l->customColors, scene::UiState::Focused, c)) {
+            const scene::Environ* icons = l->dir->resolve<scene::Environ>("intruments.env");
+            if (icons && styles_.textStyleColor(l->textStyle, l->customColors, scene::UiState::Focused, c)) {
+                LightEnv le = cache_.lightEnv(*icons, &pose_);
+                // The icons' middle (load_icon_*) and the word's place.
+                float mid[3] = {0, 0, 0};
+                int n = 0;
+                for (const auto& [d, m] : {std::pair{"load_icon_guitar", "guitar.mesh"}, std::pair{"load_icon_vox", "vox.mesh"},
+                                           std::pair{"load_icon_drum", "drummer.mesh"}, std::pair{"load_icon_bass", "bass.mesh"}})
+                    if (const scene::Object* o = findIn(d, m)) {
+                        const scene::Xfm w = pose_.world(o);
+                        for (int k = 0; k < 3; ++k) mid[k] += w.pos[size_t(k)];
+                        ++n;
+                    }
+                const scene::Xfm lw = componentWorld(*l);
+                for (int i = 0; n && i < le.lightCount; ++i)
+                    if (!le.lights[i].directional && !le.directional) {
+                        le.lights[i].vec.x += lw.pos[0] - mid[0] / float(n);
+                        le.lights[i].vec.y += lw.pos[1] - mid[1] / float(n);
+                        le.lights[i].vec.z += lw.pos[2] - mid[2] / float(n);
+                    }
+                if (const scene::Environ* own = l->dir->resolve<scene::Environ>("ornate_leader.env")) {
+                    scene::Environ sweep = *own;
+                    sweep.lights.clear();
+                    if (l->dir->resolve<scene::Light>("loading.lit")) sweep.lights.push_back("loading.lit");
+                    const LightEnv se = cache_.lightEnv(sweep, &pose_);
+                    for (int i = 0; i < se.lightCount && le.lightCount < 4; ++i) le.lights[le.lightCount++] = se.lights[i];
+                }
                 const LightEnv saved = r.lightEnv();
-                r.setLightEnv(defaultEnvironment());
+                r.setLightEnv(le);
                 drawLabel(r, *l, &l->band, c.data());
                 r.setLightEnv(saved);
                 return;
