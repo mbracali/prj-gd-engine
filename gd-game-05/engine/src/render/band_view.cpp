@@ -144,8 +144,12 @@ void collect(const chr::Character& c, const gfx::ScenePose* pose, const scene::O
         out.push_back(m);
     } else if (auto* g = o->as<scene::Group>()) {
         if (g == c.shadowGroup()) return;
-        for (const std::string& n : g->objects)
+        // draw_only (RndGroup, RB rev 13): only that member draws.
+        const std::string only = c.drawOnly(*g);
+        for (const std::string& n : g->objects) {
+            if (!only.empty() && n != only) continue;
             if (const scene::Object* x = c.dir().get(n); x && x != g) collect(c, pose, x, depth + 1, out);
+        }
     }
 }
 

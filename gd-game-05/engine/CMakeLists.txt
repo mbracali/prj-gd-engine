@@ -42,6 +42,7 @@ target_sources(gd05 PRIVATE
   src/char/char_objects.cpp
   src/char/facefx.cpp
   src/char/midi_parser.cpp
+  src/char/rb_midi_parser.cpp
   src/char/char_driver.cpp
   src/char/clip.cpp
   src/char/skeleton.cpp

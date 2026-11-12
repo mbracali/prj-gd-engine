@@ -80,8 +80,10 @@ bool transition(const scene::CharClipSamples& from, float frame, const scene::Ch
 
 // ---- ClipSet ---------------------------------------------------------------
 
-ClipSet::ClipSet(scene::Milo& milo) : milo_(milo), path_(milo.path()) {
-    const scene::Directory& d = milo.root();
+ClipSet::ClipSet(scene::Milo& milo) : ClipSet(milo.root(), milo.path()) {}
+
+ClipSet::ClipSet(scene::Directory& dir, std::string path) : dir_(dir), path_(std::move(path)) {
+    const scene::Directory& d = dir_;
     for (const auto& o : d.objects) {
         if (auto* c = o->as<scene::CharClipSamples>()) {
             clips_.push_back(c);
@@ -235,7 +237,7 @@ void ClipSet::listChannels(Bones& bones, bool delta) const {
     // The skeleton: CharBone entries ("bone_x.trans": position, scale,
     // rotation and delta types), else every channel the clips carry.
     bool any = false;
-    for (const auto& o : milo_.root().objects) {
+    for (const auto& o : dir_.objects) {
         auto* b = o->as<scene::CharBone>();
         if (!b) continue;
         any = true;

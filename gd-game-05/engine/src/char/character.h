@@ -121,6 +121,11 @@ public:
     void setShowing(const scene::Object* o, bool on) { showing_[o] = on; }
     void setShowing(const std::string& name, bool on);
     bool visible = true;  // the character as a whole (guitarist1 hidden...)
+    // RndGroup draw_only (RB rev 13): the one member of `group` that draws
+    // (char_objects.dta: hands.grp -> mic.grp, sticks.grp -> singlestick.grp);
+    // the group's saved one unless a script set it. Empty: every member.
+    void setDrawOnly(const std::string& group, const std::string& member);
+    std::string drawOnly(const scene::Group& group) const;
 
     // LOD (0x82153090): picks and shows the LOD group for `screenSize`.
     void updateLod(float screenSize);
@@ -179,6 +184,7 @@ private:
     std::vector<std::unique_ptr<ClipDriver>> drivers_;
     std::unordered_map<std::string, ClipDriver*> driverByName_;
     std::unordered_map<const scene::Object*, bool> showing_;
+    std::unordered_map<const scene::Group*, std::string> drawOnly_;
     std::vector<const scene::Group*> lodGroups_;
     const scene::Group* shadow_ = nullptr;
     const scene::Group* outfitShadow_ = nullptr;  // an outfit's, when the character has none
@@ -222,12 +228,17 @@ public:
     explicit ClipLibrary(const GameData& data) : milos_(data) {}
     // `rel` relative to `fromArkPath` (og -> ng); nullptr when missing.
     ClipSet* get(const std::string& fromArkPath, const std::string& rel);
+    // A CharDriver's clips named by object (Rock Band: `clips` empty, the
+    // set an object of the character's directory): stored inline there, or
+    // a proxy of its own milo. nullptr when there is none.
+    ClipSet* byObject(const std::string& fromArkPath, scene::Directory& dir, const std::string& object);
     const std::map<std::string, std::unique_ptr<ClipSet>>& sets() const { return sets_; }
     scene::MiloLibrary& milos() { return milos_; }
 
 private:
     scene::MiloLibrary milos_;
     std::map<std::string, std::unique_ptr<ClipSet>> sets_;
+    std::map<const scene::Directory*, std::unique_ptr<ClipSet>> inline_;
 };
 
 }  // namespace chr

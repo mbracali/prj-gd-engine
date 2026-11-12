@@ -576,6 +576,20 @@ int CharBonesSamples::typeOf(const std::string& channel) {
     return kNone;
 }
 
+std::string clipSetProxyFile(const Object& o) {
+    try {
+        size_t pos = 0;
+        milo_order::Scope order(o.bigEndian);
+        Rd r(o.record, pos);
+        r.version({17}, "CharClipSet");
+        ObjectDirData od;
+        objectDirPre(r, od);
+        return od.proxyFile;
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
 CharClipSetData decodeClipSetDir(const Object& self, size_t clipCount) {
     CharClipSetData s;
     try {

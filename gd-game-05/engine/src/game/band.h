@@ -21,6 +21,7 @@ namespace scene {
 class Waypoint;
 }
 class MidiParserSet;
+class RbMidiParserSet;
 struct MidiFile;
 struct Song;
 struct SongInfo;
@@ -110,6 +111,18 @@ public:
         std::unique_ptr<facefx::LipSync> lip;
         std::unique_ptr<facefx::ExpressionScript> expr;
         std::string shotGroup;  // RB: the camera shot's clip group for this member (BandCamShot target anim)
+        // Rock Band's CompositeCharacter state (RB 0x822E5908 / 0x822E4A80):
+        // the play flags (+0x254: clip_flags kValidGuitar / kValidBass, the
+        // attitude kGenre*, the play mode kPlay*), the clip group (+0x268),
+        // the driver playing it (+0x264: main.drv, or the drummer's
+        // main_add.drv while he plays), the mode the parser asked for
+        // (cur_play) and whether the player plays (playing).
+        uint32_t rbFlags = 0;
+        std::string rbGroup;
+        chr::ClipDriver* rbActive = nullptr;
+        uint32_t rbCurPlay = 0;
+        bool rbPlaying = true;
+        std::vector<std::unique_ptr<ScriptObject>> rbParts;  // the parsers' sinks (rb_band.cpp)
     };
     // Rock Band's BandCamShot start (RB 0x822D8108) [C data; I: no IK, props,
     // fast-forward or return]: each target's member plays its clip group
@@ -176,6 +189,16 @@ private:
     void assemble(const GameData& data, const SongInfo& song);
     bool assembleRb(const GameData& data, const SongInfo& song);  // game/rb_band.cpp
     void rbPoll(Member& m);
+    // Rock Band's band at run time (game/rb_band.cpp).
+    void rbLoadSong(const MidiFile& midi, const Song* song);
+    void rbEnter(Member& m);
+    void rbChangePlay(Member& m, uint32_t mode);                       // char_objects.dta change_play
+    void rbChangeGroup(Member& m, const std::string& group, uint32_t flags, bool force);  // RB 0x822E5908
+    void rbPlayGroup(Member& m);                                       // RB 0x822E4A80
+    bool rbDriverClip(Member& m, const std::string& driver, scene::CharClipSamples* clip, float length);  // RB 0x82342168
+    class RbPart;
+    friend class RbPart;
+    std::unique_ptr<RbMidiParserSet> rbParsers_;
     void rbSkin(const GameData& data, chr::Character& c, const DataNode* prefab, int skinIndex = -1);
     void makeScripts(const DataNode* objects);
     void registerDir(Member& m, const scene::Directory& d);

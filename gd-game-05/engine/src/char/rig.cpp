@@ -191,12 +191,15 @@ struct Rig::Impl {
         return 1;
     }
 
-    // CharWeightSetter (Poll 0x8218CFB0): its weight = the driver's eased
-    // weight of clips with its flags (0x8216A588), 1 - that when inverted.
+    // CharWeightSetter (Rock Band, Poll RB 0x8234A320) [C]: with a driver
+    // its base weight = offset + scale x the driver's eased weight of clips
+    // with its flags (RB 0x82311D68); without one, the base weight scripts
+    // set (singalong, guitar_lookat, drummer_play). The weight follows the
+    // base at most 1 / beats_per_weight per beat (at once when 0).
     struct Setter {
         std::string name, driver;
         uint32_t flags = 0;
-        bool invert = false;
+        float offset = 0, scale = 1, base = 0, beatsPerWeight = 0;
     };
     // CharIKHand (Poll 0x82173308, lengths 0x82172F38).
     struct IkHand {
@@ -370,7 +373,7 @@ void Rig::Impl::build() {
             for (const auto& e : f->entries) p.writes.push_back(e.object);
         } else if (auto* s = o->as<scene::CharWeightSetter>()) {
             weights[o->name] = {s->weightable.weight, s->weightable.weightOwner};
-            setters.push_back({o->name, s->driver, s->flags, s->invert});
+            setters.push_back({o->name, s->driver, s->flags, s->offset, s->scale, s->baseWeight, s->beatsPerWeight});
             p.kind = kSetter, p.index = setters.size() - 1;
             // 0x8218DE98: changed by its driver; changes the weightables it owns.
             p.reads = {s->driver};
@@ -622,8 +625,15 @@ void Rig::Impl::poll(const RigContext& ctx) {
 
 void Rig::Impl::pollSetter(Setter& s, const RigContext& ctx) {
     Weight& w = weights[s.name];
-    if (!s.driver.empty() && ctx.driverFlagWeight) w.weight = ctx.driverFlagWeight(s.driver, s.flags);
-    if (s.invert) w.weight = 1 - w.weight;
+    if (!s.driver.empty() && ctx.driverFlagWeight) s.base = ctx.driverFlagWeight(s.driver, s.flags) * s.scale + s.offset;
+    if (s.base == w.weight) return;
+    if (s.beatsPerWeight > 0) {
+        const float step = ctx.dBeats / s.beatsPerWeight;
+        if (step <= 0) return;
+        w.weight += std::clamp(s.base - w.weight, -step, step);
+    } else {
+        w.weight = s.base;
+    }
 }
 
 // ---- CharIKHand ------------------------------------------------------------
@@ -1117,6 +1127,30 @@ void Rig::setWeight(const std::string& name, float w) {
     auto it = impl_->weights.find(name);
     if (it == impl_->weights.end()) impl_->weights[name] = {w, ""};
     else it->second.weight = w;
+}
+
+bool Rig::setSetter(const std::string& name, const std::string& key, float v) {
+    for (auto& st : impl_->setters)
+        if (st.name == name) {
+            if (key == "base_weight") st.base = v;
+            else if (key == "beats_per_weight") st.beatsPerWeight = v;
+            else if (key == "offset") st.offset = v;
+            else if (key == "scale") st.scale = v;
+            else return false;
+            return true;
+        }
+    return false;
+}
+
+bool Rig::newSpot(const std::string& ik, const std::string& spot, double beats) {
+    for (auto& m : impl_->midis)
+        if (m.name == ik) {
+            const int s = impl_->sk.find(spot);
+            if (s < 0) return false;
+            impl_->newSpot(m, s, beats);
+            return true;
+        }
+    return false;
 }
 
 bool Rig::ikMidi(const std::string& ik, const std::string& spot, double start, double end, double now) {

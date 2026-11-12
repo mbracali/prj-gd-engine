@@ -61,6 +61,13 @@ public:
     float weightOf(const std::string& name) const;
     void setWeight(const std::string& name, float w);
 
+    // A CharWeightSetter's base_weight / beats_per_weight / offset / scale
+    // (scripts: {left_hand.weight set beats_per_weight 0.5}); false when
+    // `name` is not a setter or the key is not one of those.
+    bool setSetter(const std::string& name, const std::string& key, float v);
+    // Rock Band's CharIKMidi new_spot (RB 0x82340CB0): the bone blends to
+    // `spot` over `beats` (the parser's appended length).
+    bool newSpot(const std::string& ik, const std::string& spot, double beats);
     // CharIKMidi (fret.ik): {midi_parser <spot> <start> <end>} / new_spot.
     bool ikMidi(const std::string& ik, const std::string& spot, double start, double end, double now);
     // Hair back to rest (teleports: reset_hair).

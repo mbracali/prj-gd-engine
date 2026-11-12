@@ -77,6 +77,20 @@ ClipSet* ClipLibrary::get(const std::string& fromArkPath, const std::string& rel
     }
 }
 
+ClipSet* ClipLibrary::byObject(const std::string& fromArkPath, scene::Directory& dir, const std::string& object) {
+    if (object.empty()) return nullptr;
+    for (auto& [owner, sub] : dir.subdirs)
+        if (owner == object && sub) {
+            auto& slot = inline_[sub.get()];
+            if (!slot) slot = std::make_unique<ClipSet>(*sub, fromArkPath + ":" + object);
+            return slot.get();
+        }
+    const scene::Object* o = dir.get(object);
+    if (!o) return nullptr;
+    const std::string proxy = scene::clipSetProxyFile(*o);
+    return proxy.empty() ? nullptr : get(fromArkPath, proxy);
+}
+
 // ---- Character -------------------------------------------------------------------
 
 Character::Character(const GameData& data, const std::string& path, ClipLibrary& clips, const std::map<std::string, std::string>& outfits)
@@ -103,7 +117,7 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
     for (const auto& o : d.objects) {
         auto* drv = o->as<scene::CharDriver>();
         if (!drv) continue;
-        ClipSet* set = clips.get(path_, drv->clips);
+        ClipSet* set = drv->clips.empty() ? clips.byObject(path_, d, drv->clipsObject) : clips.get(path_, drv->clips);
         auto cd = std::make_unique<ClipDriver>(drv->name, set);
         cd->realign = drv->realign;
         cd->skipScaleDown = drv->unknown55;
@@ -306,6 +320,16 @@ bool Character::showing(const scene::Object* o) const {
     if (it != showing_.end()) return it->second;
     const scene::Draw* d = gfx::drawOf(o);
     return !d || d->showing;
+}
+
+void Character::setDrawOnly(const std::string& group, const std::string& member) {
+    if (const scene::Object* o = dir().get(group))
+        if (const auto* g = o->as<scene::Group>()) drawOnly_[g] = member;
+}
+
+std::string Character::drawOnly(const scene::Group& g) const {
+    auto it = drawOnly_.find(&g);
+    return it != drawOnly_.end() ? it->second : g.drawOnly;
 }
 
 void Character::setShowing(const std::string& name, bool on) {

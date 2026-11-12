@@ -148,6 +148,11 @@ struct CharClipSetData {
 };
 // `self` is the CharClipSet milo's Directory::self; `clipCount` the number of
 // CharClipSamples in the directory.
+// A CharClipSet object of a character directory that proxies its clips
+// (RB: male_drum.milo's male_drum_L-hand -> "anim/male_drum_l-hand.milo"):
+// the proxy file of its record (CharClipSet PreLoad RB 0x82352AE8, the
+// ObjectDir PreLoad's file); empty when the clips are stored inline.
+std::string clipSetProxyFile(const Object& clipSetObject);
 CharClipSetData decodeClipSetDir(const Object& self, size_t clipCount);
 
 // ---- characters ---------------------------------------------------------

@@ -13,6 +13,7 @@
 
 #include "char/facefx.h"
 #include "char/midi_parser.h"
+#include "char/rb_midi_parser.h"
 #include "data/dta.h"
 #include "data/game_data.h"
 #include "data/midi.h"
@@ -579,6 +580,8 @@ Band::~Band() {
     for (auto& p : parts_) drop(p.get());
     for (auto& p : players_) drop(p.get());
     parsers_.reset();
+    rbParsers_.reset();
+    for (auto& m : members_) m->rbParts.clear();
     if (world_.band == this) world_.band = nullptr;
 }
 
@@ -769,6 +772,7 @@ void Band::pollFaces() {
 }
 
 void Band::loadSong(const MidiFile& midi, const Song* song) {
+    if (!members_.empty() && startsWith(members_.front()->type, "rb_")) return rbLoadSong(midi, song);
     Interp& in = world_.interp();
     std::vector<std::string> names = {"bassist_parser", "drummer_parser", "singer_parser", "keyboard_parser"};
     for (int p = 0; p < config_.players && p < 2; ++p)
@@ -866,6 +870,10 @@ void Band::enter() {
     // handler), then GuitarCharacter's own (0x822D3B18) [I: the base enter
     // runs the script first, so the walk schedule's solo teleport wins].
     for (auto& m : members_) {
+        if (startsWith(m->type, "rb_")) {
+            rbEnter(*m);
+            continue;
+        }
         in.send(m->script.get(), "enter", {}, false);
         if (m->type == "guitarist") guitarEnter(*m);
     }
@@ -1583,6 +1591,7 @@ void Band::update(double seconds, double beats, const std::array<float, 3>* came
     first_ = false;
     seconds_ = seconds, beat_ = beats, dBeats_ = dB;
     if (parsers_ && entered_) parsers_->poll(beats);
+    if (rbParsers_ && entered_) rbParsers_->poll(beats);
     if (entered_) pollFaces();
     Interp& in = world_.interp();
     const float faceSong = float(in.tasks().time(kTaskSeconds)), faceUi = float(in.tasks().time(kTaskUISeconds));

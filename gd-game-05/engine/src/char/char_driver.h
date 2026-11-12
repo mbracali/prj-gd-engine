@@ -42,9 +42,12 @@ using Random = ::RandomGen;
 class ClipSet {
 public:
     explicit ClipSet(scene::Milo& milo);
+    // A set stored inline in another milo (Rock Band's male_fret inside
+    // male_guitar.milo): its directory; `path` names it in logs.
+    ClipSet(scene::Directory& dir, std::string path);
     const std::string& path() const { return path_; }
     const scene::CharClipSetData& data() const { return data_; }
-    scene::Milo& milo() { return milo_; }
+    scene::Directory& dir() { return dir_; }
 
     scene::CharClipSamples* clip(const std::string& name) const;
     scene::CharClipGroup* group(const std::string& name) const;
@@ -84,7 +87,7 @@ public:
     bool hasFacing() const { return hasFacing_; }
 
 private:
-    scene::Milo& milo_;
+    scene::Directory& dir_;
     std::string path_;
     scene::CharClipSetData data_;
     std::vector<scene::CharClipSamples*> clips_;
