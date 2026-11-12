@@ -1063,6 +1063,48 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         for (int i = 0; i < 30; ++i) wait(500), check("band_start_shot");
         check("counter_max:missing_shaders:0");
         at("endgame_waiting_screen", 90000);
+    } else if (scenario == "rb_look") {
+        // GD05-069 (owner: "everything is overbright", "the original is
+        // darker with a stronger film grain", "the pause background stays
+        // too bright"): the world alone (no track or HUD) sampled every
+        // 1.5 s from 12 s into a song, each frame's luma mean, contrast (its
+        // standard deviation), saturation and grain (the mean |luma - its 3x3
+        // box| where luma > 20) at 640x360, against the disc's own gameplay
+        // movies (videos/entersandman, tomsawyer, learntofly, gowiththeflow,
+        // wanteddeadoralive .bik, one frame every 2 s, title cards out: 289
+        // frames, through the same display curve): luma 69.3, contrast 55.4,
+        // grain 1.97; fails outside 15% (grain 40%: Bink smooths it). Then
+        // the pause: pause.milo's black_bg.mesh (black_bg.mat: black, alpha
+        // 0.7, kBlendSrcAlpha over the whole screen) leaves the world at 0.3
+        // of its luma: a box free of the pause art, before and while paused.
+        // GD05_VENUE picks the venue (default small_club_02); the second song.
+        if (!SDL_getenv("GD05_VENUE")) SDL_setenv_unsafe("GD05_VENUE", "small_club_02", 1);
+        SDL_setenv_unsafe("GD05_TRACK", "0", 1);
+        SDL_setenv_unsafe("GD05_HUD", "0", 1);
+        endMs_ = 90000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(500);
+        press(kDown), wait(400);  // the first song (past Random Song)
+        press(kX);
+        at("qp_seldiff_solo_screen");
+        press(kX);
+        wait(1500);
+        press(kX);
+        at("game_screen", 60000);
+        wait(12000);
+        for (int i = 0; i < 30; ++i) wait(1500), check("look:frame");
+        check("look:eval");
+        check("look:prepause");
+        key(SDLK_ESCAPE);
+        at("pause_screen", 10000);
+        wait(1500);
+        check("look:pause");
     } else if (scenario == "quickplay") {
         endMs_ = 30000;  // the song ends early (the walk's end time; GD05_WALK_END overrides)
         if (const char* e = SDL_getenv("GD05_WALK_END")) endMs_ = float(std::atof(e));
@@ -3690,6 +3732,101 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (ui::ScreenObj* sc = ui.screen(ui.currentScreen()))
             for (ui::PanelObj* p : sc->panels()) panels += " " + p->name() + (p->up ? "" : "(down)");
         std::printf("  %-12s %s:%s%s\n", tag.c_str(), ui.currentScreen().c_str(), panels.c_str(), ui.inTransition() ? " [transition]" : "");
+        return pass();
+    }
+    if (s.screen.rfind("look:", 0) == 0) {
+        // rb_look: the frame (saved as look_NN.bmp / look_pause.bmp under
+        // GD05_WALK_SHOTS) at 640x360 (2x2 boxes of the 1280x720 picture).
+        const std::string what = s.screen.substr(5);
+        const int draws = ui.host().gameCounter(0, "world_draws"), holds = ui.host().gameCounter(0, "world_holds");
+        if (what == "frame" && lookPace_[0] < 0) lookPace_ = {nowMs, double(draws), double(draws + holds)};
+        if (what == "eval") {
+            if (lookFrames_.empty()) return fail("look: no frames");
+            // Rnd's pacing (RB 0x8218EF80): the world at the PostProc's
+            // emulate_fps (ProFilm: 24), the frames around it at the display's.
+            const double secs = std::max(1.0, (nowMs - lookPace_[0]) / 1000), fps = ui.host().gameCounter(0, "world_emulate_fps");
+            const double drawn = (draws - lookPace_[1]) / secs, shown = (draws + holds - lookPace_[2]) / secs;
+            std::printf("  look: the world drawn %.1f times a second (emulate_fps %.0f), frames %.1f a second\n", drawn, fps, shown);
+            if (fps > 0 && fps < 40 && shown > 1.2 * fps && std::fabs(drawn / fps - 1) > 0.15)
+                return fail("look: the world drawn " + std::to_string(drawn) + " times a second, not the PostProc's " + std::to_string(fps));
+            std::array<double, 4> m{};
+            for (const auto& f : lookFrames_)
+                for (size_t k = 0; k < 4; ++k) m[k] += f[k] / double(lookFrames_.size());
+            // The movies' numbers (the header of this walk).
+            constexpr double kLuma = 69.3, kContrast = 55.4, kSat = 0.397, kGrain = 1.97;
+            std::printf("  look: %zu frames: luma %.1f (movies %.1f, %+.0f%%), contrast %.1f (%.1f, %+.0f%%), saturation %.3f (%.3f), grain %.2f (%.2f, %+.0f%%)\n",
+                        lookFrames_.size(), m[0], kLuma, 100 * (m[0] / kLuma - 1), m[1], kContrast, 100 * (m[1] / kContrast - 1), m[2], kSat, m[3],
+                        kGrain, 100 * (m[3] / kGrain - 1));
+            if (std::fabs(m[0] / kLuma - 1) > 0.15) return fail("look: luma " + std::to_string(m[0]) + " not within 15% of the movies'");
+            if (std::fabs(m[1] / kContrast - 1) > 0.15) return fail("look: contrast " + std::to_string(m[1]) + " not within 15% of the movies'");
+            if (std::fabs(m[3] / kGrain - 1) > 0.40) return fail("look: grain " + std::to_string(m[3]) + " not within 40% of the movies'");
+            return pass();
+        }
+        const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+        char name[48];
+        std::snprintf(name, sizeof name, "/look_%s.bmp", what == "frame" ? std::to_string(lookFrames_.size()).c_str() : what.c_str());
+        const std::string path = std::string(dir ? dir : SDL_GetBasePath()) + name;
+        if (!ui.host().saveScreenshot(path)) return fail("look: no screenshot");
+        SDL_Surface* raw = SDL_LoadBMP(path.c_str());
+        SDL_Surface* img = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        if (raw) SDL_DestroySurface(raw);
+        if (!img) return fail("look: the screenshot does not load");
+        if (!dir) SDL_RemovePath(path.c_str());
+        const int w = img->w / 2, h = img->h / 2;
+        std::vector<float> y(size_t(w) * size_t(h));
+        double sum = 0, sum2 = 0, sat = 0;
+        for (int j = 0; j < h; ++j)
+            for (int i = 0; i < w; ++i) {
+                float c[3] = {0, 0, 0};
+                for (int dy = 0; dy < 2; ++dy)
+                    for (int dx = 0; dx < 2; ++dx) {
+                        const Uint8* px = static_cast<const Uint8*>(img->pixels) + (2 * j + dy) * img->pitch + (2 * i + dx) * 4;
+                        for (int k = 0; k < 3; ++k) c[k] += 0.25f * px[k];
+                    }
+                const float l = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+                y[size_t(j) * size_t(w) + size_t(i)] = l;
+                sum += l, sum2 += double(l) * l;
+                const float mx = std::max({c[0], c[1], c[2]}), mn = std::min({c[0], c[1], c[2]});
+                if (mx > 8) sat += (mx - mn) / mx;
+            }
+        const double n = double(w) * double(h), mean = sum / n;
+        auto box = [&](int x0, int y0, int x1, int y1) {  // mean luma of a 1280x720 box
+            double s = 0;
+            int c = 0;
+            for (int j = y0 / 2; j < y1 / 2 && j < h; ++j)
+                for (int i = x0 / 2; i < x1 / 2 && i < w; ++i) s += y[size_t(j) * size_t(w) + size_t(i)], ++c;
+            return c ? s / c : 0.0;
+        };
+        // Free of the pause art (pause.milo at 1280x720): the strip under the
+        // help bar's top and above it, left of the menu.
+        const double bg = box(20, 560, 240, 640);
+        SDL_DestroySurface(img);
+        if (what == "prepause") {
+            lookPrePause_ = bg;
+            std::printf("  look: before the pause, background box luma %.1f\n", bg);
+            return pass();
+        }
+        if (what == "pause") {
+            const double ratio = lookPrePause_ > 1 ? bg / lookPrePause_ : 0;
+            std::printf("  look: paused, background box luma %.1f = %.2f of the game's (black_bg.mat: 0.30)\n", bg, ratio);
+            if (lookPrePause_ <= 1) return fail("look: the box before the pause is black");
+            if (std::fabs(ratio - 0.30) > 0.06) return fail("look: the pause background is " + std::to_string(ratio) + " of the game's, not 0.30");
+            return pass();
+        }
+        double grain = 0;
+        int gn = 0;
+        for (int j = 1; j + 1 < h; ++j)
+            for (int i = 1; i + 1 < w; ++i) {
+                const float l = y[size_t(j) * size_t(w) + size_t(i)];
+                if (l <= 20) continue;
+                float b = 0;
+                for (int dy = -1; dy <= 1; ++dy)
+                    for (int dx = -1; dx <= 1; ++dx) b += y[size_t(j + dy) * size_t(w) + size_t(i + dx)];
+                grain += std::fabs(l - b / 9), ++gn;
+            }
+        lookFrames_.push_back({mean, std::sqrt(std::max(0.0, sum2 / n - mean * mean)), sat / n, gn ? grain / gn : 0});
+        const auto& f = lookFrames_.back();
+        std::printf("  look %2zu: luma %.1f contrast %.1f saturation %.3f grain %.2f\n", lookFrames_.size() - 1, f[0], f[1], f[2], f[3]);
         return pass();
     }
     if (s.screen == "band_start_shot") {  // rb_band_start's screenshots (GD05_WALK_SHOTS)

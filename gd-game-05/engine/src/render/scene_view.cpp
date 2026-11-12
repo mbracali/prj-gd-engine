@@ -104,7 +104,7 @@ void SceneView::startPost() {
         gfx::PostFx& post = canvas_.renderer().post();
         if (pp) {
             const gfx::TextureId lum = pp->luminanceMap.empty() ? gfx::TextureId{} : cache_->texture(pp, pp->luminanceMap);
-            post.select(gfx::postProcState(*pp, lum));
+            post.select(gfx::postProcState(*pp, [&](const std::string& t) { return cache_->texture(pp, t); }));
             SDL_Log("view: post-process %s (bloom %.2f, luminance map %s%s)", pp->name.c_str(), double(pp->bloomIntensity),
                     pp->luminanceMap.empty() ? "none" : pp->luminanceMap.c_str(), pp->luminanceMap.empty() || lum ? "" : " not found");
         } else {

@@ -2848,6 +2848,10 @@ void App::gameBegin() {
 
 int App::gameCounter(int player, const std::string& key) const {
     if (key == "missing_shaders") return gfx::shaderaudit::count();  // draws without their shader (render/device.h)
+    // The world's pacing (render/post_fx.h hold): worlds drawn, frames shown again, the PostProc's emulate_fps.
+    if (key == "world_draws") return const_cast<Canvas&>(canvas_).renderer().post().worldDraws();
+    if (key == "world_holds") return const_cast<Canvas&>(canvas_).renderer().post().worldHolds();
+    if (key == "world_emulate_fps") return int(std::lround(const_cast<Canvas&>(canvas_).renderer().post().selected().emulateFps));
     if (key == "surface_overrides") return track_ ? track_->surfaceOverrides() : 0;
     if (key == "mixer_band_pct") return int(std::lround(bandVolume_ * 100));
     if (key == "mixer_guitar_pct") return int(std::lround(guitarVolume_ * 100));
@@ -2967,6 +2971,7 @@ void App::drawWorld() {
     canvas_.flush();
     gfx::Renderer& r = canvas_.renderer();
     const float clear[4] = {0, 0, 0, 1};
+    if (r.post().hold()) return;  // the world's frame rate (the PostProc's emulate_fps): the last picture again
     if (r.post().begin(clear)) {
         worldDraw_(r, true);
         r.post().end();
@@ -3026,8 +3031,7 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
     venuePostOn_ = false;
     if (const scene::CamShot* shot = venueView_->shot())
         if (auto* pp = venue_->find<scene::PostProc>(shot->flag("postprocess"))) {
-            const gfx::TextureId lum = pp->luminanceMap.empty() ? gfx::TextureId{} : venueCache_->texture(pp, pp->luminanceMap);
-            venuePost_ = gfx::postProcState(*pp, lum);
+            venuePost_ = gfx::postProcState(*pp, [&](const std::string& t) { return venueCache_->texture(pp, t); });
             venuePostOn_ = true;
         }
     worldDraw_ = [this](gfx::Renderer& r, bool hdr) {
@@ -3040,7 +3044,7 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
             if (director_ && director_->shot()) {
                 const scene::PostProc* pp = director_->postProc();
                 auto ppState = [this](const scene::PostProc& p) {
-                    return gfx::postProcState(p, p.luminanceMap.empty() ? gfx::TextureId{} : venueCache_->texture(&p, p.luminanceMap));
+                    return gfx::postProcState(p, [&](const std::string& t) { return venueCache_->texture(&p, t); });
                 };
                 if (pp) {
                     gfx::PostProcState st = ppState(*pp);

@@ -455,7 +455,7 @@ int runVenueView(const std::string& dataPath, const std::string& venueOrMilo) {
             r.pictureRect(vx, vy, vw, vh);
             // GH2's post-process with the shot's PostProc (GD05_POST=0: off).
             const scene::PostProc* pp = view.shot() ? venue->find<scene::PostProc>(view.shot()->flag("postprocess")) : nullptr;
-            if (pp) r.post().select(gfx::postProcState(*pp, pp->luminanceMap.empty() ? gfx::TextureId{} : cache->texture(pp, pp->luminanceMap)));
+            if (pp) r.post().select(gfx::postProcState(*pp, [&](const std::string& t) { return cache->texture(pp, t); }));
             else r.post().reset();
             const float black[4] = {0, 0, 0, 1};
             if (r.post().begin(black)) {

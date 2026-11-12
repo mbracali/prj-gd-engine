@@ -211,6 +211,12 @@ private:
     bool encoreDeclined_ = false;                  // career_song: NO on the encore offer
     std::string winTarget_;                        // career_win: the tour's last song
     int shotN_ = 0;                                // venue_follow: screenshot number
+    // rb_look (GD05-069): each sampled world frame's luma mean, contrast,
+    // saturation and grain; the last gameplay frame's background box luma
+    // (the pause rule).
+    std::vector<std::array<double, 4>> lookFrames_;
+    double lookPrePause_ = -1;
+    std::array<double, 3> lookPace_{-1, 0, 0};  // wall ms, world draws, frames at the first look frame
     float nameX0_ = 0;               // the career walk's band name: where it starts
     // rb_fuzz: the generator, steps, the main menu's buttons, pacing, the last actions.
     std::mt19937 fuzzRng_;
