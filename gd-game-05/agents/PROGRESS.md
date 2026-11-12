@@ -5,6 +5,45 @@ Rock Band (Xbox 360) -> `gd05`. Kickoff: `docs/spikes/GD-GAME-05_KICKOFF.md`
 bottom. "Verified" lines quote the command and its output; "built only" and
 "not tested" are said explicitly.
 
+## 2026-11-12: the guitar inside the launcher (GD05-061)
+
+- **Owner:** "the strum is not working on the songs, there is no pause in
+  the song." His 21:40 report (launcher 1.1.14, gd05 0.0.6, Vulkan): the
+  guitar listed, background events on, keyboard focus on, and not one
+  joystick / gamepad event in 53 s; only keys. Guitar Start never came
+  either, hence no pause (his keys were 1..4 and the arrows, no Enter / Esc).
+- **Ruled out, by tests through his launcher build (local_builds
+  gdul-1.1.14, its libSDL3, the 0.0.6 module he ran, his enhanced.json /
+  controllers.json):** one SDL in the process (the module has no SDL of its
+  own: nm -D, ldd); the launcher closes its pads before the game and owns
+  nothing while it runs; the window made again for Vulkan. Events written
+  into the real guitar's own node /dev/input/event9 (evdev passes them to
+  every reader as the device's) reach gd05 through the launcher: menus
+  launched from the launcher's own UI with the guitar, then 120 / 120
+  events (controllers-report: `4: 120 / 120`); a uinput guitar with his
+  ids and GUID: 120 / 120; --inputcapture: 80 / 80. Not reproduced: no
+  test fails on the current code. What is left unseen is below the
+  kernel's input layer (the USB stream from the guitar / xpad while gd05
+  runs): nothing here can strum the real guitar.
+- **Test (new):** walk device mode `GD05_WALK_EVDEV=/dev/input/eventN`
+  (written into that device) or `=uinput` (a kernel device that is his
+  guitar), tools/uinput_guitar.c. Verified in the launcher (Vulkan, real
+  node event9, his GUID seen by SDL): `GDUL_GAME_ARGS="--walktest
+  rb_guitar_play"`: menus with the guitar, 87 / 87 hits, Start -> pause,
+  green -> resume, sustain + whammy, Overdrive by tilt, a miss: OK;
+  rb_guitar_none (his assignment, keyboard P1, guitar None): 87 / 87,
+  pause / resume on the guitar: OK; rb_keys_play (Enter pause): OK.
+  The uinput mode inside a walk is not tested here (the real guitar takes
+  player 1 beside it); uinput devices are tested with the tool.
+  rb_owner_guitar fails in the launcher at dev_unfocus (a launcher window
+  cannot be hidden on Wayland: a test limit, not the game).
+- **Diagnosis for his next run:** the controller report reads each pad's
+  kernel device itself beside SDL: `Kernel device /dev/input/eventN: N
+  events from the controller, SDL joystick events M`, and says which side
+  lost them. Verified: idle guitar `0 events ... sent nothing to the
+  system`; written events `80 events from the controller, SDL joystick
+  events 80`. Owner steps: agents/OWNER_CHECK.md.
+
 ## Wave 06b (owner's retest, 2026-11-11 evening)
 
 - **Real guitar still silent (GD05-058).** His 17:35 session (launcher,

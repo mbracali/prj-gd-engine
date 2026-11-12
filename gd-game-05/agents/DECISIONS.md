@@ -522,3 +522,21 @@ pattern). Each says what, why and how to undo it.
   (docs/parity.md, 61%) scores rows too generously for what a player sees.
 - **How to apply:** never raise game-info.yaml above the owner's figure
   without the owner's OK; report the ledger's figure next to it.
+
+## D47
+- **What (2026-11-12, GD05-061):** the guitar's loss inside the launcher is
+  located by the controller report, not guessed. Each Linux pad's kernel
+  device (SDL_GetGamepadPath, /dev/input/eventN) is opened read-only by
+  Input beside SDL and drained each frame; the report prints what the
+  controller sent vs SDL's joystick events. An extra evdev reader changes
+  nothing for SDL (evdev copies every event to each reader). Device walks
+  can drive a kernel device (GD05_WALK_EVDEV) so the launcher's whole path
+  (its SDL, its window made again for Vulkan, the module) is tested from
+  the kernel up, not from SDL's virtual joystick.
+- **Why:** two of the owner's sessions showed 0 SDL events from his
+  guitar while every test from the kernel up passes in the same launcher
+  build; the next report has to say on which side of the kernel the
+  events stop.
+- **Undo:** Input::kernel_ / drainKernel / closeKernel and the report's
+  Kernel device line; walktest's EvdevOut and dev* helpers (SDL virtual
+  setters again).
