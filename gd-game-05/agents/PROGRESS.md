@@ -1149,6 +1149,11 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   quick play song list), rb_pad_play / rb_guitar_play / rb_guitar_none
   ("no sustain held with the whammy": also without the career changes),
   rb_keys_rebind (OK alone).
+- **Final gate** (fresh build at 5c1672b, gate1.sh's 41 walks incl.
+  rb_shop_items and the other tasks' new ones, + five tests, 6 at a time):
+  40 of 41 walks OK, 5 of 5 tests OK; rb_stutter (GD05-073's frame-time
+  walk) failed under the parallel load (frame_spike song_begin 259 > 150).
+  The earlier band_quickplay / pad / guitar failures did not come back.
 - **Not done:** the real band lobby (each player picks or makes a
   character; the stand-in takes the profile's first of the instrument);
   the instruments' finishes (group_select_screen) and drum / mic shops
