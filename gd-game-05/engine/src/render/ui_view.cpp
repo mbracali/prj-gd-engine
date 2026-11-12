@@ -1345,6 +1345,16 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
     }
     auto slotOf = [&](int row) { return s.rows[size_t(row)].slot > -1 ? s.rows[size_t(row)].slot : float(row); };
     const float firstSlot = s.first > 0 ? slotOf(s.first) : 0.0f;
+    // Each shown row's place: its slot x spacing, plus the gaps of the shown
+    // rows above it (RB's UIList layout, 0x82271C58 [C]); the highlight
+    // takes its row's place (0x82271F80: the selected position x spacing +
+    // the gaps above it) [C].
+    auto offOf = [&](int row) {
+        float gaps = 0;
+        for (int r = s.first; r < row; ++r) gaps += s.rows[size_t(r)].gap;
+        return (slotOf(row) - firstSlot) * list->spacing + gaps;
+    };
+    listHighlights_[o.name] = ListHighlight{};
     // The selected row's highlight: (highlight "highlight.mesh" (colors
     // (normal r g b) (selecting ...) (disabled ...))) [C data], the mesh at
     // its own place in the row, tinted by the list's state.
@@ -1357,8 +1367,18 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
                 if (c && c->children.size() >= 4)
                     for (int k = 0; k < 3; ++k) tint[k] = c->floatAt(size_t(k + 1));
             }
-            const float off = (slotOf(s.selected) - firstSlot) * list->spacing;
+            const float off = offOf(s.selected);
             const scene::Xfm at = scene::compose(hm->trans.local, scene::compose(vertical ? moveXfm(0, 0, -off) : moveXfm(off, 0, 0), lw));
+            if (!hm->verts.empty()) {
+                ListHighlight& h = listHighlights_[o.name];
+                h.drawn = true, h.selected = s.selected, h.lo = 1e30f, h.hi = -1e30f;
+                const Mat4 m = toMat4(at);
+                for (const scene::MeshVertex& v : hm->verts) {
+                    const Vec3 p = m.transformPoint({v.pos[0], v.pos[1], v.pos[2]});
+                    const float along = vertical ? p.z : p.x;
+                    h.lo = std::min(h.lo, along), h.hi = std::max(h.hi, along);
+                }
+            }
             if (cache_.mesh(hm)) {
                 drawMesh(r, cache_, *hm, toMat4(at), &pose_, findMat(*hm, hm->mat), tint);
                 ++meshesDrawn_;
@@ -1366,7 +1386,7 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
         }
     for (int row = s.first; row < int(s.rows.size()) && row < s.first + shown; ++row) {
         const ListRow& lr = s.rows[size_t(row)];
-        const float off = (slotOf(row) - firstSlot) * list->spacing;
+        const float off = offOf(row);
         const scene::Xfm rowWorld = scene::compose(vertical ? moveXfm(0, 0, -off) : moveXfm(off, 0, 0), lw);
         const char* kind = lr.disabled ? "disabled" : row == s.selected ? "highlight" : "normal";
         for (size_t e = 0; e < elements.size(); ++e) {

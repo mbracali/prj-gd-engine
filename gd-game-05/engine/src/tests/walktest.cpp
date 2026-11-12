@@ -315,6 +315,30 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         for (int i = 0; i < 20; ++i) press(kDown), wait(150);
         wait(1200);
         check("songlist_text:down29");
+    } else if (scenario == "rb_songlist_highlight") {
+        // GD05-073, owner (G06 6): "the song list's yellow selector
+        // highlights more than one song". At every step down the list
+        // (headings, the scroll, the end) the highlight's quad covers the
+        // selected row's name and no other row's name or heading
+        // (songlist_highlight: the drawn texts' middles against the quad).
+        // GD05_SONGLIST_LEGACY=1 (rows without RB's song_select_gap) fails.
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(1500);
+        check("songlist_highlight");
+        for (int i = 0; i < 24; ++i) {
+            press(kDown), wait(300);
+            check("songlist_highlight");
+        }
+        for (int i = 0; i < 6; ++i) {
+            press(kUp), wait(300);
+            check("songlist_highlight");
+        }
     } else if (scenario == "rb_esc3") {
         // Wave 05 (GD05-033, universal-behaviors.md): Esc three times in a
         // row on the main menu quits the game.
@@ -863,6 +887,93 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("tour_solo_hub_screen", 30000);
         wait(1000);
         check("rb_career_reloaded");
+    } else if (scenario == "rb_career_band") {
+        // GD05-072: the Band World Tour pays its members' characters. A
+        // guitarist made in the Solo Tour's creator, the game restarted,
+        // then Multiplayer > Band World Tour alone (the lobby stand-in
+        // takes the profile's guitarist), a new band, its first gig on
+        // autoplay: the character is paid the event's reward_per_star x the
+        // band's stars and the band's money is its members'; restarted
+        // again, the band and the money are still there.
+        SDL_setenv_unsafe("GD05_BAND_PLAYERS", "1", 1);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_career_cash0");
+        check("restart_app");
+    } else if (scenario == "rb_career_band_restarted") {
+        endMs_ = 30000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(800);
+        press(kX);  // a new band
+        at("tour_band_create_screen", 20000);
+        wait(1200);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        for (int i = 0; i < 2; ++i) press(kDown), wait(200);
+        press(kX);  // ACCEPT
+        at("tour_band_hub_screen", 30000);
+        wait(1000);
+        check("rb_band_cash0");
+        press(kX);  // GIG GUIDE
+        for (int i = 0; i < 6; ++i) {  // the first-time hints, each continued with X
+            wait(2500);
+            press(kX);
+        }
+        at("game_screen", 60000);
+        wait(3000);
+        check("rb_band_member_on_stage");
+        at("tour_band_endgame_screen", 300000);
+        wait(1000);
+        press(kX);
+        at("tour_band_gigcomplete_screen", 20000);
+        wait(1000);
+        check("rb_band_cash");
+        press(kX);
+        at("tour_band_event_screen|tour_band_hub_screen|tour_band_firstgig_screen|tour_band_firstgig_checkmarks_screen|tour_band_newvan_screen|tour_band_newitem_screen|tour_band_firstvenue_screen", 40000);
+        wait(1500);
+        check("restart_app");
+    } else if (scenario == "rb_career_band_restarted_restarted") {
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(1000);
+        press(kX);  // the saved band (row 0)
+        at("tour_band_hub_screen", 30000);
+        wait(1000);
+        check("rb_band_reloaded");
     } else if (scenario == "solo_tour") {
         // RB's Solo Tour (ui/tour_solo.dta): Solo > Tour, a character (made
         // in the creator the first time), the hub, the gig guide, a
@@ -2952,7 +3063,7 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
             measureTextColors(ui, lastScreen_, textColorsBad_);
         }
     }
-    if (scenario_ == "rb_songlist_text" && ui.current())  // songlist_text measures the drawn texts
+    if ((scenario_ == "rb_songlist_text" || scenario_ == "rb_songlist_highlight") && ui.current())  // the drawn texts are measured
         for (ui::PanelObj* p : ui.current()->panels())
             if (p->view) p->view->setTextProbes(true);
     // career: the band has bought Judy Nails' second outfit and the SG's
@@ -3560,6 +3671,65 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (hair.empty() || hair == "none") return fail("no hair chosen");
         return pass();
     }
+    // rb_career_band (GD05-072): the band (tour performer) and player 0's
+    // character (its member); the event's reward_per_star from
+    // config/tour_band.dta's (tiers (<tier> (<venue> (<event> ...)))).
+    if (s.screen.rfind("rb_band_", 0) == 0 && s.screen != "rb_band_wears") {
+        Interp& in = ui.interp();
+        auto send = [&](ScriptObject* o, const char* msg, std::vector<Value> a = {}) { return o ? in.send(o, msg, a) : Value::integer(0); };
+        ScriptObject* band = in.send("tour", "performer", {}).object;
+        const Value pc = in.send("game", "get_player_config", {Value::integer(0)});
+        ScriptObject* ch = send(pc.object, "get_char").object;
+        if (!band || !ch || ch->className() != "TourCharLocal") return fail(s.screen + ": no band or no member character");
+        const int bandMoney = send(band, "money").integerValue(), charMoney = send(ch, "money").integerValue();
+        const int fame = send(band, "world_fame").integerValue();
+        const std::string torso = send(ch, "get_outfit", {Value::symbol("torso")}).str();
+        std::printf("  %s: band %s money %d fame %d; member %s money %d torso %s\n", s.screen.c_str(), send(band, "band_name").str().c_str(), bandMoney,
+                    fame, send(ch, "get_char_name").str().c_str(), charMoney, torso.c_str());
+        if (s.screen == "rb_band_cash0") {
+            std::printf("  expected: the band's money is its member's %d; measured %d\n", charMoney, bandMoney);
+            if (bandMoney != charMoney) return fail("the band's money is not its member's");
+            careerCash_ = charMoney;
+            return pass();
+        }
+        if (s.screen == "rb_band_member_on_stage") {
+            const int n = ui.host().gameCounter(0, "band_piece:" + torso);
+            std::printf("  expected: the guitarist in %s; measured %d member(s)\n", torso.c_str(), n);
+            if (n < 1) return fail("the band's guitarist is not the player's character");
+            return pass();
+        }
+        if (s.screen == "rb_band_cash") {
+            ScriptObject* ev = in.send("tour", "event", {}).object;
+            const std::string venue = send(ev, "get", {Value::symbol("venue")}).str(), name = send(ev, "get", {Value::symbol("event_name")}).str();
+            const DataNode* tour = ui.bootTree() ? ui.bootTree()->find("tour") : nullptr;
+            const DataNode* tiers = tour && tour->find("band") ? tour->find("band")->find("tiers") : nullptr;
+            int per = -1;
+            for (size_t i = 1; tiers && i < tiers->children.size() && per < 0; ++i)
+                if (const DataNode* v = tiers->children[i].isList() ? tiers->children[i].find(venue) : nullptr)
+                    if (const DataNode* e = v->find(name))
+                        if (const DataNode* rp = e->find("reward_per_star")) per = rp->intAt(1);
+            const int want = careerCash_ + per * fame;
+            std::printf("  expected: member %d + %d x %d stars = %d, the band's money the same; measured: member %d, band %d (event %s/%s)\n",
+                        careerCash_, per, fame, want, charMoney, bandMoney, venue.c_str(), name.c_str());
+            if (per < 0) return fail("no event " + venue + "/" + name + " in config/tour_band.dta");
+            if (fame < 1) return fail("the gig earned no star");
+            if (charMoney != want) return fail("the member was paid " + std::to_string(charMoney - careerCash_));
+            if (bandMoney != charMoney) return fail("the band's money is not its member's");
+            SDL_setenv_unsafe("GD05_WALK_CAREER", (std::to_string(bandMoney) + " " + std::to_string(fame)).c_str(), 1);
+            return pass();
+        }
+        if (s.screen == "rb_band_reloaded") {
+            int wMoney = -1, wFame = -1;
+            std::istringstream is(SDL_getenv("GD05_WALK_CAREER") ? SDL_getenv("GD05_WALK_CAREER") : "");
+            is >> wMoney >> wFame;
+            std::printf("  expected (before the restart): money %d, fame %d; measured: band %d, member %d, fame %d\n", wMoney, wFame, bandMoney, charMoney,
+                        fame);
+            if (wMoney < 0) return fail("no expectations from before the restart");
+            if (bandMoney != wMoney || charMoney != wMoney || fame != wFame) return fail("the band changed through the save");
+            return pass();
+        }
+        return fail("unknown check " + s.screen);
+    }
     // rb_career (GD05-072): expectations from the data, values measured
     // through the scripts' own objects (tour performer, charcreator_panel).
     if (s.screen.rfind("rb_creator_", 0) == 0 || s.screen.rfind("rb_career_", 0) == 0 || s.screen == "rb_shop_bought" ||
@@ -3828,6 +3998,47 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         for (size_t i = 0; i < xs.size(); ++i)
             for (size_t j = i + 1; j < xs.size(); ++j)
                 if (std::fabs(xs[i] - xs[j]) < 20) return fail("two band icons stand on each other");
+        return pass();
+    }
+    if (s.screen == "songlist_highlight") {
+        // rb_songlist_highlight (GD05-073): the song list's names and
+        // headings as drawn (their glyphs' middle along the list, in the
+        // panel's space) against the highlight's quad as drawn: exactly one
+        // inside, the selected row's.
+        ui::PanelObj* p = ui.panel("qp_selsong_panel");
+        if (!p || !p->view) return fail("no qp_selsong_panel view");
+        const std::string list = "ss_song.lst";
+        const gfx::UiView::ListHighlight h = p->view->listHighlight(list);
+        if (!h.drawn) return fail("the song list drew no highlight");
+        int inside = 0, insideSelected = 0, rows = 0;
+        std::string which;
+        for (const gfx::TextProbe& t : p->view->textProbes()) {
+            if (t.name.rfind(list + "#", 0) != 0 || t.verts.empty()) continue;
+            const size_t a = list.size() + 1, b = t.name.find('#', a);
+            if (b == std::string::npos) continue;
+            const std::string element = t.name.substr(b + 1);
+            if (element != "list.lbl" && element != "heading.lbl") continue;
+            const int row = std::atoi(t.name.c_str() + a);
+            float lo = 1e30f, hi = -1e30f;
+            for (const scene::MeshVertex& v : t.verts) {
+                const gfx::Vec3 q = t.world.transformPoint({v.pos[0], v.pos[1], v.pos[2]});
+                lo = std::min(lo, q.z), hi = std::max(hi, q.z);
+            }
+            const float mid = (lo + hi) / 2;
+            ++rows;
+            if (mid >= h.lo && mid <= h.hi) {
+                ++inside;
+                insideSelected += row == h.selected && element == "list.lbl";
+                which += " " + std::to_string(row) + ":" + element;
+            }
+        }
+        ++songlistHlChecks_;
+        songlistHlMax_ = std::max(songlistHlMax_, inside);
+        std::printf("  songlist highlight: selected row %d, quad %.1f..%.1f, %d of %d drawn names inside:%s\n", h.selected, double(h.lo), double(h.hi),
+                    inside, rows, which.c_str());
+        if (rows == 0) return fail("no song names drawn");
+        if (inside != 1 || insideSelected != 1)
+            return fail("the highlight covers " + std::to_string(inside) + " names (" + which + " ), want only the selected row's");
         return pass();
     }
     if (s.screen.rfind("songlist_text:", 0) == 0) {

@@ -7,6 +7,9 @@
 #include <algorithm>
 #include <cctype>
 #include <stdexcept>
+#include <string>
+#include <thread>
+#include <vector>
 
 #include "data/game_data.h"
 #include "scene/inflate.h"
@@ -222,20 +225,48 @@ Bytes decompressMilo(const Bytes& file, MiloInfo* info) {
     in.largestBlock = le32(&file[12]);
     if (in.blocks > 100000 || 16 + size_t(in.blocks) * 4 > file.size() || in.headerSize > file.size())
         throw std::runtime_error("bad milo block table");
-    Bytes out;
+    // Each block is its own deflate stream: they inflate side by side
+    // (GD05-073: the band's clip milos are most of a song's load).
+    std::vector<size_t> starts(in.blocks + 1);
     size_t pos = in.headerSize;
     for (uint32_t i = 0; i < in.blocks; ++i) {
         uint32_t n = le32(&file[16 + size_t(i) * 4]);
         if (n > file.size() - pos) throw std::runtime_error("milo block runs past the file");
-        if (in.magic == kMagicDeflate) {
-            Bytes b = inflateRaw(file.data() + pos, n);
-            out.insert(out.end(), b.begin(), b.end());
-        } else {
-            out.insert(out.end(), file.begin() + std::ptrdiff_t(pos), file.begin() + std::ptrdiff_t(pos + n));
-        }
+        starts[i] = pos;
         pos += n;
     }
+    starts[in.blocks] = pos;
     if (pos != file.size()) throw std::runtime_error("milo blocks end before the file does");
+    Bytes out;
+    if (in.magic != kMagicDeflate) {
+        out.assign(file.begin() + std::ptrdiff_t(in.headerSize), file.begin() + std::ptrdiff_t(pos));
+    } else {
+        std::vector<Bytes> parts(in.blocks);
+        std::vector<std::string> errors(in.blocks);
+        auto inflateRange = [&](size_t from, size_t step) {
+            for (size_t i = from; i < in.blocks; i += step) try {
+                    parts[i] = inflateRaw(file.data() + starts[i], starts[i + 1] - starts[i]);
+                } catch (const std::exception& e) {
+                    errors[i] = e.what();
+                }
+        };
+        const size_t workers = std::min<size_t>(in.blocks, std::max(1u, std::min(8u, std::thread::hardware_concurrency())));
+        if (workers <= 1 || file.size() < (256u << 10)) {
+            inflateRange(0, 1);
+        } else {
+            std::vector<std::thread> pool;
+            for (size_t w = 1; w < workers; ++w) pool.emplace_back(inflateRange, w, workers);
+            inflateRange(0, workers);
+            for (std::thread& t : pool) t.join();
+        }
+        size_t total = 0;
+        for (uint32_t i = 0; i < in.blocks; ++i) {
+            if (!errors[i].empty()) throw std::runtime_error(errors[i]);
+            total += parts[i].size();
+        }
+        out.reserve(total);
+        for (const Bytes& b : parts) out.insert(out.end(), b.begin(), b.end());
+    }
     in.streamSize = out.size();
     return out;
 }

@@ -198,6 +198,7 @@ private:
     // it has rested (textColors), the ones too dark kept for finish().
     bool textColors_ = false;
     std::set<std::string> textColorsSeen_;
+    int songlistHlChecks_ = 0, songlistHlMax_ = 0;  // rb_songlist_highlight (GD05-073)
     std::vector<std::string> textColorsBad_;
     double textColorsSince_ = -1;
     std::array<float, 3> camera_{};  // the main menu's camera (the back walk)

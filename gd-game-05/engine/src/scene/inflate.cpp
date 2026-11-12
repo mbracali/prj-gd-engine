@@ -1,28 +1,37 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
-// Compact raw-deflate decoder, following the structure of Mark Adler's puff.c.
+// Raw-deflate decoder (RFC 1951). The structure is Mark Adler's puff.c; the
+// codes are read through a 10-bit lookup table (puff's bit-at-a-time walk
+// only for the rare longer codes) from a 64-bit bit buffer, and the output
+// grows in place (GD05-073: the band's clip milos took 1.4..2 s to inflate
+// at every song start and at boot; the same bytes come out).
 
 #include "scene/inflate.h"
 
+#include <algorithm>
+#include <cstring>
 #include <stdexcept>
 
 namespace {
 
 constexpr int kMaxBits = 15;
+constexpr int kFastBits = 10;
 
 struct Huffman {
     short count[kMaxBits + 1];
     short symbol[288];
+    // Bit-reversed code -> (symbol << 4) | length for codes up to kFastBits; 0: longer.
+    uint16_t fast[1 << kFastBits];
 };
 
 class Inflater {
 public:
-    Inflater(const uint8_t* d, size_t n) : in_(d), size_(n) {}
+    Inflater(const uint8_t* d, size_t n) : in_(d), size_(n) { out_.resize(n * 4 + 1024); }
 
     Bytes run() {
         int last;
         do {
-            last = bits(1);
+            last = int(bits(1));
             switch (bits(2)) {
             case 0: stored(); break;
             case 1: fixed(); break;
@@ -30,42 +39,75 @@ public:
             default: fail();
             }
         } while (!last);
+        out_.resize(n_);
         return std::move(out_);
     }
 
 private:
     [[noreturn]] static void fail() { throw std::runtime_error("corrupt deflate stream"); }
 
-    int bits(int need) {
-        long val = bitbuf_;
+    // At least `need` (<= 32) bits in the buffer; past the end only zero bits
+    // come in (a code that uses them fails in consume).
+    void refill(int need) {
         while (bitcnt_ < need) {
-            if (pos_ >= size_) fail();
-            val |= long(in_[pos_++]) << bitcnt_;
+            if (pos_ < size_) bitbuf_ |= uint64_t(in_[pos_++]) << bitcnt_;
+            else ++over_;
             bitcnt_ += 8;
         }
-        bitbuf_ = int(val >> need);
-        bitcnt_ -= need;
-        return int(val & ((1L << need) - 1));
+    }
+    void consume(int n) {
+        bitbuf_ >>= n;
+        bitcnt_ -= n;
+        if (over_ && bitcnt_ < 8 * over_) fail();  // a bit past the stream's end was used
+    }
+    uint32_t bits(int need) {
+        if (need == 0) return 0;
+        refill(need);
+        const uint32_t v = uint32_t(bitbuf_ & ((uint64_t(1) << need) - 1));
+        consume(need);
+        return v;
+    }
+
+    void reserve(size_t more) {
+        if (n_ + more > out_.size()) out_.resize(std::max(out_.size() * 2, n_ + more));
     }
 
     void stored() {
-        bitbuf_ = 0;
-        bitcnt_ = 0;
+        // Drop to the byte boundary; whole bytes still in the buffer go back.
+        consume(bitcnt_ & 7);
+        while (bitcnt_ >= 8) {
+            if (over_) --over_;
+            else --pos_;
+            bitbuf_ = 0;
+            bitcnt_ -= 8;
+        }
+        bitbuf_ = 0, bitcnt_ = 0;
         if (pos_ + 4 > size_) fail();
         unsigned len = in_[pos_] | in_[pos_ + 1] << 8;
         unsigned nlen = in_[pos_ + 2] | in_[pos_ + 3] << 8;
         pos_ += 4;
         if (len != (~nlen & 0xFFFF) || pos_ + len > size_) fail();
-        out_.insert(out_.end(), in_ + pos_, in_ + pos_ + len);
+        reserve(len);
+        std::memcpy(out_.data() + n_, in_ + pos_, len);
+        n_ += len;
         pos_ += len;
     }
 
     int decode(const Huffman& h) {
+        refill(kMaxBits);
+        if (const uint16_t e = h.fast[bitbuf_ & ((1u << kFastBits) - 1)]) {
+            consume(e & 15);
+            return e >> 4;
+        }
+        // puff's canonical walk, one bit at a time, for codes past kFastBits.
         int code = 0, first = 0, index = 0;
         for (int len = 1; len <= kMaxBits; ++len) {
-            code |= bits(1);
-            int count = h.count[len];
-            if (code - count < first) return h.symbol[index + (code - first)];
+            code |= int((bitbuf_ >> (len - 1)) & 1);
+            const int count = h.count[len];
+            if (code - count < first) {
+                consume(len);
+                return h.symbol[index + (code - first)];
+            }
             index += count;
             first += count;
             first <<= 1;
@@ -82,6 +124,24 @@ private:
         for (int len = 1; len < kMaxBits; ++len) offs[len + 1] = short(offs[len] + h.count[len]);
         for (int s = 0; s < n; ++s)
             if (length[s] != 0) h.symbol[offs[length[s]]++] = short(s);
+        // The lookup table: canonical codes in (length, symbol) order, bit-reversed.
+        std::memset(h.fast, 0, sizeof h.fast);
+        int code = 0;
+        h.count[0] = 0;
+        int next[kMaxBits + 2];
+        for (int len = 1; len <= kMaxBits; ++len) {
+            code = (code + h.count[len - 1]) << 1;
+            next[len] = code;
+        }
+        for (int s = 0; s < n; ++s) {
+            const int len = length[s];
+            if (len == 0) continue;
+            const int c = next[len]++;
+            if (len > kFastBits) continue;
+            int rev = 0;
+            for (int b = 0; b < len; ++b) rev |= ((c >> b) & 1) << (len - 1 - b);
+            for (int f = rev; f < (1 << kFastBits); f += 1 << len) h.fast[f] = uint16_t((s << 4) | len);
+        }
     }
 
     void codes(const Huffman& lencode, const Huffman& distcode) {
@@ -97,27 +157,32 @@ private:
         for (;;) {
             int symbol = decode(lencode);
             if (symbol < 256) {
-                out_.push_back(uint8_t(symbol));
+                reserve(1);
+                out_[n_++] = uint8_t(symbol);
             } else if (symbol == 256) {
                 return;
             } else {
                 symbol -= 257;
                 if (symbol >= 29) fail();
-                int len = base[symbol] + bits(extra[symbol]);
-                int ds = decode(distcode);
+                const size_t len = size_t(base[symbol]) + bits(extra[symbol]);
+                const int ds = decode(distcode);
                 if (ds >= 30) fail();
-                size_t dist = size_t(dbase[ds] + bits(dextra[ds]));
-                if (dist > out_.size()) fail();
-                size_t from = out_.size() - dist;
-                for (int i = 0; i < len; ++i) out_.push_back(out_[from + i]);
+                const size_t dist = size_t(dbase[ds]) + bits(dextra[ds]);
+                if (dist > n_) fail();
+                reserve(len);
+                uint8_t* o = out_.data() + n_;
+                const uint8_t* from = o - dist;
+                if (dist >= len) std::memcpy(o, from, len);
+                else
+                    for (size_t i = 0; i < len; ++i) o[i] = from[i];  // overlapping: byte by byte
+                n_ += len;
             }
         }
     }
 
     void fixed() {
         static Huffman lencode, distcode;
-        static bool built = false;
-        if (!built) {
+        static const bool built = [] {
             short lengths[288];
             int s = 0;
             for (; s < 144; ++s) lengths[s] = 8;
@@ -127,14 +192,15 @@ private:
             construct(lencode, lengths, 288);
             for (s = 0; s < 30; ++s) lengths[s] = 5;
             construct(distcode, lengths, 30);
-            built = true;
-        }
+            return true;
+        }();
+        (void)built;
         codes(lencode, distcode);
     }
 
     void dynamic() {
         static const short order[19] = {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
-        int nlen = bits(5) + 257, ndist = bits(5) + 1, ncode = bits(4) + 4;
+        int nlen = int(bits(5)) + 257, ndist = int(bits(5)) + 1, ncode = int(bits(4)) + 4;
         if (nlen > 286 || ndist > 30) fail();
         short lengths[320] = {};
         for (int i = 0; i < ncode; ++i) lengths[order[i]] = short(bits(3));
@@ -151,11 +217,11 @@ private:
             if (symbol == 16) {
                 if (index == 0) fail();
                 len = lengths[index - 1];
-                rep = 3 + bits(2);
+                rep = 3 + int(bits(2));
             } else if (symbol == 17) {
-                rep = 3 + bits(3);
+                rep = 3 + int(bits(3));
             } else {
-                rep = 11 + bits(7);
+                rep = 11 + int(bits(7));
             }
             if (index + rep > nlen + ndist) fail();
             while (rep--) lengths[index++] = short(len);
@@ -168,8 +234,11 @@ private:
 
     const uint8_t* in_;
     size_t size_, pos_ = 0;
-    int bitbuf_ = 0, bitcnt_ = 0;
+    uint64_t bitbuf_ = 0;
+    int bitcnt_ = 0;
+    int over_ = 0;  // bytes of zeros fed past the input's end
     Bytes out_;
+    size_t n_ = 0;
 };
 
 }  // namespace

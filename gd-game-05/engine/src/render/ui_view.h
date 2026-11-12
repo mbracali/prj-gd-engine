@@ -148,7 +148,23 @@ public:
         bool header = false;
         bool disabled = false;  // the provider's IsActive is false: the type's "disabled" colours
         float slot = -1;  // its position in the list (rows after a header start one slot down; fractional while scrolling); -1: its index
+        // Space below the row on top of the list's spacing: RB's UIList lays
+        // each row out at its index x spacing + the gaps its provider gives
+        // the rows above (0x82271C58, the provider's vfunc +0x24; RB's
+        // SongProvider: band.dta's song_select_gap, 0x82400180) [C].
+        float gap = 0;
     };
+    // The selected row's highlight as last drawn (the rb_songlist_highlight
+    // walk): its quad's extent along the list in the panel's world space.
+    struct ListHighlight {
+        bool drawn = false;
+        int selected = -1;
+        float lo = 0, hi = 0;
+    };
+    ListHighlight listHighlight(const std::string& component) const {
+        auto it = listHighlights_.find(component);
+        return it == listHighlights_.end() ? ListHighlight{} : it->second;
+    }
     void setList(const std::string& component, std::vector<ListRow> rows, int selectedRow);
     // The list's selected row (as set_list gave it), -1 without rows.
     int listRow(const std::string& component) const {
@@ -305,6 +321,7 @@ private:
     std::map<std::string, std::string> pictureTex_;
     std::map<std::string, std::string> meshMat_;  // setMeshMat
     std::map<std::string, ListState> lists_;
+    std::map<std::string, ListHighlight> listHighlights_;
     std::map<std::string, EntryState> entries_;
     std::map<std::string, float> frames_;
     std::map<const scene::Object*, std::unique_ptr<LabelText>> labels_;
