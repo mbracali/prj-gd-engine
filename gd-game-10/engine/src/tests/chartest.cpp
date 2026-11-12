@@ -498,6 +498,10 @@ int runCharTest(const std::string& discPath) {
         ++failures;
     };
 
+    // 0. The accessory ragdoll's solver on one hanging segment.
+    if (const std::string r = AccessorySim::selfTest(); !r.empty()) fail("ragdoll: " + r);
+    else std::printf("chartest: ragdoll self-test: a hanging segment keeps its cone and joint\n");
+
     // 1. Every body and instrument.
     band::Library lib;
     try {
@@ -676,7 +680,9 @@ int runCharTest(const std::string& discPath) {
                         const float dist = std::max(0.5f, float(std::atof(md)));
                         for (const Band::Entry& e : s.band()->members()) {
                             venue::Vec3 chest;
-                            if (!s.band()->bonePos(e.model->member.object, K("bone_chest"), chest)) continue;
+                            // GD10_CHARTEST_MEMBER_BONE: the bone framed (default bone_chest).
+                            const char* fb = SDL_getenv("GD10_CHARTEST_MEMBER_BONE");
+                            if (!s.band()->bonePos(e.model->member.object, qbkey::key(fb ? fb : "bone_chest"), chest)) continue;
                             bandanim::Vec f = bandanim::xformDir(e.root, {0, 0, 1});
                             const float fl = std::sqrt(f.x * f.x + f.z * f.z);
                             if (fl < 1e-6f) continue;

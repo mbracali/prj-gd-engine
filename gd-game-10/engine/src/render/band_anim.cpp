@@ -366,6 +366,7 @@ bool Animator::init(const Setup& s, std::string& error) {
     vocalPlays_ = model_->member.gh4 && role_ == band::Role::Vocalist &&
                   (model_->member.part == K("guitar") || model_->member.part == K("rhythm") || model_->member.part == K("bass"));
     ikSwitch_.clear();
+    ragdollResets_.clear();
     mocapPlaying_ = false;
     strumMod_ = fretMod_ = chordMod_ = Ramp{};
     rig_.init(*model_->skeleton);
@@ -531,6 +532,7 @@ bool Animator::init(const Setup& s, std::string& error) {
     // at the member's creation [C scripts].
     const double t0 = s.startMs;
     now_ = t0;
+    ragdollResets_.push_back(t0);  // the ragdoll starts on the member's first pose
     if (guitarLike()) {
         const uint32_t strumSet = extendKey(role_ == band::Role::Bassist && !model_->member.gh4 ? K("normal") : strumStyle_, "_Strums");
         if (const qb::Struct* ss = structOf(g.find(strumSet))) rightArm_.play(clip(keyOf(ss->find(K("no_strum_anim")))), t0, 0.2f);
@@ -1015,6 +1017,7 @@ void Animator::handle(const Event& e) {
         ++stats_.bodyAnims;
         mocapPlaying_ = true;
         if (gh4) {
+            ragdollResets_.push_back(t);
             // The mocap clips leave the forearms unanimated (Bone_Forearm_L/R
             // have no keys and are masked off in every _S_ / _B_ / _G_ clip
             // [C data]): the elbows come from the IK onto the clip's
@@ -1057,6 +1060,7 @@ void Animator::handle(const Event& e) {
                 // guitar for a guitar / bass / rhythm part, else slave [C script].
                 mocapPlaying_ = false;
                 bodyBlend_ = 0.0f;
+                ragdollResets_.push_back(t);
                 const bool guitarChain = guitarLike();
                 setIkTargets(t, guitarChain ? 0 : 1, guitarChain ? 0 : 1);
             }

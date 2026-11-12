@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include "data/qbkey.h"
 
@@ -18,7 +19,7 @@ using bandanim::Vec;
 using Rt = AccessorySim::Rt;
 
 constexpr double kStepMs = 1000.0 / 60.0;  // [I] GH3's frame time on the 360 (it keyframes with 1 / frame time [C 823FE8C8])
-constexpr int kSubSteps = 4;               // hkWorldCinfo SOLVER_TYPE_4ITERS_MEDIUM [C 82253B10: setupSolverInfo(5)]
+constexpr int kIterations = 4;             // hkWorldCinfo SOLVER_TYPE_4ITERS_MEDIUM [C 82253B10: setupSolverInfo(5)]
 constexpr float kTau = 0.6f;               // solverTau [C the .rag worldCinfo; 4ITERS_MEDIUM]
 constexpr float kDamp = 1.0f;              // solverDamp
 constexpr float kFixError = 0.05f, kFixPart = 0.8f;  // checkAndFixConstraint(0.05, 0.8) [C 823FFC28: 8200C360, 820079F8]
@@ -150,8 +151,8 @@ bool AccessorySim::init(const bandanim::Rig& rig, const havok::Physics& rag, con
         bodyOf_[size_t(bone)] = int(bodies_.size());
         bodies_.push_back(b);
         if (SDL_getenv("GD10_RAGDOLL_LOG"))
-            SDL_Log("ragdoll %s: %s mass %.2f invI %.2f com (%.3f %.3f %.3f) damp %.2f/%.2f maxAng %.1f; body-to-bone (%.4f %.4f %.4f)",
-                    hb.name.c_str(), b.dynamic ? "dynamic" : "keyframed", hb.mass, b.invInertia, b.com.x, b.com.y, b.com.z, b.linDamp,
+            SDL_Log("ragdoll #%d %s: %s mass %.2f invI %.2f com (%.3f %.3f %.3f) damp %.2f/%.2f maxAng %.1f; body-to-bone (%.4f %.4f %.4f)",
+                    bone, hb.name.c_str(), b.dynamic ? "dynamic" : "keyframed", hb.mass, b.invInertia, b.com.x, b.com.y, b.com.z, b.linDamp,
                     b.angDamp, b.maxAng, b.boneFromBody.t.x, b.boneFromBody.t.y, b.boneFromBody.t.z);
     }
     if (!dynamic_) return false;
@@ -171,11 +172,38 @@ bool AccessorySim::init(const bandanim::Rig& rig, const havok::Physics& rag, con
         c.fa = rtOfHavok(hc.transformA);
         c.fb = rtOfHavok(hc.transformB);
         c.d = hc;
+        if (SDL_getenv("GD10_RAGDOLL_LOG"))
+            SDL_Log("ragdoll con bodies %s -> %s (bones %d %d)", rag.bodies[size_t(hc.bodyA)].name.c_str(), rag.bodies[size_t(hc.bodyB)].name.c_str(),
+                    bodies_[size_t(c.a)].bone, bodies_[size_t(c.b)].bone);
+        if (SDL_getenv("GD10_RAGDOLL_LOG"))
+            SDL_Log("ragdoll con %s %s %s: twist %d [%.2f %.2f] tau %.2f ax %d/%d; cone %d max %.2f al %d ax %d/%d tau %.2f; planes %d [%.2f %.2f] al %d ax %d/%d; fric %.3f x%d",
+                    hc.name.c_str(), hc.type.c_str(), c.active ? "active" : "off", hc.twistOn, hc.twistMin, hc.twistMax, hc.twistTau, hc.twistAxis, hc.twistRefAxis,
+                    hc.coneOn, hc.coneMax, hc.coneAligned, hc.coneAxisA, hc.coneAxisB, hc.coneTau, hc.planesOn, hc.planesMin, hc.planesMax, hc.planesAligned,
+                    hc.planesAxisA, hc.planesAxisB, hc.maxFriction, hc.frictionAxes);
         cons_.push_back(c);
+    }
+    // A dynamic body constrained to a body that is not its skeleton ancestor
+    // follows its animation instead (keyframed): Rob's .rag ties
+    // Bone_ACC_Head_09 (a braid bone under his head, 0.1 kg, zero cone and
+    // planes) to Bone_Ankle_R, so the solver dragged it between his head and
+    // his ankle, 2 m a frame [C data; I: the original's result unknown, the
+    // bone keeps its animation].
+    for (Con& c : cons_) {
+        if (!c.active) continue;
+        const int child = bodies_[size_t(c.a)].bone, par = bodies_[size_t(c.b)].bone;
+        bool ancestor = false;
+        for (int p = parent_[size_t(child)]; p >= 0 && !ancestor; p = parent_[size_t(p)]) ancestor = p == par;
+        if (ancestor) continue;
+        SDL_Log("ragdoll: %s is tied to %s, not one of its skeleton's parents: animated, not simulated", c.d.name.c_str(),
+                rag.bodies[size_t(c.d.bodyB)].name.c_str());
+        Body& b = bodies_[size_t(c.a)];
+        if (b.dynamic) b.dynamic = false, b.invMass = b.invInertia = 0, --dynamic_;
+        for (Con& o : cons_)
+            if (o.a == c.a) o.active = false;
     }
     started_ = false;
     history_.clear();
-    return true;
+    return dynamic_ > 0;
 }
 
 void AccessorySim::targets(const std::vector<Mat34>& world, std::vector<Rt>& out) const {
@@ -187,19 +215,19 @@ void AccessorySim::targets(const std::vector<Mat34>& world, std::vector<Rt>& out
 }
 
 // One row of the velocity solver: J = (linA, angA, linB, angB), the
-// target velocity `rhs`, the impulse clamped to [lo, hi].
-namespace {
-struct Row {
+// target velocity `rhs`, the accumulated impulse clamped to [lo, hi].
+struct AccessorySim::SolverRow {
+    int a = -1, b = -1;
     Vec linA, angA, linB, angB;
     float rhs = 0, lo = -1e30f, hi = 1e30f;
+    float k = 0, acc = 0;  // the effective mass's inverse, the impulse so far
 };
-}  // namespace
 
-void AccessorySim::solve(std::vector<BodyState>& s, const Con& c, float h) const {
+void AccessorySim::rows(const std::vector<BodyState>& s, const Con& c, float h, std::vector<SolverRow>& out) const {
     const Body& A = bodies_[size_t(c.a)];
     const Body& B = bodies_[size_t(c.b)];
-    BodyState& sa = s[size_t(c.a)];
-    BodyState& sb = s[size_t(c.b)];
+    const BodyState& sa = s[size_t(c.a)];
+    const BodyState& sb = s[size_t(c.b)];
     const Quat qa = bandanim::qmul(sa.x.q, c.fa.q), qb = bandanim::qmul(sb.x.q, c.fb.q);
     const Vec fa[3] = {axisOf(qa, 0), axisOf(qa, 1), axisOf(qa, 2)};
     const Vec fb[3] = {axisOf(qb, 0), axisOf(qb, 1), axisOf(qb, 2)};
@@ -207,31 +235,37 @@ void AccessorySim::solve(std::vector<BodyState>& s, const Con& c, float h) const
     const Vec ca = add(sa.x.t, bandanim::qrot(sa.x.q, A.com)), cb = add(sb.x.t, bandanim::qrot(sb.x.q, B.com));
     const Vec ra = sub(pa, ca), rb = sub(pb, cb);
     const float inv = 1.0f / h;
-    auto apply = [&](const Row& r) {
-        const float k = A.invMass * dot(r.linA, r.linA) + A.invInertia * dot(r.angA, r.angA) + B.invMass * dot(r.linB, r.linB) +
-                        B.invInertia * dot(r.angB, r.angB);
-        if (k < 1e-12f) return;
-        const float jv = dot(r.linA, sa.v) + dot(r.angA, sa.w) + dot(r.linB, sb.v) + dot(r.angB, sb.w);
-        const float l = std::clamp(kDamp * (r.rhs - jv) / k, r.lo, r.hi);
-        sa.v = add(sa.v, mul(r.linA, A.invMass * l));
-        sa.w = add(sa.w, mul(r.angA, A.invInertia * l));
-        sb.v = add(sb.v, mul(r.linB, B.invMass * l));
-        sb.w = add(sb.w, mul(r.angB, B.invInertia * l));
+    auto apply = [&](SolverRow r) {
+        r.k = A.invMass * dot(r.linA, r.linA) + A.invInertia * dot(r.angA, r.angA) + B.invMass * dot(r.linB, r.linB) +
+              B.invInertia * dot(r.angB, r.angB);
+        if (r.k < 1e-12f) return;
+        r.a = c.a, r.b = c.b;
+        out.push_back(r);
     };
     // A linear row along n between the pivots, C = (pa - pb).n.
     auto linear = [&](Vec n, float err, float lo, float hi) {
-        Row r{n, cross(ra, n), mul(n, -1), mul(cross(rb, n), -1), -kTau * err * inv, lo, hi};
+        SolverRow r;
+        r.linA = n, r.angA = cross(ra, n), r.linB = mul(n, -1), r.angB = mul(cross(rb, n), -1);
+        r.rhs = -kTau * err * inv, r.lo = lo, r.hi = hi;
         apply(r);
     };
     // An angular row about n (the relative angle grows with (wA - wB).n).
     auto angular = [&](Vec n, float rhs, float lo, float hi) {
-        Row r{{}, n, {}, mul(n, -1), rhs, lo, hi};
+        SolverRow r;
+        r.angA = n, r.angB = mul(n, -1), r.rhs = rhs, r.lo = lo, r.hi = hi;
         apply(r);
     };
     // A two-sided angle limit: angle in [mn, mx] with the limit's tau.
+    // A limit row is in the solve whether or not the limit is reached
+    // (Havok's limit atoms): inside, the joint may close the remaining gap
+    // within the step and no further; beyond, it is pushed back by tau.
+    // Only the rows of limits already broken (as before, GD10-044) let a
+    // swinging braid sail through its cone within the frame (36 degrees past
+    // it at the 95th percentile in Enter Sandman).
+    auto toLimit = [&](float over, float tau) { return over > 0 ? -kTau * tau * over * inv : -over * inv; };
     auto limit = [&](Vec n, float angle, float mn, float mx, float tau) {
-        if (angle > mx) angular(n, -kTau * tau * (angle - mx) * inv, -1e30f, 0.0f);
-        else if (angle < mn) angular(n, -kTau * tau * (angle - mn) * inv, 0.0f, 1e30f);
+        angular(n, toLimit(angle - mx, tau), -1e30f, 0.0f);
+        angular(n, -toLimit(mn - angle, tau), 0.0f, 1e30f);
     };
     const havok::Constraint& d = c.d;
     if (c.kind == Con::Ragdoll || c.kind == Con::Hinge) {
@@ -258,7 +292,7 @@ void AccessorySim::solve(std::vector<BodyState>& s, const Con& c, float h) const
                 const Vec n = cross(b, a);
                 if (len(n) < 1e-6f) return;
                 const float ang = std::acos(std::clamp(dot(a, b), -1.0f, 1.0f));
-                if (ang > mx) angular(norm(n), -kTau * tau * (ang - mx) * inv, -1e30f, 0.0f);
+                angular(norm(n), toLimit(ang - mx, tau), -1e30f, 0.0f);
             } else {
                 // asin(a.b): zero when perpendicular, in [mn, mx].
                 const Vec n = cross(a, b);
@@ -307,7 +341,7 @@ void AccessorySim::solve(std::vector<BodyState>& s, const Con& c, float h) const
 }
 
 void AccessorySim::step(State& s, const std::vector<Mat34>& world, const Vec& gravity) const {
-    const float dt = float(kStepMs / 1000.0), h = dt / float(kSubSteps);
+    const float dt = float(kStepMs / 1000.0);
     std::vector<Rt> tgt;
     targets(world, tgt);
     // Hard keyframes (hkKeyFrameUtility::applyHardKeyFrame, 1 / frame time [C 823FE8C8]):
@@ -337,32 +371,50 @@ void AccessorySim::step(State& s, const std::vector<Mat34>& world, const Vec& gr
             break;
         }
     }
-    // Damping, then the sub-steps: gravity, one Gauss-Seidel pass over the
-    // constraints in the world, the velocity caps, the integration [I: Havok's
-    // solver steps].
+    // Damping and gravity, then the solver: hkpWorldCinfo
+    // SOLVER_TYPE_4ITERS_MEDIUM is one micro-step of four Gauss-Seidel
+    // iterations (tau 0.6, damping 1) [Havok's documented solver types; C
+    // 82253B10 setupSolverInfo(5)], each row's impulse accumulated and
+    // clamped; the velocity caps; one integration over the frame. GD10-044
+    // before: four sub-steps of one pass each with their own error
+    // correction (four times the stiffness and the injected energy: hair tips
+    // spun at up to 176 rad/s, 150..180 degrees off their animation).
     for (size_t i = 0; i < bodies_.size(); ++i) {
         const Body& b = bodies_[i];
         if (!b.dynamic) continue;
         s.b[i].v = mul(s.b[i].v, std::max(0.0f, 1.0f - b.linDamp * dt));
         s.b[i].w = mul(s.b[i].w, std::max(0.0f, 1.0f - b.angDamp * dt));
+        s.b[i].v = add(s.b[i].v, mul(gravity, dt));
     }
-    for (int n = 0; n < kSubSteps; ++n) {
-        for (size_t i = 0; i < bodies_.size(); ++i)
-            if (bodies_[i].dynamic) s.b[i].v = add(s.b[i].v, mul(gravity, h));
-        for (const Con& c : cons_)
-            if (c.active) solve(s.b, c, h);
-        for (size_t i = 0; i < bodies_.size(); ++i) {
-            const Body& b = bodies_[i];
-            BodyState& st = s.b[i];
-            if (b.dynamic) {
-                const float lv = len(st.v), av = len(st.w);
-                if (lv > b.maxLin) st.v = mul(st.v, b.maxLin / lv);
-                if (av > b.maxAng) st.w = mul(st.w, b.maxAng / av);
-            }
-            const Vec com = add(add(st.x.t, bandanim::qrot(st.x.q, b.com)), mul(st.v, h));
-            st.x.q = integrate(st.x.q, st.w, h);
-            st.x.t = sub(com, bandanim::qrot(st.x.q, b.com));
+    std::vector<SolverRow> rs;
+    for (const Con& c : cons_)
+        if (c.active) rows(s.b, c, dt, rs);
+    for (int it = 0; it < kIterations; ++it)
+        for (SolverRow& r : rs) {
+            BodyState& sa = s.b[size_t(r.a)];
+            BodyState& sb = s.b[size_t(r.b)];
+            const Body& A = bodies_[size_t(r.a)];
+            const Body& B = bodies_[size_t(r.b)];
+            const float jv = dot(r.linA, sa.v) + dot(r.angA, sa.w) + dot(r.linB, sb.v) + dot(r.angB, sb.w);
+            const float acc = std::clamp(r.acc + kDamp * (r.rhs - jv) / r.k, r.lo, r.hi);
+            const float l = acc - r.acc;
+            r.acc = acc;
+            sa.v = add(sa.v, mul(r.linA, A.invMass * l));
+            sa.w = add(sa.w, mul(r.angA, A.invInertia * l));
+            sb.v = add(sb.v, mul(r.linB, B.invMass * l));
+            sb.w = add(sb.w, mul(r.angB, B.invInertia * l));
         }
+    for (size_t i = 0; i < bodies_.size(); ++i) {
+        const Body& b = bodies_[i];
+        BodyState& st = s.b[i];
+        if (b.dynamic) {
+            const float lv = len(st.v), av = len(st.w);
+            if (lv > b.maxLin) st.v = mul(st.v, b.maxLin / lv);
+            if (av > b.maxAng) st.w = mul(st.w, b.maxAng / av);
+        }
+        const Vec com = add(add(st.x.t, bandanim::qrot(st.x.q, b.com)), mul(st.v, dt));
+        st.x.q = integrate(st.x.q, st.w, dt);
+        st.x.t = sub(com, bandanim::qrot(st.x.q, b.com));
     }
 }
 
@@ -392,7 +444,7 @@ void AccessorySim::pose(const State& s, std::vector<Mat34>& world) const {
 }
 
 void AccessorySim::apply(double ms, std::vector<Mat34>& world, const std::function<void(double, std::vector<Mat34>&)>& animate,
-                         const Vec& gravity) {
+                         const Vec& gravity, const std::vector<double>* resets) {
     if (!dynamic_) return;
     // The pose read at a frame is the one before that frame's step [C 823FE140:
     // keyframe, read, then the world steps]: the state after step k - 1 at
@@ -423,27 +475,47 @@ void AccessorySim::apply(double ms, std::vector<Mat34>& world, const std::functi
     while (cur_.step < want) {
         ++cur_.step;
         w.clear();
-        animate(double(cur_.step) * kStepMs, w);
-        step(cur_, w, gravity);
+        const double t1 = double(cur_.step) * kStepMs, t0 = t1 - kStepMs;
+        animate(t1, w);
+        // ragdoll_markforreset between the two steps: the bodies on the
+        // animated pose, at rest (a mocap clip snaps the pose with no
+        // blend: stepping through it threw the hair, the keyframed head
+        // moving metres in a frame) [C scripts handle_moment_anim_blending,
+        // end_moment_anim; I: the reset as setPoseModelSpace at rest].
+        const bool reset = resets && std::any_of(resets->begin(), resets->end(), [&](double r) { return r > t0 && r <= t1; });
+        if (reset) {
+            std::vector<Rt> tgt;
+            targets(w, tgt);
+            for (size_t i = 0; i < bodies_.size(); ++i) cur_.b[i] = BodyState{tgt[i], {}, {}};
+        } else {
+            step(cur_, w, gravity);
+        }
         if (cur_.step % 60 == 0 && SDL_getenv("GD10_RAGDOLL_LOG")) {
             // Development aid: the worst pivot gap of the constraints in the world,
             // the fastest accessory body, the largest swing off the animation.
             std::vector<Rt> tgt;
             targets(w, tgt);
-            float gap = 0, vmax = 0, wmax = 0, swing = 0;
+            float gap = 0, vmax = 0, wmax = 0, swing = 0, coneOver = -10;
             for (const Con& c : cons_) {
                 if (!c.active) continue;
                 const BodyState &sa = cur_.b[size_t(c.a)], &sb = cur_.b[size_t(c.b)];
                 gap = std::max(gap, len(sub(add(sa.x.t, bandanim::qrot(sa.x.q, c.fa.t)), add(sb.x.t, bandanim::qrot(sb.x.q, c.fb.t)))));
+                if (c.kind == Con::Ragdoll && c.d.coneOn) {
+                    const Quat qa = bandanim::qmul(sa.x.q, c.fa.q), qb = bandanim::qmul(sb.x.q, c.fb.q);
+                    const float cone = std::acos(std::clamp(dot(axisOf(qa, c.d.coneAxisA), axisOf(qb, c.d.coneAxisB)), -1.0f, 1.0f));
+                    coneOver = std::max(coneOver, cone - c.d.coneMax);
+                }
             }
+            int wBody = -1, sBody = -1;
             for (size_t i = 0; i < bodies_.size(); ++i) {
                 if (!bodies_[i].dynamic) continue;
-                vmax = std::max(vmax, len(cur_.b[i].v)), wmax = std::max(wmax, len(cur_.b[i].w));
+                vmax = std::max(vmax, len(cur_.b[i].v));
+                if (len(cur_.b[i].w) > wmax) wmax = len(cur_.b[i].w), wBody = bodies_[i].bone;
                 const float d = std::fabs(bandanim::qmul(cur_.b[i].x.q, bandanim::qconj(tgt[i].q)).w);
-                swing = std::max(swing, 2.0f * std::acos(std::min(1.0f, d)));
+                if (2.0f * std::acos(std::min(1.0f, d)) > swing) swing = 2.0f * std::acos(std::min(1.0f, d)), sBody = bodies_[i].bone;
             }
-            SDL_Log("ragdoll step %lld: gap %.4f m, |v| %.2f m/s, |w| %.2f rad/s, swing %.1f deg", static_cast<long long>(cur_.step), gap,
-                    vmax, wmax, swing * 57.29578f);
+            SDL_Log("ragdoll step %lld: gap %.4f m, |v| %.2f m/s, |w| %.2f rad/s (bone %d), swing %.1f deg (bone %d), cone over %.1f deg",
+                    static_cast<long long>(cur_.step), gap, vmax, wmax, wBody, swing * 57.29578f, sBody, coneOver * 57.29578f);
         }
         history_.push_back(cur_);
         while (history_.size() > kHistory) history_.pop_front();
@@ -466,4 +538,50 @@ void AccessorySim::apply(double ms, std::vector<Mat34>& world, const std::functi
         mix.b[i].x = {bandanim::nlerp(x0.q, x1.q, frac), add(x0.t, mul(sub(x1.t, x0.t), frac))};
     }
     pose(mix, world);
+}
+
+std::string AccessorySim::selfTest() {
+    bandanim::Rig rig;
+    rig.parent = {-1, 0};
+    rig.bind.resize(2);
+    rig.bind[1].t = {0.1f, 0, 0};
+    rig.invBind.resize(2);
+    rig.invBind[1].m[3] = -0.1f;
+    rig.index = {{qbkey::key("Bone_Head"), 0}, {qbkey::key("Bone_ACC_Head_01"), 1}};
+    havok::Physics ph;
+    havok::Body head, hair;
+    head.name = "Bone_Head", head.mass = 10;
+    hair.name = "Bone_ACC_Head_01", hair.mass = 1, hair.comLocal = {0.05f, 0, 0}, hair.invInertia = {300, 300, 300}, hair.angularDamping = 0.05f;
+    for (havok::Body* b : {&head, &hair}) b->transform = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    hair.transform[12] = 0.1f;
+    ph.bodies = {head, hair};
+    havok::Constraint c;
+    c.name = "Bone_ACC_Head_01", c.type = "hkRagdollConstraintData", c.bodyA = 1, c.bodyB = 0;
+    c.transformA = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    c.transformB = c.transformA;
+    c.transformB[12] = 0.1f;
+    c.coneOn = c.twistOn = true, c.coneMax = 0.3f, c.coneTau = c.twistTau = 0.8f, c.coneAligned = true;
+    ph.constraints = {c};
+    AccessorySim sim;
+    if (!sim.init(rig, ph, {qbkey::key("Bone_ACC_Head_01")})) return "no dynamic body";
+    auto animate = [&](double, std::vector<Mat34>& w) {
+        w.assign(2, Mat34{});
+        w[1].m[3] = 0.1f;
+    };
+    float worstCone = 0, worstGap = 0;
+    for (int f = 1; f <= 180; ++f) {
+        std::vector<Mat34> w;
+        animate(0, w);
+        sim.apply(f * kStepMs, w, animate, {0, -9.8f, 0});
+        const Vec x = norm({w[1].m[0], w[1].m[4], w[1].m[8]});
+        worstCone = std::max(worstCone, std::acos(std::clamp(x.x, -1.0f, 1.0f)));
+        worstGap = std::max(worstGap, len(sub(Vec{w[1].m[3], w[1].m[7], w[1].m[11]}, Vec{0.1f, 0, 0})));
+    }
+    char buf[160];
+    if (worstCone > 0.3f + 0.05f || worstGap > 0.01f) {
+        std::snprintf(buf, sizeof buf, "the hanging segment broke its joint: %.1f degrees off the head (cone 17.2), pivot %.3f m apart", worstCone * 57.29578f,
+                      worstGap);
+        return buf;
+    }
+    return "";
 }

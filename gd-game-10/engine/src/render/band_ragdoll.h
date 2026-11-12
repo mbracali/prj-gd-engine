@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <string>
 #include <vector>
 
 #include "data/havok.h"
@@ -40,8 +41,15 @@ public:
     // The animated model-space bone matrices at `ms` in `world`, replaced by
     // the simulated ones; `animate(t, world)` gives the animated matrices at
     // a step time. `gravity`: the world's (0, -9.8, 0) in model space.
+    // `resets`: song times (ascending) of ragdoll_markforreset: the step
+    // that reaches one starts over at rest on the animated pose (null: none).
     void apply(double ms, std::vector<bandanim::Mat34>& world, const std::function<void(double, std::vector<bandanim::Mat34>&)>& animate,
-               const bandanim::Vec& gravity);
+               const bandanim::Vec& gravity, const std::vector<double>* resets = nullptr);
+
+    // A hair segment hanging from a keyframed head by a ragdoll constraint
+    // (cone 0.3 rad) under gravity for 3 s: "" when the cone holds and the
+    // joint stays together, else what went wrong (chartest).
+    static std::string selfTest();
 
     struct Rt {  // a rigid transform: rotation then translation
         bandanim::Quat q;
@@ -74,7 +82,9 @@ private:
     };
     void targets(const std::vector<bandanim::Mat34>& world, std::vector<Rt>& out) const;
     void step(State& s, const std::vector<bandanim::Mat34>& world, const bandanim::Vec& gravity) const;
-    void solve(std::vector<BodyState>& s, const Con& c, float h) const;
+    struct SolverRow;
+    // The constraint's velocity rows at the step's start (h: the step's time).
+    void rows(const std::vector<BodyState>& s, const Con& c, float h, std::vector<SolverRow>& out) const;
     void pose(const State& s, std::vector<bandanim::Mat34>& world) const;
 
     std::vector<Body> bodies_;

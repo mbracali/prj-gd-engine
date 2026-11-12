@@ -143,6 +143,9 @@ public:
     // (world x inverse bind).
     void evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>& skin) const;
     const Rig& rig() const { return rig_; }
+    // ragdoll_markforreset's song times so far (gh4 handle_moment_anim_blending
+    // / end_moment_anim: a mocap clip's start and end) [C scripts].
+    const std::vector<double>& ragdollResets() const { return ragdollResets_; }
 
     struct Stats {
         int bodyAnims = 0, strums = 0, frets = 0, chords = 0, drumHits = 0, cymbals = 0, facials = 0, perfEvents = 0;
@@ -292,6 +295,7 @@ private:
     std::vector<IkSwitch> ikSwitch_;
     void setIkTargets(double t, int left, int right);  // -1 keep, 0 guitar, 1 slave
     bool mocapPlaying_ = false;  // a Band_PlayClip clip in the body (the moment branch)
+    std::vector<double> ragdollResets_;
     const anim::Clip* twistClip_ = nullptr;
     // Two-bone IK chains: bicep, forearm, palm -> target bone [C data Hero_Ik_params].
     struct Chain {

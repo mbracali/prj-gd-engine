@@ -248,7 +248,7 @@ void Band::evaluateEntry(Entry& e, double ms) {
         e.acc->apply(ms, e.world, [&an](double t, std::vector<bandanim::Mat34>& w) {
             std::vector<bandanim::Mat34> sk;
             an.evaluate(t, w, sk);
-        }, e.gravity);
+        }, e.gravity, &an.ragdollResets());
         const bandanim::Rig& rig = e.anim.rig();
         for (size_t b = 0; b < e.world.size() && b < rig.invBind.size(); ++b) e.skin[b] = bandanim::mmul(e.world[b], rig.invBind[b]);
     }
