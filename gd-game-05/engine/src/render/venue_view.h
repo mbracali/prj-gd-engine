@@ -43,6 +43,9 @@ public:
     void setShot(const scene::CamShot* shot, size_t k = 0);
     const scene::CamShot* shot() const { return shot_; }
     void setCamera(const gfx::Camera& c) { camera_ = c; }
+    // The walks' crowd probe (GD05-071): draw() then draws only the
+    // audience (the WorldCrowds in the draw list's order), nothing else.
+    void setOnlyCrowd(bool on) { onlyCrowd_ = on; }
     const gfx::Camera& camera() const { return camera_; }
 
     // Runs the particle systems to the world clock (call once a frame, after
@@ -98,6 +101,7 @@ private:
     std::vector<gfx::Vec3> feet_;
     float timeSec_ = 0;
     bool filling_ = false;  // drawing the band with More Lights' fill
+    bool onlyCrowd_ = false;
     const scene::Environ* currentEnv_ = nullptr;
     bool envSet_ = false;
     bool hdr_ = false;

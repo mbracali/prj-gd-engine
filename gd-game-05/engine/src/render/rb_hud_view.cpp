@@ -12,6 +12,8 @@
 #include <stdexcept>
 
 #include "data/game_data.h"
+#include "render/anim_rate.h"
+#include "render/draw_order.h"
 #include "render/renderer.h"
 #include "render/text_layout.h"
 #include "render/ui_view.h"
@@ -266,7 +268,10 @@ void RbHudView::trigger(const scene::EventTrigger& t, float nowMs) {
         }
         const float len = std::fabs(to - from);
         const float scale = a.enable && a.period > 0 ? (len > 0 ? len / (a.period * kFps) : 1.0f) : (a.scale != 0 ? std::fabs(a.scale) : 1.0f);
-        animate(anim, from, to, type, scale, nowMs + std::max(0.0f, a.delay) * 1000.0f);
+        // The entry's rate (GD05-070): be_ready.trig's be_color_pulse.anim
+        // loops 0..1 at k1_fpb, one pulse a beat; at 30 a second it pulsed
+        // 30 times a second and the Overdrive meter flickered.
+        animate(anim, from, to, type, scale, nowMs + std::max(0.0f, a.delay) * 1000.0f, a.period > 0 || gfx::highwayLegacy() ? gfx::k30Fps : int(a.rate));
     }
     for (const auto& s : t.shows)
         if (const scene::Object* o = d->resolve(s)) pose_.setShowing(o, true);
@@ -280,10 +285,10 @@ void RbHudView::trigger(const scene::EventTrigger& t, float nowMs) {
             if (auto* next = o->as<scene::EventTrigger>(); next && next != &t) trigger(*next, nowMs);
 }
 
-void RbHudView::animate(const scene::Object* anim, float from, float to, int type, float scale, float startMs) {
+void RbHudView::animate(const scene::Object* anim, float from, float to, int type, float scale, float startMs, int rate) {
     tasks_.erase(std::remove_if(tasks_.begin(), tasks_.end(), [&](const Task& k) { return k.anim == anim && k.type != 2; }), tasks_.end());
     Task k;
-    k.anim = anim, k.from = from, k.to = to, k.type = type, k.scale = scale, k.t0 = startMs;
+    k.anim = anim, k.from = from, k.to = to, k.type = type, k.scale = scale, k.t0 = startMs, k.rate = rate;
     tasks_.push_back(k);
     if (type != 2 && startMs <= lastMs_ + 0.5f) setFrame(anim, from);
 }
@@ -316,7 +321,7 @@ void RbHudView::runTasks(float nowMs) {
             tasks_.erase(tasks_.begin() + long(k));
             continue;
         }
-        const float run = (nowMs - t.t0) * 0.001f * kFps * t.scale;
+        const float run = float(gfx::animFrames(t.rate, t.t0, nowMs, tempo_)) * t.scale;
         const float len = t.to - t.from;
         bool done = false;
         float f;
@@ -802,14 +807,27 @@ void RbHudView::keepQuads(const scene::Object* o, const gfx::TextLayout& layout,
 void RbHudView::drawDir(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Directory& dir, const scene::Environ* env, int depth) {
     if (auto* self = dir.self ? dir.self->as<scene::DirObj>() : nullptr; self && self->hasRnd && !self->rnd.environment.empty())
         if (auto* e = dir.get(self->rnd.environment) ? dir.get(self->rnd.environment)->as<scene::Environ>() : nullptr) env = e;
-    std::set<std::string> grouped;
-    for (const auto& o : dir.objects)
-        if (auto* g = o->as<scene::Group>()) grouped.insert(g->objects.begin(), g->objects.end());
-    for (const auto& o : dir.objects) {
-        if (grouped.count(o->name)) continue;
-        if (o->as<scene::Mesh>() || o->as<scene::Group>() || o->as<scene::DirObj>() || o->as<scene::Text>() || o->as<scene::BandLabel>())
-            drawObject(mr, cache, o.get(), env, depth);
+    // RB's RndDir draw list: by draw order (render/draw_order.h, GD05-070):
+    // the streak meter's dial (streak_meter.grp, order 2) over its
+    // multiplier tag and text (multi_meter_anim.grp, order 1). In the
+    // file's order (GD05_HWY_LEGACY=1) the multiplier drew on top.
+    std::vector<const scene::Object*> list;
+    if (gfx::highwayLegacy()) {
+        std::set<std::string> grouped;
+        for (const auto& o : dir.objects)
+            if (auto* g = o->as<scene::Group>()) grouped.insert(g->objects.begin(), g->objects.end());
+        for (const auto& o : dir.objects)
+            if (!grouped.count(o->name) && (o->as<scene::Mesh>() || o->as<scene::Group>() || o->as<scene::DirObj>() || o->as<scene::Text>() || o->as<scene::BandLabel>()))
+                list.push_back(o.get());
+    } else {
+        list = gfx::dirDrawList(dir);
     }
+    std::vector<const scene::Object*> drawn;
+    for (const scene::Object* o : list) {
+        if (pose_.showing(o)) drawn.push_back(o);
+        drawObject(mr, cache, o, env, depth);
+    }
+    if (countOrder_) orderInversions_ += gfx::drawOrderInversions(drawn), ++orderDirs_;
 }
 
 void RbHudView::drawElem(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Object* o) {
@@ -839,6 +857,7 @@ void RbHudView::begin(gfx::Renderer& r, gfx::SceneCache& cache) {
 void RbHudView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const State& state, float nowMs) {
     if (!panel_) return;
     if (nowMs < lastMs_ - 1000.0f) reset(introAtMs_);
+    tempo_ = state.tempo;
     drive(state, nowMs);
     lastMs_ = nowMs;
     runTasks(nowMs);
@@ -850,7 +869,9 @@ void RbHudView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const State& stat
     const scene::Group* order = panel_->root().get("draw_order.grp") ? panel_->root().get("draw_order.grp")->as<scene::Group>() : nullptr;
     if (!order) return;
     gfx::MaterialRenderer& mr = r.materials();
+    countOrder_ = true, orderInversions_ = orderDirs_ = 0;
     for (const std::string& n : order->objects) drawElem(mr, cache, panel_->root().get(n));
+    countOrder_ = false;
     if (textDrawer_) textDrawer_->collect();
 }
 

@@ -11,6 +11,7 @@
 
 #include "data/bytes.h"
 #include "data/game_data.h"
+#include "render/draw_order.h"
 #include "render/ui_cloth.h"
 #include "scene/bitmap.h"
 #include "scene/milo.h"
@@ -109,36 +110,6 @@ bool renderDirXfm(const Bytes& r, scene::Xfm& out) {
 }  // namespace
 
 int UiView::clothPolls() const { return cloth_ ? cloth_->polls() : 0; }
-
-// RB's RndDir draw list (RB 0x821B3A48 sorts it with 0x821FF100) [C]: by
-// draw order; at the same order, objects of the same class by name
-// (strcmp). Classes compare by their Symbol's address, which the port cannot
-// know: different classes keep the directory's order [I].
-// tour_band_welcome.milo's all.grp (blackmask.mesh, 85% black) draws
-// before art.grp and the texts' group, as in RB; in the file's order it
-// covered the popup ("Congratulations!" at 12% of its colour).
-static void sortDraws(std::vector<const scene::Object*>& roots) {
-    auto orderOf = [](const scene::Object* o) {
-        const scene::Draw* d = drawOf(o);
-        return d ? d->order : 0.0f;
-    };
-    std::stable_sort(roots.begin(), roots.end(), [&](const scene::Object* a, const scene::Object* b) { return orderOf(a) < orderOf(b); });
-    for (size_t i = 0; i < roots.size();) {
-        size_t j = i;
-        while (j < roots.size() && orderOf(roots[j]) == orderOf(roots[i])) ++j;
-        // Within [i, j): each class's places, refilled by name.
-        std::map<std::string, std::vector<size_t>> places;
-        for (size_t k = i; k < j; ++k) places[roots[k]->cls].push_back(k);
-        for (auto& [cls, at] : places) {
-            if (at.size() < 2) continue;
-            std::vector<const scene::Object*> objs;
-            for (size_t k : at) objs.push_back(roots[k]);
-            std::sort(objs.begin(), objs.end(), [](const scene::Object* a, const scene::Object* b) { return std::strcmp(a->name.c_str(), b->name.c_str()) < 0; });
-            for (size_t k = 0; k < at.size(); ++k) roots[at[k]] = objs[k];
-        }
-        i = j;
-    }
-}
 
 bool UiView::drawRenderDir3d(MaterialRenderer& r) {
     const scene::Directory& outer = milo_->root();
@@ -253,7 +224,7 @@ void UiView::drawRoots(MaterialRenderer& r, const scene::Directory& root) {
     std::vector<const scene::Object*> roots;
     for (const auto& o : root.objects)
         if (!held.count(o->name) && (drawOf(o.get()) || o->as<scene::Text>())) roots.push_back(o.get());
-    sortDraws(roots);
+    gfx::sortDraws(roots);
     for (const scene::Object* o : roots) drawObject(r, *o, 0);
 }
 
@@ -757,7 +728,7 @@ void UiView::draw(MaterialRenderer& r) {
     std::vector<const scene::Object*> roots;
     for (const auto& o : root.objects)
         if (!held.count(o->name) && (drawOf(o.get()) || o->as<scene::Text>())) roots.push_back(o.get());
-    sortDraws(roots);
+    gfx::sortDraws(roots);
     const size_t firstHit = hits_.size();
     for (const scene::Object* o : roots) drawObject(r, *o, 0);
     if (rendered_.texture.id) {

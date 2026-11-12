@@ -213,6 +213,10 @@ void VenueView::draw(gfx::Renderer& r, int viewW, int viewH, bool hdr) {
     particleRenderer_->setHdr(hdr);
     gfx::MaterialRenderer& mr = r.materials();
     for (const Root& root : roots_) drawObject(mr, root.object, root.env, nullptr, 0);
+    if (onlyCrowd_) {
+        envSet_ = false;
+        return;
+    }
     particles_ = particleRenderer_->drawnParticles();
     // The Enhanced Options' shadows, pools, beams and dust (after the list, before GH2's beams).
     if (look_.any()) {
@@ -231,6 +235,7 @@ void VenueView::drawObject(gfx::MaterialRenderer& mr, const scene::Object* o, co
                            int depth) {
     const gfx::ScenePose& pose = world_.pose();
     if (!o || depth > 24 || !pose.showing(o)) return;
+    if (onlyCrowd_ && (o->as<scene::Mesh>() || o->as<scene::CharacterObj>() || o->as<scene::ParticleSys>())) return;
     if (auto* m = o->as<scene::Mesh>()) {
         selectEnv(mr, env);
         drawMesh(mr, *m, base);

@@ -54,6 +54,7 @@
 #include "render/hud_view.h"
 #include "render/scene_gpu.h"
 #include "render/track_view.h"
+#include "render/anim_rate.h"
 #include "render/rb_hud_view.h"
 #include "render/rb_track_view.h"
 #include "render/vocal_track_view.h"
@@ -678,6 +679,18 @@ private:
     float rbHudNextProbeMs_ = 15000;
     int rbHudProbes_ = 0, rbHudBoxes_ = 0, rbHudBoxErrPx_ = 0, rbHudValueErrors_ = 0;
     int rbNowBarGemPx_ = -1, rbNowBarCoverPct_ = -1;  // the now-bar probe (rbHudProbe)
+    // The walks' highway and crowd probes (GD05-070 / GD05-071, rb_highway
+    // and rb_crowd; GD05_METER_PROBE / GD05_TAIL_PROBE / GD05_CROWD_PROBE=1):
+    // under the frame, each part alone over magenta, its pixels measured.
+    void rbProbes();
+    struct RbProbeStats {
+        std::vector<std::pair<float, float>> meter;  // (song ms, Overdrive meter luma) a frame
+        int meterJumps = 0, meterFlickers = 0, meterBeats = 0, meterFrames = 0;
+        int starTails = 0, starTailsWrong = 0;   // summed over the frames
+        int tailPx = 0, tailChromaPct = -1;       // the last star-tail probe
+        int crowdPx = 0, crowdPxMax = 0, crowdProbes = 0, crowdFrames = 0;
+        int trackOrderErrors = 0, trackOrderParts = 0, hudOrderInversions = 0, hudOrderDirs = 0;
+    } rbProbe_;
     // The venue behind the track (M8): set by the venue code once a venue is
     // loaded; draws the world with the renderer, materials with
     // DrawContext::hdr = `hdr` (GH2's HDR buffer, render/post_fx.h).
@@ -2853,9 +2866,12 @@ const scene::CamShot* App::forcedShot(const std::string& spec) const {
     if (!venue_) return nullptr;
     if (spec.empty() || spec[0] != '#') return venue_->find<scene::CamShot>(spec);
     std::vector<scene::BandCamShot*> shots = venue_->all<scene::BandCamShot>();
+    // #crowdN: the N-th of those with a crowd (the rb_crowd walk).
+    const bool crowd = spec.rfind("#crowd", 0) == 0;
+    if (crowd) shots.erase(std::remove_if(shots.begin(), shots.end(), [](const scene::BandCamShot* s) { return s->crowd.empty(); }), shots.end());
     if (shots.empty()) return nullptr;
     std::sort(shots.begin(), shots.end(), [](const scene::BandCamShot* a, const scene::BandCamShot* b) { return a->name < b->name; });
-    return shots[size_t(std::max(0, std::atoi(spec.c_str() + 1))) % shots.size()];
+    return shots[size_t(std::max(0, std::atoi(spec.c_str() + (crowd ? 6 : 1)))) % shots.size()];
 }
 
 int App::gameCounter(int player, const std::string& key) const {
@@ -2885,6 +2901,28 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "score") return player_ ? player_->score() : 0;
     if (key == "part_vocals") return parts_[0] == "vocals" ? 1 : 0;
     if (key == "rb_track_frames") return rbTrackFrames_;
+    // GD05-070 / GD05-071 (rbProbes).
+    if (key == "meter_frames") return rbProbe_.meterFrames;
+    if (key == "meter_jumps") return rbProbe_.meterJumps;
+    if (key == "meter_flickers") return rbProbe_.meterFlickers;
+    if (key == "rb_star_tails") return rbProbe_.starTails;
+    if (key == "rb_star_tails_wrong") return rbProbe_.starTailsWrong;
+    if (key == "star_tail_px") return rbProbe_.tailPx;
+    if (key == "star_tail_chroma_pct") return rbProbe_.tailChromaPct;
+    if (key == "crowd_px") return rbProbe_.crowdPx;
+    if (key == "crowd_px_max") return rbProbe_.crowdPxMax;
+    if (key == "crowd_probes") return rbProbe_.crowdProbes;
+    if (key == "crowd_clips") {
+        int n = 0;
+        if (world_)
+            for (const Crowd::State& st : world_->crowd().crowds())
+                for (const auto& a : st.archetypes) n += a.actor ? a.actor->clipsStarted : 0;
+        return n;
+    }
+    if (key == "rb_track_order_errors") return rbProbe_.trackOrderErrors;
+    if (key == "rb_track_order_parts") return rbProbe_.trackOrderParts;
+    if (key == "rb_hud_order_inversions") return rbProbe_.hudOrderInversions;
+    if (key == "rb_hud_order_dirs") return rbProbe_.hudOrderDirs;
     if (key == "rb_hud_probes") return rbHudProbes_;
     if (key == "rb_nowbar_gem_px") return rbNowBarGemPx_;
     if (key == "rb_nowbar_cover_pct") return rbNowBarCoverPct_;
@@ -2979,6 +3017,7 @@ void App::hudCommand(const std::string& msg, const std::vector<Value>& args) {
 // them out. No venue yet: nothing is drawn and the frame is as before.
 void App::drawWorld() {
     if (rbHudProbeDue_) rbHudProbe();  // under the frame, which the world then covers
+    rbProbes();
     if (!worldDraw_) return;
     canvas_.flush();
     gfx::Renderer& r = canvas_.renderer();
@@ -3524,6 +3563,7 @@ RbHudView::State App::rbHudState(float t) const {
     s.lost = songLost();
     s.coda = rbBonus_ && rbBonus_->inCoda(t) && !rbBonus_->codaBanked();
     s.codaScore = rbBonus_ ? rbBonus_->codaPot() : 0;
+    s.tempo = song_ ? &song_->tempo : nullptr;  // the triggers' beat rates (render/anim_rate.h)
     return s;
 }
 
@@ -3563,6 +3603,115 @@ void App::drawRbHud(float t) {
                 double(st.tracks.empty() ? -1.0f : st.tracks[0].energy), double(sh.crowdFrame), double(st.crowd), double(sh.wipeFrame), errors);
         rbHudValueErrors_ += errors;
     }
+}
+
+void App::rbProbes() {
+    static const bool meterOn = envOn("GD05_METER_PROBE"), tailOn = envOn("GD05_TAIL_PROBE"), crowdOn = envOn("GD05_CROWD_PROBE");
+    if (!meterOn && !tailOn && !crowdOn) return;
+    if (!sceneCache_ || paused_) return;
+    canvas_.flush();
+    gfx::Renderer& r = canvas_.renderer();
+    const float key[4] = {1, 0, 1, 1};
+    // The picture's pixels other than the magenta it was cleared to.
+    struct Px {
+        long n = 0;
+        double luma = 0, chroma = 0;
+    };
+    auto measure = [&](bool overBlack = false) {
+        Px p;
+        SDL_Surface* raw = canvas_.readPixels();
+        SDL_Surface* c = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        if (raw) SDL_DestroySurface(raw);
+        if (!c) return p;
+        for (int y = 0; y < c->h; ++y) {
+            const uint8_t* row = static_cast<const uint8_t*>(c->pixels) + size_t(y) * size_t(c->pitch);
+            for (int x = 0; x < c->w; ++x) {
+                const uint8_t* q = row + size_t(x) * 4;
+                if (overBlack ? std::max({q[0], q[1], q[2]}) <= 24 : 255 - q[0] + q[1] + 255 - q[2] <= 24) continue;
+                const int mx = std::max({q[0], q[1], q[2]}), mn = std::min({q[0], q[1], q[2]});
+                ++p.n, p.luma += 0.2126 * q[0] + 0.7152 * q[1] + 0.0722 * q[2], p.chroma += mx > 0 ? double(mx - mn) / mx : 0.0;
+            }
+        }
+        SDL_DestroySurface(c);
+        if (p.n) p.luma /= double(p.n), p.chroma /= double(p.n);
+        return p;
+    };
+    // The draw-order checks from the last frame (render/rb_track_view.h, rb_hud_view.h).
+    if (rbTrack_ && !vocal_ && !rbTrack_->drawOrder().empty()) {
+        const std::vector<std::string> want = rbTrack_->expectedDrawOrder(), &got = rbTrack_->drawOrder();
+        int err = int(std::max(want.size(), got.size()) - std::min(want.size(), got.size()));
+        for (size_t i = 0; i < std::min(want.size(), got.size()); ++i) err += want[i] != got[i];
+        if (err && rbProbe_.trackOrderErrors == 0) {
+            std::string w, g;
+            for (const auto& n : want) w += " " + n;
+            for (const auto& n : got) g += " " + n;
+            SDL_Log("rb probe: track draw order\n  data:%s\n  drawn:%s", w.c_str(), g.c_str());
+        }
+        rbProbe_.trackOrderErrors = std::max(rbProbe_.trackOrderErrors, err);
+        rbProbe_.trackOrderParts = std::max(rbProbe_.trackOrderParts, int(want.size()));
+        rbProbe_.starTails += rbTrack_->starTails(), rbProbe_.starTailsWrong += rbTrack_->starTails() - rbTrack_->starTailsBonus();
+    }
+    if (rbHud_) {
+        rbProbe_.hudOrderInversions = std::max(rbProbe_.hudOrderInversions, rbHud_->drawOrderInversions());
+        rbProbe_.hudOrderDirs = std::max(rbProbe_.hudOrderDirs, rbHud_->drawOrderDirs());
+    }
+    // The Overdrive meter (star_power_01) alone, every frame: its luma; a
+    // jump is a change of more than 6% of the brightest seen. be_ready's
+    // be_color_pulse loops once a beat (k1_fpb): at most one jump a beat.
+    if (meterOn && rbHud_ && begun_) {
+        r.device().clear(key, true);
+        rbHud_->drawOnly(r, *sceneCache_, "star_power_01");
+        const Px p = measure();
+        auto& m = rbProbe_.meter;
+        if (p.n > 0) m.emplace_back(lastT_, float(p.luma));
+        if (m.size() > 240) m.erase(m.begin());
+        rbProbe_.meterFrames = int(m.size());
+        float hi = 0;
+        for (const auto& e : m) hi = std::max(hi, e.second);
+        // A flicker: a jump straight back (up then down, or down then up, on
+        // the next frame). The pulse's wrap is one jump, then a slope.
+        int jumps = 0, flickers = 0;
+        for (size_t i = 1; i < m.size(); ++i) {
+            const float d = m[i].second - m[i - 1].second;
+            if (std::fabs(d) <= 0.06f * hi) continue;
+            ++jumps;
+            if (i + 1 < m.size()) {
+                const float e = m[i + 1].second - m[i].second;
+                flickers += std::fabs(e) > 0.06f * hi && (e > 0) != (d > 0);
+            }
+        }
+        rbProbe_.meterJumps = jumps, rbProbe_.meterFlickers = flickers;
+        rbProbe_.meterBeats = m.size() > 1 && song_ ? int(std::ceil(gfx::beatAt(&song_->tempo, m.back().first) - gfx::beatAt(&song_->tempo, m.front().first))) : 0;
+    }
+    // The star tails alone (the last frame's) over black (they add), their
+    // chroma: tail_bonus.mat's track_flash_style.tex is near white.
+    if (tailOn && rbTrack_ && !vocal_ && rbTrack_->starTails() > 0) {
+        const float black[4] = {0, 0, 0, 1};
+        r.device().clear(black, true);
+        rbTrack_->drawLastTails(r, *sceneCache_, true);
+        const Px p = measure(true);
+        if (p.n > 50) rbProbe_.tailPx = int(p.n), rbProbe_.tailChromaPct = int(std::lround(p.chroma * 100));
+    }
+    // The audience alone through the shot's camera, every 30th frame.
+    if (crowdOn && venueView_ && ++rbProbe_.crowdFrames % 30 == 0) {
+        r.device().clear(key, true);
+        int x = 0, y = 0, w = 0, h = 0;
+        r.pictureRect(x, y, w, h);
+        venueView_->setOnlyCrowd(true);
+        venueView_->draw(r, w, h, false);
+        venueView_->setOnlyCrowd(false);
+        const Px p = measure();
+        rbProbe_.crowdPx = int(p.n), rbProbe_.crowdPxMax = std::max(rbProbe_.crowdPxMax, int(p.n)), ++rbProbe_.crowdProbes;
+        SDL_Log("crowd probe: %s %s: %ld px, %d characters drawn", venue_ ? venue_->name().c_str() : "-",
+                director_ && director_->shot() ? director_->shot()->name.c_str() : "-", p.n, venueView_->crowdView().charactersDrawn());
+    }
+    r.device().clear(nullptr, true);
+    if (static int n = 0; (meterOn || tailOn) && ++n % 300 == 0)
+        SDL_Log("rb probe at %.0f ms: Overdrive meter %d frames, %d jumps (%d straight back) over %d beats; star tails %d (%d not tail_bonus.mat), "
+                "chroma %d%% over %d px; track draw order %d off of %d; HUD %d pairs out of draw order in %d directories",
+                double(lastT_), rbProbe_.meterFrames, rbProbe_.meterJumps, rbProbe_.meterFlickers, rbProbe_.meterBeats, rbProbe_.starTails, rbProbe_.starTailsWrong,
+                rbProbe_.tailChromaPct, rbProbe_.tailPx, rbProbe_.trackOrderErrors, rbProbe_.trackOrderParts, rbProbe_.hudOrderInversions,
+                rbProbe_.hudOrderDirs);
 }
 
 void App::rbHudProbe() {

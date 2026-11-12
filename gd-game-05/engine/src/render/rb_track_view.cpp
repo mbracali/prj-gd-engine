@@ -12,6 +12,7 @@
 
 #include "data/dta.h"
 #include "data/game_data.h"
+#include "render/anim_rate.h"
 #include "render/renderer.h"
 #include "scene/milo.h"
 #include "scene/world_objects.h"
@@ -554,7 +555,10 @@ void RbTrackView::fxTrigger(FxDir& fx, const scene::EventTrigger& t, float nowMs
         }
         const float len = std::fabs(to - from);
         const float scale = a.enable && a.period > 0 ? (len > 0 ? len / (a.period * kFxFps) : 1.0f) : (a.scale != 0 ? std::fabs(a.scale) : 1.0f);
-        fxAnimate(fx, anim, from, to, type, scale, nowMs + std::max(0.0f, a.delay) * 1000.0f);
+        // The entry's rate (GD05-070): star_deploy.trig's track_streak_glow.mnm
+        // loops 1000..1480 at k480_fpb (a beat), not 16 s at 30 a second.
+        fxAnimate(fx, anim, from, to, type, scale, nowMs + std::max(0.0f, a.delay) * 1000.0f,
+                  a.period > 0 || gfx::highwayLegacy() ? gfx::k30Fps : int(a.rate));
     }
     for (const auto& s : t.shows)
         if (const scene::Object* o = d->resolve(s)) pose_.setShowing(o, true);
@@ -578,10 +582,10 @@ void RbTrackView::fxTrigger(FxDir& fx, const scene::EventTrigger& t, float nowMs
             if (auto* next = o->as<scene::EventTrigger>(); next && next != &t) fxTrigger(fx, *next, nowMs);
 }
 
-void RbTrackView::fxAnimate(FxDir& fx, const scene::Object* anim, float from, float to, int type, float scale, float startMs) {
+void RbTrackView::fxAnimate(FxDir& fx, const scene::Object* anim, float from, float to, int type, float scale, float startMs, int rate) {
     fx.tasks.erase(std::remove_if(fx.tasks.begin(), fx.tasks.end(), [&](const AnimTask& k) { return k.anim == anim && k.type != 2; }), fx.tasks.end());
     AnimTask k;
-    k.anim = anim, k.from = from, k.to = to, k.type = type, k.scale = scale, k.t0 = startMs;
+    k.anim = anim, k.from = from, k.to = to, k.type = type, k.scale = scale, k.t0 = startMs, k.rate = rate;
     fx.tasks.push_back(k);
     if (type != 2 && startMs <= lastFxMs_ + 0.5f) fxSetFrame(fx, anim, from);  // the first frame now
 }
@@ -800,7 +804,7 @@ void RbTrackView::fxUpdate(float nowMs) {
                 fx->tasks.erase(fx->tasks.begin() + long(k));
                 continue;
             }
-            const float run = float(nowMs - t.t0) * 0.001f * kFxFps * t.scale;
+            const float run = float(gfx::animFrames(t.rate, float(t.t0), nowMs, tempo_)) * t.scale;
             const float len = t.to - t.from;
             bool done = false;
             float f;
@@ -819,6 +823,105 @@ void RbTrackView::fxUpdate(float nowMs) {
         fx->parts.sync(pose_);
         fx->parts.setFrame(clock);
         fx->parts.update(pose_, scene::Xfm{}, clock);
+    }
+}
+
+// The draw group's members the view draws itself, at their place in it
+// (static.grp) [C data]: beat_markers.grp's bar widgets, now_bar.grp's
+// smasher plate, widgets.grp's tails and gems, smasher_fx.grp's
+// after_gems.grp. False: an ordinary group.
+bool RbTrackView::drawPart(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Group* g, const scene::Environ* env) {
+    if (g->name == "beat_markers.grp") {
+        drawBeatLines(mr, cache, *curSong_, curNowMs_);
+        return true;
+    }
+    if (g->name == "now_bar.grp") {
+        drawSmasherPlate(mr, cache, env);
+        return true;
+    }
+    if (g->name == "widgets.grp") {
+        // [I: a gem's tail before the gems, as RB's TrackWidget draws its
+        // instances; the order of the two is not read.]
+        drawTails(mr, cache, *curPlayer_, curNowMs_), drawLog_.push_back("tails");
+        drawGems(mr, cache, *curPlayer_, curNowMs_), drawLog_.push_back("gems");
+        return true;
+    }
+    if (g->name == "smasher_fx.grp") {
+        for (const std::string& n : g->objects)
+            if (const scene::Object* o = g->dir->resolve(n); o && o != g)
+                if (auto* sub = o->as<scene::Group>()) drawGroup(mr, cache, sub, env, 2);
+        drawSmasherFx(mr, cache), drawLog_.push_back("effects.grp");
+        return true;
+    }
+    return false;
+}
+
+// now_bar.grp's smasher plate after its setup_draworder (smasher_plate.dta,
+// run by its reset) [C data]: its draw_order.grp's smasher_plate.mesh, then
+// before_gems.grp (collect_groups: each smasher of smasher_list's
+// base_bottom.grp, then each one's base_top.grp); after_hide.grp and
+// gem_smashers.grp hidden, so the smashers' effects.grp draw only after the
+// gems (smasher_fx.grp). Before GD05-070 every smasher drew whole
+// (bottom, top, effects) in gem_smashers.grp's order (2 3 1 0 4), the
+// effects under the gems and the next smasher.
+void RbTrackView::drawSmasherPlate(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Environ* env) {
+    if (!smasherGroup_ || !smasherGroup_->dir) return;
+    const scene::Directory& plate = *smasherGroup_->dir;
+    for (const std::string& n : smasherGroup_->objects) {
+        const scene::Object* o = plate.resolve(n);
+        if (!o || !pose_.showing(o)) continue;
+        if (auto* m = o->as<scene::Mesh>()) {
+            setEnv(mr, cache, env);
+            gfx::drawMesh(mr, cache, *m, gfx::toMat4(pose_.world(m)), &pose_);
+            drawLog_.push_back(m->name);
+        }
+    }
+    // smasher_list: the plate's property, else its smashers by name [I].
+    std::vector<const scene::Directory*> smashers;
+    std::vector<std::string> names;
+    if (const scene::Object* holder = track_->root().get(drums_ ? "smasher_plate_drum" : "smasher_plate_guitar")) names = headerList(*holder, "smasher_list");
+    if (names.empty() && plate.self) names = headerList(*plate.self, "smasher_list");
+    if (names.empty())
+        for (int i = 0; i < 5; ++i) names.push_back("gem_smasher" + std::to_string(i));
+    for (const std::string& n : names)
+        for (const auto& [owner, d] : plate.subdirs)
+            if (d && owner == n) smashers.push_back(d.get());
+    for (const char* part : {"base_bottom.grp", "base_top.grp"}) {
+        for (const scene::Directory* d : smashers)
+            if (const scene::Object* o = d->get(part))
+                if (auto* g = o->as<scene::Group>()) drawGroup(mr, cache, g, env, 2);
+        drawLog_.push_back(part);
+    }
+}
+
+std::vector<std::string> RbTrackView::expectedDrawOrder() const {
+    std::vector<std::string> out;
+    const scene::Group* g = get<scene::Group>(drawGroup_);
+    if (!g || !g->dir || !pose_.showing(g)) return out;
+    for (const std::string& n : g->objects) {
+        const scene::Object* o = g->dir->resolve(n);
+        if (!o || o == g || !pose_.showing(o) || !(o->as<scene::Mesh>() || o->as<scene::Group>())) continue;
+        out.push_back(o->name);
+        if (o->name == "now_bar.grp") out.insert(out.end(), {"smasher_plate.mesh", "base_bottom.grp", "base_top.grp"});
+        if (o->name == "widgets.grp") out.insert(out.end(), {"tails", "gems"});
+        if (o->name == "smasher_fx.grp") out.push_back("effects.grp");
+    }
+    return out;
+}
+
+void RbTrackView::drawLastTails(gfx::Renderer& r, gfx::SceneCache& cache, bool star) {
+    if (tailRanges_.empty() || !tailMesh_ || !tails_) return;
+    const scene::Mesh* tmpl = tails_->find<scene::Mesh>("tail02.mesh");
+    if (!tmpl) return;
+    gfx::MaterialRenderer& mr = r.materials();
+    frameSet_ = false;
+    const gfx::GpuMesh all = tailMesh_->upload(tailVerts_, tailIndices_);
+    setEnv(mr, cache, trackEnv_);
+    for (const TailRange& t : tailRanges_) {
+        if (t.star != star) continue;
+        gfx::GpuMesh part = all;
+        part.firstIndex = t.firstIndex, part.indexCount = t.indexCount;
+        gfx::drawMesh(mr, cache, *tmpl, gfx::Mat4::identity(), &pose_, t.mat, nullptr, &part);
     }
 }
 
@@ -849,10 +952,13 @@ void RbTrackView::drawGroup(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
     if (!g || depth > 8 || !pose_.showing(g) || !g->dir) return;
     if (!g->environment.empty())
         if (auto* e = g->dir->resolve<scene::Environ>(g->environment)) env = e;
+    if (depth == 1 && curSong_ && g->dir == &track_->root()) drawLog_.push_back(g->name);
+    if (curSong_ && g->dir == &track_->root() && !gfx::highwayLegacy() && drawPart(mr, cache, g, env)) return;
     for (const std::string& n : g->objects) {
         const scene::Object* o = g->dir->resolve(n);
         if (!o || o == g || !pose_.showing(o)) continue;
         if (auto* m = o->as<scene::Mesh>()) {
+            if (depth == 0 && curSong_ && g->dir == &track_->root()) drawLog_.push_back(m->name);
             if (static int n = 0; SDL_getenv("GD05_TRACKLOG") && n < 40 && depth > 0) {
                 ++n;
                 const scene::Mat* mt = m->dir ? m->dir->resolve<scene::Mat>(m->mat) : nullptr;
@@ -1023,6 +1129,7 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
     if (nowMs < lastTailMs_ - 1000) tailStates_.clear();  // a restart
     lastTailMs_ = nowMs;
     tailVerts_.clear(), tailIndices_.clear(), tailRanges_.clear();
+    starTails_ = starTailsBonus_ = 0;
     const auto& gems = player.chart->gems;
     const float aheadMs = topY_ / (yPerSecond_ * speed_) * 1000.0f;
     auto last = std::lower_bound(gems.begin(), gems.end(), nowMs + aheadMs, [](const Gem& g, float v) { return g.ms < v; });
@@ -1055,10 +1162,18 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
         for (int b = 0; b < 5; ++b) {
             if (!(g.frets & (1u << b))) continue;
             const int f = player.laneOfBit[size_t(b)];
-            const std::string name = missed ? "tail_miss.mat" : "tail_" + slotColors_[size_t(f)] + ".mat";
+            // The tail's material by its type (Tail SetType RB 0x8281BEC8 [C]):
+            // a star (Overdrive phrase, or unison) tail takes the builder's
+            // tail_bonus.mat (track_flash_style.tex: the whitish Overdrive
+            // look), a missed one tail_miss.mat, the others their slot's
+            // tail_<colour>.mat. (Before GD05-070 the star tail kept its
+            // slot's coloured texture, only tinted by tail_star.mat's white.)
+            const std::string name = missed ? "tail_miss.mat"
+                                     : star && !gfx::highwayLegacy() ? "tail_bonus.mat"
+                                                                : "tail_" + slotColors_[size_t(f)] + ".mat";
             const scene::Mat* mat = tails_->find<scene::Mat>(name);
             if (!mat) continue;
-            const scene::Mat* starMat = star ? tails_->find<scene::Mat>("tail_star.mat") : nullptr;
+            const scene::Mat* starMat = star && gfx::highwayLegacy() ? tails_->find<scene::Mat>("tail_star.mat") : nullptr;
             const float* col = starMat ? starMat->color.data() : mat->color.data();
             const float x = slotX(f) + c.offsetX;
             const uint16_t base = uint16_t(tailVerts_.size() / 16);
@@ -1088,7 +1203,8 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
                     const uint16_t a0 = uint16_t(base + r2 * n + q), a1 = uint16_t(a0 + 1), b0 = uint16_t(a0 + n), b1 = uint16_t(b0 + 1);
                     for (uint16_t k : {a0, a1, b1, a0, b1, b0}) tailIndices_.push_back(k);
                 }
-            tailRanges_.push_back({mat, first, int(tailIndices_.size()) - first});
+            tailRanges_.push_back({mat, first, int(tailIndices_.size()) - first, star});
+            if (star) ++starTails_, starTailsBonus_ += mat->name == "tail_bonus.mat" ? 1 : 0;
         }
     }
     for (auto it = tailStates_.begin(); it != tailStates_.end();) it = it->second.seen ? std::next(it) : tailStates_.erase(it);
@@ -1150,6 +1266,7 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
         gemSeen_.clear(), seenChart_ = nullptr, wasOd_ = false, lastHeld_ = -1, lastHeldSlots_ = 0;
     }
     lastFxMs_ = nowMs;
+    tempo_ = &song.tempo;
     fxEvents(player, nowMs);
     fxUpdate(nowMs);
     if (const scene::Object* o = obj(drums_ ? "guitar_draw.grp" : "drum_draw.grp")) pose_.setShowing(o, false);
@@ -1203,14 +1320,27 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
         else SDL_Log("RB track: no smasher group");
     }
 
-    drawParticles_ = true;  // the deploy's spotlight flares in spotlight_draw.grp
-    drawGroup(mr, cache, get<scene::Group>(drawGroup_), trackEnv_);
-    drawParticles_ = false;
-    drawBeatLines(mr, cache, song, nowMs);
-    drawGroup(mr, cache, smasherGroup_, trackEnv_);
-    drawTails(mr, cache, player, nowMs);
-    drawGems(mr, cache, player, nowMs);
-    drawSmasherFx(mr, cache);
+    // The draw group in its own order (GD05-070): static.grp's members as
+    // the data lists them, the parts the view draws itself (the beat lines,
+    // the smasher plate, the tails and gems, the smashers' effects) at
+    // their group's place (drawPart).
+    drawLog_.clear();
+    curSong_ = &song, curPlayer_ = &player, curNowMs_ = nowMs;
+    if (gfx::highwayLegacy()) {  // GD05_HWY_LEGACY=1: the order before GD05-070, for the walks' before numbers
+        drawParticles_ = true;
+        drawGroup(mr, cache, get<scene::Group>(drawGroup_), trackEnv_);
+        drawParticles_ = false;
+        drawBeatLines(mr, cache, song, nowMs), drawLog_.push_back("beat_markers.grp");
+        drawGroup(mr, cache, smasherGroup_, trackEnv_), drawLog_.push_back("smasher_plate.mesh"), drawLog_.push_back("effects.grp");
+        drawTails(mr, cache, player, nowMs), drawLog_.push_back("tails");
+        drawGems(mr, cache, player, nowMs), drawLog_.push_back("gems");
+        drawSmasherFx(mr, cache), drawLog_.push_back("effects.grp");
+    } else {
+        drawParticles_ = true;  // the deploy's spotlight flares in spotlight_draw.grp
+        drawGroup(mr, cache, get<scene::Group>(drawGroup_), trackEnv_);
+        drawParticles_ = false;
+    }
+    curSong_ = nullptr, curPlayer_ = nullptr;
     if (sub) r.device().setViewport(vx, vy, vw, vh);
     viewW_ = vw, viewH_ = vh;
 }

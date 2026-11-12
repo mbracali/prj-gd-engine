@@ -1063,6 +1063,60 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         for (int i = 0; i < 30; ++i) wait(500), check("band_start_shot");
         check("counter_max:missing_shaders:0");
         at("endgame_waiting_screen", 90000);
+    } else if (scenario == "rb_highway") {
+        // GD05-070 (owner: "the yellow Overdrive bar flickers", "the
+        // multiplier is drawn on top of other elements", "the hit area looks
+        // wrong", "Overdrive colour on the sustains' tails"): App::rbProbes
+        // under every frame. The Overdrive meter (star_power_01) alone over
+        // magenta: its luma may jump at most once a beat and never straight
+        // back (be_ready.trig's be_color_pulse.anim loops 0..1 at k1_fpb);
+        // the track's draw order against static.grp's and the smasher
+        // plate's setup_draworder; no HUD directory draws a drawable before
+        // one of a lower draw order (RndDir's sort, RB 0x821B3A48); every
+        // star tail drawn with tail_bonus.mat, its pixels near white
+        // (chroma under 20%; the slot colours are over 90%).
+        // GD05_HWY_LEGACY=1 shows the checks failing (the code before).
+        if (!SDL_getenv("GD05_VENUE")) SDL_setenv_unsafe("GD05_VENUE", "arena_01", 1);
+        SDL_setenv_unsafe("GD05_METER_PROBE", "1", 1);
+        SDL_setenv_unsafe("GD05_TAIL_PROBE", "1", 1);
+        SDL_setenv_unsafe("GD05_TAILTEST", "1", 1);  // every gem a tail: the star ones too
+        endMs_ = 75000;
+        rbQuickplay();
+        wait(4000);
+        check("od_meter:0.6");  // be_ready: the pulse
+        wait(8000);
+        check("counter:meter_frames:200");
+        check("counter_max:meter_flickers:0");
+        check("counter:rb_track_order_parts:8");
+        check("counter_max:rb_track_order_errors:0");
+        check("counter:rb_hud_order_dirs:5");
+        check("counter_max:rb_hud_order_inversions:0");
+        wait(45000);  // into the song's Overdrive phrases
+        check("counter:rb_star_tails:1");
+        check("counter_max:rb_star_tails_wrong:0");
+        check("counter:star_tail_px:50");
+        check("counter_max:star_tail_chroma_pct:20");
+        check("counter_max:meter_flickers:0");
+        at("endgame_waiting_screen", 90000);
+    } else if (scenario == "rb_crowd") {
+        // GD05-071 (owner: "no crowd visible in any venue"): a shot with a
+        // crowd (GD05_FORCE_SHOT #crowdN, default the first), the audience
+        // alone through its camera every 30th frame (App::rbProbes): its
+        // pixels, the archetypes' clips started (crowd.dta intro_start /
+        // crowd_update -> main.drv play_group_flags). Before GD05-071 no clip
+        // played and every archetype lay on the floor in its bind pose: 0 px.
+        // GD05_VENUE picks the venue (default arena_01); GD05_CROWD_LEGACY=1
+        // shows the check failing.
+        if (!SDL_getenv("GD05_VENUE")) SDL_setenv_unsafe("GD05_VENUE", "arena_01", 1);
+        if (!SDL_getenv("GD05_FORCE_SHOT")) SDL_setenv_unsafe("GD05_FORCE_SHOT", "#crowd0", 1);
+        SDL_setenv_unsafe("GD05_CROWD_PROBE", "1", 1);
+        endMs_ = 20000;
+        rbQuickplay();
+        wait(5000);
+        check("counter:crowd_probes:3");
+        check("counter:crowd_clips:8");
+        check("counter:crowd_px_max:20000");  // 1% of the 1920 x 1080 picture
+        at("endgame_waiting_screen", 90000);
     } else if (scenario == "rb_look") {
         // GD05-069 (owner: "everything is overbright", "the original is
         // darker with a stronger film grain", "the pause background stays
@@ -3882,6 +3936,10 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         const int got = ui.host().gameCounter(0, key);
         std::printf("  counter %s: %d (want at most %d)\n", key.c_str(), got, most);
         if (got > most) return fail(key + " is " + std::to_string(got));
+        return pass();
+    }
+    if (s.screen.rfind("od_meter:", 0) == 0) {  // rb_highway: player 1's Overdrive meter set
+        ui.host().setPlayerStarPower(0, "meter", float(std::atof(s.screen.c_str() + 9)));
         return pass();
     }
     if (s.screen.rfind("counter:", 0) == 0) {
