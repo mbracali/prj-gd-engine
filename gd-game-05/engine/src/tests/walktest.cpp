@@ -3813,15 +3813,31 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         if (what == "pause") {
             // The screen's outer strips (x < 90, x >= 1190 at 1280x720: the
-            // pause art's octopus reaches in there only with its outlines):
-            // the median of paused / before over the pixels lit before
-            // (luma > 25); the world under the pause is paused.
+            // pause art's octopus reaches in there only with its outlines),
+            // the pixels lit before (luma > 25): the median of paused over
+            // the rule's value, 0.3 x the colour before the display curve
+            // (D25: the screen shows outputCurve(c)), back through it.
+            float gamma = 0.85f;
+            if (const char* e = SDL_getenv("GD05_GAMMA")) gamma = float(std::atof(e));
+            auto inverse = [&](float v) {  // outputCurve is increasing
+                float lo = 0, hi = 1;
+                for (int k = 0; k < 24; ++k) {
+                    const float m = 0.5f * (lo + hi);
+                    (gamma > 0 ? gfx::outputCurve(m, gamma) : m) < v ? lo = m : hi = m;
+                }
+                return 0.5f * (lo + hi);
+            };
+            auto rule = [&](float before) {
+                const float c = 0.3f * inverse(before / 255);
+                return 255 * (gamma > 0 ? gfx::outputCurve(c, gamma) : c);
+            };
             std::vector<double> r;
             if (lookPrePause_.size() == y.size())
                 for (int j = 0; j < h; ++j)
                     for (int i = 0; i < w; ++i)
                         if (i < 45 || i >= 595)
-                            if (const float b = lookPrePause_[size_t(j) * size_t(w) + size_t(i)]; b > 25) r.push_back(y[size_t(j) * size_t(w) + size_t(i)] / b);
+                            if (const float b = lookPrePause_[size_t(j) * size_t(w) + size_t(i)]; b > 25)
+                                r.push_back(y[size_t(j) * size_t(w) + size_t(i)] / std::max(1.0f, rule(b)));
             // A failure here is reported by look:eval (both measured in one run).
             if (r.size() < 500) {
                 lookPauseError_ = "look: too little lit background before the pause (" + std::to_string(r.size()) + " pixels)";
@@ -3829,9 +3845,9 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             }
             std::nth_element(r.begin(), r.begin() + long(r.size() / 2), r.end());
             const double ratio = r[r.size() / 2];
-            std::printf("  look: paused, the background at %.2f of the game's (median of %zu pixels; black_bg.mat: 0.30)\n", ratio, r.size());
+            std::printf("  look: paused, the background at %.2f of black_bg.mat's rule (0.3 of the colour; median of %zu pixels)\n", ratio, r.size());
             // The flicker (x 0.8..0.9 under ProFilm) and the grain move it a little.
-            if (std::fabs(ratio - 0.30) > 0.08) lookPauseError_ = "look: the pause background is " + std::to_string(ratio) + " of the game's, not 0.30";
+            if (std::fabs(ratio - 1) > 0.25) lookPauseError_ = "look: the pause background is " + std::to_string(ratio) + " of black_bg.mat's rule";
             return pass();
         }
         double grain = 0;
