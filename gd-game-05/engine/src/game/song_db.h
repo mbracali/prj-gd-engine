@@ -58,3 +58,10 @@ struct SongInfo {
 // defined, so the test entries inside #ifndef _SHIP are dropped) whose chart
 // and audio exist in the archive, in file order.
 std::vector<SongInfo> loadSongs(const GameData& data);
+// Rock Band's SongMgr ranked lists (RB 0x82434020) [C]: for an instrument
+// (guitar, vocals, drum, bass, band), the songs with a rank for it by that
+// rank (file order among equal ranks), not downloaded (the disc has none),
+// either the bonus songs ((unlockable TRUE), `unlockable`) or the others.
+// A tour's (songs N) is the Nth of the first, (unlock N) of the second
+// (RB 0x823FE820); quick play's unlocks index both (RB 0x82431AC8).
+std::vector<std::string> rankedSongs(const std::vector<SongInfo>& songs, const std::string& instrument, bool unlockable);

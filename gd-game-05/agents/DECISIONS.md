@@ -996,3 +996,65 @@ pattern). Each says what, why and how to undo it.
   drivers down too only reduced it (254 frames past 1.2). RB's CharDriver
   Poll for apply add has to be read (GD05-088).
 - **Undo:** the clamp in Rig::Impl::pollHand.
+
+## D75
+- **What (2026-11-12, GD05-085):** the Solo Tour's rules are RB's
+  TourCharLocal (vtable 0x8206C184) [C]: an event's (songs N) is the Nth
+  song of SongMgr's ranked list for the performer's instrument, (unlock N)
+  of its bonus list ((unlockable TRUE)), (<inst> N) / (band N) of that
+  instrument's, N < 0 from the end, clamped (RB 0x823FE820; lists RB
+  0x82434020, `rankedSongs`); a venue's open events are those with N up to
+  max_song of the difficulty (Easy 30) and (unlock N) up to the bonus songs
+  unlocked (RB 0x823E46B0); the open towns (vfunc +0x48, RB 0x823E5BB8) go
+  in the data's order while every open event of the venues before was
+  completed at the difficulty or a harder one (RB 0x823DE560), the bonus
+  venue whenever it has open events; event_status is kTourPlayed /
+  kTourNew (RB 0x823DBF80), kTourLocked for what the lists leave out;
+  is_venue_type_unlocked is an open town's normal venue of that kind (RB
+  0x823E0010). Each difficulty keeps the bonus songs unlocked (from
+  num_initial_unlock_songs, RB 0x823E54E8), one more for each event first
+  completed whose song is a bonus song (complete_event RB 0x823E1178);
+  new_unlock is the newest one not yet announced (RB 0x823DE7F8).
+  Band World Tour: a gig's buzz is (buzz (venues (<venue> (performance
+  ...)))) at row (the event's stars before, new_performance for a first
+  gig) - 1, column max(average stars, 2) - 2 (RB 0x823EF7D0) [C]; fans are
+  the line through (fans ...)'s points around the buzz (RB 0x823EE350)
+  [C]; a failed song costs lose_penalty [C data]. [I]: the row's "stars
+  before" (RB reads the band's event record +0x14), the caps' order
+  (buzz_caps: none, van, bus, jet), when lose_song applies, new_town (the
+  town the event opened), the random song pick, the band towns' own events
+  (tour/<town>.dta, RB 0x823FE1D8's second set) still not loaded.
+- **What (GD05-077):** quick play offers, besides modes.dta's first songs,
+  the songs a band of the profile played (RB 0x823D43D0) and, per
+  instrument (guitar, vocals, drum), the first P of its ranked list (bonus
+  list for a bonus song), P the most over the profile's characters of the
+  instrument (RB 0x823D4738) of: the song number of the last event of the
+  first venue of the last open normal town, over the difficulties, and
+  for bonus songs the bonus songs unlocked (RB 0x823E0458) [C].
+- **Why:** song order, unlocks, fans and buzz were wave 02's guesses
+  (sequential events, the band's rank for every instrument, (unlock N) by
+  an unranked list, fans = 10 x buzz); quick play ignored the tours.
+- **Measured:** walk rb_tour_rules (PROGRESS.md 2026-11-12 GD05-085).
+- **Undo:** RbMeta::resolveSong / soloOpenEvents / soloOpenTowns /
+  soloQuickplayProgress / buzzChange / buzzToFans, rbTourUnlocks;
+  GD05_TOUR_UNLOCKS_LEGACY=1 (quick play without the tours).
+
+## D76
+- **What (2026-11-12, GD05-083):** has_group_selection is RB's (RB
+  0x823E0700) [C]: more than one of the category's (outfits ...) contains
+  the model's name (strstr), so a guitar / bass / drum / mic model with
+  finishes goes through group_select_screen. OutfitGroupPanel
+  (group_select_panel) lists those outfits in outfit.lst [C: the match; I:
+  the catalog's order, RB's 0x8282AD38 not read]; the finish chosen with X
+  is what the outfit panel's confirm_outfit wears (bought through
+  shop_confirm_screen at the model's price, or worn when owned). The
+  group panel's SELECT_MSG buys on {&& {! has_outfit} $cost}: RB's script
+  reads the $cost the outfit panel's handlers left, the port's do restores
+  its locals, so the panel sets $cost to the model's price before its
+  SELECT_MSG [I: RB's do semantics].
+- **Why:** every model was bought in its default finish
+  (has_group_selection 0, D69).
+- **Measured:** rb_shop_items: 5120's six finishes listed as the data's,
+  the second (5120_sparkle) bought at 1299, worn on stage, kept through a
+  restart (PROGRESS.md 2026-11-12 GD05-083).
+- **Undo:** OutfitGroupPanelObj, modelFinishes, gChosenFinish.

@@ -1092,6 +1092,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("tour_band_gigcomplete_screen", 20000);
         wait(1000);
         check("rb_band_cash");
+        check("rb_bwt_buzz");
         press(kX);
         at("tour_band_event_screen|tour_band_hub_screen|tour_band_firstgig_screen|tour_band_firstgig_checkmarks_screen|tour_band_newvan_screen|tour_band_newitem_screen|tour_band_firstvenue_screen", 40000);
         wait(1500);
@@ -1111,13 +1112,87 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("tour_band_hub_screen", 30000);
         wait(1000);
         check("rb_band_reloaded");
+    } else if (scenario == "rb_tour_rules") {
+        // GD05-085 / GD05-077: the Solo Tour's rules from RB's code, through
+        // its menus. A new guitarist: the gig guide lists the open towns'
+        // open events (RB 0x823E5BB8 / 0x823E46B0: the first town and the
+        // bonus venue's (unlock 1)), each playing the instrument's ranked
+        // song (RB 0x823FE820); the bonus gig played: the next bonus song
+        // unlocked (RB 0x823E1178) and announced (new_unlock, RB 0x823DE7F8)
+        // with (unlock 2) now listed; then, restarted, quick play offers
+        // the first town's songs and the two bonus songs besides the ten
+        // first (RB 0x82431AC8 / 0x823E0458). Expectations from the data
+        // (config/tour_solo.dta, songs.dtb's ranks) in the checks.
+        // GD05_TOUR_UNLOCKS_LEGACY=1 runs quick play without the tours.
+        endMs_ = 30000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);  // GIG GUIDE
+        at("tour_solo_diff_screen");
+        press(kX);  // the difficulty
+        at("tour_solo_guitar_welcome_screen|tour_solo_event_screen", 20000);
+        wait(800);
+        press(kX);
+        at("tour_solo_event_screen", 20000);
+        wait(1000);
+        check("rb_tour_solo_events");
+        check("rb_tour_focus_bonus");  // down the list to (unlock 1)
+        check("print_focus");
+        press(kX);  // play it
+        at("game_screen", 60000);
+        at("tour_solo_endgame_screen", 120000);
+        wait(1000);
+        press(kX);
+        at("tour_solo_gigcomplete_screen", 20000);
+        wait(1000);
+        press(kX);
+        at("tour_solo_newunlock_screen", 40000);
+        wait(1000);
+        check("rb_tour_unlocked");
+        press(kX);
+        at("tour_solo_event_screen|tour_solo_hub_screen", 40000);
+        wait(1000);
+        check("rb_tour_solo_events");
+        check("restart_app");
+    } else if (scenario == "rb_tour_rules_restarted") {
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(1500);
+        check("rb_tour_qp");
     } else if (scenario == "rb_shop_items") {
         // GD05-072: the Rock Shop's instruments (char/instruments.dta: the
         // models and their prices). A new guitarist (100) cannot afford the
         // first guitar (shop_error_money_screen, the cash kept); with RB's
-        // cheat_add_money 2000 (cheats_funcs.dta) it is bought: the cash
-        // drops by the model's price, its default finish is played on stage;
-        // after a restart it is still the character's.
+        // cheat_add_money 2000 (cheats_funcs.dta) it is bought: its finishes
+        // offered (group_select_screen, has_group_selection RB 0x823E0700),
+        // the second chosen, the cash drops by the model's price, that
+        // finish is played on stage; after a restart it is still the
+        // character's (GD05-083).
         endMs_ = 15000;
         at("splash_screen", 30000);
         press(kX);
@@ -1160,7 +1235,13 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("shop_instrument_screen", 10000);
         wait(1000);
         check("rb_shop_cheat_money");
-        press(kX);  // the first model again: the confirm screen
+        press(kX);  // the first model again: its finishes (GD05-083)
+        at("group_select_screen", 10000);
+        wait(1000);
+        check("rb_shop_finishes");
+        press(kDown), wait(400);  // the second finish
+        check("print_focus");
+        press(kX);  // the confirm screen
         at("shop_confirm_screen", 10000);
         wait(1000);
         press(kX);  // yes
@@ -4133,7 +4214,13 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         {
             const ui::RbModel probe = ui::rbFirstModel(ui, gender, "guitar");
             const int price = probe.cost;
-            const std::string model = probe.model, finish = probe.finish;
+            const std::string model = probe.model;
+            // The model's finishes: the category's outfits whose names contain
+            // the model's (RB 0x823E0700); the walk picks the second.
+            std::vector<std::string> finishes;
+            for (const std::string& o : ui::rbCategoryOutfits(ui, gender, "guitar"))
+                if (o.find(model) != std::string::npos) finishes.push_back(o);
+            const std::string finish = finishes.size() > 1 ? finishes[1] : probe.finish;
             std::printf("  %s: money %d, guitar %s; data: first guitar %s (%s) at %d\n", s.screen.c_str(), money, guitar.c_str(), model.c_str(),
                         finish.c_str(), price);
             if (model.empty() || price <= 0) return fail("no guitar model with a price in char/instruments.dta");
@@ -4141,6 +4228,18 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 std::printf("  expected: shop_error_money_screen, cash %d kept (%d < %d); measured: %s, cash %d\n", careerCash_, careerCash_, price,
                             ui.currentScreen().c_str(), money);
                 if (money != careerCash_) return fail("the cash changed on a refused purchase");
+                return pass();
+            }
+            if (s.screen == "rb_shop_finishes") {
+                auto* gp = dynamic_cast<ui::ListProvider*>(in.findObject("group_select_panel_provider"));
+                std::vector<std::string> got;
+                for (int i = 0; gp && i < gp->numData(); ++i) got.push_back(gp->symbol(i));
+                std::string w, g;
+                for (const std::string& x : finishes) w += " " + x;
+                for (const std::string& x : got) g += " " + x;
+                std::printf("  expected finishes of %s:%s; measured:%s\n", model.c_str(), w.c_str(), g.c_str());
+                if (finishes.size() < 2) return fail("the data gives " + model + " fewer than two finishes");
+                if (got != finishes) return fail("group_select_screen does not list the model's finishes");
                 return pass();
             }
             if (s.screen == "rb_shop_cheat_money") {
@@ -4432,6 +4531,207 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     if (s.screen == "unlock_all_songs") {  // long_cheats.dta's code: every song listed (walks that scroll a long list)
         ui.interp().send("profile_mgr", "unlock_all_songs", {});
         return pass();
+    }
+    // rb_tour_rules / rb_bwt_buzz (GD05-085 / GD05-077): the tours' rules
+    // recomputed here from the data alone (config/tour_solo.dta,
+    // config/tour_band.dta, songs.dtb's ranks), against what the game's
+    // own objects (tour performer, its event lists, song_provider) hold.
+    if (s.screen.rfind("rb_tour_", 0) == 0 || s.screen == "rb_bwt_buzz") {
+        Interp& in = ui.interp();
+        const DataNode* tour = ui.bootTree() ? ui.bootTree()->find("tour") : nullptr;
+        auto send = [&](ScriptObject* o, const char* msg, std::vector<Value> a = {}) { return o ? in.send(o, msg, a) : Value::integer(0); };
+        auto rankedList = [&](const std::string& inst, bool bonus) {
+            std::vector<const SongInfo*> v;
+            for (const SongInfo& si : ui.host().songs())
+                if (!si.tutorial && si.unlockable == bonus && si.rank.count(inst)) v.push_back(&si);
+            std::stable_sort(v.begin(), v.end(), [&](const SongInfo* a, const SongInfo* b) { return a->rank.at(inst) < b->rank.at(inst); });
+            std::vector<std::string> out;
+            for (const SongInfo* si : v) out.push_back(si->id);
+            return out;
+        };
+        auto intOf = [](const DataNode& n) { return n.type == DataNode::Type::Int ? n.i : n.type == DataNode::Type::Float ? int(n.f) : 0; };
+        if (s.screen == "rb_bwt_buzz") {
+            // Buzz: (buzz (venues (<venue> (performance <rows>)))), row
+            // new_performance - 1 for a first gig, column max(average stars, 2) - 2;
+            // fans: the line through (fans ...)'s points around the buzz.
+            ScriptObject* band = in.send("tour", "performer", {}).object;
+            ScriptObject* ev = in.send("tour", "event", {}).object;
+            const DataNode* buzz = tour && tour->find("band") ? tour->find("band")->find("buzz") : nullptr;
+            if (!band || !ev || !buzz) return fail("rb_bwt_buzz: no band, event or (buzz ...) data");
+            const std::string venue = send(ev, "get", {Value::symbol("venue")}).str();
+            const int stars = send(band, "world_fame").integerValue(), songs = std::max(1, send(ev, "num_songs").integerValue());
+            int newPerf = 2;
+            if (const DataNode* np = buzz->find("new_performance"); np && np->children.size() > 1) newPerf = in.eval(np->children[1]).integerValue();
+            const DataNode* perf = buzz->find("venues") && buzz->find("venues")->find(venue) ? buzz->find("venues")->find(venue)->find("performance") : nullptr;
+            if (!perf) return fail("no performance table for " + venue);
+            const DataNode& row = perf->children[size_t(std::clamp(newPerf - 1, 0, int(perf->children.size()) - 2)) + 1];
+            const int avg = stars / songs, col = std::clamp(std::max(avg, 2) - 2, 0, int(row.children.size()) - 1);
+            const int wantBuzz = std::max(0, intOf(row.children[size_t(col)]));
+            double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+            const DataNode* fans = buzz->find("fans");
+            for (size_t i = 1; fans && i < fans->children.size(); ++i) {
+                x1 = intOf(fans->children[i].children[0]), y1 = intOf(fans->children[i].children[1]);
+                if (wantBuzz <= x1) break;
+                x0 = x1, y0 = y1;
+            }
+            const double slope = x1 == x0 ? 0 : (y1 - y0) / (x1 - x0);
+            const int wantFans = x1 == x0 ? int(y0) : int(float(wantBuzz) * float(slope) + float(y0 - slope * x0));
+            const int gotBuzz = send(band, "buzz").integerValue(), gotFans = send(band, "fans").integerValue();
+            std::set<std::string> played;
+            for (const std::string& id : ui::rbTourUnlocks().bandPlayed) played.insert(id);
+            auto* sl = dynamic_cast<ui::ListProvider*>(in.findObject("tour_event_song_provider"));
+            if (sl) in.send(sl, "refresh", {});
+            int missing = 0, setSongs = 0;
+            for (int i = 0; sl && i < sl->numData(); ++i) setSongs += 1, missing += !played.count(sl->symbol(i));
+            std::printf("  expected (venue %s, %d stars over %d songs, new_performance %d): buzz %d, fans %d, the %d set songs offered in quick play; "
+                        "measured: buzz %d, fans %d, %d missing\n",
+                        venue.c_str(), stars, songs, newPerf, wantBuzz, wantFans, setSongs, gotBuzz, gotFans, missing);
+            if (gotBuzz != wantBuzz || gotFans != wantFans) return fail("the band's buzz / fans do not follow config/tour_band.dta");
+            if (!setSongs || missing) return fail("the band's played songs are not offered in quick play");
+            return pass();
+        }
+        // The Solo Tour's towns, venues and events in the data's order.
+        struct Ev {
+            std::string town, venue, name;
+            const DataNode* n;
+            bool unlock;
+            int number;
+        };
+        std::vector<std::vector<Ev>> venues;  // one per (town, venue)
+        const DataNode* solo = tour ? tour->find("solo") : nullptr;
+        const DataNode* towns = solo ? solo->find("towns") : nullptr;
+        for (size_t t = 1; towns && t < towns->children.size(); ++t) {
+            const DataNode& tn = towns->children[t];
+            if (!tn.isList() || tn.children.empty()) continue;
+            for (size_t v = 1; v < tn.children.size(); ++v) {
+                const DataNode& vn = tn.children[v];
+                if (!vn.isList() || vn.children.empty()) continue;
+                venues.emplace_back();
+                for (size_t e = 1; e < vn.children.size(); ++e) {
+                    const DataNode& en = vn.children[e];
+                    const DataNode* sg = en.isList() ? en.find("songs") : nullptr;
+                    if (!sg || sg->children.size() < 2) continue;
+                    const DataNode& f = sg->children[1];
+                    const bool unlock = f.isList() && f.textAt(0) == "unlock";
+                    venues.back().push_back({tn.textAt(0), vn.textAt(0), en.textAt(0), &en, unlock, f.isList() ? f.intAt(1) : intOf(f)});
+                }
+            }
+        }
+        const int initial = solo && solo->find("num_initial_unlock_songs") ? solo->find("num_initial_unlock_songs")->intAt(1) : 1;
+        ScriptObject* perf = in.send("tour", "performer", {}).object;
+        const int diff = send(perf, "solo_difficulty").integerValue();
+        int maxSong = 1 << 30;
+        if (const DataNode* ms = solo ? solo->find("max_song") : nullptr)
+            for (size_t i = 1; i < ms->children.size(); ++i) {
+                const DataNode& c = ms->children[i];
+                static const char* const kSyms[] = {"kDifficultyEasy", "kDifficultyMedium", "kDifficultyHard", "kDifficultyExpert"};
+                const int d = c.children[0].type == DataNode::Type::Int ? c.children[0].i : int(std::find(kSyms, kSyms + 4, c.textAt(0)) - kSyms);
+                if (d == diff) maxSong = c.intAt(1);
+            }
+        const int unlocked = initial + tourBonusPlayed_;
+        // The open towns' open events: a bonus venue whenever it has open
+        // events, the normal venues up to the first not completed (this walk
+        // completes only bonus gigs).
+        std::vector<const Ev*> expected;
+        bool blocked = false;
+        for (const std::vector<Ev>& v : venues) {
+            std::vector<const Ev*> open;
+            for (const Ev& e : v)
+                if (e.unlock ? e.number <= unlocked : e.number <= maxSong) open.push_back(&e);
+            if (open.empty()) continue;
+            if (open[0]->unlock) {
+                expected.insert(expected.end(), open.begin(), open.end());
+                continue;
+            }
+            if (blocked) continue;
+            expected.insert(expected.end(), open.begin(), open.end());
+            blocked = true;
+        }
+        const std::string inst = send(perf, "get_instrument").str();
+        const std::vector<std::string> ranked = rankedList(inst, false), bonus = rankedList(inst, true);
+        auto songOf = [&](const Ev& e) {
+            const std::vector<std::string>& l = e.unlock ? bonus : ranked;
+            return e.number >= 1 && size_t(e.number) <= l.size() ? l[size_t(e.number - 1)] : std::string("?");
+        };
+        auto* sp = dynamic_cast<ui::ListProvider*>(in.findObject("solo_event_provider"));
+        if (s.screen == "rb_tour_focus_bonus") {
+            // Down the event list until its selection is the first (unlock N) event.
+            const Ev* target = nullptr;
+            for (const Ev* e : expected)
+                if (e->unlock) target = target ? target : e;
+            ui::PanelObj* fp = ui.focusPanel();
+            ScriptObject* lst = fp ? fp->component(fp->focus) : nullptr;
+            const int at = send(lst, "selected_pos").integerValue();
+            const int want = sp && target ? sp->indexOf(target->name) : -1;
+            if (want < 0) return fail("no (unlock N) event in the gig guide");
+            if (at == want) return pass();
+            if (nowMs - stepStart_ > 15000) return fail("could not reach " + target->name + " in the list (at " + std::to_string(at) + ")");
+            if (!ui.inTransition() && nowMs - lastNavMs_ > 250) ui.buttonDown(kDown, 0), ui.buttonUp(kDown, 0), lastNavMs_ = nowMs;
+            return;
+        }
+        if (s.screen == "rb_tour_solo_events") {
+            if (!sp) return fail("no solo_event_provider");
+            in.send(sp, "refresh", {});
+            std::vector<std::string> got, want;
+            for (int i = 0; i < sp->numData(); ++i) got.push_back(sp->symbol(i));
+            int wrongSongs = 0;
+            std::string list;
+            for (const Ev* e : expected) {
+                want.push_back(e->name);
+                const int i = sp->indexOf(e->name);
+                const std::string song = i >= 0 ? in.send(sp, "event_song", {Value::integer(i)}).str() : std::string();
+                wrongSongs += song != songOf(*e);
+                list += " " + e->name + "=" + songOf(*e) + (song == songOf(*e) ? "" : "(measured " + song + ")");
+            }
+            std::printf("  solo gig guide (%s, difficulty %d, max_song %d, bonus songs unlocked %d): expected %zu events:%s; measured %zu events\n",
+                        inst.c_str(), diff, maxSong, unlocked, want.size(), list.c_str(), got.size());
+            if (got != want) return fail("the gig guide lists " + std::to_string(got.size()) + " events, not the " + std::to_string(want.size()) + " open ones");
+            if (wrongSongs) return fail(std::to_string(wrongSongs) + " events play another song than the data's");
+            return pass();
+        }
+        if (s.screen == "rb_tour_unlocked") {
+            const std::string got = send(perf, "new_unlock").str();
+            const std::string want = size_t(initial) < bonus.size() ? bonus[size_t(initial)] : std::string();
+            std::printf("  expected: the bonus gig unlocks %s (%s's bonus song %d); measured new_unlock %s\n", want.c_str(), inst.c_str(), initial + 1,
+                        got.c_str());
+            if (got != want) return fail("the bonus gig unlocked " + got);
+            ++tourBonusPlayed_;
+            SDL_setenv_unsafe("GD05_WALK_TOUR", std::to_string(tourBonusPlayed_).c_str(), 1);
+            return pass();
+        }
+        if (s.screen == "rb_tour_qp") {
+            // modes.dta's initial songs, the guitarist's first open town's
+            // songs (its last event's number), its unlocked bonus songs.
+            const char* env = SDL_getenv("GD05_WALK_TOUR");
+            const int bonusPlayed = env ? std::atoi(env) : 0;
+            const std::string qpInst = ui::gameCfgValue(ui, "unlock_song_instrument").str();
+            const int qpInitial = ui::gameCfgValue(ui, "unlock_song_initial_num").integerValue();
+            int townSongs = 0;
+            for (const std::vector<Ev>& v : venues)
+                if (!v.empty() && !v[0].unlock) {
+                    townSongs = v.back().number;
+                    break;
+                }
+            std::set<std::string> want;
+            const std::vector<std::string> first = rankedList(qpInst, false), g = rankedList("guitar", false), gb = rankedList("guitar", true);
+            for (int i = 0; i < qpInitial && size_t(i) < first.size(); ++i) want.insert(first[size_t(i)]);
+            for (int i = 0; i < townSongs && size_t(i) < g.size(); ++i) want.insert(g[size_t(i)]);
+            for (int i = 0; i < initial + bonusPlayed && size_t(i) < gb.size(); ++i) want.insert(gb[size_t(i)]);
+            auto* qp = dynamic_cast<ui::ListProvider*>(in.findObject("song_provider"));
+            if (!qp) return fail("no song_provider");
+            std::set<std::string> got;
+            for (int i = 0; i < qp->numData(); ++i)
+                if (qp->symbol(i) != "random_song") got.insert(qp->symbol(i));
+            int extra = 0, missing = 0;
+            for (const std::string& id : got) extra += !want.count(id);
+            for (const std::string& id : want) missing += !got.count(id);
+            std::printf("  expected quick play: %d first by %s + the first town's %d guitar songs + %d guitar bonus songs = %zu songs; measured %zu "
+                        "(%d not expected, %d missing)\n",
+                        qpInitial, qpInst.c_str(), townSongs, initial + bonusPlayed, want.size(), got.size(), extra, missing);
+            if (got != want) return fail("quick play does not offer the tour's unlocks");
+            return pass();
+        }
+        return fail("unknown check " + s.screen);
     }
     if (s.screen == "qp_locked" || s.screen == "qp_locked_song") {
         // rb_qp_locked (GD05-073): the songs RB's SongMgr (0x82431AC8) makes

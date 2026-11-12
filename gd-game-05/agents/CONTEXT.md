@@ -180,3 +180,21 @@ Wave G06 career, shop and creator (GD05-072, D67..D70):
   each failure (no verdict: for older builds).
 - `agents/scratch/car6/gate_par.sh [jobs]` (git-ignored) runs gate1.sh's
   walks and the five tests in parallel, each with its own XDG_DATA_HOME.
+
+Wave G06 tour rules and finishes (GD05-085 / GD05-077 / GD05-083, D75 / D76):
+- `--walktest rb_tour_rules`: a new guitarist's gig guide against
+  config/tour_solo.dta and the songs' ranks (`rb_tour_solo_events`: the
+  open towns' open events and each one's song), the first (unlock N) gig
+  played (`rb_tour_unlocked`: new_unlock the next bonus song, then (unlock
+  2) listed), restarted, quick play's list (`rb_tour_qp`: modes.dta's
+  first songs + the open town's guitar songs + the unlocked bonus songs).
+  GD05_TOUR_UNLOCKS_LEGACY=1: quick play without the tours (fails).
+- `rb_career_band` checks `rb_bwt_buzz` after the gig: buzz from the
+  venue's performance table, fans on the (fans ...) line, the gig's songs
+  offered in quick play.
+- `rb_shop_items` now goes through group_select_screen
+  (`rb_shop_finishes`: the model's finishes as the data's) and buys the
+  second finish.
+- `agents/scratch/car7/gate_par.sh [jobs]` (git-ignored): gate1.sh's walks
+  + rb_highway, rb_crowd + the five tests, each its own XDG_DATA_HOME;
+  B_OVERRIDE=<binary> runs another build.

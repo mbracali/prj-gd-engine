@@ -10,12 +10,14 @@
 // requirements and outfit unlocks, the hints' conditions and screens, the
 // songs' ranks (songs.dtb). The messages and what the scripts do with them
 // were listed from the scripts (docs/tour_and_shop.md).
-// [I] what the port decides (RB's TourPerformer / TourBand natives are not
-// read in the XEX): the Nth song of a solo event is the Nth song of the
-// instrument's rank order; a band event's (band N) the Nth of the band's;
-// a tier is the town of the same order in (world ...); fame is the stars
-// earned; fans grow with the venue's (buzz (venues ...)) table by stars;
-// an event is unlocked when its (fame (town N) (world M)) and buzz are met.
+// [C] the tours' rules read in the XEX (DECISIONS D75): the Solo Tour's
+// TourCharLocal (songs from SongMgr's ranked lists, open events and towns,
+// bonus unlocks), the Band World Tour's buzz and fans.
+// [I] what the port still decides (D67, D75): a tier is the town of the
+// same order in (world ...) (RB's 0x823FCED8 not re-read); fame is the
+// stars earned; a band event is unlocked when its (fame (town N) (world M))
+// and buzz are met; the band towns' own events (tour/<town>.dta) are not
+// loaded.
 #include "ui/rb_meta.h"
 
 #include <SDL3/SDL.h>
@@ -74,8 +76,20 @@ struct TourEvent {
     std::string key() const { return town + "/" + venue + "/" + name; }
 };
 
+// A venue of a solo town with its events, and its kind (TourVenue: kTourVenueNormal 0,
+// kTourVenueUnlock 1 when its events play (unlock N), kTourVenueDownload 2:
+// RB 0x823FDB20) [C].
+struct SoloVenue {
+    std::string town, venue;
+    int type = 0;
+    std::vector<size_t> events;  // indices into TourData::soloEvents
+};
+
 struct TourData {
     std::vector<std::string> soloTowns, bandTowns;
+    std::vector<SoloVenue> soloVenues;  // by town, in the data's order
+    int initialUnlocks = 1;             // tour_solo.dta num_initial_unlock_songs (RB 0x823DC120) [C]
+    int maxSong[4] = {45, 45, 45, 45};  // tour_solo.dta max_song per difficulty (RB 0x823DBED0) [C]
     std::vector<TourEvent> soloEvents, bandEvents;
     std::map<std::string, std::string> tierTown;  // band tier -> world town [I]
     const DataNode* solo = nullptr;
@@ -106,7 +120,13 @@ struct CharData {
     int difficulty = 1;
     std::map<std::string, int> stars;  // "<difficulty>:<event key>" -> stars
     std::set<std::string> seenHints, seenTowns;
-    std::string town, venue, event, newTown, newUnlock;
+    // Per difficulty (RB's 0x3c-byte records at TourCharLocal +0xd4): the
+    // bonus songs unlocked (+0x2c, from num_initial_unlock_songs: RB
+    // 0x823E54E8; one more for each event first completed whose song is a
+    // bonus song: RB 0x823E1178) and the unlocks already announced (+0x30).
+    int unlocks[4] = {-1, -1, -1, -1};  // -1: the data's initial count
+    std::set<std::string> seenUnlocks[4];
+    std::string town, venue, event, newTown;
     int score = 0;
 };
 
@@ -116,6 +136,9 @@ struct BandData {
     int fans = 0, money = 0, buzz = 0;
     std::map<std::string, int> stars;  // event key -> best stars (fame)
     std::set<std::string> items, seenHints;
+    // The songs the band has played (RB's band record at +0x18c, RB
+    // 0x82409D00 / 0x82409F18): quick play offers them (RB 0x823D43D0) [C].
+    std::set<std::string> played;
     std::string town, venue, event, unlockedItem;
     int minDifficulty = 3;
     // The members' characters (their names, unique in the profile:
@@ -143,6 +166,7 @@ class RbBandObj : public ScriptObject {
 public:
     RbBandObj(RbMeta& m, const std::string& id) : ScriptObject(id, "TourBand"), meta_(m) {}
     BandData d;
+    int lastBuzzChange = 0, lastFansChange = 0;  // the last gig's
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override;
 
 private:
@@ -286,48 +310,149 @@ public:
     RbCharObj* soloChar() { return dynamic_cast<RbCharObj*>(performer); }
     RbBandObj* bandPerf() { return dynamic_cast<RbBandObj*>(performer); }
 
-    // The songs by an instrument's rank (the tours' order) [I].
-    std::vector<std::string> rankOrder(const std::string& inst) {
-        std::vector<std::pair<int, std::string>> v;
-        for (const SongInfo& s : ui_.host().songs()) {
-            if (s.tutorial) continue;
-            auto it = s.rank.find(inst);
-            if (it == s.rank.end()) it = s.rank.find("band");
-            if (it != s.rank.end()) v.emplace_back(it->second, s.id);
-        }
-        std::stable_sort(v.begin(), v.end());
-        std::vector<std::string> out;
-        for (auto& p : v) out.push_back(p.second);
-        return out;
+    // SongMgr's ranked lists (RB 0x82434020) [C], cached per instrument.
+    std::map<std::string, std::vector<std::string>> rankedCache[2];
+    const std::vector<std::string>& ranked(const std::string& inst, bool unlockable) {
+        auto& c = rankedCache[unlockable ? 1 : 0];
+        auto it = c.find(inst);
+        if (it == c.end()) it = c.emplace(inst, rankedSongs(ui_.host().songs(), inst, unlockable)).first;
+        return it->second;
     }
-    // An event's songs (its (songs ...) list) for the performer's instrument.
+    // One entry of an event's (songs ...) as RB resolves it (RB 0x823FE820)
+    // [C]: N (or (leader N)) the Nth song of the performer's instrument's
+    // ranked list, (unlock N) of its bonus songs, (<instrument> N) of that
+    // instrument's (band: the band's rank); N < 0 counts from the end; out
+    // of range clamps to the list. A song's name stands for itself; random
+    // and any are left to the caller. "" when the entry is none of these.
+    std::string resolveSong(const DataNode& s, const std::string& inst) {
+        int n = 0;
+        std::string listInst = inst;
+        bool unlock = false;
+        if (s.type == DataNode::Type::Int) {
+            n = s.i;
+        } else if (s.isList() && s.children.size() > 1) {
+            const std::string head = text(&s, 0);
+            n = num(&s, 1);
+            unlock = head == "unlock";
+            if (head != "leader" && head != "unlock") listInst = head;
+        } else {
+            return s.isText() ? s.s : std::string();
+        }
+        const std::vector<std::string>& l = ranked(listInst, unlock);
+        if (l.empty()) return {};
+        long idx = n < 0 ? long(l.size()) + n : long(n) - 1;
+        idx = std::clamp<long>(idx, 0, long(l.size()) - 1);
+        return l[size_t(idx)];
+    }
+    // An event's (songs ...) list for the performer's instrument.
     std::vector<std::string> eventSongs(const TourEvent& e, bool band, const std::string& inst) {
         std::vector<std::string> out;
         const DataNode* songs = e.node ? e.node->find("songs") : nullptr;
         if (!songs) return out;
-        const std::vector<std::string> order = rankOrder(band ? "band" : inst);
-        for (size_t i = 1; i < songs->children.size(); ++i) {
-            const DataNode& s = songs->children[i];
-            if (s.type == DataNode::Type::Int) {
-                if (s.i >= 1 && size_t(s.i) <= order.size()) out.push_back(order[size_t(s.i - 1)]);
-            } else if (s.isList()) {  // (band N) / (unlock N)
-                const int k = num(&s, 1, 1);
-                const std::vector<std::string> o2 = text(&s, 0) == "unlock" ? unranked() : order;
-                if (k >= 1 && size_t(k) <= o2.size()) out.push_back(o2[size_t(k - 1)]);
-                else if (!order.empty()) out.push_back(order[size_t(k) % order.size()]);
-            } else if (s.isText()) {
-                if (s.s == "random" && !order.empty()) out.push_back(order[size_t(std::rand()) % order.size()]);
-                else if (s.s == "any") out.push_back("any");
-                else out.push_back(s.s);
+        const std::string i = band ? "band" : inst;
+        for (size_t k = 1; k < songs->children.size(); ++k) {
+            const DataNode& s = songs->children[k];
+            if (s.isText() && s.s == "random") {
+                // tour_random_song: a song of the performer's ranked list [I: RB's pick].
+                const std::vector<std::string>& l = ranked(i, false);
+                if (!l.empty()) out.push_back(l[size_t(std::rand()) % l.size()]);
+            } else {
+                const std::string id = resolveSong(s, i);
+                if (!id.empty()) out.push_back(id);
             }
         }
         return out;
     }
-    std::vector<std::string> unranked() {
-        std::vector<std::string> v;
-        for (const SongInfo& s : ui_.host().songs())
-            if (!s.tutorial && s.rank.empty()) v.push_back(s.id);
-        return v;
+    // The first (songs ...) entry's number and whether it is (unlock N):
+    // what the solo tour checks an event against (RB 0x823E46B0) [C].
+    static int firstSongNumber(const TourEvent& e, bool& unlock, bool& symbol) {
+        unlock = symbol = false;
+        const DataNode* songs = e.node ? e.node->find("songs") : nullptr;
+        if (!songs || songs->children.size() < 2) return 0;
+        const DataNode& s = songs->children[1];
+        if (s.type == DataNode::Type::Int) return s.i;
+        if (s.isList()) return unlock = text(&s, 0) == "unlock", num(&s, 1);
+        symbol = true;
+        return 0;
+    }
+    // The bonus songs unlocked at a difficulty, and the most of the
+    // difficulties from `from` up (RB 0x823DE708) [C].
+    int unlocksAt(const CharData& c, int d) const { return c.unlocks[d] < 0 ? data.initialUnlocks : c.unlocks[d]; }
+    int unlockProgress(const CharData& c, int from) const {
+        int most = 0;
+        for (int d = std::clamp(from, 0, 3); d < 4; ++d) most = std::max(most, unlocksAt(c, d));
+        return most;
+    }
+    bool soloCompleted(const CharData& c, int diff, const TourEvent& e) const { return c.stars.count(std::to_string(diff) + ":" + e.key()) != 0; }
+    // A venue's open events at the character's difficulty (RB 0x823E46B0)
+    // [C]: (songs N) up to max_song of the difficulty, (unlock N) up to the
+    // bonus songs unlocked, a named song only when downloaded (none).
+    std::vector<size_t> soloOpenEvents(const CharData& c, int diff, const SoloVenue& v) const {
+        std::vector<size_t> out;
+        for (size_t i : v.events) {
+            bool unlock = false, symbol = false;
+            const int n = firstSongNumber(data.soloEvents[i], unlock, symbol);
+            if (symbol) continue;
+            if (unlock ? n <= unlockProgress(c, diff) : n <= data.maxSong[std::clamp(diff, 0, 3)]) out.push_back(i);
+        }
+        return out;
+    }
+    // The towns open at a difficulty (TourCharLocal vfunc +0x48, RB
+    // 0x823E5BB8) [C]: in the data's order, a town with a normal venue is
+    // open while the venues before it had every open event completed at
+    // that difficulty or a harder one (RB 0x823DE560: the difficulty to
+    // beat rises to the one they were completed at); unlock / download
+    // venues are open whenever they have open events.
+    std::vector<std::string> soloOpenTowns(const CharData& c, int diff) const {
+        std::vector<std::string> out;
+        int level = diff;
+        for (const SoloVenue& v : data.soloVenues) {
+            const std::vector<size_t> open = soloOpenEvents(c, diff, v);
+            if (open.empty()) continue;
+            if (v.type != 0) {
+                out.push_back(v.town);
+                continue;
+            }
+            if (level >= 4) continue;
+            out.push_back(v.town);
+            for (; level < 4; ++level) {
+                bool all = true;
+                for (size_t i : open) all = all && soloCompleted(c, level, data.soloEvents[i]);
+                if (all) break;
+            }
+        }
+        return out;
+    }
+    // Solo event_status (RB 0x823DBF80) [C]: kTourPlayed (1) once completed
+    // at the character's difficulty, else kTourNew (2); the port answers
+    // kTourLocked (0) for an event RB's lists leave out (its town not open
+    // or the event not open, RB 0x823E5BB8 / 0x823E46B0).
+    int soloStatus(const RbCharObj& c, const TourEvent& e);
+    std::string newUnlock(const CharData& c);
+    // Quick play's progress of a character (RB 0x823E0458) [C]: for the
+    // ranked songs, the most over the difficulties of the song number of the
+    // last event of the first venue of the last open town whose first venue
+    // is normal; for the bonus songs, the bonus songs unlocked at any
+    // difficulty.
+    int soloQuickplayProgress(const CharData& c, bool bonus) const {
+        if (bonus) return unlockProgress(c, 0);
+        int most = 0;
+        for (int d = 0; d < 4; ++d) {
+            const std::vector<std::string> towns = soloOpenTowns(c, d);
+            for (auto t = towns.rbegin(); t != towns.rend(); ++t) {
+                const SoloVenue* first = nullptr;
+                for (const SoloVenue& v : data.soloVenues)
+                    if (v.town == *t && !v.events.empty()) {
+                        first = &v;
+                        break;
+                    }
+                if (!first || first->type != 0) continue;
+                bool unlock = false, symbol = false;
+                most = std::max(most, firstSongNumber(data.soloEvents[first->events.back()], unlock, symbol));
+                break;
+            }
+        }
+        return most;
     }
     std::string localizeOr(const std::string& tok) {
         const std::string l = ui_.localize(tok);
@@ -337,21 +462,6 @@ public:
         for (const SongInfo& s : ui_.host().songs())
             if (s.id == id) return s.name;
         return id;
-    }
-    // Solo: an event is open once the one before it in its town is played,
-    // and a town once the town before it has every event played [I].
-    int soloStatus(const RbCharObj& c, const TourEvent& e) {
-        const std::string dk = std::to_string(c.d.difficulty) + ":";
-        if (c.d.stars.count(dk + e.key())) return 1 | (1 << (2 + c.d.difficulty));  // played / completed
-        const auto& evs = data.soloEvents;
-        for (size_t i = 0; i < evs.size(); ++i) {
-            if (&evs[i] != &e && evs[i].key() != e.key()) continue;
-            if (i == 0) return 2;  // kTourNew
-            const TourEvent& prev = evs[i - 1];
-            if (prev.town == e.town) return c.d.stars.count(dk + prev.key()) ? 2 : 0;
-            return c.d.stars.count(dk + prev.key()) ? 2 : 0;
-        }
-        return 0;
     }
     // A band's hometown plays the first tier's gigs, and the first tier's
     // town the hometown's [I: RB starts every band at home].
@@ -375,6 +485,62 @@ public:
         if (bandFame(b, townOf(e, b)) < townReq || bandFame(b, "") < worldReq || b.d.buzz < buzzReq) return 0;
         return 2;
     }
+
+    // ---- the Band World Tour's buzz and fans (config/tour_band.dta (buzz ...)).
+    const DataNode* buzzBlock() const { return data.band ? data.band->find("buzz") : nullptr; }
+    // Fans for a buzz (buzz_to_fans, RB 0x823EE350) [C]: the line through
+    // the (fans (<buzz> <fans>) ...) points around the buzz, from (0 0).
+    int buzzToFans(int buzz) const {
+        const DataNode* fans = buzzBlock() ? buzzBlock()->find("fans") : nullptr;
+        double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        for (size_t i = 1; fans && i < fans->children.size(); ++i) {
+            const DataNode& p = fans->children[i];
+            if (!p.isList() || p.children.size() < 2) continue;
+            x1 = p.children[0].type == DataNode::Type::Float ? p.children[0].f : p.children[0].i;
+            y1 = p.children[1].type == DataNode::Type::Float ? p.children[1].f : p.children[1].i;
+            if (buzz <= x1) break;
+            x0 = x1, y0 = y1;
+        }
+        if (x1 == x0) return int(y0);
+        const double slope = (y1 - y0) / (x1 - x0);
+        return int(float(buzz) * float(slope) + float(y0 - slope * x0));
+    }
+    // The buzz a gig earns (RB 0x823EF7D0) [C]: the venue's performance
+    // table, row (the event's stars before, or new_performance for a first
+    // gig) - 1, column max(stars, 2) - 2, both clamped to the table.
+    // [I] the row: RB reads the band's record of the event (+0x14), taken
+    // here as its best average stars.
+    int buzzChange(const std::string& venue, int before, int stars) {
+        const DataNode* b = buzzBlock();
+        int row = before;
+        if (row < 0) {
+            row = 2;
+            if (const DataNode* np = b ? b->find("new_performance") : nullptr; np && np->children.size() > 1) {
+                try {
+                    row = in_.eval(np->children[1]).integerValue();
+                } catch (const std::exception&) {
+                }
+            }
+        }
+        const DataNode* venues = b ? b->find("venues") : nullptr;
+        const DataNode* vn = venues ? venues->find(venue) : nullptr;
+        const DataNode* perf = vn ? vn->find("performance") : nullptr;
+        if (!perf || perf->children.size() < 2) return 0;
+        const size_t rows = perf->children.size() - 1;
+        const size_t r = size_t(std::clamp<long>(long(row) - 1, 0, long(rows) - 1));
+        const DataNode& line = perf->children[1 + r];
+        if (!line.isList() || line.children.empty()) return 0;
+        const size_t c = size_t(std::clamp<long>(long(std::max(stars, 2)) - 2, 0, long(line.children.size()) - 1));
+        return line.children[c].type == DataNode::Type::Int ? line.children[c].i : int(line.children[c].f);
+    }
+    int losePenalty(const std::string& venue) const {
+        const DataNode* venues = buzzBlock() ? buzzBlock()->find("venues") : nullptr;
+        const DataNode* vn = venues ? venues->find(venue) : nullptr;
+        return num(vn ? vn->find("lose_penalty") : nullptr);
+    }
+    // The buzz, 0 up to the band's cap (buzz_caps: none, van, bus, jet
+    // [I: the order of the caps]); the fans follow it.
+    void setBuzz(RbBandObj& b, int buzz);
 
     // A creator palette as a list of its colours (skin.lst / color.lst set_colors).
     std::map<std::string, RbList*> palettes;
@@ -432,6 +598,22 @@ private:
 
 // ------------------------------------------------------------ characters
 
+const DataNode* outfitCategory(UiManager& ui, const std::string& gender, const std::string& cat);
+namespace {
+// An instrument model's finishes: the category's (outfits ...) whose names
+// contain the model's (has_group_selection, RB 0x823E0700: strstr) [C].
+std::vector<std::string> modelFinishes(UiManager& ui, const std::string& gender, const std::string& cat, const std::string& model) {
+    std::vector<std::string> v;
+    const DataNode* c = model.empty() ? nullptr : outfitCategory(ui, gender, cat);
+    for (const auto& [o, n] : entries(c ? c->find("outfits") : nullptr))
+        if (o.find(model) != std::string::npos) v.push_back(o);
+    return v;
+}
+// The finish chosen in group_select_panel for a model, until the outfit
+// panel wears it (confirm_outfit).
+std::map<std::string, std::string> gChosenFinish;
+}  // namespace
+
 bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) {
     (void)in;
     r = Value::integer(0);
@@ -486,7 +668,8 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
         const std::string worn = d.outfit.count(cat) ? d.outfit[cat] : std::string();
         return r = Value::integer(d.owned.count(o) || worn == o || (!o.empty() && worn.rfind(o + "_", 0) == 0) ? 1 : 0), true;
     }
-    if (msg == "has_group_selection") return r = Value::integer(0), true;  // [I] colour groups not offered yet
+    // More than one finish of the model in the category (RB 0x823E0700) [C].
+    if (msg == "has_group_selection") return r = Value::integer(modelFinishes(m.ui(), d.gender, sArg(args, 0), sArg(args, 1)).size() > 1 ? 1 : 0), true;
     if (msg == "outfit_list") {
         std::vector<Value> v;
         for (const auto& [k, o] : d.outfit) v.push_back(Value::list({Value::symbol(k), Value::symbol(o)}));
@@ -563,9 +746,21 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "is_winning") return r = Value::integer(m.winning ? 1 : 0), true;
     if (msg == "reward") return r = Value::integer(m.reward()), true;
     if (msg == "complete_event") {
+        // TourCharLocal complete_event (RB 0x823E1178) [C]: the first time
+        // at the difficulty, an event whose song is a bonus song unlocks the
+        // next bonus song; the event's outfit; paid the reward.
         if (!m.event) return true;
         const std::string key = std::to_string(d.difficulty) + ":" + m.event->ev.key();
         const bool first = !d.stars.count(key);
+        const int dd = std::clamp(d.difficulty, 0, 3);
+        const std::vector<std::string> towns0 = m.soloOpenTowns(d, dd);
+        if (first) {
+            const std::vector<std::string> songs = m.eventSongs(m.event->ev, false, d.instrument);
+            const SongInfo* si = nullptr;
+            for (const SongInfo& s : m.ui().host().songs())
+                if (!songs.empty() && s.id == songs[0]) si = &s;
+            if (si && si->unlockable) d.unlocks[dd] = m.unlocksAt(d, dd) + 1;
+        }
         d.stars[key] = std::max(d.stars[key], m.lastStars);
         m.pay(*this, m.reward());
         // The event's outfit for the instrument and gender (the reward).
@@ -573,11 +768,12 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
             if (const DataNode* o = m.event->ev.node->find("outfit"))
                 if (const DataNode* inst = o->find(d.instrument == "bass" ? "guitar" : d.instrument))
                     if (const DataNode* g = inst->find(d.gender)) d.owned.insert(text(g, 2));
-        // A new town: the next event is in a town not seen yet.
+        // A new town: one the event opened (RB 0x823E5BB8's list grew) and
+        // not seen yet [I: RB's new_town is not read].
         d.newTown.clear();
-        for (const TourEvent& e : m.data.soloEvents)
-            if (m.soloStatus(*this, e) == 2) {
-                if (e.town != m.event->ev.town && !d.seenTowns.count(e.town)) d.newTown = e.town;
+        for (const std::string& t : m.soloOpenTowns(d, dd))
+            if (std::find(towns0.begin(), towns0.end(), t) == towns0.end() && !d.seenTowns.count(t)) {
+                d.newTown = t;
                 break;
             }
         m.save();
@@ -586,12 +782,20 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "new_town") return r = Value::symbol(d.newTown), true;
     if (msg == "add_seen_town") return d.seenTowns.insert(sArg(args, 0)), d.newTown.clear(), true;
     if (msg == "unlock_town") return r = Value::symbol(d.newTown), true;
-    if (msg == "new_unlock") return r = Value::symbol(d.newUnlock), true;
-    if (msg == "advance_new_unlock") return d.newUnlock.clear(), true;
+    if (msg == "new_unlock") return r = Value::symbol(m.newUnlock(d)), true;
+    if (msg == "advance_new_unlock") {
+        // The announced unlock is seen (RB 0x823E6AF0's record +0x30) [I: the record written].
+        const std::string u = m.newUnlock(d);
+        if (!u.empty()) d.seenUnlocks[std::clamp(d.difficulty, 0, 3)].insert(u);
+        return m.save(), true;
+    }
     if (msg == "add_seen_hint") return d.seenHints.insert(sArg(args, 0)), true;
     if (msg == "is_venue_type_unlocked") {
-        for (const TourEvent& e : m.data.soloEvents)
-            if (e.venue == sArg(args, 0) && m.soloStatus(*this, e) != 0) return r = Value::integer(1), true;
+        // An open town has a normal venue of that kind (RB 0x823E0010) [C].
+        const int dd = std::clamp(d.difficulty, 0, 3);
+        for (const std::string& t : m.soloOpenTowns(d, dd))
+            for (const SoloVenue& v : m.data.soloVenues)
+                if (v.town == t && v.type == 0 && !v.events.empty() && v.venue == sArg(args, 0)) return r = Value::integer(1), true;
         return true;
     }
     if (msg == "is_local") return r = Value::integer(1), true;
@@ -599,9 +803,45 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     return false;
 }
 
+int RbMeta::soloStatus(const RbCharObj& c, const TourEvent& e) {
+    const int dd = std::clamp(c.d.difficulty, 0, 3);
+    const std::vector<std::string> towns = soloOpenTowns(c.d, dd);
+    if (std::find(towns.begin(), towns.end(), e.town) == towns.end()) return 0;
+    for (const SoloVenue& v : data.soloVenues) {
+        if (v.town != e.town || v.venue != e.venue) continue;
+        for (size_t i : soloOpenEvents(c.d, dd, v))
+            if (data.soloEvents[i].key() == e.key()) return soloCompleted(c.d, dd, e) ? 1 : 2;
+    }
+    return 0;
+}
+
+std::string RbMeta::newUnlock(const CharData& c) {
+    // new_unlock (RB 0x823DE7F8) [C]: with more bonus songs unlocked than
+    // num_initial_unlock_songs, the newest one of the instrument's bonus
+    // list (index unlocked - initial), unless already announced at the
+    // difficulty or a harder one (RB 0x823DE770).
+    const int dd = std::clamp(c.difficulty, 0, 3);
+    const int have = unlockProgress(c, dd);
+    if (have == data.initialUnlocks) return {};
+    const std::vector<std::string>& l = ranked(c.instrument, true);
+    const long k = long(have) - data.initialUnlocks;
+    if (k < 0 || k >= long(l.size())) return {};
+    for (int d = dd; d < 4; ++d)
+        if (c.seenUnlocks[d].count(l[size_t(k)])) return {};
+    return l[size_t(k)];
+}
+
 void RbMeta::pay(RbCharObj& c, int amount) {
     const DataNode* most = data.solo ? data.solo->find("max_money") : nullptr;
     c.d.money = int(std::min<long long>(most ? num(most) : 999999999, (long long)c.d.money + amount));
+}
+
+void RbMeta::setBuzz(RbBandObj& b, int buzz) {
+    const DataNode* caps = buzzBlock() ? buzzBlock()->find("buzz_caps") : nullptr;
+    const int k = b.d.items.count("tour_vehicle_jet") ? 4 : b.d.items.count("tour_vehicle_bus") ? 3 : b.d.items.count("tour_vehicle_van") ? 2 : 1;
+    const int cap = num(caps, size_t(k), 999999999);
+    b.d.buzz = std::clamp(buzz, 0, cap);
+    b.d.fans = buzzToFans(b.d.buzz);
 }
 
 std::vector<RbCharObj*> RbMeta::localMembers(RbBandObj* band) {
@@ -656,8 +896,8 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
         const DataNode* buzz = m.data.band ? m.data.band->find("buzz") : nullptr;
         return r = Value::integer(num(buzz ? buzz->find("buzz_achievement") : nullptr, 1, 1000)), true;
     }
-    if (msg == "buzz_to_fans") return r = Value::integer(iArg(args, 0) * 10), true;
-    if (msg == "adjust_buzz") return d.buzz += iArg(args, 0), true;
+    if (msg == "buzz_to_fans") return r = Value::integer(m.buzzToFans(iArg(args, 0))), true;
+    if (msg == "adjust_buzz") return m.setBuzz(*this, d.buzz + iArg(args, 0)), true;
     if (msg == "town_fame") return r = Value::integer(m.bandFame(*this, args.empty() ? d.town : sArg(args, 0))), true;
     if (msg == "total_town_fame" || msg == "total_venue_fame") {
         int n = 0;
@@ -723,6 +963,7 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "set_random_songs") return true;
     if (msg == "next_song") return r = Value::symbol(m.songIndex < m.setlist.size() ? m.setlist[m.songIndex] : std::string()), true;
     if (msg == "complete_song") {
+        if (m.songIndex < m.setlist.size() && m.setlist[m.songIndex] != "any") d.played.insert(m.setlist[m.songIndex]);
         m.lastStars += iArg(args, 0), m.lastScore += iArg(args, 1);
         m.songStars.push_back(iArg(args, 0));
         ++m.songIndex;
@@ -737,28 +978,36 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
         if (!m.event) return true;
         const int songs = std::max<int>(1, int(m.setlist.size()));
         const int stars = m.lastStars / songs;
-        d.stars[m.event->ev.key()] = std::max(d.stars[m.event->ev.key()], m.lastStars);
         // Every local member's character is paid the whole reward (pay,
         // RB 0x823EE4A0: each member's character's own pay) [C].
         const int reward = m.reward();
         for (RbCharObj* c : m.localMembers()) m.pay(*c, reward);
-        // Fans: the venue's (buzz (venues (<venue> (performance ...)))) by stars [I: the table's axes].
-        const DataNode* buzz = m.data.band ? m.data.band->find("buzz") : nullptr;
-        const DataNode* venues = buzz ? buzz->find("venues") : nullptr;
-        const DataNode* vn = venues ? venues->find(m.event->ev.venue) : nullptr;
-        const DataNode* perf = vn ? vn->find("performance") : nullptr;
-        int gain = stars * 5;
-        if (perf && perf->children.size() > 1 && perf->children[1].isList()) gain = num(&perf->children[1], size_t(std::clamp(stars - 1, 0, 3)), gain);
-        d.buzz += gain;
-        d.fans += gain * 10;
+        // Buzz (RB 0x823EF7D0) [C]: the venue's (buzz (venues (<venue>
+        // (performance (row) ...)))): the row the event's last performance
+        // (new_performance for a first gig), the column the average stars
+        // (2 at least) - 2, each clamped to the table; fans follow the buzz
+        // (RB 0x823EE350).
+        const int before = d.stars.count(m.event->ev.key()) ? d.stars[m.event->ev.key()] / songs : -1;
+        const int change = m.buzzChange(m.event->ev.venue, before, stars), fans0 = d.fans;
+        m.setBuzz(*this, d.buzz + change);
+        lastFansChange = d.fans - fans0;
+        lastBuzzChange = change;
+        d.stars[m.event->ev.key()] = std::max(d.stars[m.event->ev.key()], m.lastStars);
         const std::string award = text(m.event->ev.node->find("award_item"));
         if (!award.empty() && !d.items.count(award)) d.items.insert(award), d.unlockedItem = award;
         m.save();
         return true;
     }
-    if (msg == "lose_song") return d.buzz = std::max(0, d.buzz - 5), true;
-    if (msg == "fans_lost_on_fail") return r = Value::integer(50), true;
-    if (msg == "fans_change") return r = Value::integer(0), true;
+    // A failed song costs the venue's lose_penalty in buzz (config/tour_band.dta
+    // (buzz (venues (<venue> (lose_penalty n))))) [C data; I: when RB applies it].
+    if (msg == "lose_song") {
+        const int before = d.fans;
+        m.setBuzz(*this, d.buzz + m.losePenalty(d.venue.empty() && m.event ? m.event->ev.venue : d.venue));
+        lastFansChange = d.fans - before;
+        return m.save(), true;
+    }
+    if (msg == "fans_lost_on_fail") return r = Value::integer(m.buzzToFans(d.buzz) - m.buzzToFans(std::max(0, d.buzz + m.losePenalty(d.venue)))), true;
+    if (msg == "fans_change") return r = Value::integer(lastFansChange), true;
     if (msg == "fans_update_str") return r = Value::string(std::to_string(d.fans)), true;
     if (msg == "has_item") return r = Value::integer(d.items.count(sArg(args, 0)) ? 1 : 0), true;
     if (msg == "item_to_str") return r = Value::string("*"), true;
@@ -850,6 +1099,14 @@ void RbMeta::save() {
         Json sh = Json::array();
         for (const std::string& s : c->d.seenHints) sh.a.push_back(Json::string(s));
         j.set("seen_hints", sh);
+        Json un = Json::array(), su = Json::array();
+        for (int d = 0; d < 4; ++d) {
+            un.a.push_back(Json::number(c->d.unlocks[d]));
+            Json x = Json::array();
+            for (const std::string& s : c->d.seenUnlocks[d]) x.a.push_back(Json::string(s));
+            su.a.push_back(x);
+        }
+        j.set("unlocks", un), j.set("seen_unlocks", su);
         cs.a.push_back(j);
     }
     root.set("characters", cs);
@@ -869,6 +1126,9 @@ void RbMeta::save() {
         Json mem = Json::array();
         for (const std::string& s : b->d.members) mem.a.push_back(Json::string(s));
         j.set("members", mem);
+        Json pl = Json::array();
+        for (const std::string& s : b->d.played) pl.a.push_back(Json::string(s));
+        j.set("played", pl);
         Json sh = Json::array();
         for (const std::string& s : b->d.seenHints) sh.a.push_back(Json::string(s));
         j.set("seen_hints", sh);
@@ -909,6 +1169,9 @@ void RbMeta::load() {
         for (const auto& [k, v] : j["stars"].o) c->d.stars[k] = int(v.num());
         for (const Json& s : j["owned"].a) c->d.owned.insert(s.str());
         for (const Json& s : j["seen_hints"].a) c->d.seenHints.insert(s.str());
+        for (size_t d = 0; d < 4 && d < j["unlocks"].a.size(); ++d) c->d.unlocks[d] = int(j["unlocks"].a[d].num(-1));
+        for (size_t d = 0; d < 4 && d < j["seen_unlocks"].a.size(); ++d)
+            for (const Json& s : j["seen_unlocks"].a[d].a) c->d.seenUnlocks[d].insert(s.str());
         chars.push_back(c);
     }
     for (const Json& j : root["bands"].a) {
@@ -919,6 +1182,7 @@ void RbMeta::load() {
         for (const auto& [k, v] : j["stars"].o) b->d.stars[k] = int(v.num());
         for (const Json& s : j["items"].a) b->d.items.insert(s.str());
         for (const Json& s : j["members"].a) b->d.members.push_back(s.str());
+        for (const Json& s : j["played"].a) b->d.played.insert(s.str());
         for (const Json& s : j["seen_hints"].a) b->d.seenHints.insert(s.str());
         bands.push_back(b);
     }
@@ -1263,6 +1527,7 @@ public:
     }
     // What a chosen symbol puts on the character: a model's default finish.
     std::string wear(const std::string& o) const {
+        if (auto it = gChosenFinish.find(o); it != gChosenFinish.end() && group(o)) return it->second;
         const DataNode* g = group(o);
         return g && g->find("default_outfit") ? text(g->find("default_outfit")) : o;
     }
@@ -1379,6 +1644,7 @@ public:
                     // keeps it owned (an instrument model: with its finish).
                     if (!o.empty()) c->d.owned.insert(o), c->d.owned.insert(l->wear(o));
                     if (!o.empty() && (c->d.owned.count(o) || l->cost(o) == 0)) c->d.outfit[cat] = l->wear(o), ++bought_;
+                    gChosenFinish.erase(o);
                 } else if (stored_.count(cat)) {
                     c->d.outfit[cat] = stored_[cat];
                 }
@@ -1461,6 +1727,68 @@ private:
     double startMs_ = 0;
 };
 
+// OutfitGroupPanel group_select_panel (ui/shop.dta): init <outfit panel>
+// lists the focused model's finishes in outfit.lst (the outfits that
+// has_group_selection counts, RB 0x823E0700 [C]; the list's order the
+// catalog's [I: RB's OutfitGroupPanel 0x8282AD38 not read]); X keeps the
+// chosen finish for the outfit panel's confirm_outfit (the script then
+// buys it through shop_confirm_screen or wears it).
+class OutfitGroupPanelObj : public PanelObj {
+public:
+    using PanelObj::PanelObj;
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        if (msg == "init") {
+            props["outfit_panel"] = args.empty() ? Value::integer(0) : args[0];
+            ScriptObject* op = args.empty() ? nullptr : args[0].object;
+            model_ = op ? in.send(op, "focus_outfit", {}).str() : std::string();
+            const std::string cat = op ? in.send(op, "focus_category", {}).str() : std::string();
+            auto* c = op ? dynamic_cast<RbCharObj*>(in.send(op, "tour_char", {}).object) : nullptr;
+            if (!list_ && gMeta) list_ = gMeta->own(std::make_unique<RbList>(name() + "_provider"));
+            if (list_) {
+                const std::vector<std::string> f = modelFinishes(ui, c ? c->d.gender : "male", cat, model_);
+                list_->build = [f] { return f; };
+                list_->label = [this](const std::string& o) {
+                    const std::string l = ui.localize(o);
+                    return l.empty() ? o : l;
+                };
+                list_->refresh();
+                attach();
+            }
+            return r = Value::integer(0), true;
+        }
+        if (msg == "selected_outfit" || msg == "focus_outfit") return r = Value::symbol(selected()), true;
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+    void enter() override {
+        PanelObj::enter();
+        attach();
+    }
+    bool buttonDown(int button, int player) override {
+        if (button == kPad_X && !model_.empty() && !selected().empty()) {
+            gChosenFinish[model_] = selected();
+            // The SELECT_MSG buys when {&& {! has_outfit} $cost}: RB's
+            // script reads the $cost the outfit panel's handlers left (its
+            // do's locals); the port's do restores them, so the model's
+            // price is set here [I: RB's do semantics].
+            const Value op = getProp(ui.interp(), "outfit_panel");
+            const Value prov = op.object ? ui.interp().send(op.object, "focus_provider", {}) : Value::integer(0);
+            ui.interp().var("cost") = prov.object ? ui.interp().send(prov.object, "cost", {Value::symbol(model_)}) : Value::integer(0);
+        }
+        return PanelObj::buttonDown(button, player);
+    }
+
+private:
+    void attach() {
+        if (ComponentObj* c = component("outfit.lst"); c && list_ && c->provider != list_) ui.interp().send(c, "set_provider", {Value::obj(list_)});
+    }
+    std::string selected() {
+        ComponentObj* c = component("outfit.lst");
+        return list_ ? list_->symbol(c ? c->selected : 0) : std::string();
+    }
+    RbList* list_ = nullptr;
+    std::string model_;
+};
+
 // OutfitConfigPanel color_select_panel (ui/shop.dta): init <outfit panel>
 // keeps the panel the confirm screen answers to [C data: the uses; I: no
 // colour choice yet].
@@ -1477,6 +1805,7 @@ public:
 std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& cls, const std::string& name) {
     if (cls == "GuitarTutorialPanel" || cls == "DrumTutorialPanel" || cls == "VocalsTutorialPanel") return std::make_unique<RbTutorialPanelObj>(ui, name, cls);
     if (cls == "OutfitConfigPanel") return std::make_unique<OutfitConfigPanelObj>(ui, name, cls);
+    if (cls == "OutfitGroupPanel") return std::make_unique<OutfitGroupPanelObj>(ui, name, cls);
     // (not the calibrate_* screens: calibrate_av_chooser_screen was made a
     // panel, so OPTIONS > CALIBRATE found no screen)
     if (cls == "AudioLatencyPanel" || (name.rfind("calibrate_", 0) == 0 && cls != "UIScreen")) return std::make_unique<AudioLatencyPanelObj>(ui, name, cls);
@@ -1492,6 +1821,29 @@ std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& 
     if (name == "practice_space_panel")
         return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"select_cam", "set_creator_player_num", "play_attitude_group", "set_char_player_num"});
     return nullptr;
+}
+
+std::vector<std::string> rbCategoryOutfits(UiManager& ui, const std::string& gender, const std::string& category) {
+    std::vector<std::string> v;
+    const DataNode* c = outfitCategory(ui, gender, category);
+    for (const auto& [o, n] : entries(c ? c->find("outfits") : nullptr)) v.push_back(o);
+    return v;
+}
+
+RbTourUnlocks rbTourUnlocks() {
+    RbTourUnlocks u;
+    if (!gMeta) return u;
+    gMeta->ensure();
+    for (const RbCharObj* c : gMeta->chars)
+        for (int i = 0; i < 3; ++i)
+            if (c->d.instrument == RbTourUnlocks::kInstruments[i]) {
+                u.ranked[i] = std::max(u.ranked[i], gMeta->soloQuickplayProgress(c->d, false));
+                u.bonus[i] = std::max(u.bonus[i], gMeta->soloQuickplayProgress(c->d, true));
+            }
+    std::set<std::string> played;
+    for (const RbBandObj* b : gMeta->bands) played.insert(b->d.played.begin(), b->d.played.end());
+    u.bandPlayed.assign(played.begin(), played.end());
+    return u;
 }
 
 int rbOutfitCost(UiManager& ui, const std::string& gender, const std::string& category, const std::string& outfit) {
@@ -1531,6 +1883,31 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
             if (const DataNode* h = tour->find("default_hometown")) m.data.hometown = text(h);
             if (const DataNode* mo = tour->find("default_money")) m.data.money = num(mo);
             loadEvents(m.data.solo ? m.data.solo->find("towns") : nullptr, m.data.soloTowns, m.data.soloEvents);
+            // The solo venues and their kinds (RB 0x823FDB20) [C], max_song and
+            // num_initial_unlock_songs (tour_solo.dta) [C data].
+            for (size_t i = 0; i < m.data.soloEvents.size(); ++i) {
+                const TourEvent& e = m.data.soloEvents[i];
+                if (m.data.soloVenues.empty() || m.data.soloVenues.back().town != e.town || m.data.soloVenues.back().venue != e.venue)
+                    m.data.soloVenues.push_back({e.town, e.venue, 0, {}});
+                SoloVenue& v = m.data.soloVenues.back();
+                v.events.push_back(i);
+                const DataNode* songs = e.node ? e.node->find("songs") : nullptr;
+                const DataNode* s0 = songs && songs->children.size() > 1 ? &songs->children[1] : nullptr;
+                if (s0 && s0->isList() && text(s0, 0) == "unlock") v.type = 1;
+                if (s0 && s0->isText() && s0->s == "download") v.type = 2;
+            }
+            if (const DataNode* n = m.data.solo ? m.data.solo->find("num_initial_unlock_songs") : nullptr) m.data.initialUnlocks = num(n);
+            for (const auto& [k, n] : entries(m.data.solo ? m.data.solo->find("max_song") : nullptr)) {
+                static const char* const kSyms[] = {"kDifficultyEasy", "kDifficultyMedium", "kDifficultyHard", "kDifficultyExpert"};
+                for (int d = 0; d < 4; ++d)
+                    if (k == kSyms[d]) m.data.maxSong[d] = num(n);
+            }
+            if (const DataNode* ms = m.data.solo ? m.data.solo->find("max_song") : nullptr)  // the macros as numbers
+                for (size_t i = 1; i < ms->children.size(); ++i) {
+                    const DataNode& c = ms->children[i];
+                    if (c.isList() && c.children.size() > 1 && c.children[0].type == DataNode::Type::Int && c.children[0].i >= 0 && c.children[0].i < 4)
+                        m.data.maxSong[c.children[0].i] = num(&c);
+                }
             loadEvents(m.data.band ? m.data.band->find("tiers") : nullptr, m.data.bandTowns, m.data.bandEvents);
             // A tier is the world town of the same order [I].
             std::vector<std::pair<int, std::string>> world;
@@ -1556,9 +1933,17 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
     };
     // Solo events: every event of every town in order (the list moves the town as it scrolls).
     m.soloEvents = list("solo_event_provider");
+    // The open towns' open events (RB 0x823E5BB8 / 0x823E46B0) [C].
     m.soloEvents->build = [&m] {
         std::vector<std::string> v;
-        for (const TourEvent& e : m.data.soloEvents) v.push_back(e.name);  // unique across the towns [C data]
+        RbCharObj* c = m.soloChar();
+        if (!c) return v;
+        const int dd = std::clamp(c->d.difficulty, 0, 3);
+        for (const std::string& t : m.soloOpenTowns(c->d, dd))
+            for (const SoloVenue& sv : m.data.soloVenues)
+                if (sv.town == t)
+                    for (size_t i : m.soloOpenEvents(c->d, dd, sv)) v.push_back(m.data.soloEvents[i].name);  // unique across the towns [C data]
+        if (SDL_getenv("GD05_UILOG")) SDL_Log("tour: solo events %d (difficulty %d)", int(v.size()), dd);
         return v;
     };
     auto evOf = [&m](const std::string& sym) -> const TourEvent* { return m.findEvent(false, "", "", sym); };

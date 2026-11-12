@@ -184,27 +184,36 @@ public:
     }
 
 private:
-    // RB's SongMgr (0x82431AC8) [C]: a song a mode other than leaderboards
-    // lists only once it is available: downloaded, or every song unlocked
-    // (the cheat), or one of the mode's unlock_song_initial_num first songs
-    // (modes.dta: 10) by the rank of its unlock_song_instrument (qp_solo:
-    // the leader's instrument; band quick play: band; none: no such song)
-    // among the songs that are not (unlockable TRUE) (the ranked list of
-    // 0x82434020), or played in a tour (0x823D43D0), or within the tours'
-    // progress on guitar, vocals or drums (0x823D4738). The port has no
-    // downloads; the tours' part waits for the career's progress
-    // (GD05-077) [I]. GD05_SONGLIST_LEGACY=1: every song, as before.
+    // RB's SongMgr (0x82432C60 -> 0x82431AC8) [C]: a song a mode other
+    // than leaderboards lists only once it is available: downloaded (none
+    // on the disc), or every song unlocked (the cheat), or one of the mode's
+    // unlock_song_initial_num (modes.dta: 10) first songs by the rank of its
+    // unlock_song_instrument (qp_solo: the leader's instrument; band quick
+    // play: band; none: no song at all) among the songs that are not
+    // (unlockable TRUE) (the ranked lists of 0x82434020), or a song a band
+    // of the profile has played (0x823D43D0), or within the tours' progress
+    // on guitar, vocals or drums: its place in that instrument's ranked list
+    // (the bonus list for a bonus song) under the progress of the profile's
+    // characters of the instrument (0x823D4738 / 0x823E0458, ui/rb_meta.cpp
+    // rbTourUnlocks) (GD05-077). GD05_SONGLIST_LEGACY=1: every song, as before.
     std::set<std::string> availableSongs() {
         std::set<std::string> out;
         const std::string inst = gameCfgValue(ui_, "unlock_song_instrument").str();
         const int initial = gameCfgValue(ui_, "unlock_song_initial_num").integerValue();
         if (inst.empty() || inst == "0") return out;
-        std::vector<const SongInfo*> ranked;
-        for (const SongInfo& s : ui_.host().songs())
-            if (!s.tutorial && !s.unlockable && s.rank.count(inst)) ranked.push_back(&s);
-        std::stable_sort(ranked.begin(), ranked.end(), [&](const SongInfo* a, const SongInfo* b) { return a->rank.at(inst) < b->rank.at(inst); });
-        for (size_t i = 0; i < ranked.size() && int(i) < initial; ++i) out.insert(ranked[i]->id);
+        const std::vector<SongInfo>& songs = ui_.host().songs();
+        const std::vector<std::string> first = rankedSongs(songs, inst, false);
+        for (size_t i = 0; i < first.size() && int(i) < initial; ++i) out.insert(first[i]);
         lockInstrument_ = inst;
+        if (SDL_getenv("GD05_TOUR_UNLOCKS_LEGACY")) return out;  // GD05-077's walk against the code before
+        const RbTourUnlocks t = rbTourUnlocks();
+        out.insert(t.bandPlayed.begin(), t.bandPlayed.end());
+        for (int i = 0; i < 3; ++i)
+            for (int bonus = 0; bonus < 2; ++bonus) {
+                const std::vector<std::string> l = rankedSongs(songs, RbTourUnlocks::kInstruments[i], bonus != 0);
+                const int n = bonus ? t.bonus[i] : t.ranked[i];
+                for (size_t k = 0; k < l.size() && int(k) < n; ++k) out.insert(l[k]);
+            }
         return out;
     }
 

@@ -221,6 +221,7 @@ private:
     // cash before the shop / the gig, the gig's stars.
     std::string careerHair0_;
     int careerCash_ = -1, careerStars_ = -1;
+    int tourBonusPlayed_ = 0;  // rb_tour_rules: the (unlock N) gigs completed so far (GD05-085)
     int shotN_ = 0;                                // venue_follow: screenshot number
     // rb_look (GD05-069): each sampled world frame's luma mean, contrast,
     // saturation and grain; the last gameplay frame's background box luma

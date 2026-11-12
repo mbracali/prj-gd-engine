@@ -31,5 +31,19 @@ struct RbModel {
     int cost = 0;
 };
 RbModel rbFirstModel(UiManager& ui, const std::string& gender, const std::string& category);
+// A category's (outfits ...) names in the catalog's order [C data] (the walks' expectations).
+std::vector<std::string> rbCategoryOutfits(UiManager& ui, const std::string& gender, const std::string& category);
+
+// What the profile's tours unlock in quick play (SongMgr 0x82432C60 ->
+// 0x82431AC8) [C]: per instrument (guitar, vocals, drum: RB 0x823D4738,
+// the most of the profile's characters of the instrument, RB 0x823E0458)
+// how many of its ranked songs and of its bonus songs, and the songs a
+// band of the profile has played (RB 0x823D43D0).
+struct RbTourUnlocks {
+    static constexpr const char* kInstruments[3] = {"guitar", "vocals", "drum"};
+    int ranked[3] = {0, 0, 0}, bonus[3] = {0, 0, 0};
+    std::vector<std::string> bandPlayed;
+};
+RbTourUnlocks rbTourUnlocks();
 
 }  // namespace ui

@@ -1259,3 +1259,56 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   XDG_DATA_HOME, `agents/scratch/fix6/gate_par.sh`): 52 of 57 walks OK, 5 of 5
   tests OK, bandcheck passed. Failed: rb_look in all four venues
   (GD05-069) and rb_crowd theater_01 (GD05-076), both expected.
+
+## 2026-11-12: the tours' rules, quick play's tour unlocks, the instruments' finishes (car7: GD05-085, GD05-077, GD05-083)
+
+- **Done (D75):** the Solo Tour runs on RB's TourCharLocal rules read in
+  the XEX (vtable 0x8206C184): songs from SongMgr's ranked lists (normal /
+  bonus, RB 0x82434020, `rankedSongs` in game/song_db), (songs N) /
+  (unlock N) / (<inst> N) resolved as RB 0x823FE820 (clamped, negative from
+  the end); a venue's open events by max_song and the bonus songs unlocked
+  (0x823E46B0); towns open in the data's order once the venues before are
+  completed at the difficulty or a harder one (0x823E5BB8 / 0x823DE560);
+  event_status, is_venue_type_unlocked, the bonus unlocks per difficulty
+  (complete_event 0x823E1178, from num_initial_unlock_songs 0x823E54E8) and
+  new_unlock (0x823DE7F8), saved (rb_profile.json `unlocks`,
+  `seen_unlocks`). Band World Tour: buzz from the venue's performance table
+  (0x823EF7D0), fans on the (fans ...) line (0x823EE350), lose_penalty, the
+  band's played songs (saved `played`). Quick play (GD05-077): the tours'
+  unlocks (0x82431AC8 / 0x823D4738 / 0x823E0458 / 0x823D43D0).
+- **Done (D76, GD05-083):** has_group_selection (0x823E0700) and
+  group_select_panel: a model with finishes offers them, the chosen one is
+  bought and worn.
+- **Expected (data) vs measured** (walks on HEAD + these changes only, a
+  clean export built in agents/scratch/car7/old; "before" = the same walks
+  on the code before, GD05_WALK_KEEP_GOING=1):
+
+  | check | expected (from the data) | measured | before |
+  | --- | --- | --- | --- |
+  | rb_tour_solo_events, new guitarist (Medium, max_song 45, 1 bonus) | 6 events: tier1_1 song1..5 = shouldistay, inbloom, maps, missqueen, hereitgoesagain; unlock1 = timewehad | the same 6, same songs | 59 events listed; song5 played timewehad, unlock1 inbloom |
+  | rb_tour_unlocked, after the (unlock 1) gig | new_unlock daylatedollarshort (guitar bonus song 2); unlock2 listed (7 events) | daylatedollarshort; 7 events | not reached (the list) |
+  | rb_tour_qp, restarted | 10 first by guitar + first town's 5 + 2 bonus = 12 songs | 12 (0 extra, 0 missing) | 10 (GD05_TOUR_UNLOCKS_LEGACY=1: 10, 2 bonus songs missing, FAIL) |
+  | rb_bwt_buzz, band gig small_club 2 stars / 1 song | buzz performance[new_performance 2 - 1][0] = 0, fans 0, the song offered in quick play | 0, 0, 0 missing | buzz 7, fans 70, the song not offered |
+  | rb_shop_finishes, guitar 5120 | 5120_paint, _sparkle, _sunburst, _triburst, _woodash, _woodmaple | the same 6 | no group_select_screen (bought in 5120_paint) |
+  | rb_shop_guitar, the second finish | 2100 - 1299 = 801, 5120_sparkle worn, on stage, after a restart | 801, 5120_sparkle, 1 member, kept | - |
+
+- **Gate** (HEAD + these changes only, a clean export built apart from the
+  other agent's uncommitted edits; `agents/scratch/car7/gate_par.sh`:
+  gate1.sh's 42 walks incl. rb_tour_rules + rb_highway, rb_crowd, 6 at a
+  time, each its own XDG_DATA_HOME, + the five tests): 41 of 44 walks with
+  OK at first (rb_bright's verdict line was interleaved in its log: OK),
+  5 of 5 tests OK. rb_band_start timed out on qp_endgame_screen under the
+  load, then OK alone. rb_highway failed (meter_flickers 2 under load, 1
+  alone) and fails the same alone on HEAD without these changes
+  (meter_flickers 1): not from this work (the flicker probe's known load
+  sensitivity, PROGRESS 2026-11-12 G06 highway).
+- **Not done:** GD05-082 (the real band lobby: RB's matchmaking_band_screen
+  needs session_mgr add_local_player / update_band_leader, the slots'
+  char.lst and the creator from the lobby; the stand-in stays); GD05-083's
+  drum / mic shops walked and the characters drawn in the menus; GD05-084
+  (patches: no render to texture yet; height / weight: RB's deform not
+  read, the slider properties go through generic property syncs 0x8233B878
+  / 0x8231FD38); GD05-085's [I] parts (D75: the buzz row's "stars before",
+  the caps' order, new_town, the band towns' own events from
+  tour/<town>.dta not loaded, fame / the hometown tier mapping 0x823FCED8,
+  the active moments).
