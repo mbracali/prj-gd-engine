@@ -1424,6 +1424,75 @@ pattern). Each says what, why and how to undo it.
 - **Undo:** GD05_SHOTCAM_LEGACY=1 (the panels' own cameras, creator.trans,
   no slot characters).
 
+## D91
+- **What (2026-11-12, GD05-093 / GD05-069):** Rock Band's spotlight beams
+  (NgSpotlightDrawer) replace GH2's beam sheets. [C]: the Ng drawer's
+  classic beam pass (vtable +0x44) is an empty function (0x824A3138), so
+  no beam sheet is drawn with its beam material; the beams reach the
+  picture only as follows. (1) Density map (0x822A9E58): the drawer's
+  camera (+0x64, a copy of the shot's, 0x822A9CC8) draws the proxy (the
+  stage fog / smoke group) into the beam system's density texture (+0xC,
+  a quarter of the picture each way, type 0x122, 0x822A9A58). (2) Volume
+  passes (0x822ABDC0 -> 0x822ABC28): the beam buffer (+8, half the
+  picture each way, 32 bits, type 0xA2) cleared; each queued spotlight
+  with a beam length > 0 drawn by its beam shape (+0x1E8; every beam on
+  the disc is shape 0 or 1: 0x822AB858 -> 0x822AABE0) with xbox_shaders
+  #2290 / #2291 (a ray / cone intersection against the scene's depth),
+  kept as gd04's Xenos translator gives them, the fetches only the
+  port's. Constants: gDepthHalf c9 0.125 (0x82887374); gCamPos c10;
+  gSpotPos c25 (pos, 1 / length); gSpotDir c26 (the light's y row,
+  length); gSpotToCam c27; gConst_u c28 (k^2 + 1, a k^2 + m, |c - p|^2 -
+  m^2 - a^2 k^2, 1; k the radius slope, a the apex distance + m, m = dir .
+  (cam - pos)); gRadii c29 (top, bottom, dir . pos, + length; radii x
+  expand, a sheet's x (1 - side border x 0.7), 0x82297B88); gCamDir c30;
+  gFogDensity c82 (0, 1 / far, 0, 0) (0x822A8EF8); gXSectionStrength c86
+  (0 with the camera inside the cone, 0x822A90B0); gPlaneRight / Left
+  c87 / c88 (the sheet's side planes through the camera, 0x822AA458);
+  gZRange c89 (near, far, 1, 0); gFogColor c90 = colour x intensity x 8
+  (0x822AB858, 0x82887360) x brighten (0x822AABE0); gFogRange c91 (0,
+  the drawer's unnamed f32 (250), 0, 1 / far). (3) Composite (the post's
+  gFogDepth variants, #2381 / #2397): scene + beams x (gFogDensity.x +
+  gFogDensity.y x density.x) x gFogRange.x, after the bloom, before the
+  grain and the ColorXfm, with gFogDensity = (base x 0.01, smoke x 0.01 x
+  (1 - base x 0.01)) (0x822A8E78, 0x82010224) and gFogRange.x = total x
+  32 (0x822AB5B8, 0x8288735C): c91.x's last writer before the post is
+  0x822AB5B8, not a spotlight pass (fix9's open question). The presets'
+  drawer entries (0x822BF6B8): smoke eases towards the file's second f32;
+  base towards the first, then overwritten by total eased towards the
+  third (two stfs to +0x3C): base ends as total -> third (1 on the disc).
+  The drawer's record (Load 0x82299660): total (+0x28), base (+0x3C),
+  smoke (+0x40), range (+0x44), colour (+0x2C), a texture, the proxy.
+  [I]: the density pass draws the proxy's own materials onto black (the
+  device's +0x25 flag is set, what it changes is not read); the volume
+  passes add (ONE / ONE) into an RGBA8 buffer (the pass's blend state and
+  the 0xA2 colour format not read); each beam's mesh is the camera-facing
+  sheet between the c87 / c88 planes (RB draws the beam's own mesh);
+  cut-outs (0x822AB068) and the target colour (+0x21C) are not drawn;
+  the preset entries are lerped between keyframes as the spotlights'.
+- **Why:** the port drew GH2's sheets at gain 1 and no smoke (GD05-093).
+- **Measured:** rb_look's new check (GD05_BEAM_PROBE: the pixels the
+  composite adds at least 1/255 to): beam pixels in 25..29 of 30 frames
+  in every venue, 0 with base / smoke at 0 (GD05_DRAWER_ZERO, 8..65 beams
+  still drawn); GD05_BEAMS_LEGACY=1 fails it ("no spotlight beam pixels").
+  Look numbers: PROGRESS fix10.
+- **Undo:** GD05_BEAMS_LEGACY=1 (GH2's sheets; also without post-processing).
+
+## D92
+- **What (2026-11-12, GD05-095):** the film grain's noise map is sampled
+  trilinearly, as RB's [C]: 0x827D9190 binds noise_map to s13 with
+  Function_8246AC70(13, 1), which sets the fetch constant's mag / min
+  filter linear and its mip filter (bits 23-24 of the dword at +0x48C)
+  linear, and 8246ACF8(13, 0) (clamp bits 10-15: wrap). ProFilm_a /
+  failed / savior.pp use noise_mono.tex (512 x 512, six levels) at
+  noise_base_scale 8 x 4.5 (top 1.359, intensity 0.3 / 0.5): 3.2 texels a
+  pixel across RB's 1280 x 720, read from the smaller levels; the port
+  read level 0 (sharp white noise).
+- **Measured (rb_look grain, movies 1.97):** small_club_02 3.03 -> 2.86,
+  big_club_03 3.38 -> 3.07, arena_04 2.35 -> 2.10, theater_02 2.65 ->
+  2.43. Without the grain at all (a temporary switch, removed) 2.14 /
+  2.64 / 1.49 / 2.05: the rest is the scene's own detail, not the post.
+- **Undo:** the noise slot's SamplerState in PostFx::end.
+
 ## D93
 - **What (2026-11-12, GD05-084, car9):** the patch creator (tattoos and
   face paint). The shop's pickers (PatchSelectPanel tattoo_select_panel /

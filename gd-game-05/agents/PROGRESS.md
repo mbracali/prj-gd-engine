@@ -1611,3 +1611,54 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   rb_look runs themselves: arena_04 OK once (65.1), the others fail on
   luma (big_club_03 56.6..59.0, theater_02 42.1 / 46.3, arena_04 49.6 once),
   small_club_02's contrast (+23..26 %) or the grain.
+
+## 2026-11-12: Rock Band's spotlight beams, the grain (fix10: GD05-093, GD05-095, GD05-069)
+
+- **The beams (GD05-093, D91) [C]:** NgSpotlightDrawer's beam-sheet pass
+  (vtable +0x44) is an empty function (0x824A3138): Rock Band never draws
+  the beams' sheets with their beam material, which the port drew (GH2's,
+  gain 1). Its beams are three passes, now the port's: the drawer's proxy
+  (stage fog / smoke) drawn into a quarter-size density map through a copy
+  of the shot's camera (0x822A9E58); per queued spotlight with a beam
+  length (shape 0 / 1: every beam on the disc) xbox_shaders #2290 / #2291,
+  a ray / cone intersection against the scene's depth, into a half-size
+  beam buffer (0x822ABC28 -> 0x822AB858 -> 0x822AABE0, the side planes
+  0x822AA458, the camera-inside test 0x822A90B0); then the post composite
+  adds beams x (base x 0.01 + smoke x 0.01 x (1 - base x 0.01) x density)
+  x total x 32 after the bloom (#2381 / #2397). c91.x, fix9's open
+  question: 0x822AB5B8 writes it last (total x 32, 0x8288735C). The
+  presets' drawer entries (0x822BF6B8) ease smoke towards the file's second
+  f32 and set base to total eased towards the third (RB stores base twice).
+  The shaders are gd04's Xenos translation kept as is (a scratch copy of
+  the translator that names every constant register,
+  agents/scratch/fix10/xs, git-ignored); only the fetches are the port's.
+- **The grain (GD05-095, D92) [C]:** RB samples noise_mono.tex (512 x 512,
+  six levels, scale 8 x 4.5: 3.2 texels a pixel at 1280 x 720) with a
+  linear mip filter (0x827D9190 -> 8246AC70(13, 1): fetch constant bits
+  23-24); the port read the top level (sharp white noise).
+- **Check (rb_look):** GD05_BEAM_PROBE reads the beam buffer and the
+  density map back each frame and counts the pixels the composite adds at
+  least 1/255 to; the walk wants some in the 30 shots and none with the
+  drawer's base / smoke at 0 (GD05_DRAWER_ZERO, on a shot that still
+  draws beams). GD05_BEAMS_LEGACY=1 (the old code path) fails it: "no
+  spotlight beam pixels in any frame".
+- **rb_look, before (fix9 gate) -> after (this build, one run each, not
+  the gate)** (movies: luma 69.3, contrast 55.4, grain 1.97):
+
+  | venue | luma | contrast | grain |
+  |---|---|---|---|
+  | small_club_02 | 71.7 -> 64.7 (-7 %) | 68.2 -> 64.6 (+17 %) | 3.04 -> 2.86 |
+  | big_club_03 | 55.2 -> 48.9 (-29 %) | 61.1 -> 53.1 (-4 %) | 3.22 -> 3.07 |
+  | arena_04 | 69.2 -> 64.1 (-8 %) | 60.4 -> 52.5 (-5 %) | 2.26 -> 2.10 |
+  | theater_02 | 41.1 -> 45.3 (-35 %) | 59.2 -> 57.9 (+4 %) | 3.09 -> 2.43 |
+
+  arena_04 passes; beam check passed in all four (25..29 of 30 frames
+  with beam pixels, 0 with base / smoke 0). Fails left: big_club_03 and
+  theater_02 luma, small_club_02 contrast (+14..17 % over runs) and grain.
+  Without any grain (temporary switch) grain reads 2.14 / 2.64 / 1.49 /
+  2.05: the rest is scene detail, cause not found.
+- **Not done (the wave ended):** the full gate (the clean HEAD export
+  was stopped while configuring); GD05-094 (venuesfx_bank.milo: no
+  reference in the XEX strings, the .dtb files are not plain text; not
+  traced); [I] items of D91 (the density pass's +0x25 flag, the beam
+  buffer's 0xA2 format / blend, cut-outs, target colour).
