@@ -2818,10 +2818,12 @@ int runApp(const Options& options) {
         const int r = App(o).run(&restartSlot);
         if (restartSlot < 0) return r;
         SDL_Log("restart: Enhanced Settings asked for a restart (the new backends)");
+        // In the launcher the launcher starts the game again, as a new Play
+        // (its controllers and window handed over again: in the module they
+        // were lost, GDUL-028); on its own the game starts again from its start.
+        if (const char* h = SDL_getenv("GD_LAUNCHER_HOSTED"); h && h[0] == '1') return 75;  // GD_GAME_EXIT_RESTART
         o = options;
         o.song.clear(), o.panel.clear(), o.viewScene.clear();
-        o.skipBoot = true;
-        o.startScreen = "enhanced_settings";
         o.startSlot = restartSlot;
     }
 }

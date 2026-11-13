@@ -891,6 +891,11 @@ void Launcher::play(Game& g) {
     SDL_snprintf(secs, sizeof secs, "%.1f", r.seconds);
     log_.add("back from " + g.id + ": exit code " + std::to_string(r.exitCode) + " after " + secs + " s" +
              (r.unloaded ? " (module unloaded)" : " (module stayed loaded)"));
+    if (r.exitCode == GD_GAME_EXIT_RESTART) {  // Restart Now (GDUL-028): a new Play of the same game
+        log_.add("restart " + g.id + " (Restart Now)");
+        play(g);
+        return;
+    }
     toast(r.exitCode == 0 ? "Welcome back from " + g.title() + "!" : g.title() + " ended with code " + std::to_string(r.exitCode) + ".");
 }
 

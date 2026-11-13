@@ -134,6 +134,13 @@ typedef struct GdHost {
 
 typedef int (*GdGameRunFn)(const GdHost* host);
 
+// gd_game_run's result when the player chose Restart Now (Enhanced >
+// Graphics / Audio backend, GDUL-028): the launcher runs the game again from
+// its start, as a new Play (the controllers announced again, its window made
+// for the API the game asks). A launcher older than this shows it as an exit
+// code.
+#define GD_GAME_EXIT_RESTART 75
+
 #define GD_GAME_RUN_SYMBOL "gd_game_run"
 
 // ---- The model explorer (optional) ----
