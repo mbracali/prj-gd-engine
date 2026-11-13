@@ -422,6 +422,13 @@ private:
     void updateVenue(float t);
     bool running_ = true;
     bool restart_ = false;  // Enhanced > Graphics / Audio backend > Restart Now
+    // The mouse cursor (#98, GD01-322): shown in the menus (and the pause
+    // menu) while the mouse is used, hidden while a song plays, 3 s after the
+    // mouse stops, and at once when a key, a guitar or a gamepad drives them.
+    bool cursorShown_ = true;
+    double mouseUsedMs_ = -1e9;
+    void cursorEvent(const SDL_Event& e);
+    void updateCursor();
     Screen screen_ = Screen::NeedData;
     std::string message_;
 
@@ -2353,7 +2360,26 @@ void App::drawResults() {
     renderer_.textCentered(kScreenW / 2, 470, 1.5f, kDim, "Press Enter to continue");
 }
 
+void App::cursorEvent(const SDL_Event& e) {
+    const bool mouse = (e.type == SDL_EVENT_MOUSE_MOTION && e.motion.which != SDL_TOUCH_MOUSEID) ||
+                       (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.which != SDL_TOUCH_MOUSEID) || e.type == SDL_EVENT_MOUSE_WHEEL;
+    if (mouse) mouseUsedMs_ = double(SDL_GetTicksNS()) / 1e6;
+    else if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || e.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN ||
+             e.type == SDL_EVENT_JOYSTICK_HAT_MOTION)
+        mouseUsedMs_ = -1e9;
+}
+
+void App::updateCursor() {
+    const double now = double(SDL_GetTicksNS()) / 1e6;
+    const bool show = screen_ != Screen::Playing && (!ui_ || enhancedOn("mouse")) && now - mouseUsedMs_ < 3000;  // the ISO picker screen too
+    if (show == cursorShown_) return;
+    cursorShown_ = show;
+    if (show) SDL_ShowCursor();
+    else SDL_HideCursor();
+}
+
 void App::frame() {
+    updateCursor();
     // Lefty Flip (Options > Game Settings), per player: the mirrored highway,
     // the lefty gamepad layout, and a guitar's swapped menu strum.
     if (campaign_) {
@@ -2744,6 +2770,7 @@ int App::run(int* restartSlot) {
         updateTouchLanes();
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
+            cursorEvent(e);
             if (e.type == SDL_EVENT_QUIT) running_ = false;
             else if (e.type == SDL_EVENT_WINDOW_HDR_STATE_CHANGED) renderer_.hdrStateChanged();  // HDR on / off, paper white, headroom
             else if (e.type == SDL_EVENT_DROP_FILE && e.drop.data && screen_ != Screen::Playing) tryLoadData(e.drop.data);
