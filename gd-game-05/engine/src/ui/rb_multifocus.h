@@ -25,6 +25,11 @@ public:
     // The state's (options) handler, then the type's; unhandled if neither.
     Value dispatch(const std::string& msg, std::vector<Value> args = {});
     bool ready();
+    // PanelDir's ButtonDown in the slot's own directory: its focused
+    // component, else its navigation (true: taken).
+    bool buttonDown(int button, int player);
+    // The slot's player_num ((type (player_num {gamecfg ...}))), -1 for none.
+    int playerNum();
     PanelObj& panel() { return panel_; }
     // The slot's own directory in the panel ("slot<N>"), empty without one.
     const std::string& scope() const { return scope_; }
@@ -38,6 +43,8 @@ private:
     std::string scope_;
 };
 
+// The screens whose every (slots ...) entry gets a slot (the band lobby).
+bool multiSlotScreen(const ScreenObj& screen);
 // The slots of `screen` (none when it has no player_panels).
 std::vector<std::unique_ptr<PlayerSlotObj>> makePlayerSlots(UiManager& ui, ScreenObj& screen);
 

@@ -185,6 +185,85 @@ void Bones::scaleDown(const scene::CharClipSamples& clip, float f) {
     }
 }
 
+// 0x8231F790 for one sample of a set with weight a.
+void Bones::rotateToSample(const Set& set, uint32_t sample, float a) {
+    if (set.count == 0) return;
+    const auto& idx = map(set);
+    const float* s = set.sample(std::min(sample, set.count - 1));
+    for (size_t b = 0; b < set.bones.size(); ++b) {
+        if (idx[b] < 0) continue;
+        Channel& ch = ch_[size_t(idx[b])];
+        const float* x = s + set.offset[b];
+        switch (set.bones[b].type) {
+        case Set::kPos:
+        case Set::kScale:
+            for (int k = 0; k < 3; ++k) ch.v[k] += a * x[k];
+            break;
+        case Set::kQuat: {
+            const float px = a * x[0], py = a * x[1], pz = a * x[2];
+            const float pw = x[3] >= 0 ? a * x[3] + (1 - a) : a * x[3] - (1 - a);
+            const float qx = ch.v[0], qy = ch.v[1], qz = ch.v[2], qw = ch.v[3];
+            // q x p (Hamilton, x y z w).
+            ch.v[0] = qw * px + qx * pw + qy * pz - qz * py;
+            ch.v[1] = qw * py + qy * pw + qz * px - qx * pz;
+            ch.v[2] = qw * pz + qz * pw + qx * py - qy * px;
+            ch.v[3] = qw * pw - qx * px - qy * py - qz * pz;
+            break;
+        }
+        default:
+            ch.v[0] += a * x[0];
+            break;
+        }
+    }
+}
+
+void Bones::rotateTo(const scene::CharClipSamples& clip, float w, float frame) {
+    // 0x8234EC10: the full set at t (0x82364F90: the sample and fraction f),
+    // samples i and i + 1 with (1 - f) w and f w (the second only when f > 0);
+    // the static set at sample 0 with w.
+    if (!clip.full.bones.empty() && clip.full.count > 0) {
+        float f;
+        const uint32_t i = sampleIndex(clip.full, clipT(clip, frame), f);
+        rotateToSample(clip.full, i, (1 - f) * w);
+        if (f > 0) rotateToSample(clip.full, i + 1, f * w);
+    }
+    if (!clip.one.bones.empty()) rotateToSample(clip.one, 0, w);
+}
+
+void Bones::blendInto(Bones& dest) const {
+    for (const Channel& c : ch_) {
+        const int di = dest.find(c.name);
+        if (di < 0) continue;
+        Channel& d = dest.ch_[size_t(di)];
+        const float a = c.weight, keep = 1 - a;
+        switch (c.type) {
+        case Set::kPos:
+        case Set::kScale:
+            for (int k = 0; k < 3; ++k) d.v[k] = keep * d.v[k] + c.v[k];
+            break;
+        case Set::kQuat: {
+            const float aa = std::fabs(a);
+            const float s[4] = {c.v[0] * aa, c.v[1] * aa, c.v[2] * aa, c.v[3] * a};
+            for (int k = 0; k < 4; ++k) d.v[k] *= keep;
+            const float dot = d.v[0] * s[0] + d.v[1] * s[1] + d.v[2] * s[2] + d.v[3] * s[3];
+            const float sgn = dot >= 0 ? 1.0f : -1.0f;
+            for (int k = 0; k < 4; ++k) d.v[k] += sgn * s[k];
+            break;
+        }
+        default:
+            d.v[0] = keep * d.v[0] + a * c.v[0];
+            break;
+        }
+    }
+}
+
+void Bones::clear() {
+    for (Channel& c : ch_) {
+        std::fill(std::begin(c.v), std::end(c.v), 0.0f);
+        c.weight = 0;
+    }
+}
+
 void Bones::rotateBy(const scene::CharClipSamples& clip, float frame) {
     // 0x82161F98: t clamped to [0, 1] for the full set, 0 for the static one.
     const float t = std::clamp(clipT(clip, frame), 0.0f, 1.0f);

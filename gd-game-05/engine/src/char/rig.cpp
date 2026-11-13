@@ -2,8 +2,6 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "char/rig.h"
 
-#include <SDL3/SDL.h>
-
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -191,12 +189,15 @@ struct Rig::Impl {
         return 1;
     }
 
-    // CharWeightSetter (Poll 0x8218CFB0): its weight = the driver's eased
-    // weight of clips with its flags (0x8216A588), 1 - that when inverted.
+    // CharWeightSetter (Rock Band, Poll RB 0x8234A320) [C]: with a driver
+    // its base weight = offset + scale x the driver's eased weight of clips
+    // with its flags (RB 0x82311D68); without one, the base weight scripts
+    // set (singalong, guitar_lookat, drummer_play). The weight follows the
+    // base at most 1 / beats_per_weight per beat (at once when 0).
     struct Setter {
         std::string name, driver;
         uint32_t flags = 0;
-        bool invert = false;
+        float offset = 0, scale = 1, base = 0, beatsPerWeight = 0;
     };
     // CharIKHand (Poll 0x82173308, lengths 0x82172F38).
     struct IkHand {
@@ -226,6 +227,7 @@ struct Rig::Impl {
         std::string name;
         float offset = 0;
         int hand = -1, twist2 = -1;
+        float lengthScale = 0;  // RB rev 2: twist2 at hand x x this (none when <= 0)
     };
     // CharLookAt (Poll 0x8216E4E8, limits 0x8216DDF0).
     struct LookAt {
@@ -301,7 +303,7 @@ struct Rig::Impl {
     std::vector<PosConstraint> constraints;
     std::vector<IkRod> rods;
 
-    enum Kind { kDriver, kServo, kFace, kWalk, kSetter, kHand, kMidi, kUpper, kFore, kLookAt, kEyes, kHair, kConstraint, kRod };
+    enum Kind { kDriver, kServo, kBlender, kFace, kWalk, kSetter, kHand, kMidi, kUpper, kFore, kLookAt, kEyes, kHair, kConstraint, kRod };
     struct Pollable {
         Kind kind;
         size_t index;
@@ -351,6 +353,10 @@ void Rig::Impl::build() {
             p.kind = kDriver, p.index = driverNames.size();
             driverNames.push_back(o->name);
             p.writes = {d->bones};
+        } else if (auto* bb = o->as<scene::CharBonesBlender>()) {
+            // RB's CharBonesBlender (PollDeps RB 0x8234DE60) [C]: changes its dest.
+            p.kind = kBlender, p.index = 0;
+            p.writes = {bb->dest};
         } else if (o->as<scene::CharServoBone>()) {
             p.kind = kServo, p.index = 0;
             p.writesAllBones = true;
@@ -370,7 +376,7 @@ void Rig::Impl::build() {
             for (const auto& e : f->entries) p.writes.push_back(e.object);
         } else if (auto* s = o->as<scene::CharWeightSetter>()) {
             weights[o->name] = {s->weightable.weight, s->weightable.weightOwner};
-            setters.push_back({o->name, s->driver, s->flags, s->invert});
+            setters.push_back({o->name, s->driver, s->flags, s->offset, s->scale, s->baseWeight, s->beatsPerWeight});
             p.kind = kSetter, p.index = setters.size() - 1;
             // 0x8218DE98: changed by its driver; changes the weightables it owns.
             p.reads = {s->driver};
@@ -406,7 +412,7 @@ void Rig::Impl::build() {
             p.reads = {u->upperArm};  // 0x82182F80
             p.writes = {u->twist1, u->twist2};
         } else if (auto* f = o->as<scene::CharForeTwist>()) {
-            fores.push_back({o->name, f->offset, bone(f->hand), bone(f->twist2)});
+            fores.push_back({o->name, f->offset, bone(f->hand), bone(f->twist2), f->lengthScale});
             p.kind = kFore, p.index = fores.size() - 1;
             p.reads = {f->hand};  // 0x82182398
             p.writes = {f->twist2, parentName(bone(f->twist2))};
@@ -524,6 +530,24 @@ void Rig::Impl::build() {
             if (w.owner == p.name && n != p.name) p.writes.push_back(n);
     }
     sort();
+    // Rock Band's CharPollGroup (RB 0x82345C38: hand_iks = left_hand.ikhand,
+    // fret.ikhand, right_hand.ikhand, strum.ikhand ...) polls its members in
+    // its own order [C data]: they swap among the places the sort gave them,
+    // so the strum IK runs after the right hand's hip / mouth IK.
+    for (const auto& o : dir.objects) {
+        const auto* g = o->as<scene::CharPollGroup>();
+        if (!g) continue;
+        std::vector<size_t> slots;
+        std::vector<Pollable> members;
+        // [I] Only its IK hands swap: the drivers it also lists (expression.drv,
+        // face_accent.dmidi) write the face and keep the sort's places.
+        for (const std::string& name : g->polls)
+            for (size_t i = 0; i < pollables.size(); ++i)
+                if (pollables[i].name == name && pollables[i].kind == kHand) slots.push_back(i), members.push_back(pollables[i]);
+        std::vector<size_t> sorted = slots;
+        std::sort(sorted.begin(), sorted.end());
+        for (size_t k = 0; k < sorted.size(); ++k) pollables[sorted[k]] = members[k];
+    }
 }
 
 // 0x82156B78 / 0x821563C8: the directory's pollables ordered so that each
@@ -598,6 +622,9 @@ void Rig::Impl::poll(const RigContext& ctx) {
         case kServo:
             if (ctx.pollServo) ctx.pollServo();
             break;
+        case kBlender:
+            if (ctx.pollBlender) ctx.pollBlender(p.name);
+            break;
         case kFace:
             if (ctx.pollFace) ctx.pollFace(p.name);
             break;
@@ -620,10 +647,23 @@ void Rig::Impl::poll(const RigContext& ctx) {
 
 // ---- CharWeightSetter ------------------------------------------------------
 
+bool Rig::legacySetters = false;
+
 void Rig::Impl::pollSetter(Setter& s, const RigContext& ctx) {
     Weight& w = weights[s.name];
-    if (!s.driver.empty() && ctx.driverFlagWeight) w.weight = ctx.driverFlagWeight(s.driver, s.flags);
-    if (s.invert) w.weight = 1 - w.weight;
+    if (Rig::legacySetters) {
+        if (!s.driver.empty() && ctx.driverFlagWeight) w.weight = ctx.driverFlagWeight(s.driver, s.flags);
+        return;
+    }
+    if (!s.driver.empty() && ctx.driverFlagWeight) s.base = ctx.driverFlagWeight(s.driver, s.flags) * s.scale + s.offset;
+    if (s.base == w.weight) return;
+    if (s.beatsPerWeight > 0) {
+        const float step = ctx.dBeats / s.beatsPerWeight;
+        if (step <= 0) return;
+        w.weight += std::clamp(s.base - w.weight, -step, step);
+    } else {
+        w.weight = s.base;
+    }
 }
 
 // ---- CharIKHand ------------------------------------------------------------
@@ -643,8 +683,25 @@ void Rig::Impl::lengths(IkHand& h) {
 
 void Rig::Impl::pollHand(IkHand& h) {
     lengths(h);
-    const float w = weightOf(h.name);
+    float w = weightOf(h.name);
     if (w == 0 || h.hand < 0 || h.targets.empty()) return;
+    // Rock Band (Poll RB 0x8232EB48) [C]: several targets weigh 144 / their
+    // squared local offset (0.001 at least) each; under a sum of 1 the IK's
+    // weight shrinks by that sum. A clip calls a target by bringing it onto
+    // its parent (bone_R-hand_mouth for the mic, _R-hip for a hand on the
+    // hip); a target left at its rest offset (tens of units) barely pulls.
+    std::vector<float> rbWeights;
+    if (h.targets.size() > 1) {
+        float sum = 0;
+        for (int t : h.targets) {
+            const scene::Xfm& l = sk.local(t);
+            const float d2 = l.pos[0] * l.pos[0] + l.pos[1] * l.pos[1] + l.pos[2] * l.pos[2];
+            rbWeights.push_back(144.0f / (d2 <= 0.001f ? 0.001f : d2));
+            sum += rbWeights.back();
+        }
+        if (sum < 1) w *= sum;
+        for (float& k : rbWeights) k /= sum;
+    }
     // The target: one target's world position (and orientation with
     // orient), or the targets' average weighted by 1 / |their local offset|.
     V3 target{0, 0, 0};
@@ -654,16 +711,8 @@ void Rig::Impl::pollHand(IkHand& h) {
         target = t.pos;
         if (h.orient) rot = mToQuat(orthoY(row(t.rot, 1), row(t.rot, 2)));
     } else {
-        std::vector<float> inv;
-        float sum = 0;
-        for (int t : h.targets) {
-            float l = len(sk.local(t).pos);
-            if (l <= 0.001f) l = 0.001f;
-            inv.push_back(1.0f / l);
-            sum += 1.0f / l;
-        }
         for (size_t i = 0; i < h.targets.size(); ++i) {
-            const float k = inv[i] / sum;
+            const float k = rbWeights[i];
             const scene::Xfm& t = sk.world(h.targets[i]);
             target = add(target, mul(t.pos, k));
             if (h.orient) quatAccumulate(rot, mToQuat(orthoY(row(t.rot, 1), row(t.rot, 2))), k);
@@ -687,10 +736,13 @@ void Rig::Impl::pollHand(IkHand& h) {
     const int upper = forearm >= 0 ? sk.parent(forearm) : -1;
     if (forearm >= 0 && upper >= 0) {
         // The elbow: law of cosines from the shoulder distance, cos clamped
-        // to [-0.985, 0.88]; the forearm's local rotation becomes that bend
-        // about z (whole matrix, position kept).
+        // to [-1, 1] (Rock Band, RB 0x8232EB48 [C]: the arm or leg straightens
+        // to reach; GH2's [-0.985, 0.88] kept it bent, and a stretch hand
+        // then pulled the hand off the forearm: GD05-066 / 067); the
+        // forearm's local rotation becomes that bend about z (whole matrix,
+        // position kept).
         const V3 d = sub(sk.world(upper).pos, goal);
-        const float c = std::clamp((dot(d, d) - h.a2b2) * h.inv2ab, -0.985f, 0.88f);
+        const float c = std::clamp((dot(d, d) - h.a2b2) * h.inv2ab, -1.0f, 1.0f);
         const float s = -std::sqrt(1 - c * c);
         scene::Xfm fl = sk.local(forearm);
         fl.rot = {c, s, 0, -s, c, 0, 0, 0, 1};
@@ -783,7 +835,9 @@ void Rig::Impl::pollFore(ForeTwist& f) {
     const float t = wrapAngle(f.offset * kDeg + twistAboutX(hand.rot)) * 0.333333f;
     scene::Xfm b = sk.local(f.twist2);
     b.rot = rotX(t);
-    b.pos[0] = hand.pos[0] * 0.5f;
+    // Rock Band (Poll RB 0x8233DE58) [C]: twist2's x = the hand's x x
+    // length_scale, left alone without one (GH2 put it halfway).
+    if (f.lengthScale > 0) b.pos[0] = hand.pos[0] * f.lengthScale;
     scene::Xfm a = sk.local(twist1);
     a.rot = mulRot(b.rot, sk.local(forearm).rot);
     sk.setLocal(twist1, a);
@@ -1117,6 +1171,30 @@ void Rig::setWeight(const std::string& name, float w) {
     auto it = impl_->weights.find(name);
     if (it == impl_->weights.end()) impl_->weights[name] = {w, ""};
     else it->second.weight = w;
+}
+
+bool Rig::setSetter(const std::string& name, const std::string& key, float v) {
+    for (auto& st : impl_->setters)
+        if (st.name == name) {
+            if (key == "base_weight") st.base = v;
+            else if (key == "beats_per_weight") st.beatsPerWeight = v;
+            else if (key == "offset") st.offset = v;
+            else if (key == "scale") st.scale = v;
+            else return false;
+            return true;
+        }
+    return false;
+}
+
+bool Rig::newSpot(const std::string& ik, const std::string& spot, double beats) {
+    for (auto& m : impl_->midis)
+        if (m.name == ik) {
+            const int s = impl_->sk.find(spot);
+            if (s < 0) return false;
+            impl_->newSpot(m, s, beats);
+            return true;
+        }
+    return false;
 }
 
 bool Rig::ikMidi(const std::string& ik, const std::string& spot, double start, double end, double now) {

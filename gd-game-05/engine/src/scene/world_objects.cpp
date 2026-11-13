@@ -268,8 +268,8 @@ void readLightPreset(Rd& r, LightPreset& p) {
             l.falloff = r.f();
         }
         k.description = r.str();
-        const uint32_t drawers = r.count(12);
-        for (uint32_t i = 0; i < drawers; ++i) r.f(), r.f(), r.f();
+        k.drawers.resize(r.count(12));
+        for (auto& d : k.drawers) d[0] = r.f(), d[1] = r.f(), d[2] = r.f();
         for (float& v : k.extra) v = r.f();
     }
     p.spotlights = r.strs();
@@ -400,17 +400,29 @@ void readEventTrigger(Rd& r, EventTrigger& e) {
     }
 }
 
+void readEventAnim(Rd& r, EventAnim& e) {
+    checkVersion(e.version, "EventAnim", 0);
+    e.header = r.header();
+    r.anim(e.anim);
+    e.keys.resize(r.count(8));
+    for (auto& k : e.keys) {
+        k.frame = r.f();
+        k.events.resize(r.count(8));
+        for (auto& [proxy, trig] : k.events) proxy = r.str(), trig = r.str();
+    }
+}
+
 // RndPostProc::Load RB 0x821913A0 -> RB 0x82190F08 (rev 18) [C]: bloom
-// colour, size, intensity, threshold, the luminance map, the shared
-// ColorXfm block (RB 0x8221A410), posterize, secs range, noise, then
-// threshold, duration, four more and the mirror mode [names partly I].
+// colour, threshold, size, intensity, the luminance map, the shared
+// ColorXfm block (RB 0x8221A410), flicker, noise, trails, the frame rate,
+// posterize, mirror, distortion (field names from SyncProperty 0x8218FC00).
 void readPostProc(Rd& r, PostProc& p) {
     checkVersion(p.version, "PostProc", 18);
     p.header = r.header();
-    r.fs(p.bloomThreshold);  // RB: the bloom colour (RGBA)
-    p.bloomScale = r.f();    // size
-    p.bloomIntensity = r.f();
-    p.bloomKernelMult = r.f();  // RB: the bloom threshold
+    r.fs(p.bloomColor);
+    p.bloomSize = r.f();       // +0x40
+    p.bloomIntensity = r.f();  // +0x44
+    p.bloomThreshold = r.f();  // +0x3c
     p.luminanceMap = r.str();
     checkVersion(r.u32(), "ColorXfm", 0);
     for (float& v : p.colorXfm) v = r.f();  // the 3x4 transform
@@ -420,20 +432,20 @@ void readPostProc(Rd& r, PostProc& p) {
     p.contrast = r.f();
     p.brightness = r.f();
     for (auto& lvl : p.levels) r.fs(lvl);  // in_lo, in_hi, out_lo, out_hi
-    r.fs(p.intensity);   // posterize
-    r.fs(p.secsRange);
+    r.fs(p.flickerIntensity);
+    r.fs(p.flickerSecs);
     r.fs(p.noiseBaseScale);
-    p.unknownD0 = r.f();
+    p.noiseTopScale = r.f();
     p.noiseIntensity = r.f();
     p.noiseStationary = r.b();
     p.noiseMap = r.str();
-    p.threshold = r.f();
-    p.duration = r.f();
+    p.trailThreshold = r.f();
+    p.trailDuration = r.f();
     p.emulateFps = r.f();
-    p.numLevels = r.f();
-    p.minIntensity = r.f();
-    p.mirror = r.i32();
-    p.f15c = r.f();
+    p.posterLevels = r.f();
+    p.posterMin = r.f();
+    p.mirror = r.f();
+    p.distortionScale = r.f();
 }
 
 void readFlare(Rd& r, Flare& f) {
@@ -522,6 +534,7 @@ const std::map<std::string, WorldDecoder>& worldDecoders() {
         {"Spotlight", dec<Spotlight>(readSpotlight)},
         {"WorldCrowd", dec<WorldCrowd>(readWorldCrowd)},
         {"EventTrigger", dec<EventTrigger>(readEventTrigger)},
+        {"EventAnim", dec<EventAnim>(readEventAnim)},
         {"PostProc", dec<PostProc>(readPostProc)},
         {"Flare", dec<Flare>(readFlare)},
         {"LightAnim", dec<LightAnim>(readLightAnim)},

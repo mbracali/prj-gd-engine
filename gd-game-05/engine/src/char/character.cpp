@@ -77,6 +77,28 @@ ClipSet* ClipLibrary::get(const std::string& fromArkPath, const std::string& rel
     }
 }
 
+ClipSet* ClipLibrary::byObject(const std::string& fromArkPath, scene::Directory& dir, const std::string& object) {
+    if (object.empty()) return nullptr;
+    for (auto& [owner, sub] : dir.subdirs)
+        if (owner == object && sub) {
+            auto& slot = inline_[sub.get()];
+            if (!slot) slot = std::make_unique<ClipSet>(*sub, fromArkPath + ":" + object);
+            return slot.get();
+        }
+    const scene::Object* o = dir.get(object);
+    if (!o) return nullptr;
+    const std::string proxy = scene::clipSetProxyFile(*o);
+    if (proxy.empty()) return nullptr;
+    // An outfit's object (the head's `visemes`) names its file from the
+    // outfit's folder: the character's anim folder by file name then [I].
+    if (!milos_.data().exists(scene::miloArkPath(scene::findMiloRelative(milos_.data(), fromArkPath, proxy)))) {
+        const size_t gen = fromArkPath.rfind("/gen/");
+        const size_t slash = proxy.find_last_of('/');
+        if (gen != std::string::npos) return get("", fromArkPath.substr(0, gen) + "/anim/" + (slash == std::string::npos ? proxy : proxy.substr(slash + 1)));
+    }
+    return get(fromArkPath, proxy);
+}
+
 // ---- Character -------------------------------------------------------------------
 
 Character::Character(const GameData& data, const std::string& path, ClipLibrary& clips, const std::map<std::string, std::string>& outfits)
@@ -99,14 +121,23 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
     if (!shadow_) shadow_ = outfitShadow_;
     // The rig.
     rig_ = std::make_unique<Rig>(d, skeleton_);
-    // Drivers: their clip sets' channels into the servo.
+    // GD05_BLENDER_LEGACY=1: the code before GD05-088 (no blenders, rotate-to
+    // drivers added) to show the bandcheck failing.
+    static const bool legacy = [] {
+        const char* e = SDL_getenv("GD05_BLENDER_LEGACY");
+        return e && *e && *e != '0';
+    }();
+    for (const auto& o : d.objects)
+        if (auto* bb = o->as<scene::CharBonesBlender>(); bb && !legacy) blenders_[bb->name].dest = bb->dest;
+    // Drivers: their clip sets' channels into their bones (the servo, or a
+    // blender and the bones it blends into).
     for (const auto& o : d.objects) {
         auto* drv = o->as<scene::CharDriver>();
         if (!drv) continue;
-        ClipSet* set = clips.get(path_, drv->clips);
+        ClipSet* set = drv->clips.empty() ? clips.byObject(path_, d, drv->clipsObject) : clips.get(path_, drv->clips);
         auto cd = std::make_unique<ClipDriver>(drv->name, set);
         cd->realign = drv->realign;
-        cd->skipScaleDown = drv->unknown55;
+        cd->apply = legacy && drv->apply == ClipDriver::kApplyRotateTo ? uint32_t(ClipDriver::kApplyAdd) : drv->apply;
         const std::string wname = drv->name;
         Rig* rig = rig_.get();
         cd->weight = [rig, wname] { return rig->weightOf(wname); };
@@ -116,7 +147,18 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
         cd->sendStarved = [this](const std::string& m) {
             if (sendMessage) sendMessage(m);
         };
-        if (set) set->listChannels(bones_, set->data().moveSelf);
+        Bones* target = bonesNamed(drv->bones);
+        driverBones_[cd.get()] = target;
+        if (set) {
+            // RB lists a blender's channels in its dest too (0x8231F1C8 finds them there).
+            for (const std::string* n = &drv->bones; target != &bones_;) {
+                set->listChannels(*target, set->data().moveSelf);
+                auto it = blenders_.find(*n);
+                n = &it->second.dest;
+                target = bonesNamed(*n);
+            }
+            set->listChannels(bones_, set->data().moveSelf);
+        }
         driverByName_[drv->name] = cd.get();
         drivers_.push_back(std::move(cd));
     }
@@ -151,6 +193,13 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
 }
 
 Character::~Character() = default;
+
+// A driver's or blender's bones by name: a CharBonesBlender's buffer, else
+// the servo's (bone.servo, and any other name the port does not keep apart).
+Bones* Character::bonesNamed(const std::string& name) {
+    auto it = blenders_.find(name);
+    return it == blenders_.end() ? &bones_ : &it->second.bones;
+}
 
 ClipDriver* Character::driver(const std::string& name) {
     auto it = driverByName_.find(name);
@@ -281,7 +330,58 @@ void Character::loadOutfit(const GameData& data, const std::string& outfitPath) 
         set("normal_map", mat->normalMap);
         set("specular_map", mat->specularMap);
     }
+    // What stays in the outfit's directory (its inline proxies: a head's
+    // head_skin_proxy) resolves names in the character's, where the
+    // outfit's objects went [I: RB merges the outfit into the character's
+    // directory].
+    od.parent = &d;
     outfits_.push_back(std::move(m));
+}
+
+const scene::Directory* Character::proxyDir(const std::string& owner) {
+    const scene::Directory* found = nullptr;
+    std::function<void(const scene::Directory&)> walk = [&](const scene::Directory& d) {
+        for (const auto& [o, sub] : d.subdirs) {
+            if (found || !sub) continue;
+            if (o == owner) found = sub.get();
+            else walk(*sub);
+        }
+    };
+    forEachRoot([&](scene::Directory& root) {
+        if (!found) walk(root);
+    });
+    return found;
+}
+
+const scene::Directory* Character::keepMilo(const GameData& data, const std::string& path) {
+    for (const auto& m : linked_)
+        if (m->path() == path) return &m->root();
+    if (!data.exists(path)) return nullptr;
+    try {
+        linked_.push_back(scene::loadMilo(data, path));
+    } catch (const std::exception& e) {
+        SDL_Log("char %s: %s: %s", name_.c_str(), path.c_str(), e.what());
+        return nullptr;
+    }
+    return &linked_.back()->root();
+}
+
+const scene::Directory* Character::linkMilo(const GameData& data, scene::Directory& into, const std::string& path) {
+    for (const auto& m : linked_)
+        if (m->path() == path) {
+            if (std::find(into.linked.begin(), into.linked.end(), &m->root()) == into.linked.end()) into.linked.push_back(&m->root());
+            return &m->root();
+        }
+    if (!data.exists(path)) return nullptr;
+    try {
+        linked_.push_back(scene::loadMilo(data, path));
+    } catch (const std::exception& e) {
+        SDL_Log("char %s: %s: %s", name_.c_str(), path.c_str(), e.what());
+        return nullptr;
+    }
+    into.linked.push_back(&linked_.back()->root());
+    into.clearIndex();
+    return &linked_.back()->root();
 }
 
 void Character::setXfm(const scene::Xfm& x) { skeleton_.setRoot(x); }
@@ -306,6 +406,19 @@ bool Character::showing(const scene::Object* o) const {
     if (it != showing_.end()) return it->second;
     const scene::Draw* d = gfx::drawOf(o);
     return !d || d->showing;
+}
+
+void Character::setDrawOnly(const std::string& group, const std::string& member) {
+    if (const scene::Object* o = dir().get(group))
+        if (const auto* g = o->as<scene::Group>()) drawOnly_[g] = member;
+}
+
+bool Character::ignoreDrawOnly = false;
+
+std::string Character::drawOnly(const scene::Group& g) const {
+    if (ignoreDrawOnly) return {};
+    auto it = drawOnly_.find(&g);
+    return it != drawOnly_.end() ? it->second : g.drawOnly;
 }
 
 void Character::setShowing(const std::string& name, bool on) {
@@ -549,10 +662,16 @@ void Character::poll(RigContext ctx) {
     const double beat = ctx.beat;
     const float dB = ctx.dBeats, dS = ctx.dSeconds;
     ctx.pollDriver = [this, beat, dB, dS](const std::string& name) {
-        if (ClipDriver* d = driver(name)) d->poll(beat, dB, dS, &bones_);
+        if (ClipDriver* d = driver(name)) d->poll(beat, dB, dS, driverBones_[d]);
     };
     ctx.pollDrivers = [this, beat, dB, dS] {
-        for (auto& d : drivers_) d->poll(beat, dB, dS, &bones_);
+        for (auto& d : drivers_) d->poll(beat, dB, dS, driverBones_[d.get()]);
+    };
+    ctx.pollBlender = [this](const std::string& name) {
+        auto it = blenders_.find(name);
+        if (it == blenders_.end()) return;
+        it->second.bones.blendInto(*bonesNamed(it->second.dest));
+        it->second.bones.clear();
     };
     ctx.pollServo = [this, dB] {
         poseMeshes(bones_, channelBone_, channelsMapped_);
@@ -569,8 +688,81 @@ void Character::poll(RigContext ctx) {
     rig_->poll(ctx);
 }
 
+void Character::setRbFace(ClipSet* set, const std::vector<std::string>& names) {
+    faceSet_ = set;
+    faceBase_ = set ? set->clip("Base") : nullptr;
+    faceClips_.clear();
+    facePose_.clear();
+    if (!faceBase_) return;
+    faceBones_ = Bones();
+    faceChannelBone_.clear();
+    faceMapped_ = 0;
+    set->listChannels(faceBones_, false);
+    for (const std::string& n : names) faceClips_.push_back(set->clip(n));
+}
+
+const Bones& Character::facePoseOf(const scene::CharClipSamples& clip) {
+    auto& b = facePose_[&clip];
+    if (!b) {
+        b = std::make_unique<Bones>();
+        for (const auto& c : faceBones_.channels()) b->add(c.name);
+        b->scaleAdd(clip, 1, clip.startFrame, 0);
+    }
+    return *b;
+}
+
 // FaceFxLipSyncServo Poll 0x8218E7E0 / 0x821A7978.
 void Character::pollFace(const RigContext& ctx) {
+    if (lip_ && visible && faceBase_) {
+        // Rock Band: Base plus the lit visemes' offsets from it [I: the delta
+        // blend of RB's relative clips; quaternions as q = (qi qb^-1)^w q].
+        const float servoWeight = faceServo_ ? rig_->weightOf(faceServo_->name) : 1.0f;
+        std::vector<float> values;
+        for (const auto& [b, axis] : faceEntries_) values.push_back(b >= 0 ? facefx::eyeAngle(skeleton_.local(b).rot.data(), axis) : 0.0f);
+        facefx::FacePose pose;
+        if (servoWeight <= 0 || !lip_->poll(ctx.faceSongSeconds, ctx.faceUiSeconds, values.data(), values.size(), pose)) return;
+        const Bones& base = facePoseOf(*faceBase_);
+        auto& out = faceBones_.channels();
+        for (size_t i = 0; i < out.size(); ++i) {
+            std::copy(std::begin(base.channels()[i].v), std::end(base.channels()[i].v), out[i].v);
+            out[i].weight = base.channels()[i].weight;
+        }
+        for (const auto& f : pose.frames) {
+            if (f.frame < 0 || size_t(f.frame) >= faceClips_.size() || !faceClips_[size_t(f.frame)]) continue;
+            const Bones& vis = facePoseOf(*faceClips_[size_t(f.frame)]);
+            const float w = f.weight * servoWeight;
+            for (size_t i = 0; i < out.size(); ++i) {
+                const auto& a = vis.channels()[i];
+                const auto& b = base.channels()[i];
+                if (a.weight <= 0 || b.weight <= 0) continue;
+                if (out[i].type == scene::CharBonesSamples::kQuat) {
+                    // d = qa * conj(qb), nlerped from identity by w, applied first.
+                    const float* qa = a.v;
+                    const float qb[4] = {-b.v[0], -b.v[1], -b.v[2], b.v[3]};
+                    float d[4] = {qa[3] * qb[0] + qa[0] * qb[3] + qa[1] * qb[2] - qa[2] * qb[1],
+                                  qa[3] * qb[1] - qa[0] * qb[2] + qa[1] * qb[3] + qa[2] * qb[0],
+                                  qa[3] * qb[2] + qa[0] * qb[1] - qa[1] * qb[0] + qa[2] * qb[3],
+                                  qa[3] * qb[3] - qa[0] * qb[0] - qa[1] * qb[1] - qa[2] * qb[2]};
+                    if (d[3] < 0) d[0] = -d[0], d[1] = -d[1], d[2] = -d[2], d[3] = -d[3];
+                    float dw[4] = {d[0] * w, d[1] * w, d[2] * w, 1 - w + d[3] * w};
+                    const float n = std::sqrt(dw[0] * dw[0] + dw[1] * dw[1] + dw[2] * dw[2] + dw[3] * dw[3]);
+                    if (n > 0) dw[0] /= n, dw[1] /= n, dw[2] /= n, dw[3] /= n;
+                    float* q = out[i].v;
+                    const float r[4] = {dw[3] * q[0] + dw[0] * q[3] + dw[1] * q[2] - dw[2] * q[1],
+                                        dw[3] * q[1] - dw[0] * q[2] + dw[1] * q[3] + dw[2] * q[0],
+                                        dw[3] * q[2] + dw[0] * q[1] - dw[1] * q[0] + dw[2] * q[3],
+                                        dw[3] * q[3] - dw[0] * q[0] - dw[1] * q[1] - dw[2] * q[2]};
+                    std::copy(r, r + 4, q);
+                } else {
+                    for (int k = 0; k < 4; ++k) out[i].v[k] += w * (a.v[k] - b.v[k]);
+                }
+            }
+        }
+        poseMeshes(faceBones_, faceChannelBone_, faceMapped_);
+        lastFace_ = std::move(pose);
+        ++facePoses_;
+        return;
+    }
     if (!lip_ || !visible || !visemes_) return;
     std::vector<float> values;
     for (const auto& [b, axis] : faceEntries_) values.push_back(b >= 0 ? facefx::eyeAngle(skeleton_.local(b).rot.data(), axis) : 0.0f);

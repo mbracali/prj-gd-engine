@@ -148,6 +148,11 @@ struct CharClipSetData {
 };
 // `self` is the CharClipSet milo's Directory::self; `clipCount` the number of
 // CharClipSamples in the directory.
+// A CharClipSet object of a character directory that proxies its clips
+// (RB: male_drum.milo's male_drum_L-hand -> "anim/male_drum_l-hand.milo"):
+// the proxy file of its record (CharClipSet PreLoad RB 0x82352AE8, the
+// ObjectDir PreLoad's file); empty when the clips are stored inline.
+std::string clipSetProxyFile(const Object& clipSetObject);
 CharClipSetData decodeClipSetDir(const Object& self, size_t clipCount);
 
 // ---- characters ---------------------------------------------------------
@@ -194,9 +199,8 @@ public:
     std::string bones;            // ObjPtr<CharBones>: the servo it writes ("bone.servo")
     std::string clips;            // FilePath of the CharClipSet ("../../anims/alterna1_main.milo")
     std::string clipsObject;      // RB: the clips' object name when `clips` is empty
-    uint32_t apply = 0;           // RB rev 7: a u32 where GH2 had the +0x55 bool
+    uint32_t apply = 0;           // RB rev 7: a u32 where GH2 had the +0x55 bool (chr::ClipDriver::Apply)
     bool realign = false;         // rev >= 2 (+0x54); TRUE only on metal_drummer main.drv
-    bool unknown55 = false;       // rev >= 5 (+0x55); 0 on the disc (Q: skips the bones' ScaleDown)
     std::string starvedClip;      // PostLoad rev >= 4: ObjPtr<CharClip> (Q: name)
 };
 

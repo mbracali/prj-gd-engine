@@ -39,13 +39,15 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         // Enhanced > Performance > Graphics / Audio backend (GDCORE-008,
         // engine-backend-guidelines.md 4): read once at start-up
         // (startupGraphicsBackend / startupAudioBackend in app.h); no mode
-        // changes them. Only what this build offers (no OpenGL on macOS, rule 7).
+        // changes them. gd05 runs only on gd-engine-core (D71): Vulkan and
+        // miniaudio by default, no "local". Only what this build offers (no
+        // OpenGL on macOS, rule 7).
 #ifdef __APPLE__
-        {"graphics_backend", {"local", "sdl3", "vulkan"}},
+        {"graphics_backend", {"vulkan", "sdl3"}},
 #else
-        {"graphics_backend", {"local", "sdl3", "vulkan", "opengl3"}},
+        {"graphics_backend", {"vulkan", "sdl3", "opengl3"}},
 #endif
-        {"audio_backend", {"local", "miniaudio", "openal", "faudio"}},
+        {"audio_backend", {"miniaudio", "openal", "faudio"}},
         {"internal_res", {"1080", "0", "448", "480", "720", "800", "900", "1440", "2160"}},
         {"sharp_ui", {"off", "on"}},
         {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
@@ -169,7 +171,8 @@ void migrateEnhanced(Json& e) {
     // XInput and Rock Band guitars are always on now; Ground Fog and Light
     // Streaks were removed (0.1.8): their saved values are dropped.
     // Graphics / Audio backend: a value this build cannot offer (an unknown
-    // id, OpenGL3 on macOS) is dropped (GDCORE-008).
+    // id, OpenGL3 on macOS, "local" since D71) is dropped (GDCORE-008): the
+    // default (Vulkan, miniaudio) takes its place.
     auto backendKept = [](const std::string& k, const Json& v) {
         if (k != "graphics_backend" && k != "audio_backend") return true;
         const EnhancedSetting* s = enhancedSetting(k);
@@ -304,23 +307,23 @@ const std::vector<Item>& items() {
         // engine-backend-guidelines.md 4 (GDCORE-008): the gd-engine-core
         // backends, first in the section (universal-menus.md "Backends").
         {Kind::Choice, "graphics_backend", "Graphics Backend", true,
-         "The library the game draws with. local: the game's own OpenGL renderer, as always. SDL3: SDL's GPU API "
-         "(Vulkan, Metal or Direct3D 12 underneath). Vulkan: Vulkan directly. "
+         "The library the game draws with. Vulkan (the default): Vulkan directly. SDL3: SDL's GPU API "
+         "(Vulkan, Metal or Direct3D 12 underneath). "
 #ifndef __APPLE__
-         "OpenGL3: the shared OpenGL 3.3 / GLES 3 renderer. "
+         "OpenGL3: OpenGL 3.3 / GLES 3, for older graphics drivers. "
 #endif
-         "If the one chosen cannot start, the game uses local. Takes effect when the game starts again: Restart Now does it at once.",
-         {{"local", "local"}, {"sdl3", "SDL3"}, {"vulkan", "Vulkan"},
+         "If the one chosen cannot start, the game uses the next one. Takes effect when the game starts again: "
+         "Restart Now does it at once.",
+         {{"vulkan", "Vulkan"}, {"sdl3", "SDL3"},
 #ifndef __APPLE__
           {"opengl3", "OpenGL3"},  // no OpenGL on macOS (engine-backend-guidelines.md rule 7)
 #endif
          }},
         {Kind::Choice, "audio_backend", "Audio Backend", true,
-         "The library the game plays its sound through. local: the game's own audio output, as always. "
-         "miniaudio: the shared mixer for every system. OpenAL: OpenAL Soft, 3D sound. FAudio: the XAudio2 "
-         "re-implementation. If the one chosen cannot start, the game uses local. Takes effect when the game "
-         "starts again: Restart Now does it at once.",
-         {{"local", "local"}, {"miniaudio", "miniaudio"}, {"openal", "OpenAL"}, {"faudio", "FAudio"}}},
+         "The library the game plays its sound through. miniaudio (the default): the shared mixer for every "
+         "system. OpenAL: OpenAL Soft, 3D sound. FAudio: the XAudio2 re-implementation. If the one chosen cannot "
+         "start, the game uses the next one. Takes effect when the game starts again: Restart Now does it at once.",
+         {{"miniaudio", "miniaudio"}, {"openal", "OpenAL"}, {"faudio", "FAudio"}}},
         {Kind::Choice, "screen_mode", "Screen Mode", true,
          "Windowed; full screen at the desktop's resolution; or full screen without a border (a window covering the "
          "screen, the quickest to switch away from).",

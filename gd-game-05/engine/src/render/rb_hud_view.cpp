@@ -12,6 +12,9 @@
 #include <stdexcept>
 
 #include "data/game_data.h"
+#include "render/anim_rate.h"
+#include "render/draw_order.h"
+#include "render/material.h"
 #include "render/renderer.h"
 #include "render/text_layout.h"
 #include "render/ui_view.h"
@@ -156,7 +159,7 @@ void RbHudView::load(const GameData& data, scene::MiloLibrary& library) {
     if (float cx, cy, w; meterBox(0, cx, cy, w)) refMeter_ = {cx, cy, w};
     hiddenElems_ = {"guitar", "bass", "drum", "vocals", "guitar_effects", "bass_effects", "vocalist_volume",
                     "popup_help_01", "popup_help_02", "popup_help_03"};
-    reset(-1e30f);
+    reset(-1e30f, nullptr);
 }
 
 // track_configuration's update (track_paneldir.dta) [C data]: each object
@@ -209,7 +212,8 @@ void RbHudView::applyConfiguration(const std::string& name) {
     }
 }
 
-void RbHudView::reset(float introAtMs) {
+void RbHudView::reset(float introAtMs, const TempoMap* tempo) {
+    tempo_ = tempo;
     if (!panel_) return;
     pose_.clear();
     for (const auto& [owner, d] : panel_->root().subdirs)
@@ -222,6 +226,7 @@ void RbHudView::reset(float introAtMs) {
     introPlayed_ = false;
     lastMs_ = -1e30f;
     seen_ = {};
+    crowdDeployed_ = 0;
     scoreShown_.clear();
     bandMultShown_ = 0;
     wonSeen_ = lostSeen_ = codaSeen_ = false;
@@ -266,7 +271,10 @@ void RbHudView::trigger(const scene::EventTrigger& t, float nowMs) {
         }
         const float len = std::fabs(to - from);
         const float scale = a.enable && a.period > 0 ? (len > 0 ? len / (a.period * kFps) : 1.0f) : (a.scale != 0 ? std::fabs(a.scale) : 1.0f);
-        animate(anim, from, to, type, scale, nowMs + std::max(0.0f, a.delay) * 1000.0f);
+        // The entry's rate (GD05-070): be_ready.trig's be_color_pulse.anim
+        // loops 0..1 at k1_fpb, one pulse a beat; at 30 a second it pulsed
+        // 30 times a second and the Overdrive meter flickered.
+        animate(anim, from, to, type, scale, nowMs + std::max(0.0f, a.delay) * 1000.0f, a.period > 0 || gfx::highwayLegacy() ? gfx::k30Fps : int(a.rate));
     }
     for (const auto& s : t.shows)
         if (const scene::Object* o = d->resolve(s)) pose_.setShowing(o, true);
@@ -280,10 +288,10 @@ void RbHudView::trigger(const scene::EventTrigger& t, float nowMs) {
             if (auto* next = o->as<scene::EventTrigger>(); next && next != &t) trigger(*next, nowMs);
 }
 
-void RbHudView::animate(const scene::Object* anim, float from, float to, int type, float scale, float startMs) {
+void RbHudView::animate(const scene::Object* anim, float from, float to, int type, float scale, float startMs, int rate) {
     tasks_.erase(std::remove_if(tasks_.begin(), tasks_.end(), [&](const Task& k) { return k.anim == anim && k.type != 2; }), tasks_.end());
     Task k;
-    k.anim = anim, k.from = from, k.to = to, k.type = type, k.scale = scale, k.t0 = startMs;
+    k.anim = anim, k.from = from, k.to = to, k.type = type, k.scale = scale, k.t0 = startMs, k.rate = rate;
     tasks_.push_back(k);
     if (type != 2 && startMs <= lastMs_ + 0.5f) setFrame(anim, from);
 }
@@ -316,7 +324,7 @@ void RbHudView::runTasks(float nowMs) {
             tasks_.erase(tasks_.begin() + long(k));
             continue;
         }
-        const float run = (nowMs - t.t0) * 0.001f * kFps * t.scale;
+        const float run = float(gfx::animFrames(t.rate, t.t0, nowMs, tempo_)) * t.scale;
         const float len = t.to - t.from;
         bool done = false;
         float f;
@@ -610,8 +618,30 @@ void RbHudView::drive(const State& s, float nowMs) {
         }
         // crowd_meter.dta: each instrument's icon group at its health [I:
         // the rating 0..1 as the frame; the editor's range is -1..1].
-        if (scene::Directory* cm = subdir("crowd_meter"))
+        if (scene::Directory* cm = subdir("crowd_meter")) {
             if (const scene::Object* g = cm->get(t.part + ".grp")) setFrame(g, t.rating);
+            // GD05-073: crowd_meter.dta deploy / stop_deploy (the band's
+            // band_energy_deploy.trig as the first member deploys,
+            // band_energy_stop.trig as the last stops; the icon's
+            // deploy.trig / stop_deploy.trig) and set_player_icon_state
+            // failed / normal (state_failed.trig / state_normal.trig) [C data].
+            scene::Directory* icon = nullptr;
+            for (const auto& [o2, d2] : cm->subdirs)
+                if (o2 == t.part && d2) icon = d2.get();
+            if (t.deploying != w.deploying) {
+                crowdDeployed_ = std::max(0, crowdDeployed_ + (t.deploying ? 1 : -1));
+                if (t.deploying && crowdDeployed_ == 1) trigger(cm, "band_energy_deploy.trig", nowMs);
+                if (!t.deploying && crowdDeployed_ == 0) trigger(cm, "band_energy_stop.trig", nowMs);
+                if (icon) trigger(icon, t.deploying ? "deploy.trig" : "stop_deploy.trig", nowMs);
+                w.deploying = t.deploying;
+                ++fxCrowdTriggers_;
+            }
+            if (icon && t.failed != w.iconFailed) {
+                trigger(icon, t.failed ? "state_failed.trig" : "state_normal.trig", nowMs);
+                w.iconFailed = t.failed;
+                ++fxCrowdTriggers_;
+            }
+        }
     }
     // TrackPanel poll (0x82803750) [C]: the scoreboard's set_score.
     const std::string score = fmtScore(s.bandScore);
@@ -802,14 +832,27 @@ void RbHudView::keepQuads(const scene::Object* o, const gfx::TextLayout& layout,
 void RbHudView::drawDir(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Directory& dir, const scene::Environ* env, int depth) {
     if (auto* self = dir.self ? dir.self->as<scene::DirObj>() : nullptr; self && self->hasRnd && !self->rnd.environment.empty())
         if (auto* e = dir.get(self->rnd.environment) ? dir.get(self->rnd.environment)->as<scene::Environ>() : nullptr) env = e;
-    std::set<std::string> grouped;
-    for (const auto& o : dir.objects)
-        if (auto* g = o->as<scene::Group>()) grouped.insert(g->objects.begin(), g->objects.end());
-    for (const auto& o : dir.objects) {
-        if (grouped.count(o->name)) continue;
-        if (o->as<scene::Mesh>() || o->as<scene::Group>() || o->as<scene::DirObj>() || o->as<scene::Text>() || o->as<scene::BandLabel>())
-            drawObject(mr, cache, o.get(), env, depth);
+    // RB's RndDir draw list: by draw order (render/draw_order.h, GD05-070):
+    // the streak meter's dial (streak_meter.grp, order 2) over its
+    // multiplier tag and text (multi_meter_anim.grp, order 1). In the
+    // file's order (GD05_HWY_LEGACY=1) the multiplier drew on top.
+    std::vector<const scene::Object*> list;
+    if (gfx::highwayLegacy()) {
+        std::set<std::string> grouped;
+        for (const auto& o : dir.objects)
+            if (auto* g = o->as<scene::Group>()) grouped.insert(g->objects.begin(), g->objects.end());
+        for (const auto& o : dir.objects)
+            if (!grouped.count(o->name) && (o->as<scene::Mesh>() || o->as<scene::Group>() || o->as<scene::DirObj>() || o->as<scene::Text>() || o->as<scene::BandLabel>()))
+                list.push_back(o.get());
+    } else {
+        list = gfx::dirDrawList(dir);
     }
+    std::vector<const scene::Object*> drawn;
+    for (const scene::Object* o : list) {
+        if (pose_.showing(o)) drawn.push_back(o);
+        drawObject(mr, cache, o, env, depth);
+    }
+    if (countOrder_) orderInversions_ += gfx::drawOrderInversions(drawn), ++orderDirs_;
 }
 
 void RbHudView::drawElem(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Object* o) {
@@ -838,7 +881,8 @@ void RbHudView::begin(gfx::Renderer& r, gfx::SceneCache& cache) {
 
 void RbHudView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const State& state, float nowMs) {
     if (!panel_) return;
-    if (nowMs < lastMs_ - 1000.0f) reset(introAtMs_);
+    tempo_ = state.tempo;
+    if (nowMs < lastMs_ - 1000.0f) reset(introAtMs_, state.tempo);
     drive(state, nowMs);
     lastMs_ = nowMs;
     runTasks(nowMs);
@@ -850,7 +894,9 @@ void RbHudView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const State& stat
     const scene::Group* order = panel_->root().get("draw_order.grp") ? panel_->root().get("draw_order.grp")->as<scene::Group>() : nullptr;
     if (!order) return;
     gfx::MaterialRenderer& mr = r.materials();
+    countOrder_ = true, orderInversions_ = orderDirs_ = 0;
     for (const std::string& n : order->objects) drawElem(mr, cache, panel_->root().get(n));
+    countOrder_ = false;
     if (textDrawer_) textDrawer_->collect();
 }
 
@@ -919,17 +965,18 @@ std::vector<RbHudView::Box> RbHudView::expectedBoxes() const {
                         if (auto it = animFrame_.find(ma); it != animFrame_.end() && it->second < gfx::ScenePose::endFrame(ma) - 1e-3f) partial = true;
                 if (partial) continue;
                 const gfx::Mat4 w = gfx::toMat4(pose_.world(m));
+                const bool glow = mat && (mat->blend == int(gfx::MatBlend::Add) || mat->blend == int(gfx::MatBlend::SrcAlphaAdd));
                 float mx0 = 1e9f, mx1 = -1e9f, my0 = 1e9f, my1 = -1e9f;
                 for (const auto& v : m->verts) {
                     float sx, sy;
                     if (!project(w.transformPoint({v.pos[0], v.pos[1], v.pos[2]}), sx, sy)) continue;
-                    b.x0 = std::min(b.x0, sx), b.y0 = std::min(b.y0, sy), b.x1 = std::max(b.x1, sx), b.y1 = std::max(b.y1, sy);
+                    if (!glow) b.x0 = std::min(b.x0, sx), b.y0 = std::min(b.y0, sy), b.x1 = std::max(b.x1, sx), b.y1 = std::max(b.y1, sy), b.valid = true;
+                    b.ox0 = std::min(b.ox0, sx), b.oy0 = std::min(b.oy0, sy), b.ox1 = std::max(b.ox1, sx), b.oy1 = std::max(b.oy1, sy);
                     mx0 = std::min(mx0, sx), my0 = std::min(my0, sy), mx1 = std::max(mx1, sx), my1 = std::max(my1, sy);
-                    b.valid = true;
                 }
                 if (SDL_getenv("GD05_HUDLOG"))
-                    SDL_Log("RB HUD:   %s mesh %s box %.0f %.0f - %.0f %.0f alpha %.2f mat %s", owner.c_str(), m->name.c_str(), double(mx0), double(my0), double(mx1),
-                            double(my1), double(alpha), m->mat.c_str());
+                    SDL_Log("RB HUD:   %s mesh %s box %.0f %.0f - %.0f %.0f alpha %.2f mat %s blend %d%s", owner.c_str(), m->name.c_str(), double(mx0), double(my0),
+                            double(mx1), double(my1), double(alpha), m->mat.c_str(), mat ? mat->blend : -1, glow ? " (glow)" : "");
             }
             // Its texts and labels as last drawn (their glyph quads).
             for (const auto& ob : dir.objects) {
@@ -946,6 +993,7 @@ std::vector<RbHudView::Box> RbHudView::expectedBoxes() const {
                     float sx, sy;
                     if (!project({p[0], p[1], p[2]}, sx, sy)) continue;
                     b.x0 = std::min(b.x0, sx), b.y0 = std::min(b.y0, sy), b.x1 = std::max(b.x1, sx), b.y1 = std::max(b.y1, sy);
+                    b.ox0 = std::min(b.ox0, sx), b.oy0 = std::min(b.oy0, sy), b.ox1 = std::max(b.ox1, sx), b.oy1 = std::max(b.oy1, sy);
                     b.valid = true;
                 }
             }
@@ -958,19 +1006,21 @@ std::vector<RbHudView::Box> RbHudView::expectedBoxes() const {
                         }
                         Box nb;
                         nb.name = owner + "/" + o2, nb.strict = false;
-                        nb.x0 = nb.y0 = 1e9f, nb.x1 = nb.y1 = -1e9f;
+                        nb.x0 = nb.y0 = nb.ox0 = nb.oy0 = 1e9f, nb.x1 = nb.y1 = nb.ox1 = nb.oy1 = -1e9f;
                         walk(*sd, nb, false);
                         if (nb.valid) nestedBoxes.push_back(nb);
                     }
         };
         b.name = owner;
-        b.x0 = b.y0 = 1e9f, b.x1 = b.y1 = -1e9f;
+        b.x0 = b.y0 = b.ox0 = b.oy0 = 1e9f, b.x1 = b.y1 = b.ox1 = b.oy1 = -1e9f;
         walk(*d, b, true);
         nestedBoxes.insert(nestedBoxes.begin(), b);
         for (Box& bx : nestedBoxes)
             if (bx.valid) {
                 bx.x0 = std::clamp(bx.x0, 0.0f, 1280.0f), bx.x1 = std::clamp(bx.x1, 0.0f, 1280.0f);
                 bx.y0 = std::clamp(bx.y0, 0.0f, 720.0f), bx.y1 = std::clamp(bx.y1, 0.0f, 720.0f);
+                bx.ox0 = std::clamp(std::min(bx.ox0, bx.x0), 0.0f, 1280.0f), bx.ox1 = std::clamp(std::max(bx.ox1, bx.x1), 0.0f, 1280.0f);
+                bx.oy0 = std::clamp(std::min(bx.oy0, bx.y0), 0.0f, 720.0f), bx.oy1 = std::clamp(std::max(bx.oy1, bx.y1), 0.0f, 720.0f);
                 if (bx.x1 > bx.x0 + 2 && bx.y1 > bx.y0 + 2) out.push_back(bx);  // shrunk to a point (an intro's hide): not on screen
             }
     }

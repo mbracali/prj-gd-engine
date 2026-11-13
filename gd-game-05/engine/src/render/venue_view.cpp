@@ -19,6 +19,7 @@
 #include "game/world.h"
 #include "render/band_view.h"
 #include "render/canvas.h"
+#include "render/core_backend.h"
 #include "render/crowd_view.h"
 #include "render/renderer.h"
 
@@ -38,14 +39,76 @@ const scene::Environ* dirEnv(const scene::Directory& d) {
     return d.resolve<scene::Environ>(own->rnd.environment);
 }
 
+// SpotlightDrawer rev 4's proxy (the record's last name; "" when unreadable).
+std::string spotlightDrawerProxy(const std::vector<unsigned char>& rec) {
+    auto u32 = [&](size_t p) {
+        return uint32_t(rec[p]) << 24 | uint32_t(rec[p + 1]) << 16 | uint32_t(rec[p + 2]) << 8 | uint32_t(rec[p + 3]);
+    };
+    if (rec.size() < 4 || u32(0) != 4) return {};
+    size_t pos = 4;
+    scene::Draw draw;
+    try {
+        scene::readDrawAt(rec, pos, draw);
+    } catch (const std::exception&) {
+        return {};
+    }
+    pos += 8 * 4;  // total, base_intensity, smoke_intensity, f32, color
+    std::string name;
+    for (int k = 0; k < 2; ++k) {
+        if (pos + 4 > rec.size()) return {};
+        const uint32_t n = u32(pos);
+        if (n > rec.size() - pos - 4) return {};
+        name.assign(reinterpret_cast<const char*>(rec.data() + pos + 4), n);
+        pos += 4 + n;
+    }
+    return name;
+}
+
 // A directory's draw list: its drawables less those its Groups draw, by
 // draw_order (stable: table order within one order).
-std::vector<const scene::Object*> drawList(const std::vector<const scene::Directory*>& dirs) {
+std::vector<const scene::Object*> drawList(const std::vector<const scene::Directory*>& dirs,
+                                          std::vector<const scene::Object*>* sdProxies = nullptr) {
+    static const bool sdLegacy = SDL_getenv("GD05_SD_PROXY_LEGACY") != nullptr;
     std::set<const scene::Object*> children;
     std::vector<const scene::Object*> all;
+    // A TexRenderer's draw (rev 3: its draw, then its output texture) goes
+    // into that texture, not into the world: RB's tattoo and vehicle
+    // directories (small_club_02's tattoos_a, vehicles) drew over the whole
+    // venue [I: RndTexRenderer as the UI's RenderDir, render/ui_view.cpp].
+    std::set<const scene::Directory*> rendered;
     for (const scene::Directory* d : dirs)
         d->forEach([&](scene::Object& o) {
-            if (!o.decoded) return;
+            // A SpotlightDrawer lists its proxy as its draw child (RB
+            // ListDrawChildren 0x82299DD0 pushes the object's +0x5c; RndDir
+            // SyncObjects 0x821B3A48 then drops it from the draw list) and its
+            // DrawShowing is empty (vtable +0x10: 0x824A3138, blr) [C]: the
+            // proxy, every venue type's stage fog / smoke group, is never
+            // drawn (GD05-069). Record (Load 0x82299660, rev 4) [C]: u32 4,
+            // Draw, total, base_intensity, smoke_intensity, f32, color, then
+            // two object names, the proxy the second.
+            if (o.cls == "SpotlightDrawer" && o.dir) {
+                const std::string proxy = spotlightDrawerProxy(o.record);
+                if (const scene::Object* c = proxy.empty() ? nullptr : o.dir->resolve(proxy)) {
+                    if (!sdLegacy) children.insert(c);
+                    if (sdProxies) sdProxies->push_back(c);
+                }
+                return;
+            }
+            if (o.cls != "TexRenderer" || !o.dir) return;
+            for (const std::string& n : scene::recordNames(o.record)) {
+                if (const scene::Object* c = o.dir->resolve(n); c && c != &o) children.insert(c);
+                for (const auto& [owner, sub] : o.dir->subdirs)
+                    if (sub && owner == n) rendered.insert(sub.get());
+            }
+        });
+    auto inRendered = [&](const scene::Directory* d) {
+        for (; d; d = d->parent)
+            if (rendered.count(d)) return true;
+        return false;
+    };
+    for (const scene::Directory* d : dirs)
+        d->forEach([&](scene::Object& o) {
+            if (!o.decoded || inRendered(o.dir)) return;
             if (auto* g = o.as<scene::Group>())
                 for (const std::string& n : g->objects)
                     if (const scene::Object* c = g->dir ? g->dir->resolve(n) : nullptr; c && c != g) children.insert(c);
@@ -88,9 +151,24 @@ void VenueView::build() {
     // The chain: one draw list over every directory (FindObject's view).
     std::vector<const scene::Directory*> dirs;
     for (const auto& p : v.parts()) dirs.push_back(&p.milo->root());
-    for (const scene::Object* o : drawList(dirs)) {
+    std::vector<const scene::Object*> proxies;
+    for (const scene::Object* o : drawList(dirs, &proxies)) {
         const scene::Environ* env = o->dir ? dirEnv(*o->dir) : nullptr;
         roots_.push_back({o, env});
+    }
+    // The walks' check (rb_look): every SpotlightDrawer proxy out of the list.
+    sdProxies_ = int(proxies.size()), sdProxiesListed_ = 0;
+    for (const Root& r : roots_) sdProxiesListed_ += int(std::count(proxies.begin(), proxies.end(), r.object));
+    // The venue's SpotlightDrawer (one per venue type's lighting milo) and
+    // its proxy for RB's beams (render/spotlight_view.h, GD05-093).
+    for (const scene::Directory* d : dirs) {
+        if (spotlights_->drawerProxy()) break;
+        d->forEach([&](scene::Object& o) {
+            if (o.cls != "SpotlightDrawer" || !o.dir || spotlights_->drawerProxy()) return;
+            gfx::DrawerParams dp;
+            if (!gfx::readDrawerParams(o.record, dp)) return;
+            spotlights_->setDrawer(&o, dp.proxy.empty() ? nullptr : o.dir->resolve(dp.proxy));
+        });
     }
     for (const auto& p : v.proxies()) {
         auto& list = proxyRoots_[p.object];
@@ -101,6 +179,26 @@ void VenueView::build() {
         if (o.as<scene::ParticleSys>() || o.as<scene::ParticleSysAnim>()) particleSet_.add(&o, uint32_t(particleSet_.systems().size() + 7));
     });
     for (size_t i = 0; i < particleSet_.systems().size(); ++i) systemIndex_[&particleSet_.systems()[i].def()] = i;
+    systemMilo_.assign(particleSet_.systems().size(), std::string());
+    systemDrawn_.assign(particleSet_.systems().size(), 0);
+    auto tag = [&](const scene::Milo& m, const std::string& path) {
+        m.root().forEach([&](const scene::Object& o) {
+            if (auto* p = o.as<scene::ParticleSys>())
+                if (auto it = systemIndex_.find(p); it != systemIndex_.end()) systemMilo_[it->second] = path;
+        });
+    };
+    for (const auto& p : v.parts()) tag(*p.milo, p.milo->path());
+    for (const auto& p : v.proxies()) tag(*p.milo, p.path);
+}
+
+VenueView::PartProbe VenueView::particleProbe(const std::string& part) const {
+    PartProbe r;
+    for (size_t i = 0; i < systemMilo_.size(); ++i)
+        if (systemMilo_[i].find(part) != std::string::npos) {
+            const gfx::ParticleSystem& s = particleSet_.systems()[i];
+            ++r.systems, r.started += s.started(), r.alive += s.count(), r.drawn += systemDrawn_[i];
+        }
+    return r;
 }
 
 bool venueObjectXfm(const World& world, const std::string& name, bool multiplayer, scene::Xfm& out, const std::string& subpart) {
@@ -148,7 +246,13 @@ void VenueView::setShot(const scene::CamShot* shot, size_t k) {
 void VenueView::update() {
     const gfx::ScenePose& pose = world_.pose();
     particleSet_.sync(pose);
-    particleSet_.update(pose, scene::Xfm{}, float(world_.seconds() * 30.0));
+    // RB polls a venue system only when drawn since its last poll (D86);
+    // GD05_PARTICLES_LEGACY=1: every system every frame (the code before).
+    static const bool legacy = [] {
+        const char* e = SDL_getenv("GD05_PARTICLES_LEGACY");
+        return e && *e == '1';
+    }();
+    particleSet_.update(pose, scene::Xfm{}, float(world_.seconds() * 30.0), !legacy);
 }
 
 scene::Xfm VenueView::worldOf(const scene::Object* o, const scene::Xfm* base) const {
@@ -189,11 +293,16 @@ void VenueView::draw(gfx::Renderer& r, int viewW, int viewH, bool hdr) {
         world_.pose().setCamera(cam);
     }
     particleRenderer_->resetStats();
+    std::fill(systemDrawn_.begin(), systemDrawn_.end(), 0);
     crowdView_->resetStats();
     bandView_->resetStats();
     particleRenderer_->setHdr(hdr);
     gfx::MaterialRenderer& mr = r.materials();
     for (const Root& root : roots_) drawObject(mr, root.object, root.env, nullptr, 0);
+    if (onlyCrowd_) {
+        envSet_ = false;
+        return;
+    }
     particles_ = particleRenderer_->drawnParticles();
     // The Enhanced Options' shadows, pools, beams and dust (after the list, before GH2's beams).
     if (look_.any()) {
@@ -202,9 +311,32 @@ void VenueView::draw(gfx::Renderer& r, int viewW, int viewH, bool hdr) {
     } else if (lights_) {
         lights_->draw(look_, {}, camera_, hdr, timeSec_);  // clears its counts
     }
+    // RB's beams' density map (0x822A9E58, GD05-093): the drawer's proxy,
+    // the stage fog / smoke group, drawn through the shot's camera into a
+    // quarter-size texture (not into the picture: D79 / D89).
+    if (hdr && spotlights_->drawerProxy() && spotlights_->beginDensity(viewW_, viewH_)) {
+        const int w = viewW_, h = viewH_;
+        viewW_ = std::max(1, w / 4), viewH_ = std::max(1, h / 4);
+        envSet_ = false;
+        particleRenderer_->setHdr(false);
+        hdr_ = false;
+        const scene::Object* proxy = spotlights_->drawerProxy();
+        drawObject(mr, proxy, proxy->dir ? dirEnv(*proxy->dir) : nullptr, nullptr, 0);
+        hdr_ = hdr;
+        particleRenderer_->setHdr(hdr);
+        viewW_ = w, viewH_ = h;
+        envSet_ = false;
+        spotlights_->endDensity(r.post().worldTarget(), viewW_, viewH_);
+    }
     // Spotlights (cans, floor spots, beams, lenses) and flares after the list.
     spotlights_->draw(mr, camera_, viewW_, viewH_, hdr, hdr ? r.post().worldTarget() : gfx::TargetId{},
                       hdr ? r.post().worldDepth() : gfx::TextureId{});
+    {
+        const gfx::SpotlightView::Fog& f = spotlights_->fog();
+        gfx::PostFx::Fog pf;
+        pf.on = hdr && f.on, pf.beams = f.beams, pf.density = f.density, pf.c82x = f.c82x, pf.c82y = f.c82y, pf.c91x = f.c91x;
+        r.post().setFog(pf);
+    }
     envSet_ = false;
 }
 
@@ -212,6 +344,7 @@ void VenueView::drawObject(gfx::MaterialRenderer& mr, const scene::Object* o, co
                            int depth) {
     const gfx::ScenePose& pose = world_.pose();
     if (!o || depth > 24 || !pose.showing(o)) return;
+    if (onlyCrowd_ && (o->as<scene::Mesh>() || o->as<scene::CharacterObj>() || o->as<scene::ParticleSys>())) return;
     if (auto* m = o->as<scene::Mesh>()) {
         selectEnv(mr, env);
         drawMesh(mr, *m, base);
@@ -244,10 +377,12 @@ void VenueView::drawObject(gfx::MaterialRenderer& mr, const scene::Object* o, co
     } else if (auto* p = o->as<scene::ParticleSys>()) {
         auto it = systemIndex_.find(p);
         if (it == systemIndex_.end()) return;
-        const gfx::ParticleSystem& s = particleSet_.systems()[it->second];
+        gfx::ParticleSystem& s = particleSet_.systems()[it->second];
+        s.drawShowing(float(world_.seconds() * 30.0));  // RB DrawShowing 0x821D9408: zeroes the poll counter (catches up)
         if (s.count() == 0 && p->preserved.empty()) return;
         selectEnv(mr, env);
         particleRenderer_->draw(mr, cache_, s, camera_, base ? gfx::toMat4(*base) : Mat4::identity(), &pose);
+        systemDrawn_[it->second] += s.count();
     } else if (auto* d = o->as<scene::DirObj>()) {
         // A proxy directory: its milo's draw list at the proxy's transform.
         auto it = proxyRoots_.find(d);
@@ -356,7 +491,7 @@ int runVenueView(const std::string& dataPath, const std::string& venueOrMilo) {
         std::fprintf(stderr, "%s --view: cannot start video: %s\n", app::kProgram, SDL_GetError());
         return 2;
     }
-    SDL_Window* window = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), SDL_WINDOW_RESIZABLE | gfx::prepareWindow());
+    SDL_Window* window = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), SDL_WINDOW_RESIZABLE | gfx::prepareWindowFor(gfx::rendererBackend()));
     Canvas canvas;
     std::string error;
     if (!window || !canvas.init(window, error)) {
@@ -455,7 +590,7 @@ int runVenueView(const std::string& dataPath, const std::string& venueOrMilo) {
             r.pictureRect(vx, vy, vw, vh);
             // GH2's post-process with the shot's PostProc (GD05_POST=0: off).
             const scene::PostProc* pp = view.shot() ? venue->find<scene::PostProc>(view.shot()->flag("postprocess")) : nullptr;
-            if (pp) r.post().select(gfx::postProcState(*pp, pp->luminanceMap.empty() ? gfx::TextureId{} : cache->texture(pp, pp->luminanceMap)));
+            if (pp) r.post().select(gfx::postProcState(*pp, [&](const std::string& t) { return cache->texture(pp, t); }));
             else r.post().reset();
             const float black[4] = {0, 0, 0, 1};
             if (r.post().begin(black)) {

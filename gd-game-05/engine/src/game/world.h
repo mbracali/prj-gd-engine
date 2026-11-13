@@ -190,6 +190,18 @@ public:
     const std::unordered_map<const scene::Spotlight*, SpotState>& spots() const { return spots_; }
     // A spotlight's state for writing (game/light_presets.h blends presets into it).
     SpotState& spotState(const scene::Spotlight* s) { return spots_[s]; }
+    // A SpotlightDrawer's total / base_intensity / smoke_intensity as the
+    // presets leave them (RB 0x822BF6B8; render/spotlight_view.h); `set`
+    // false until a preset touches it (the record's values hold).
+    struct DrawerState {
+        float total = 1, base = 1, smoke = 1;
+        bool set = false;
+    };
+    DrawerState& drawerState(const scene::Object* d) { return drawers_[d]; }
+    const DrawerState* findDrawerState(const scene::Object* d) const {
+        auto it = drawers_.find(d);
+        return it == drawers_.end() || !it->second.set ? nullptr : &it->second;
+    }
 
     // The first shot of a category (INTRO first, else any) and the INTRO
     // lighting preset (else the first preset): the static look before the
@@ -200,7 +212,7 @@ public:
 
     // Statistics for the tests and logs.
     struct Stats {
-        int eventsFired = 0, triggersFired = 0, animsStarted = 0, proxyCalls = 0, sounds = 0, shows = 0, hides = 0;
+        int eventsFired = 0, triggersFired = 0, eventAnimTriggers = 0, unresolvedSounds = 0, animsStarted = 0, proxyCalls = 0, sounds = 0, shows = 0, hides = 0;
         std::map<std::string, int> events;  // world events fired
     };
     const Stats& stats() const { return stats_; }
@@ -264,10 +276,13 @@ private:
     double seconds_ = 0, beats_ = 0;
     std::vector<AnimTask> tasks_;
     std::unordered_map<const scene::Object*, float> frames_;  // last frame set per anim
+    std::unordered_map<const scene::EventAnim*, float> eventAnimLast_;  // EventAnim +0x10: the last frame set
+    void eventAnimFrame(const scene::EventAnim& e, float frame);
     std::multimap<std::string, const scene::EventTrigger*> byEvent_, byEnable_, byDisable_, byWaitFor_;
     std::unordered_map<const scene::EventTrigger*, TriggerState> triggers_;
     std::vector<DelayedHide> hides_;
     std::unordered_map<const scene::Spotlight*, SpotState> spots_;
+    std::unordered_map<const scene::Object*, DrawerState> drawers_;
     Stats stats_;
     std::vector<NativeHandler> natives_;
     std::vector<ObjectHandler> objectNatives_;

@@ -14,6 +14,7 @@
 #include "render/scene_gpu.h"
 
 class GameData;
+class TempoMap;
 namespace scene {
 class Milo;
 class MiloLibrary;
@@ -100,6 +101,24 @@ public:
     float nowBarScreenY() const { return nowBarY_; }  // the now bar's height in the view (0 top .. 1 bottom), last draw
     void draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song, const PlayerView& player, float nowMs, float trackSpeed);
 
+    // The walks' checks (GD05-070). The parts of the draw group as the last
+    // frame drew them, and as the data orders them: static.grp's members,
+    // its now_bar.grp as the smasher plate's setup_draworder leaves it
+    // (smasher_plate.dta: smasher_plate.mesh, before_gems.grp = every
+    // smasher's base_bottom.grp then every base_top.grp; gem_smashers.grp
+    // and after_hide.grp hidden), widgets.grp's tails and gems, and
+    // smasher_fx.grp with after_gems.grp (gem_track.dta track_reset: every
+    // smasher's effects.grp) [C data].
+    const std::vector<std::string>& drawOrder() const { return drawLog_; }
+    std::vector<std::string> expectedDrawOrder() const;
+    // The Overdrive (star) tails the last frame drew, and those drawn with
+    // tail_bonus.mat (the TailBuilder's star material, RB 0x8281BEC8).
+    int starTails() const { return starTails_; }
+    int starTailsBonus() const { return starTailsBonus_; }
+    // The last frame's tails again (star ones only, or the others), through
+    // its camera: the walks' colour probe.
+    void drawLastTails(gfx::Renderer& r, gfx::SceneCache& cache, bool star);
+
 private:
     struct SlotSet {
         const scene::TrackWidget *normal = nullptr, *hopo = nullptr, *star = nullptr, *starHopo = nullptr, *miss = nullptr,
@@ -152,6 +171,7 @@ private:
     struct TailRange {
         const scene::Mat* mat;
         int firstIndex, indexCount;
+        bool star = false;
     };
     std::vector<TailRange> tailRanges_;
     // RB's tail (TailBuilder RB 0x8281A970 / 0x8281A8C8, poll 0x8281C928,
@@ -195,6 +215,7 @@ private:
         float from = 0, to = 0, scale = 1;
         double t0 = 0;  // song ms it started
         int type = 0;   // 0 range (holds the end), 1 loop
+        int rate = 0;   // the entry's RndAnimatable rate (render/anim_rate.h)
     };
     struct FxDir {
         const scene::Directory* dir = nullptr;
@@ -208,6 +229,7 @@ private:
     std::map<const scene::ParticleSys*, gfx::ParticleSystem*> fxSystem_;
     std::unique_ptr<gfx::ParticleRenderer> particles_;
     bool drawParticles_ = false;
+    const TempoMap* tempo_ = nullptr;  // the song's (draw), for the beat rates
     int fxLaunchedNow_ = 0;  // particles launched by the triggers being fired
     float lastFxMs_ = -1e30f;
     // What the view saw last frame (the events are its changes).
@@ -222,12 +244,20 @@ private:
     // Fires the directory's trigger `name`; false when it has none.
     bool fxTrigger(FxDir& fx, const std::string& name, float nowMs);
     void fxTrigger(FxDir& fx, const scene::EventTrigger& t, float nowMs);
-    void fxAnimate(FxDir& fx, const scene::Object* anim, float from, float to, int type, float scale, float nowMs);
+    void fxAnimate(FxDir& fx, const scene::Object* anim, float from, float to, int type, float scale, float nowMs, int rate = 0);
     void fxSetFrame(FxDir& fx, const scene::Object* anim, float frame);
     int fxLaunch(FxDir& fx, const scene::Object* launcher);
     void fxEvents(const PlayerView& player, float nowMs);
     void fxUpdate(float nowMs);
     void drawSmasherFx(gfx::MaterialRenderer& mr, gfx::SceneCache& cache);
+    void drawSmasherPlate(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Environ* env);
+    // A member of the draw group the view draws itself, at its place.
+    bool drawPart(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Group* g, const scene::Environ* env);
+    std::vector<std::string> drawLog_;
+    const Song* curSong_ = nullptr;
+    const PlayerView* curPlayer_ = nullptr;
+    float curNowMs_ = 0;
+    int starTails_ = 0, starTailsBonus_ = 0;
     // A PropAnim's keys at `frame` into pose_ (and `fx`'s particle copies).
     bool applyPropAnimFx(const scene::Object& anim, float frame, FxDir* fx);
 };

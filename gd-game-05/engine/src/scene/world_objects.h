@@ -126,6 +126,7 @@ public:
         std::vector<EnvEntry> environs;   // per `environs`
         std::vector<LightEntry> lights;   // per `lights`
         std::string description;
+        std::vector<std::array<float, 3>> drawers;  // per the preset's spotlightDrawers: total, base_intensity, smoke_intensity
         std::array<float, 9> extra{};     // RB rev 13: nine f32 after the drawers [names I]
     };
     Animatable anim;
@@ -229,25 +230,48 @@ public:
     std::vector<std::string> proxyEvents;  // RB: each proxy call's event (gem_smasher's hit.trig: break.trig)
 };
 
-// RndPostProc v9 (Load @ 0x821ec558 -> 0x821eb3d0): a shot's bloom, colour
-// transform and noise.
+// EventAnim v0 (RB; SetFrame RB 0x822CE3A0, EndFrame 0x822CE390) [C]: keys
+// of (frame, (proxy, trigger) pairs); SetFrame(f) fires every trigger of
+// the keys from the last frame set up to f (key frame >= last and <= f),
+// in key order, then keeps f as the last; EndFrame is the last key's frame.
+// The record (header, Animatable, keys: f32 frame, u32 n, n x (proxy,
+// trigger) strings) [C data: every record on the disc ends at its marker].
+// The win sequences' BandCamShots play them (band_objects.dta start_shot:
+// {[play_anim] animate}).
+class EventAnim : public Object {
+public:
+    struct Key {
+        float frame = 0;
+        std::vector<std::pair<std::string, std::string>> events;  // proxy, trigger
+    };
+    Animatable anim;
+    std::vector<Key> keys;
+};
+
+// RndPostProc rev 18 (Load RB 0x82190F08, names and offsets from
+// SyncProperty 0x8218FC00) [C]: a shot's bloom, colour transform, flicker,
+// film grain and frame rate (render/post_fx.h).
 class PostProc : public Object {
 public:
-    std::array<float, 4> bloomThreshold{};  // rgb + w
-    float bloomScale = 0, bloomIntensity = 0, bloomKernelMult = 0;
-    std::string luminanceMap;
-    std::array<float, 12> colorXfm{};
-    std::array<float, 2> intensity{}, secsRange{}, noiseBaseScale{};  // Q: names
-    float unknownD0 = 0;    // Q: +0xd0
-    float noiseIntensity = 0;
-    std::string noiseMap;
-    float hue = 0, saturation = 0, lightness = 0, contrast = 0, brightness = 0;
-    float threshold = 0, duration = 0, emulateFps = 0;  // Q: names
-    // RB rev 18 [C order]:
+    std::array<float, 4> bloomColor{};  // +0x2c rgb, +0x38 bloom_alpha
+    float bloomThreshold = 0;           // +0x3c
+    float bloomSize = 0;                // +0x40
+    float bloomIntensity = 0;           // +0x44
+    std::string luminanceMap;           // +0x48
+    std::array<float, 12> colorXfm{};   // the ColorXfm's matrix (+0xa8)
+    float hue = 0, saturation = 0, lightness = 0, contrast = 0, brightness = 0;  // its inputs
     std::array<std::array<float, 4>, 4> levels{};  // in_lo, in_hi, out_lo, out_hi
-    bool noiseStationary = false;
-    float numLevels = 0, minIntensity = 0, f15c = 0;
-    int mirror = 0;
+    std::array<float, 2> flickerIntensity{}, flickerSecs{};  // +0xf4 intensity, +0xfc secs_range
+    std::array<float, 2> noiseBaseScale{};  // +0x118
+    float noiseTopScale = 0;                // +0x120 (no property name)
+    float noiseIntensity = 0;               // +0x124
+    bool noiseStationary = false;           // +0x128
+    std::string noiseMap;                   // +0x12c
+    float trailThreshold = 0, trailDuration = 0;  // +0x138 threshold, +0x13c duration
+    float emulateFps = 0;                   // +0x150
+    float posterLevels = 0, posterMin = 0;  // +0xe8 num_levels, +0xec min_intensity
+    float mirror = 0;                       // +0xf0
+    float distortionScale = 0;              // +0x15c
 };
 
 // RndFlare v4 (Load @ 0x8220ddb8): a lens flare sprite.

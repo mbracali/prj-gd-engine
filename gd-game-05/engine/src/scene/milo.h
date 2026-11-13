@@ -128,6 +128,10 @@ public:
     // a proxy or its directory was stored inline. Throws if the file is broken.
     Milo* proxy(const Milo& owner, const Object& dirObject);
     const GameData& data() const { return data_; }
+    // Every milo loaded so far.
+    template <class F> void forEachMilo(F&& f) const {
+        for (const auto& [path, m] : milos_) f(*m);
+    }
 
 private:
     const GameData& data_;

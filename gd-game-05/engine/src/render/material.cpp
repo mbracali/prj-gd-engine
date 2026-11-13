@@ -12,7 +12,11 @@ uint32_t standardKey(const Material& m, const LightEnv* env, const DrawContext& 
     uint32_t k = 0;
     if (m.diffuseTex) k |= DiffuseMap;
     if (m.prelit || ctx.particles) k |= Prelit;
-    if (m.useEnviron && ctx.lit) k |= UseEnviron;
+    // RB's NgMat select (0x827D4750) [C]: gAmbient (c1) is the environ's
+    // ambient for a use_environ material, else white; the particle vertex
+    // shader (ark/xbox_shaders "particles") multiplies each particle's colour
+    // by it: venue smoke takes the environ's ambient.
+    if (m.useEnviron && (ctx.lit || ctx.particles)) k |= UseEnviron;
     if (ctx.lit) {
         const bool ppl = m.perPixelLit;
         if (ppl) k |= PerPixel;

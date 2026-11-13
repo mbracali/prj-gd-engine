@@ -197,6 +197,30 @@ public:
     std::string targetTex;                        // Q: name
 };
 
+// RndTexRenderer rev 3 (Load RB 0x821ED160) [C]: the object header, then
+// (rev > 2) Animatable and Draw, `draw` (the drawable rendered: a proxied
+// RndDir), `outputTexture` (the Tex it renders into), (rev > 1) force and
+// impostor_height. DrawShowing (RB 0x821ED620) renders `draw` into the
+// texture through the draw's camera when dirty (every frame when forced).
+class TexRenderer : public Object {
+public:
+    Animatable anim;
+    Draw draw;
+    std::string drawName, outputTexture;
+    bool force = false;
+    float impostorHeight = 0;
+};
+
+// PatchRenderer rev 1 (Load RB 0x822D3998) [C]: a TexRenderer, two symbols
+// (the test patch, default "blank", and "front"), then (rev > 0) the back
+// and front textures drawn under and over the patch (PreDraw RB 0x822D2AC8,
+// PostDraw 0x822D2B80: full-target rects).
+class PatchRenderer : public TexRenderer {
+public:
+    std::string testPatch, side;
+    std::string backTex, frontTex;
+};
+
 // RndEnviron v5 (Load @ 0x821d9f68; names from SyncProperty @ 0x821da558).
 class Environ : public Object {
 public:
@@ -494,6 +518,9 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
 // The shared sub-records for decoders in other files (scene/ui_objects.cpp):
 // each reads at record[pos] and advances pos; throws on malformed data.
 ObjectHeader readObjectHeaderAt(const Bytes& record, size_t& pos);
+// The length-prefixed (big-endian u32) printable names in a raw record: the
+// object names a class the port keeps raw refers to.
+std::vector<std::string> recordNames(const Bytes& record);
 void readTransAt(const Bytes& record, size_t& pos, Trans& t);
 void readDrawAt(const Bytes& record, size_t& pos, Draw& d);
 

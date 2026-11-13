@@ -317,6 +317,38 @@ void readGroup(In& in, Group& g) {
     g.lodScreenSize = in.f();
 }
 
+void readTexRendererBody(In& in, TexRenderer& t, uint32_t rev) {
+    t.header = readObjectHeader(in);
+    if (rev > 2) {
+        readAnimatable(in, t.anim);
+        readDraw(in, t.draw);
+    }
+    t.drawName = in.str();
+    t.outputTexture = in.str();
+    if (rev > 1) {
+        t.force = in.b();
+        t.impostorHeight = in.f();
+    }
+}
+
+void readTexRenderer(In& in, TexRenderer& t) {
+    expectVersion(t.version, 3, "TexRenderer");
+    readTexRendererBody(in, t, t.version);
+}
+
+void readPatchRenderer(In& in, PatchRenderer& p) {
+    expectVersion(p.version, 1, "PatchRenderer");
+    const uint32_t rev = in.u32();
+    expectVersion(rev, 3, "TexRenderer");
+    readTexRendererBody(in, p, rev);
+    p.testPatch = in.str();
+    p.side = in.str();
+    if (p.version > 0) {
+        p.backTex = in.str();
+        p.frontTex = in.str();
+    }
+}
+
 void readCam(In& in, Cam& c) {
     expectVersion(c.version, 12, "Cam");
     c.header = readObjectHeader(in);
@@ -644,6 +676,8 @@ const std::map<std::string, Decoder>& decoders() {
         {"Trans", dec<TransObj>(readTransObj)},
         {"Group", dec<Group>(readGroup)},
         {"Cam", dec<Cam>(readCam)},
+        {"TexRenderer", dec<TexRenderer>(readTexRenderer)},
+        {"PatchRenderer", dec<PatchRenderer>(readPatchRenderer)},
         {"Environ", dec<Environ>(readEnviron)},
         {"Light", dec<Light>(readLight)},
         {"TransAnim", dec<TransAnim>(readTransAnim)},
@@ -939,6 +973,20 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
     if (cls == "WorldInstance" && d->objectDir.proxyFile.empty()) d->objectDir.proxyFile = sharedFile;
     d->decoded = true;
     return d;
+}
+
+std::vector<std::string> recordNames(const Bytes& rec) {
+    std::vector<std::string> out;
+    for (size_t i = 0; i + 4 < rec.size(); ++i) {
+        const uint32_t n = uint32_t(rec[i]) << 24 | uint32_t(rec[i + 1]) << 16 | uint32_t(rec[i + 2]) << 8 | uint32_t(rec[i + 3]);
+        if (n < 3 || n > 64 || i + 4 + n > rec.size()) continue;
+        bool printable = true;
+        for (size_t k = 0; k < n && printable; ++k) printable = rec[i + 4 + k] >= 0x20 && rec[i + 4 + k] < 0x7f;
+        if (!printable) continue;
+        out.emplace_back(reinterpret_cast<const char*>(rec.data() + i + 4), n);
+        i += 3 + n;
+    }
+    return out;
 }
 
 ObjectHeader readObjectHeaderAt(const Bytes& record, size_t& pos) {

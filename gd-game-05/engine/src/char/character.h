@@ -16,6 +16,7 @@
 #include "char/char_walk.h"
 #include "char/clip.h"
 #include "char/facefx.h"
+#include "char/patch.h"
 #include "char/rig.h"
 #include "char/skeleton.h"
 #include "scene/milo.h"
@@ -68,6 +69,28 @@ public:
         milo_->root().forEach(f);
         for (auto& m : outfits_) m->root().forEach(f);
     }
+    // The character's milo's root and each outfit's (with their inline
+    // proxied directories: the head's and the torso's skin proxies).
+    template <class F>
+    void forEachRoot(F&& f) {
+        f(milo_->root());
+        for (auto& m : outfits_) f(m->root());
+    }
+    // The inline proxied directory object `owner` holds in any of the roots
+    // (head_skin_proxy, torso_skin_proxy), or null.
+    const scene::Directory* proxyDir(const std::string& owner);
+    // Loads a milo one of its directories names (a skin proxy's ObjectDir
+    // subdir, torso_skin_subdir.milo), kept with the character, and links it
+    // into `into`'s lookups (Directory::linked); null when it cannot load.
+    const scene::Directory* linkMilo(const GameData& data, scene::Directory& into, const std::string& path);
+    // Bumped whenever what the skin proxies draw changes (the skin colour,
+    // make-up, a patch): render/char_skin.h renders them again.
+    uint32_t skinSerial = 0;
+    // The patches its PatchRenderers draw, by location (patch_chest ...;
+    // char/patch.h); a milo the stickers come from is kept with linkMilo.
+    std::map<std::string, std::vector<PatchDraw>> patches;
+    // Loads (once) and keeps a milo the character's patches need.
+    const scene::Directory* keepMilo(const GameData& data, const std::string& path);
     const scene::CharacterObj& own() const { return *own_; }
     bool band() const { return own_->band; }
     const std::string& type() const { return own_->header.type; }  // guitarist / singer / ... / crowd / ui
@@ -121,6 +144,12 @@ public:
     void setShowing(const scene::Object* o, bool on) { showing_[o] = on; }
     void setShowing(const std::string& name, bool on);
     bool visible = true;  // the character as a whole (guitarist1 hidden...)
+    // RndGroup draw_only (RB rev 13): the one member of `group` that draws
+    // (char_objects.dta: hands.grp -> mic.grp, sticks.grp -> singlestick.grp);
+    // the group's saved one unless a script set it. Empty: every member.
+    void setDrawOnly(const std::string& group, const std::string& member);
+    std::string drawOnly(const scene::Group& group) const;
+    static bool ignoreDrawOnly;  // GD05_BAND_LEGACY=1: every member draws, as before
 
     // LOD (0x82153090): picks and shows the LOD group for `screenSize`.
     void updateLod(float screenSize);
@@ -150,6 +179,15 @@ public:
     // bones posed from that buffer (0x821A51E0). No pose when the player has
     // stopped or no song was played.
     const scene::FaceFxLipSyncServo* faceServo() const { return faceServo_; }
+    // Rock Band's face (RB 0x823252C8 servo; char_objects.dta sync_objects):
+    // the viseme clip set (char/male/anim/male_viseme_head_1.milo, or the
+    // character's own `visemes`), its clips relative to `Base` (CharClipSamples
+    // init: viseme clips are relative to Base). Each poll the face is Base
+    // plus, per bone pose node the FaceFX graph lights, weight x (its clip -
+    // Base), scaled by the servo's weight (expression.weight /
+    // singalong.weight). `names[i]` is the clip of pose frame i.
+    void setRbFace(ClipSet* set, const std::vector<std::string>& names);
+    bool rbFace() const { return faceBase_ != nullptr; }
     ClipSet* faceClips() const { return faceSet_; }
     void attachFace(facefx::LipSync* lip) { lip_ = lip; }
     facefx::LipSync* lipSync() const { return lip_; }
@@ -172,13 +210,25 @@ private:
     std::string path_, name_;
     std::unique_ptr<scene::Milo> milo_;
     std::vector<std::unique_ptr<scene::Milo>> outfits_;
+    std::vector<std::unique_ptr<scene::Milo>> linked_;  // linkMilo's
     std::unique_ptr<scene::CharacterObj> own_;
     Skeleton skeleton_;
     Bones bones_;
+    // RB's CharBonesBlenders (limbs.blender: the drummer's hand and foot
+    // drivers): their own buffers, blended into their dest and cleared as
+    // they poll (RB 0x8234D520).
+    struct Blender {
+        Bones bones;
+        std::string dest;
+    };
+    std::unordered_map<std::string, Blender> blenders_;
+    std::unordered_map<const ClipDriver*, Bones*> driverBones_;  // a driver's bones (the servo's or a blender's)
+    Bones* bonesNamed(const std::string& name);
     std::unique_ptr<Rig> rig_;
     std::vector<std::unique_ptr<ClipDriver>> drivers_;
     std::unordered_map<std::string, ClipDriver*> driverByName_;
     std::unordered_map<const scene::Object*, bool> showing_;
+    std::unordered_map<const scene::Group*, std::string> drawOnly_;
     std::vector<const scene::Group*> lodGroups_;
     const scene::Group* shadow_ = nullptr;
     const scene::Group* outfitShadow_ = nullptr;  // an outfit's, when the character has none
@@ -206,6 +256,10 @@ private:
     ClipSet* faceSet_ = nullptr;
     const scene::CharClipSamples* visemes_ = nullptr;
     const scene::CharClipSamples* neutral_ = nullptr;
+    const scene::CharClipSamples* faceBase_ = nullptr;           // RB: Base
+    std::vector<const scene::CharClipSamples*> faceClips_;       // RB: per pose frame
+    std::unordered_map<const scene::CharClipSamples*, std::unique_ptr<Bones>> facePose_;  // RB: each clip's pose
+    const Bones& facePoseOf(const scene::CharClipSamples& clip);
     facefx::LipSync* lip_ = nullptr;
     Bones faceBones_;
     std::vector<int> faceChannelBone_;
@@ -222,12 +276,17 @@ public:
     explicit ClipLibrary(const GameData& data) : milos_(data) {}
     // `rel` relative to `fromArkPath` (og -> ng); nullptr when missing.
     ClipSet* get(const std::string& fromArkPath, const std::string& rel);
+    // A CharDriver's clips named by object (Rock Band: `clips` empty, the
+    // set an object of the character's directory): stored inline there, or
+    // a proxy of its own milo. nullptr when there is none.
+    ClipSet* byObject(const std::string& fromArkPath, scene::Directory& dir, const std::string& object);
     const std::map<std::string, std::unique_ptr<ClipSet>>& sets() const { return sets_; }
     scene::MiloLibrary& milos() { return milos_; }
 
 private:
     scene::MiloLibrary milos_;
     std::map<std::string, std::unique_ptr<ClipSet>> sets_;
+    std::map<const scene::Directory*, std::unique_ptr<ClipSet>> inline_;
 };
 
 }  // namespace chr

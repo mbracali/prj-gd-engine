@@ -295,6 +295,7 @@ void ParticleSystem::emit(float frame, float dt) {
         free_.pop_back();
         init(pool_[i], frame);
         alive_.push_back(i);
+        ++startedTotal_;
         emitCount_ -= 1;
     }
 }
@@ -307,6 +308,7 @@ int ParticleSystem::launch(int n) {
         free_.pop_back();
         init(pool_[i], now);
         alive_.push_back(i);
+        ++startedTotal_;
     }
     return started;
 }
@@ -350,6 +352,21 @@ void ParticleSystem::poll(float clockFrames) {
     emit(now, dt);
 }
 
+void ParticleSystem::pollDrawn(float clockFrames, bool showing) {
+    if (!def_->preserved.empty()) return;
+    if (pollsSinceDraw_ == 0) {
+        if (showing) poll(clockFrames);
+        else lastFrame_ = frame_, lastClock_ = clockFrames;  // the time noted (+0x100)
+    }
+    ++pollsSinceDraw_;
+}
+
+void ParticleSystem::drawShowing(float clockFrames) {
+    if (!def_->preserved.empty()) return;
+    if (pollsSinceDraw_ >= 2) poll(clockFrames);  // the catch-up (move and emit)
+    pollsSinceDraw_ = 0;
+}
+
 void ParticleSystem::appendQuads(Vec3 camRight, Vec3 camUp, std::vector<float>& verts, std::vector<uint16_t>& indices) const {
     Vec3 right = camRight, up = camUp;
     if (local_) {
@@ -357,7 +374,10 @@ void ParticleSystem::appendQuads(Vec3 camRight, Vec3 camUp, std::vector<float>& 
         const scene::Xfm inv = inverse(drawSpace_);
         right = xfmDir(inv, camRight), up = xfmDir(inv, camUp);
     }
-    right = right * 0.5f, up = up * 0.5f;
+    // RB's particle draw (0x82476498) [C]: gParticleRight = the camera's
+    // right x 0.5, gParticleUp = its up x 0.5 x screen_aspect (the object's
+    // +0x1f0, read after life by Load 0x821D7870).
+    right = right * 0.5f, up = up * (0.5f * (def_->screenAspect > 0 ? def_->screenAspect : 1.0f));  // 0: as 1 [I]
     const Vec3 normal = normalize(cross(right, up));
     auto addParticle = [&](Vec3 pos, const float* color, float size, float angle) {
         if (verts.size() / 16 + 4 > 65535) return;
@@ -466,7 +486,7 @@ void ParticleSet::setFrame(float frame) {
     for (ParticleSystem& s : systems_) s.setFrame(frame);
 }
 
-void ParticleSet::update(const ScenePose& pose, const scene::Xfm& base, float clockFrames) {
+void ParticleSet::update(const ScenePose& pose, const scene::Xfm& base, float clockFrames, bool drawGated) {
     for (ParticleSystem& s : systems_) {
         const scene::ParticleSys& d = s.def();
         const scene::Xfm world = scene::compose(pose.world(&d), base);
@@ -487,7 +507,8 @@ void ParticleSet::update(const ScenePose& pose, const scene::Xfm& base, float cl
         if (!d.mesh.empty() && d.dir)
             if (const scene::Mesh* m = d.dir->resolve<scene::Mesh>(d.mesh))
                 s.setEmitterMesh(m, scene::compose(pose.world(m), base));
-        s.poll(clockFrames);
+        if (drawGated) s.pollDrawn(clockFrames, pose.showing(&d));
+        else s.poll(clockFrames);
     }
 }
 

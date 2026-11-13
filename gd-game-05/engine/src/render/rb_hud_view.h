@@ -13,6 +13,7 @@
 #include "scene/ui_styles.h"
 
 class GameData;
+class TempoMap;
 namespace scene {
 class Milo;
 class MiloLibrary;
@@ -84,6 +85,9 @@ public:
         bool won = false, lost = false;
         bool coda = false;
         int codaScore = 0;
+        // The song's tempo: the triggers' anims at k1_fpb / k480_fpb count
+        // beats (render/anim_rate.h); none: 120 beats a minute.
+        const TempoMap* tempo = nullptr;
     };
     // An element's box on the 1280 x 720 picture: from the milo data
     // (its shown meshes through the panel camera).
@@ -96,6 +100,12 @@ public:
         // arrow, a scoreboard star), whose textures leave clear edges, so
         // only its pixels inside the box are checked.
         bool strict = true;
+        // The element's glows (additive meshes: the Overdrive meter's
+        // player_meter_sun*.mesh while be_ready.trig's sunburst plays) with
+        // its meshes: a glow's texture fades to nothing towards its quad's
+        // edges, so its pixels may reach this far but need not
+        // (GD05-087). The strict box above leaves them out.
+        float ox0 = 0, oy0 = 0, ox1 = 0, oy1 = 0;
     };
 
     RbHudView();
@@ -105,7 +115,10 @@ public:
     bool loaded() const { return panel_ != nullptr; }
     // A new song: the panel's reset (reset_all.trig, every element's reset).
     // `introAtMs`: when the panel's intro (on_extend: intro.trig) plays.
-    void reset(float introAtMs);
+    // `tempo`: the new song's (the reset runs the panel's reset anims at
+    // their beat rates; the view keeps no pointer into an older song, whose
+    // chart a retry frees: GD05-086).
+    void reset(float introAtMs, const TempoMap* tempo);
     float introAt() const { return introAtMs_; }
     // Draws the HUD over the picture (its own camera; depth cleared).
     void draw(gfx::Renderer& r, gfx::SceneCache& cache, const State& state, float nowMs);
@@ -128,6 +141,11 @@ public:
     // [C data: track_paneldir.dta]. The band's tracks are this picture moved
     // onto their meters (trackRects).
     RbTrackView::Config trackConfig() const;
+    // The last draw's directories (the elements and their nested ones) and
+    // the pairs in them drawn out of draw order (render/draw_order.h): the
+    // walks' check, 0 as RB's RndDir draws (GD05-070).
+    int drawOrderInversions() const { return orderInversions_; }
+    int drawOrderDirs() const { return orderDirs_; }
     // What the elements show (the walks compare these with the players).
     struct Shown {
         std::string score, multiplier;  // score.txt, streak_meter_01's multiplier.txt ("" hidden)
@@ -141,11 +159,15 @@ private:
         const scene::Object* owner = nullptr;  // the panel's RndDir object
         scene::Directory* dir = nullptr;       // its inline directory
     };
+    const TempoMap* tempo_ = nullptr;  // the song's, for the beat rates
+    bool countOrder_ = false;
+    int orderInversions_ = 0, orderDirs_ = 0;
     struct Task {
         const scene::Object* anim = nullptr;
         float from = 0, to = 0, scale = 1;
         float t0 = 0;
         int type = 0;  // 0 range, 1 loop, 2 a hide later
+        int rate = 0;  // the entry's RndAnimatable rate (render/anim_rate.h)
     };
     const scene::Object* panelObj(const std::string& name) const;
     scene::Directory* subdir(const std::string& name) const;
@@ -153,7 +175,7 @@ private:
     void applyConfiguration(const std::string& name);
     bool trigger(const scene::Directory* d, const std::string& name, float nowMs);
     void trigger(const scene::EventTrigger& t, float nowMs);
-    void animate(const scene::Object* anim, float from, float to, int type, float scale, float startMs);
+    void animate(const scene::Object* anim, float from, float to, int type, float scale, float startMs, int rate = 0);
     void setFrame(const scene::Object* anim, float frame);
     bool applyPropAnim(const scene::Object& anim, float frame);
     void runTasks(float nowMs);
@@ -189,8 +211,16 @@ private:
         int state = -1;  // 0 none (filling), 1 ready, 2 deploying
         float energy = -1;
         bool failed = false, solo = false, intro = false;
+        bool deploying = false, iconFailed = false;  // crowd_meter's icon deploy / stop_deploy, state sent
     };
     std::array<TrackSeen, 3> seen_{};
+    int crowdDeployed_ = 0;  // crowd_meter.dta [deployed]: the members deploying
+    int fxCrowdTriggers_ = 0;  // crowd meter deploy / state triggers fired (the walks)
+
+public:
+    int crowdMeterTriggers() const { return fxCrowdTriggers_; }
+
+private:
     std::string scoreShown_;
     int bandMultShown_ = 0;
     bool wonSeen_ = false, lostSeen_ = false, codaSeen_ = false;

@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <functional>
 #include <memory>
 
 #include "render/device.h"
@@ -17,56 +18,75 @@ namespace scene {
 class PostProc;
 }
 
-// GH2's post-process of the 3D world, as the game's DX renderer does it
-// (DoPost 0x82303E68, called at the end of each frame from 0x823055E8;
-// docs/renderer.md "Post-process"):
+// Rock Band's post-process of the 3D world (NgPostProc::DoPost RB
+// 0x827DA600, the shaders in ark/xbox_shaders "postprocess", "bloom",
+// "downsample", "blur"; docs/renderer.md "Post-process"):
 //
-//   the world is drawn into the HDR buffer (2:10:10:10, colours / 4: the
-//   materials' HDR key bit) with its depth;
-//   DOF (when the camera shot asks): the buffer, unpacked, is box-filtered to
-//   a low-resolution copy and blurred twice (7 taps across, 7 down);
-//   bloom (when the PostProc's intensity > 0): a bright pass (per-channel
-//   threshold, plus a "white" part from the luminance), two 2x downsamples
-//   and a 15-tap Gaussian, down then across, at a quarter of the size;
-//   one full-screen pass to the screen: unpack, then for world pixels only
-//   (depth beyond the UI plane) DOF blend, bloom add, noise, colour
-//   transform and the luminance map (a 1D tone curve).
+//   the world is drawn into the world buffer with its depth (the port keeps
+//   GH2's colours / 4 in a 10-bit buffer; RB's frame is 8 bits a channel
+//   with the bloom mask in alpha, so the composite clamps the world at 1
+//   [I]);
+//   DOF (when the camera shot asks): a low-resolution copy blurred twice,
+//   blended by depth (the port keeps GH2's passes: RB's "DOF" variant
+//   blends its low-resolution buffer the same way);
+//   bloom (intensity > 0 and not (threshold >= 4 and bloom alpha <= 0),
+//   0x827D94D0): each world pixel times its bloom mask
+//   sat((bloom_color . rgb - threshold) / (4 - threshold)) (gBloomColor,
+//   0x827D8C18; RB's scene shaders write the mask in alpha, the port works
+//   it out from the colour [I]), two 2x downsamples, then a 15-tap blur
+//   down then across (0x827D8970: taps at (i + 0.5) * bloom_size / 7 of
+//   1/180 of the height / 1/320 of the width, weights exp(ln 0.1 * i^2 /
+//   49), normalised [I]);
+//   one full-screen pass to the screen (postprocess 0x16 / 0x1e): DOF
+//   blend, + bloom * bloom_intensity, the film grain as an overlay blend
+//   of two noise_map layers mix(c, overlay(c, n0 * n1), noise_intensity)
+//   (0x827D9190), then the ColorXfm with its 3x3 scaled by the flicker
+//   (0x827D93D8, 0x8218E948), clamped.
 //
-// GH2 draws the track and HUD into the same buffer in a near depth range so
-// that the final pass leaves them alone; gd05 draws them after end(), over
-// the post-processed world (the same picture, except that GH2's bright
-// gems also feed the world's bloom) [I].
+// Rnd also paces the world by the PostProc's emulate_fps (0x8218EF80 /
+// 0x8218EEA0, Rnd 0x821876F0): ProFilm's 24 draws the world on two of
+// every five 60 Hz frames (periods of 3 and 2 frames), showing the last
+// world picture in between; the track and HUD go on at the full rate.
+//
+// GH2 / RB draw the track and HUD into the same buffer; gd05 draws them
+// after end(), over the post-processed world [I].
 namespace gfx {
 
 class Renderer;
 
-// RndPostProc v9 (Load 0x821EB3D0, field offsets from SyncProperty
-// 0x821EB598, defaults from the constructor 0x821EAFB8): what a camera shot
-// selects. The venue loader fills it from scene::PostProc (postProcState).
+// RndPostProc rev 18 as NgPostProc uses it (fields: Load RB 0x82190F08,
+// SyncProperty 0x8218FC00, defaults: the constructor 0x8218F3E8): what a
+// camera shot selects. The venue loader fills it from scene::PostProc
+// (postProcState).
 struct PostProcState {
-    std::array<float, 4> bloomThreshold{4, 4, 4, 4};  // +0x28: r, g, b, white (unpacked HDR units)
-    float bloomKernel = 1;      // +0x38 bloom_kernel_multiplier: the Gaussian's gain per pass
-    float bloomScale = 1;       // +0x3c bloom_scale: the Gaussian's sigma, in quarter-size texels
-    float bloomIntensity = 0;   // +0x40: bloom on when > 0
-    TextureId luminanceMap;     // +0x44: 1D tone curve (luminance / 4 -> factor); none: off
-    // +0x64..+0x9c: rows red / green / blue select (rgb) and the biases (w).
+    std::array<float, 4> bloomColor{1, 1, 1, 0};  // +0x2c rgb, +0x38 bloom_alpha
+    float bloomThreshold = 1;  // +0x3c (world colour units, 0..4)
+    float bloomSize = 7;       // +0x40: the blur's reach (1/7 of it a tap)
+    float bloomIntensity = 0;  // +0x44: the blurred bloom's gain
+    TextureId luminanceMap;    // +0x48: 1D tone curve (luminance / 4 -> factor); none: off
+    // +0xa8: the ColorXfm's matrix: rows red / green / blue select (rgb) and the biases (w).
     std::array<float, 12> colorXfm{1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0};  // as stored: 3 selects, then 3 biases
-    std::array<float, 2> noiseBaseScale{32, 24};  // +0xc8
-    float noiseLayerScale = 1.3591f;              // +0xd0: the second noise layer's extra scale
-    float noiseIntensity = 0;                     // +0xd4: noise on when != 0
-    TextureId noiseMap;                           // +0xd8; none: the renderer's own noise
-    // Not drawn (no shipped PostProc uses them, [C] all 28 have the values
-    // that switch them off): +0xa4 flicker "intensity" / +0xac secs_range
-    // (0x821EA128), +0xe4 threshold / +0xe8 duration (BLENDPREVIOUS trails,
-    // on when threshold < 1 and duration > 0, 0x821EA228), COPYPREVIOUS.
+    std::array<float, 2> flickerIntensity{0, 0};  // +0xf4: the flicker's depth range (the ColorXfm x 1 - depth)
+    std::array<float, 2> flickerSecs{0.001f, 0.007f};  // +0xfc: seconds between flicker targets
+    std::array<float, 2> noiseBaseScale{32, 24};  // +0x118
+    float noiseTopScale = 1.3591f;                // +0x120: the second noise layer's extra scale
+    float noiseIntensity = 0;                     // +0x124: the grain's overlay weight
+    bool noiseStationary = false;                 // +0x128: a fixed phase
+    TextureId noiseMap;                           // +0x12c; the grain is off without one
+    float emulateFps = 30;                        // +0x150: the world's frame rate (0: every frame)
+    // Not drawn (no gameplay shot's PostProc uses them): posterize
+    // (num_levels / min_intensity), kaleidoscope (mirror), trails
+    // (threshold / duration), distortion.
 
-    bool bloomOn() const { return bloomIntensity > 0; }
+    bool bloomOn() const { return bloomIntensity > 0 && !(bloomThreshold >= 4 && bloomColor[3] <= 0); }
     bool colorXfmOn() const;
+    bool noiseOn() const { return noiseIntensity != 0 && noiseMap; }
 };
 
 // RndPostProc from a decoded scene object: textures resolved by the caller
 // (SceneCache::texture(&pp, pp.luminanceMap), empty when unnamed).
-PostProcState postProcState(const scene::PostProc& pp, TextureId luminanceMap, TextureId noiseMap = {});
+// `texture` resolves a map name (empty: none) to the venue's texture.
+PostProcState postProcState(const scene::PostProc& pp, const std::function<TextureId(const std::string&)>& texture);
 // PostProcBlendTask (RB 0x8220A508) [C]: `from` towards `to` by t (0..1);
 // the maps are the destination's from the start.
 PostProcState blendPostProc(const PostProcState& from, const PostProcState& to, float t);
@@ -100,6 +120,7 @@ constexpr uint32_t CopyPrevious = 1u << 6;   // not built
 constexpr int NumTapsShift = 14;             // blur.fx: taps - 1
 constexpr uint32_t LumMap = 1u << 20;
 constexpr uint32_t HdrOut = 1u << 21;  // the port's: Enhanced > HDR, no clamp at 1.0 (not GH2's)
+constexpr uint32_t Fog = 1u << 22;     // RB's spotlight beams (gFogDepth / gFogDensity variants)
 constexpr uint32_t All = ColorXfm | Noise | Dof | Bloom | LumMap;
 }  // namespace postkey
 
@@ -123,13 +144,31 @@ public:
     void setSettings(const PostSettings& s) { settings_ = s; }
     const PostSettings& settings() const { return settings_; }
     void setFrame(const PostFrame& f) { frame_ = f; }
+    // This frame's spotlight beams (RB's NgSpotlightDrawer, render/
+    // spotlight_view.h): the beam buffer, the density map and the
+    // composite's gFogDensity.xy / gFogRange.x; cleared by end().
+    struct Fog {
+        bool on = false;
+        TextureId beams, density;
+        float c82x = 0, c82y = 0, c91x = 0;
+    };
+    void setFog(const Fog& f) { fog_ = f; }
     // TAA's sub-pixel jitter for this frame's world (NDC; 0 when off).
     std::array<float, 2> jitter() { return capturing_ && enhanced_ && settings_.any() ? enhanced_->jitter(settings_, w_, h_) : std::array<float, 2>{0, 0}; }
     // The port's chain (tests: frames run, the last frame's passes); nullptr before the first.
     const EnhancedFx* enhanced() const { return enhanced_.get(); }
     // The composite program this frame used (tests: which of GH2's effects ran).
     uint32_t lastKey() const { return lastKey_; }
+    // Tests: worlds drawn (end) and frames that showed the last one again (hold).
+    int worldDraws() const { return worldDraws_; }
+    int worldHolds() const { return worldHolds_; }
     bool lastDof() const { return lastDof_; }
+
+    // Rnd's world pacing by the selected PostProc's emulate_fps: true on the
+    // frames that show the last world picture again (drawn by this call into
+    // the picture, as end() would); the caller then draws no world. Call
+    // once a frame before begin().
+    bool hold();
 
     // Starts drawing the world into the HDR buffer (sized to the picture),
     // cleared to `clear` (rgba 0..1, stored / 4) with its depth. Returns
@@ -155,12 +194,14 @@ public:
     static std::string keyName(uint32_t key);
 
 private:
-    enum class Pass : uint8_t { Composite, Collapse, Bright, Downsample, Blur7, Blur15, Debug };
+    enum class Pass : uint8_t { Composite, Collapse, Bright, Downsample, Blur7, Blur15, Debug, Copy };
     static ProgramDesc describe(Pass pass, uint32_t key);
     ProgramId program(Pass pass, uint32_t key);
     bool ensureTargets(int w, int h);
     void destroyTargets();
     void quad(TargetId target, ProgramId p, const TextureId* tex, const SamplerState* samp, int slots, const void* block, size_t size);
+    void updateFlicker(float dt);
+    void present(int x, int y, int pw, int ph);  // the held picture (ldr_) into the picture rect
 
     Renderer& renderer_;
     RenderDevice& device_;
@@ -171,10 +212,11 @@ private:
     bool capturing_ = false;
     int w_ = 0, h_ = 0;
     TargetId hdr_, dofA_, dofB_, bloomHalf_, bloomA_, bloomB_;
-    TargetId ldr_;  // GH2's pass's result when the port's chain follows
+    TargetId ldr_;  // the composite's result when the port's chain follows, or when the world is paced
     bool ldrF16_ = false, worldF16_ = false;  // Enhanced > HDR: RGBA16F
     PostSettings settings_;
     PostFrame frame_;
+    Fog fog_;
     std::unique_ptr<EnhancedFx> enhanced_;
     uint32_t lastKey_ = 0;
     bool lastDof_ = false;
@@ -182,6 +224,21 @@ private:
     BufferId triangle_;
     TextureId noise_;
     uint32_t seed_ = 0x2545f491u;
+    float random();  // 0..1
+    // The flicker (RB 0x8218E948): the ColorXfm's factor, eased from the
+    // last target to the next over a random period.
+    float flicker_ = 1, flickerFrom_ = 0, flickerTo_ = 0, flickerT_ = 0, flickerPeriod_ = 0;
+    uint64_t lastNs_ = 0;
+    std::array<float, 2> stationaryPhase_{0, 0};  // NgPostProc +0x168 (random at construction)
+    std::array<float, 4> frozenPhase_{};  // the last grain phases (GD05_POST_FREEZE)
+    bool frozenPhaseSet_ = false;
+    // The pacing (RB 0x8218EF80): 60 Hz ticks, the period's tick, its
+    // length and the alternating remainder.
+    uint64_t tick_ = 0, tickStartNs_ = 0;
+    int paceFps_ = 0, paceStep_ = 0, paceLen_ = 0, paceRem_ = 0;
+    int worldDraws_ = 0, worldHolds_ = 0;
+    bool held_ = false;     // ldr_ holds the last world picture
+    bool paced_ = false;    // this frame's world goes through ldr_
     std::unordered_map<uint32_t, ProgramId> programs_;  // (pass << 24) ^ key
 };
 

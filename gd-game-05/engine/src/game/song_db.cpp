@@ -5,6 +5,8 @@
 #include "data/dta.h"
 #include "data/game_data.h"
 
+#include <algorithm>
+
 namespace {
 
 // The values of (key v0 v1 ...) or (key (v0 v1 ...)).
@@ -104,8 +106,20 @@ std::vector<SongInfo> loadSongs(const GameData& data) {
             }
         }
         s.tutorial = s.rank.empty();
+        if (const DataNode* u = entry.find("unlockable"); u && u->children.size() > 1)
+            s.unlockable = u->children[1].isText() ? u->children[1].s == "TRUE" : u->intAt(1) != 0;
         if (s.name.empty()) s.name = s.id;
         if (data.exists(s.audio.moggPath) && data.exists(s.audio.midiPath)) songs.push_back(std::move(s));
     }
     return songs;
+}
+
+std::vector<std::string> rankedSongs(const std::vector<SongInfo>& songs, const std::string& instrument, bool unlockable) {
+    std::vector<const SongInfo*> v;
+    for (const SongInfo& s : songs)
+        if (!s.tutorial && s.unlockable == unlockable && s.rank.count(instrument)) v.push_back(&s);
+    std::stable_sort(v.begin(), v.end(), [&](const SongInfo* a, const SongInfo* b) { return a->rank.at(instrument) < b->rank.at(instrument); });
+    std::vector<std::string> out;
+    for (const SongInfo* s : v) out.push_back(s->id);
+    return out;
 }

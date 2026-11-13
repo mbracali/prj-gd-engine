@@ -198,6 +198,13 @@ private:
     // it has rested (textColors), the ones too dark kept for finish().
     bool textColors_ = false;
     std::set<std::string> textColorsSeen_;
+    int songlistHlChecks_ = 0, songlistHlMax_ = 0;  // rb_songlist_highlight (GD05-073)
+    int qpLockedListed_ = 0, qpRandomLocked_ = 0;  // rb_qp_locked (GD05-073)
+    // rb_od_* (GD05-073): the Overdrive checks' state.
+    int odChecks_ = 0, odPhase_ = 0, odFills_ = 0, odGaps_ = 0, odDrainErrPct_ = 0;
+    bool odFreestyleSeen_ = false, odVocal_ = false;
+    float odStartMeter_ = 0;
+    double odStartBeat_ = 0, odStartMs_ = 0;
     std::vector<std::string> textColorsBad_;
     double textColorsSince_ = -1;
     std::array<float, 3> camera_{};  // the main menu's camera (the back walk)
@@ -210,7 +217,22 @@ private:
     int lagStrikes_ = 0;                           // the options walk: strums on the lag clicks
     bool encoreDeclined_ = false;                  // career_song: NO on the encore offer
     std::string winTarget_;                        // career_win: the tour's last song
+    // rb_career (GD05-072): the creator's look before the choices, the
+    // cash before the shop / the gig, the gig's stars.
+    std::string careerHair0_;
+    int careerCash_ = -1, careerStars_ = -1;
+    int tourBonusPlayed_ = 0;  // rb_tour_rules: the (unlock N) gigs completed so far (GD05-085)
     int shotN_ = 0;                                // venue_follow: screenshot number
+    // rb_look (GD05-069): each sampled world frame's luma mean, contrast,
+    // saturation and grain; the last gameplay frame's background box luma
+    // (the pause rule).
+    std::vector<std::array<double, 4>> lookFrames_;
+    std::vector<float> lookPrePause_;  // the luma (640x360) just before the pause
+    std::string lookPauseError_;
+    int lookPauseOk_ = 0, lookPauseDark_ = 0;  // rb_look: pauses measured, pauses on a dark world (skipped)
+    long long lookBeamPx_ = -1, lookBeamZero_ = -1;  // rb_look: the most beam pixels in a frame; with base / smoke 0
+    int lookBeamFrames_ = 0;                      // rb_look: frames with beam pixels
+    std::array<double, 3> lookPace_{-1, 0, 0};  // wall ms, world draws, frames at the first look frame
     float nameX0_ = 0;               // the career walk's band name: where it starts
     // rb_fuzz: the generator, steps, the main menu's buttons, pacing, the last actions.
     std::mt19937 fuzzRng_;

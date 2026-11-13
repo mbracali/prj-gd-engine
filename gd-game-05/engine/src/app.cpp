@@ -5,10 +5,12 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <random>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -19,12 +21,14 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "app_ids.h"
 #include "audio/audio_device.h"
 #include "audio/mixer.h"
 #include "audio/synth.h"
+#include "char/character.h"
 #include "char/midi_parser.h"
 #include "data/dta.h"
 #include "data/game_data.h"
@@ -49,11 +53,11 @@
 #include "platform/paths.h"
 #include "render/canvas.h"
 #include "render/core_backend.h"
-#include "render/hdr_output.h"
 #include "render/highway.h"
 #include "render/hud_view.h"
 #include "render/scene_gpu.h"
 #include "render/track_view.h"
+#include "render/anim_rate.h"
 #include "render/rb_hud_view.h"
 #include "render/rb_track_view.h"
 #include "render/vocal_track_view.h"
@@ -69,6 +73,8 @@
 #include "ui/enhanced_panel.h"
 #include "ui/screen_text.h"
 #include "ui/ui_host.h"
+#include "render/char_skin.h"
+#include "ui/rb_meta.h"
 #include "ui/ui_manager.h"
 #include "video/wmv_player.h"
 
@@ -218,12 +224,85 @@ private:
     uint64_t start_ = 0, end_ = 0, pos_ = 0, fade_ = 0;
 };
 
+// The menus' music streams (a song's preview, the meta loops, the credits)
+// open off the frame: reading, deciphering and opening a song's mogg took
+// 100..240 ms on the main thread, a stutter at every preview the song list
+// started (GD05-073). RB streams them from the disc too. One stream opens
+// at a time; a request while one opens replaces the waiting one (scrolling
+// down the list), and only the latest request is played.
+class MusicLoader {
+public:
+    struct Request {
+        std::string key, arkPath;
+        double startMs = 0, endMs = 0, fadeMs = 0;
+    };
+    ~MusicLoader() { join(); }
+    void request(const GameData& data, Request r) {
+        data_ = &data;
+        want_ = std::move(r);
+        wanted_ = true;
+        if (!thread_.joinable() && !legacyDone_) start();
+    }
+    void cancel() { wanted_ = false; }
+    // The stream of the latest request once it is open (its key in `key`), else null.
+    std::unique_ptr<LoopSource> poll(std::string& key) {
+        std::unique_ptr<LoopSource> out;
+        if ((thread_.joinable() || legacyDone_) && done_) {
+            if (thread_.joinable()) thread_.join();
+            legacyDone_ = false;
+            if (!error_.empty()) SDL_Log("music %s: %s", job_.key.c_str(), error_.c_str());
+            if (wanted_ && result_ && job_.key == want_.key) out = std::move(result_), key = job_.key, wanted_ = false;
+            result_.reset();
+        }
+        if (wanted_ && !thread_.joinable() && !legacyDone_) start();
+        return out;
+    }
+    void join() {
+        if (thread_.joinable()) thread_.join();
+        result_.reset();
+    }
+
+private:
+    void start() {
+        job_ = want_;
+        done_ = false;
+        error_.clear();
+        if (SDL_getenv("GD05_MUSIC_LEGACY")) {  // the code before: opened on the frame that asks
+            try {
+                result_ = std::make_unique<LoopSource>(std::make_unique<VorbisStream>(data_->read(job_.arkPath)), job_.startMs, job_.endMs, job_.fadeMs);
+            } catch (const std::exception& e) {
+                error_ = e.what();
+            }
+            done_ = true;
+            legacyDone_ = true;
+            return;
+        }
+        thread_ = std::thread([this, job = job_, data = data_] {
+            try {
+                auto s = std::make_unique<VorbisStream>(data->read(job.arkPath));
+                result_ = std::make_unique<LoopSource>(std::move(s), job.startMs, job.endMs, job.fadeMs);
+            } catch (const std::exception& e) {
+                error_ = e.what();
+            }
+            done_ = true;
+        });
+    }
+    const GameData* data_ = nullptr;
+    Request want_, job_;
+    bool wanted_ = false;
+    std::thread thread_;
+    std::atomic<bool> done_{false};
+    bool legacyDone_ = false;
+    std::unique_ptr<LoopSource> result_;
+    std::string error_;
+};
+
 // Enhanced > Graphics / Audio Backend as this start of the game uses them
 // (startupGraphicsBackend / startupAudioBackend in app.h): read from
 // enhanced.json once, at the start of App::run (each restart reads it again).
 struct StartupBackends {
     bool latched = false;
-    std::string graphics = "local", audio = "local";
+    std::string graphics = gfx::backendId(gfx::kDefaultBackend), audio = audiodev::kDefaultBackend;
 };
 StartupBackends& startupBackends() {
     static StartupBackends b;
@@ -299,6 +378,8 @@ public:
     std::array<SongResult, 2> lastResult_{};
     const BandPerformer* gameBand() const override { return coopBand_.get(); }
     int gameCounter(int player, const std::string& key) const override;
+    // GD05_FORCE_SHOT: a CamShot by name, or #N the venue's N-th BandCamShot by name.
+    const scene::CamShot* forcedShot(const std::string& spec) const;
     void setPlayerSwitch(int index, const std::string& name, bool on) override {
         Player* p = index == 0 ? player_.get() : player2_.get();
         if (!p) return;
@@ -308,6 +389,15 @@ public:
     void setPlayerStarPower(int index, const std::string& what, float value) override {
         Player* p = index == 0 ? player_.get() : player2_.get();
         if (!p) return;
+        // GD05-073's Overdrive walks: the singer's meter, and a shout (loud, no pitch) for `value` ms.
+        if (what == "vocal_meter") {
+            if (vocal_) vocal_->setOverdriveMeter(value);
+            return;
+        }
+        if (what == "vocal_shout") {
+            voiceShoutUntilMs_ = lastT_ + value;
+            return;
+        }
         if (what == "meter") p->setStarMeter(value);
         else if (what == "deploy_rate") p->setDeployRate(value);
         else if (what == "phrase_boost") p->setPhraseBoost(value);
@@ -438,14 +528,13 @@ private:
     void drawFpsCounter();
     // Enhanced Options only: "Graphics: X   Audio: Y", the backends this run uses.
     void drawBackendLabel();
-    // The graphics backend that draws now (after any fallback): "local" until
-    // the gd-engine-core renderer lands (GDCORE-008; the graphics work returns
-    // the device's real id here).
-    std::string graphicsBackendNow() const { return gfx::backendId(gfx::rendererBackend()); }  // what draws (after a fallback)
-    // The audio backend that plays now (after any fallback).
+    // The graphics backend that draws now (after any fallback).
+    std::string graphicsBackendNow() const { return gfx::backendId(gfx::rendererBackend()); }
+    // The audio backend that plays now (after any fallback; the asked one
+    // while nothing plays).
     static std::string audioBackendNow() {
         const std::string b = audiodev::backend();
-        return b.empty() ? std::string("local") : b;
+        return b.empty() ? audiodev::askedBackend() : b;
     }
     // Enhanced Options > Enable Touch Controls: the track's lanes for the
     // fingers (Input::setTouchLanes) and the on-screen buttons.
@@ -558,6 +647,9 @@ private:
     std::unique_ptr<VocalInput> mic_;
     VocalTrackView vocalView_;
     float vocalRating_ = 0.5f, voicePitch_ = -1, voiceLoud_ = 0;
+    float voiceShoutUntilMs_ = -1e30f;
+    float botFillStrikeMs_ = -1e30f;  // the autoplay drummer's last fill strike
+    int botFillLane_ = 0;  // a walk's shout into the "microphone" (setPlayerStarPower vocal_shout)
     const char* vocalRatingName_ = nullptr;
     float vocalRatingMs_ = -1e9f;
     int vocalPhrasesHit_ = 0;
@@ -676,6 +768,18 @@ private:
     float rbHudNextProbeMs_ = 15000;
     int rbHudProbes_ = 0, rbHudBoxes_ = 0, rbHudBoxErrPx_ = 0, rbHudValueErrors_ = 0;
     int rbNowBarGemPx_ = -1, rbNowBarCoverPct_ = -1;  // the now-bar probe (rbHudProbe)
+    // The walks' highway and crowd probes (GD05-070 / GD05-071, rb_highway
+    // and rb_crowd; GD05_METER_PROBE / GD05_TAIL_PROBE / GD05_CROWD_PROBE=1):
+    // under the frame, each part alone over magenta, its pixels measured.
+    void rbProbes();
+    struct RbProbeStats {
+        std::vector<std::pair<float, float>> meter;  // (song ms, Overdrive meter luma) a frame
+        int meterJumps = 0, meterFlickers = 0, meterBeats = 0, meterFrames = 0;
+        int starTails = 0, starTailsWrong = 0;   // summed over the frames
+        int tailPx = 0, tailChromaPct = -1;       // the last star-tail probe
+        int crowdPx = 0, crowdPxMax = 0, crowdProbes = 0, crowdFrames = 0, crowdCharsMax = 0;
+        int trackOrderErrors = 0, trackOrderParts = 0, hudOrderInversions = 0, hudOrderDirs = 0;
+    } rbProbe_;
     // The venue behind the track (M8): set by the venue code once a venue is
     // loaded; draws the world with the renderer, materials with
     // DrawContext::hdr = `hdr` (GH2's HDR buffer, render/post_fx.h).
@@ -728,7 +832,7 @@ private:
     // effect, and the FPS counter's average.
     Json enhanced_ = Json::object();
     // Enhanced > HDR > True HDR: the window's surface (chosen at start) and why it is SDR when it is.
-    hdr::Surface hdrSurface_ = hdr::Surface::Sdr;
+    int hdrSurface_ = 0;  // the swapchain's colour space: 0 SDR, 1 scRGB, 2 PQ (RenderDevice::hdrSurface)
     std::string hdrReason_, hdrApplied_;
     std::string hdrStatus();
     std::string savedHdrMode();  // enhanced.json's HDR before the window exists
@@ -753,6 +857,25 @@ private:
     float failMs_ = -1e9f;
     // The menus' music: none, a meta loop or a song's preview.
     enum class Music { None, Menu, Preview, Credits } music_ = Music::None;
+    Music musicPending_ = Music::None;  // the stream musicLoader_ opens
+    int musicPlays_ = 0;                 // streams musicLoader_ handed to the mixer (the walks)
+    // GD05-073: each frame's work time (ms) and marks at moments that used
+    // to stutter (a preview asked for / playing, the song's start), for the
+    // walks' frame_spikes checks (ratios to the frames' median: load on the
+    // machine moves both). GD05_FRAMELOG=1 logs the frames after a mark.
+    std::vector<float> frameWorkMs_;
+    std::vector<std::pair<size_t, std::string>> frameMarks_;
+    int frameLogLeft_ = 0;
+    void markFrame(const std::string& tag) {
+        frameMarks_.push_back({frameWorkMs_.size(), tag});
+        if (envOn("GD05_FRAMELOG")) frameLogLeft_ = 240, SDL_Log("frames: mark %s at frame %zu", tag.c_str(), frameWorkMs_.size());
+    }
+    int frameSpikeRatio(const std::string& spec) const;
+    int gpuUploads() const { return (venueCache_ ? venueCache_->uploads() : 0) + (sceneCache_ ? sceneCache_->uploads() : 0); }
+    int uploadsAtBegin_ = -1;  // gpuUploads() as the song began
+    void warmWorld();
+    MusicLoader musicLoader_;
+    void pollMusic();
     // GH2's sound effects (audio/synth.h): config/sound.dta's banks, the
     // venue's through the world; made with the game data.
     std::unique_ptr<Synth> synth_;
@@ -777,11 +900,6 @@ int App::run() {
     // 1430:4748:guitar) plugs in a virtual controller, to test without hardware.
     if (const char* vp = SDL_getenv("GD05_VIRTUAL_PAD")) virtualPad_ = Input::attachVirtualPad(vp);
     inputLog_ = envOn("GD05_INPUTLOG");
-    // Enhanced > Graphics Backend (GDCORE-008, render/core_backend.h): local
-    // (gd05's OpenGL device) or a gd-engine-core backend, decided before the
-    // window: SDL3 GPU and Vulkan need a window made for their API (in the
-    // launcher, prepareWindowFor asks it for one). Local and opengl3 keep the
-    // OpenGL window.
     debugHighway_ = envOn("GD05_DEBUG_HIGHWAY");
     debugMenu_ = envOn("GD05_DEBUG_MENU");
     if (!options_.walk.empty()) {
@@ -802,46 +920,48 @@ int App::run() {
     {
         std::string audio = startupBackends().audio;
         if (const char* b = SDL_getenv("GD05_AUDIO_BACKEND"); b && *b) audio = b;
-        audiodev::setBackend(audio);  // every sound's output (audio/audio_device.h); local is SDL's device
+        audiodev::setBackend(audio);  // every sound's output (audio/audio_device.h)
     }
-    const gfx::Backend graphicsBackend = gfx::chosenBackend(startupBackends().graphics);
-    const bool gpuWindow = graphicsBackend == gfx::Backend::Sdl3 || graphicsBackend == gfx::Backend::Vulkan;
     SDL_WindowFlags baseFlags = SDL_WINDOW_RESIZABLE;
 #ifdef __ANDROID__
     baseFlags |= SDL_WINDOW_FULLSCREEN;
 #endif
-    SDL_WindowFlags flags = baseFlags | gfx::prepareWindowFor(graphicsBackend);  // OpenGL (render/device.h) for local
-    // Enhanced > HDR > True HDR: the window's surface is chosen now (render/hdr_output.h).
-    // A window or surface that cannot be made with it is made again without (Emulated).
-    // The surface probe is local's (an OpenGL context): on the core backends True HDR runs as Emulated.
-    hdrReason_ = graphicsBackend != gfx::Backend::Local
-                     ? std::string("True HDR is not on the ") + gfx::backendId(graphicsBackend) + " graphics backend yet"
-                     : hdr::unsupportedReason();
+    // Enhanced > HDR > True HDR: the Vulkan backend's HDR swapchain, asked
+    // for when the device starts (Emulated when there is none, and why).
     const bool trueHdr = savedHdrMode() == "true";
-    const bool wantHdr = trueHdr && graphicsBackend == gfx::Backend::Local && hdr::request();
-    window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
-    if (wantHdr) {
+    gfx::setHdrRequest(trueHdr);
+    // The graphics backends to try, best first (render/core_backend.h, D71):
+    // each needs a window made for its API (in the launcher, prepareWindowFor
+    // asks it for one), so a backend that cannot start has its window made
+    // again for the next (rule 2: never a black screen).
+    std::string error, failed;
+    bool rendererOk = false;
+    for (const gfx::Backend b : gfx::backendsToTry(startupBackends().graphics)) {
         if (window_) {
-            if (SDL_GLContext probe = SDL_GL_CreateContext(window_)) {
-                hdrSurface_ = hdr::obtained(hdrReason_);
-                SDL_GL_DestroyContext(probe);
-            } else {
-                hdrReason_ = hdr::failure("no OpenGL context on an HDR surface", SDL_GetError());
-            }
-        } else {
-            hdrReason_ = hdr::failure("no window with an HDR surface", SDL_GetError());
+            SDL_Log("graphics backend: %s: making the window again for %s", failed.c_str(), gfx::backendId(b));
+            SDL_DestroyWindow(window_);
         }
-        if (hdrSurface_ == hdr::Surface::Sdr) {
-            if (window_) SDL_DestroyWindow(window_);
-            hdr::cancel();
-            window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
-        }
+        window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), baseFlags | gfx::prepareWindowFor(b));
+        if (window_) setAppWindowIcon(window_);
+        gfx::setRendererBackend(b);
+        error.clear();
+        rendererOk = window_ && canvas_.init(window_, error);
+        if (rendererOk) break;
+        failed = gfx::backendId(b);
+        SDL_Log("graphics backend: %s did not start (%s)", failed.c_str(), window_ ? error.c_str() : SDL_GetError());
     }
+    if (!rendererOk) {
+        std::fprintf(stderr, "%s: cannot open the window: %s\n", app::kProgram, window_ ? error.c_str() : SDL_GetError());
+        SDL_Quit();
+        return 2;
+    }
+    SDL_Log("graphics backend: %s (gd-engine-core)", gfx::backendId(gfx::rendererBackend()));
+    hdrSurface_ = canvas_.renderer().device().hdrSurface();
+    hdrReason_ = hdrSurface_ ? "" : canvas_.renderer().device().hdrReason();
     if (trueHdr)
-        SDL_Log("hdr: %s", hdrSurface_ == hdr::Surface::ScRgb ? "scRGB surface (linear, RGBA16F)"
-                           : hdrSurface_ == hdr::Surface::Pq  ? "BT.2020 PQ surface"
-                                                              : ("unavailable (" + hdrReason_ + "), using Emulated").c_str());
-    setAppWindowIcon(window_);
+        SDL_Log("hdr: %s", hdrSurface_ == 1   ? "scRGB surface (linear, RGBA16F)"
+                           : hdrSurface_ == 2 ? "BT.2020 PQ surface"
+                                              : ("unavailable (" + hdrReason_ + "), using Emulated").c_str());
     installDesktopEntry();
     // Touch: window-normalised positions to menu units (the 16:9 picture).
     input_.setTouchToMenu([this](float nx, float ny, float& mx, float& my) {
@@ -851,30 +971,6 @@ int App::run() {
         mx = (nx * float(ww) - (float(ww) - 1280.0f * scale) * 0.5f) / scale;
         my = (ny * float(wh) - (float(wh) - 720.0f * scale) * 0.5f) / scale;
     });
-    std::string error;
-    gfx::setRendererBackend(graphicsBackend);
-    bool rendererOk = window_ && canvas_.init(window_, error);
-    if (!rendererOk && graphicsBackend != gfx::Backend::Local) {
-        // The core backend did not start: local runs instead (rule 2: never a
-        // black screen); an SDL3 GPU / Vulkan window is made again for
-        // OpenGL first (in the launcher the shim gets its OpenGL window back).
-        SDL_Log("graphics backend: %s did not start (%s); using local", gfx::backendId(graphicsBackend), window_ ? error.c_str() : SDL_GetError());
-        if (gpuWindow) {
-            SDL_Log("graphics backend: %s: making the window again for OpenGL (local)", gfx::backendId(graphicsBackend));
-            if (window_) SDL_DestroyWindow(window_);
-            window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), baseFlags | gfx::prepareWindowFor(gfx::Backend::Local));
-            if (window_) setAppWindowIcon(window_);
-        }
-        gfx::setRendererBackend(gfx::Backend::Local);
-        error.clear();
-        rendererOk = window_ && canvas_.init(window_, error);
-    }
-    if (!rendererOk) {
-        std::fprintf(stderr, "%s: cannot open the window: %s\n", app::kProgram, window_ ? error.c_str() : SDL_GetError());
-        SDL_Quit();
-        return 2;
-    }
-    canvas_.renderer().device().setHdrSurface(int(hdrSurface_));
     if (!mixer_.open(error)) {
         std::fprintf(stderr, "%s: cannot open the audio device: %s\n", app::kProgram, error.c_str());
         canvas_.shutdown();
@@ -942,6 +1038,9 @@ int App::run() {
         // frames a second instead of spinning; gd01's frame limiter comes
         // with its renderer.
         const uint64_t spent = SDL_GetTicksNS() - frameStart;
+        frameWorkMs_.push_back(float(double(spent) / 1e6));
+        if (frameLogLeft_ > 0 && --frameLogLeft_ >= 0)
+            SDL_Log("frames: %zu %.2f ms %s%s", frameWorkMs_.size() - 1, double(spent) / 1e6, ui_ ? ui_->currentScreen().c_str() : "-", player_ ? " (song)" : "");
         // Development aid (GD05-034, the load stutter): GD05_HITCHLOG=<ms>
         // logs every frame whose work took longer, with its screen; the
         // longest and the count print at the end.
@@ -1005,6 +1104,7 @@ bool App::loadData(const std::string& path) {
         sceneCache_.reset(), milos_.reset();
         trackTried_ = false;
         synth_.reset();
+        musicLoader_.cancel(), musicLoader_.join(), musicPending_ = Music::None;
         data_ = std::move(data), rules_ = rules, songs_ = std::move(songs);
         // The sound effects: the banks decode here (all of them: ~0.1 s).
         const uint64_t t0 = SDL_GetTicksNS();
@@ -1284,6 +1384,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         loadVenue(v, var);
     }
     if (!band_ && song_ && info_) startBand(*info_, *song_);
+    warmWorld();
     worldDriver_ = WorldDriver(!ui_);
     worldDriver_.reset(float(-leadInMs_));
     return true;
@@ -1437,6 +1538,9 @@ float App::practiceBackgroundDb() const {
 
 void App::beginSong() {
     if (!pendingStream_ || !info_) return;
+    warmWorld();  // anything loaded since the song's load (a venue world_panel loaded after it)
+    markFrame("song_begin");
+    uploadsAtBegin_ = gpuUploads();
     // GamePanel's start (0x822CCA60): the intro clock from the INTRO shot's
     // length (CamShot +0xf0 = every keyframe's duration + blend, frames at
     // 30 a second, 0x82226630) [C].
@@ -1458,7 +1562,7 @@ void App::beginSong() {
     if (skipIntro_) extendAtMs_ = float(startMs) - 10000.0f;
     extendSent_ = skipIntro_;
     rbExtendMs_ = skipIntro_ || practice ? float(startMs) : float(std::max(startMs, 0.0));
-    if (rbHud_) rbHud_->reset(rbExtendMs_);  // track_panel.dta on_reset / on_extend (intro.trig)
+    if (rbHud_) rbHud_->reset(rbExtendMs_, song_ ? &song_->tempo : nullptr);  // track_panel.dta on_reset / on_extend (intro.trig)
     controllersLive_ = false;
     heldBeforeLive_ = {};
     introSfx_ = 0;
@@ -2250,6 +2354,7 @@ void App::updateVocals(float t) {
         pitch = vocal_->targetPitch(t);
         loud = vocal_->percussionDue(t) ? 0.6f : vocal_->noteAt(t) ? 0.3f : 0.0f;  // taps the tambourine's gems
     }
+    if (t < voiceShoutUntilMs_) loud = 1.0f, pitch = -1;
     voicePitch_ = pitch, voiceLoud_ = loud;
     if (SDL_getenv("GD05_VOCALLOG")) {
         static float next = 0;
@@ -2435,6 +2540,12 @@ void App::updateSong(float t) {
     if (!over && !paused_) {
         keys_.feed(*player_, t);
         if (bot_) bot_->feed(*player_, t);
+        // The autoplay drummer plays a shown fill as a player does (a pad
+        // every 150 ms, the lanes in turn): RB's crash deploys only after
+        // crash_fill_ready_hits strikes in the fill (RbBonus::codaStrike)
+        // [test aid, GD05-073: the autoplay hit the crash alone, never deployed].
+        if (bot_ && rbBonus_ && rbBonus_->fillActive(t) && t - botFillStrikeMs_ >= 150.0f)
+            rbBonus_->codaStrike(botFillLane_++ % 4, t), botFillStrikeMs_ = t;
         // A test aid: GD05_AUTODEPLOY=1 deploys Overdrive as soon as it is ready.
         static const bool autoDeploy = SDL_getenv("GD05_AUTODEPLOY") != nullptr;
         if (bot_ && autoDeploy && player_->starPowerReady()) player_->starPowerButton(t);
@@ -2557,9 +2668,10 @@ void App::updateSong(float t) {
             director_->setStarPower(player_->starPowerActive() || (player2_ && player2_->starPowerActive()));
             rbShots(t);
             director_->update();
-            // Development aid: GD05_FORCE_SHOT=<CamShot> plays that shot whenever another starts.
+            // Development aid: GD05_FORCE_SHOT=<CamShot> plays that shot whenever another starts;
+            // #N the venue's N-th BandCamShot by name (the rb_look walk's fixed shots).
             if (const char* fs = SDL_getenv("GD05_FORCE_SHOT"))
-                if (const auto* shot = venue_->find<scene::CamShot>(fs); shot && director_->shot() != shot) {
+                if (const auto* shot = forcedShot(fs); shot && director_->shot() != shot) {
                     director_->forceShot(shot);
                     director_->update();
                 }
@@ -2699,6 +2811,7 @@ void App::frameSong() {
 // track and HUD are its game panels).
 void App::frameUi() {
     const double now = double(SDL_GetTicksNS()) / 1e6 - uiStartMs_;
+    pollMusic();
     updateCursor();
     actions_.clear();
     input_.poll(SDL_GetTicksNS(), actions_);
@@ -2846,8 +2959,109 @@ void App::gameBegin() {
     beginSong();
 }
 
+const scene::CamShot* App::forcedShot(const std::string& spec) const {
+    if (!venue_) return nullptr;
+    if (spec.empty() || spec[0] != '#') return venue_->find<scene::CamShot>(spec);
+    std::vector<scene::BandCamShot*> shots = venue_->all<scene::BandCamShot>();
+    // #crowdN: the N-th of those with a crowd (the rb_crowd walk).
+    const bool crowd = spec.rfind("#crowd", 0) == 0;
+    if (crowd) shots.erase(std::remove_if(shots.begin(), shots.end(), [](const scene::BandCamShot* s) { return s->crowd.empty(); }), shots.end());
+    if (shots.empty()) return nullptr;
+    std::sort(shots.begin(), shots.end(), [](const scene::BandCamShot* a, const scene::BandCamShot* b) { return a->name < b->name; });
+    return shots[size_t(std::max(0, std::atoi(spec.c_str() + (crowd ? 6 : 1)))) % shots.size()];
+}
+
+// frame_spike:<tag>:<frames>: for each mark `tag`, the longest frame of
+// the `frames` after it against the median frame of the run's frames from
+// the first such mark on (x10, an integer). With several marks the median
+// of their windows' ratios (one slow frame from the machine's load does not
+// decide); "<tag>!" takes the largest instead.
+int App::frameSpikeRatio(const std::string& spec) const {
+    const size_t c = spec.find(':');
+    std::string tag = spec.substr(0, c);
+    const bool worst = !tag.empty() && tag.back() == '!';
+    if (worst) tag.pop_back();
+    const size_t window = c == std::string::npos ? 60 : size_t(std::max(1, std::atoi(spec.c_str() + c + 1)));
+    size_t first = frameWorkMs_.size();
+    for (const auto& m : frameMarks_)
+        if (m.second == tag) first = std::min(first, m.first);
+    if (first >= frameWorkMs_.size()) return -1;
+    std::vector<float> all(frameWorkMs_.begin() + std::ptrdiff_t(first), frameWorkMs_.end());
+    std::nth_element(all.begin(), all.begin() + std::ptrdiff_t(all.size() / 2), all.end());
+    const float median = std::max(0.05f, all[all.size() / 2]);
+    std::vector<float> ratios;
+    for (const auto& m : frameMarks_) {
+        if (m.second != tag) continue;
+        float mx = 0;
+        for (size_t f = m.first; f < std::min(frameWorkMs_.size(), m.first + window); ++f) mx = std::max(mx, frameWorkMs_[f]);
+        ratios.push_back(mx / median);
+    }
+    std::sort(ratios.begin(), ratios.end());
+    const float r = worst ? ratios.back() : ratios[ratios.size() / 2];
+    SDL_Log("frames: %s: %zu marks, median frame %.2f ms, window max / median: median %.1f, largest %.1f", tag.c_str(), ratios.size(),
+            double(median), double(ratios[ratios.size() / 2]), double(ratios.back()));
+    return int(std::lround(r * 10));
+}
+
+// GD05-073: the world's textures and meshes (the venue and its proxies,
+// the band, the crowd) and the track's and the HUD's go to the GPU while
+// the song loads, not on the frame that first draws each: that frame
+// stalled (a stutter as the song starts, and at a camera cut showing parts
+// of the venue not seen yet). The 360 has every texture in memory once the
+// milo is loaded [I]. GD05_WARM_LEGACY=1: as before (each on its first draw).
+void App::warmWorld() {
+    if (SDL_getenv("GD05_WARM_LEGACY")) return;
+    const uint64_t t0 = SDL_GetTicksNS();
+    const int before = gpuUploads();
+    auto warm = [](gfx::SceneCache& c) {
+        return [&c](scene::Object& o) {
+            if (const auto* t = o.as<scene::Tex>()) c.texture(t);
+            else if (const auto* m = o.as<scene::Mesh>()) c.mesh(m);
+        };
+    };
+    if (venueCache_) {
+        auto w = warm(*venueCache_);
+        if (venue_) venue_->forEach(w);
+        if (band_)
+            for (const auto& m : band_->members()) {
+                if (m->character) m->character->forEachObject(w);
+                for (const auto& [name, fx] : m->fx)
+                    if (fx && fx->milo) fx->milo->root().forEach(w);
+            }
+        if (world_)
+            for (const Crowd::State& st : world_->crowd().crowds())
+                for (const auto& a : st.archetypes)
+                    if (a.actor && a.actor->character) a.actor->character->forEachObject(w);
+    }
+    if (sceneCache_ && milos_) {
+        auto w = warm(*sceneCache_);
+        milos_->forEachMilo([&](scene::Milo& m) { m.root().forEach(w); });
+    }
+    if (const int n = gpuUploads() - before; n > 0 && envOn("GD05_UILOG"))
+        SDL_Log("world warmed: %d textures and meshes to the GPU in %.1f ms", n, double(SDL_GetTicksNS() - t0) / 1e6);
+}
+
 int App::gameCounter(int player, const std::string& key) const {
-    if (key == "missing_shaders") return gfx::shaderaudit::count();  // draws without their shader (render/device.h)
+    if (key == "missing_shaders") return gfx::shaderaudit::count();
+    // Textures and meshes sent to the GPU since the song began (warmWorld: none).
+    if (key == "song_gpu_uploads") return uploadsAtBegin_ < 0 ? -1 : gpuUploads() - uploadsAtBegin_;
+    if (key == "music_plays") return musicPlays_;
+    // GD05-073's Overdrive walks.
+    if (key == "vocal_od_active") return vocal_ && vocal_->overdriveActive() ? 1 : 0;
+    if (key == "vocal_od_meter_pct") return vocal_ ? int(std::lround(vocal_->overdriveMeter() * 100)) : -1;
+    if (key == "vocal_freestyle") return vocal_ && vocal_->inFreestyle(lastT_) ? 1 : 0;
+    if (key == "fills_deployed") return rbBonus_ ? rbBonus_->fillsDeployed() : 0;
+    if (key == "rb_crowd_fx_triggers") return rbHud_ ? rbHud_->crowdMeterTriggers() : 0;
+    if (key.rfind("frame_marks:", 0) == 0) {
+        int n = 0;
+        for (const auto& m : frameMarks_) n += m.second == key.substr(12);
+        return n;
+    }
+    if (key.rfind("frame_spike:", 0) == 0) return frameSpikeRatio(key.substr(12));  // draws without their shader (render/device.h)
+    // The world's pacing (render/post_fx.h hold): worlds drawn, frames shown again, the PostProc's emulate_fps.
+    if (key == "world_draws") return const_cast<Canvas&>(canvas_).renderer().post().worldDraws();
+    if (key == "world_holds") return const_cast<Canvas&>(canvas_).renderer().post().worldHolds();
+    if (key == "world_emulate_fps") return int(std::lround(const_cast<Canvas&>(canvas_).renderer().post().selected().emulateFps));
     if (key == "surface_overrides") return track_ ? track_->surfaceOverrides() : 0;
     if (key == "mixer_band_pct") return int(std::lround(bandVolume_ * 100));
     if (key == "mixer_guitar_pct") return int(std::lround(guitarVolume_ * 100));
@@ -2858,17 +3072,130 @@ int App::gameCounter(int player, const std::string& key) const {
         return 0;
     }
     if (key == "spot_shadows") return venueView_ ? venueView_->spotlights().shadowsTotal() : 0;
+    // GD05-069: SpotlightDrawer proxies (the stage fog) found / left in the venue's draw list.
+    if (key == "venue_sd_proxies") return venueView_ ? venueView_->spotlightDrawerProxies() : -1;
+    if (key == "venue_sd_proxies_listed") return venueView_ ? venueView_->spotlightDrawerProxiesListed() : -1;
+    // GD05-093: RB's volume beams drawn this frame, and (GD05_BEAM_PROBE=1)
+    // the pixels the beam composite adds to (-1: not measured).
+    if (key == "rb_beams_drawn") return venueView_ ? venueView_->spotlights().rbBeamsDrawn() : -1;
+    if (key == "rb_beam_pixels") return venueView_ ? int(venueView_->spotlights().beamPixels()) : -1;
+    // GD05-090: a venue milo's particles ("parts_started:<milo path part>",
+    // parts_alive, parts_drawn); the world's EventAnim triggers fired.
+    for (const char* k : {"parts_started:", "parts_alive:", "parts_drawn:"})
+        if (key.rfind(k, 0) == 0) {
+            if (!venueView_) return -1;
+            const VenueView::PartProbe p = venueView_->particleProbe(key.substr(std::strlen(k)));
+            if (p.systems == 0) return -1;
+            return k[6] == 's' ? int(std::min<long long>(p.started, 1 << 30)) : k[6] == 'a' ? p.alive : p.drawn;
+        }
+    if (key == "world_eventanim_triggers") return world_ ? world_->stats().eventAnimTriggers : -1;
     // Rock Band (wave 02): the vocals, the band on stage, the part played.
     if (key == "vocal_notes_drawn") return vocalView_.notesDrawn();
     if (key == "vocal_lyrics_drawn") return vocalView_.lyricsDrawn();
     if (key == "vocal_score") return vocal_ ? vocal_->score() : 0;
     if (key == "vocal_phrases_rated") return vocal_ ? vocal_->phrasesRated(VocalPlayer::Rating::Awful) : 0;
     if (key == "band_members") return band_ ? int(band_->members().size()) : 0;
+    if (key.rfind("band_piece:", 0) == 0) {  // GD05-072: the members built with that outfit piece (char/.../<piece>.milo_xbox)
+        int n = 0;
+        if (band_)
+            for (const auto& m : band_->members())
+                for (const std::string& p : m->pieces) n += p.find("/" + key.substr(11) + ".milo") != std::string::npos;
+        return n;
+    }
+    if (key.rfind("band_bone:", 0) == 0) {  // GD05-084: band_bone:<slot>:<bone>:<axis 0..2>: the bone's local position x 1000 (the deform)
+        const std::string rest = key.substr(10);
+        const size_t a = rest.find(':'), b = rest.rfind(':');
+        if (band_ && a != std::string::npos && b > a)
+            for (const auto& m : band_->members())
+                if (m->slot == rest.substr(0, a) && m->character) {
+                    chr::Skeleton& sk = m->character->skeleton();
+                    const std::string bone = rest.substr(a + 1, b - a - 1);
+                    int i = sk.find(bone + ".trans");
+                    if (i < 0) i = sk.find(bone + ".mesh");
+                    if (i >= 0) return int(std::lround(sk.local(i).pos[size_t(std::clamp(std::atoi(rest.c_str() + b + 1), 0, 2))] * 1000));
+                }
+        return -999999;
+    }
+    if (key.rfind("band_piece_suffix:", 0) == 0) {  // GD05-083: the members built with a piece whose name ends so (the venue's drum kit)
+        int n = 0;
+        if (band_)
+            for (const auto& m : band_->members())
+                for (const std::string& p : m->pieces) n += p.find(key.substr(18) + ".milo") != std::string::npos;
+        return n;
+    }
+    if (key.rfind("band_patch:", 0) == 0) {  // GD05-084 (rb_tattoo): band_patch:<slot>:<location> the layers, band_patch:<slot>:<tex>:<x>:<y> its texture's rgb
+        std::vector<std::string> f;
+        for (size_t a = 11, b; a <= key.size(); a = b + 1) {
+            b = key.find(':', a);
+            if (b == std::string::npos) b = key.size();
+            f.push_back(key.substr(a, b - a));
+        }
+        if (band_ && f.size() >= 2)
+            for (const auto& m : band_->members())
+                if (m->slot == f[0] && m->character) {
+                    if (f.size() == 2) {
+                        auto it = m->character->patches.find(f[1]);
+                        return it == m->character->patches.end() ? 0 : int(it->second.size());
+                    }
+                    if (f.size() < 4) return -1;
+                    SDL_Surface* sf = gfx::CharSkin::readAny(*m->character, f[1]);
+                    if (!sf) return -1;
+                    const int x = std::atoi(f[2].c_str()), y = std::atoi(f[3].c_str());
+                    int rgb = -1;
+                    if (x >= 0 && y >= 0 && x < sf->w && y < sf->h) {
+                        const uint8_t* p = static_cast<const uint8_t*>(sf->pixels) + y * sf->pitch + x * 4;
+                        rgb = (p[0] << 16) | (p[1] << 8) | p[2];
+                    }
+                    SDL_DestroySurface(sf);
+                    return rgb;
+                }
+        return -1;
+    }
+    if (key.rfind("band_slot_piece:", 0) == 0) {  // GD05-082: the member in a venue slot (player_guitar0...) built with that outfit piece
+        const std::string rest = key.substr(16);
+        const size_t c = rest.find(':');
+        int n = 0;
+        if (band_ && c != std::string::npos)
+            for (const auto& m : band_->members())
+                if (m->slot == rest.substr(0, c))
+                    for (const std::string& p : m->pieces) n += p.find("/" + rest.substr(c + 1) + ".milo") != std::string::npos;
+        return n;
+    }
+    if (key.rfind("band_flags:", 0) == 0) {  // GD05-072: the members whose play flags hold all of these (the attitude kGenre*)
+        const uint32_t want = uint32_t(std::stoul(key.substr(11)));
+        int n = 0;
+        if (band_)
+            for (const auto& m : band_->members()) n += (m->rbFlags & want) == want;
+        return n;
+    }
     if (key == "crowd_drawn") return venueView_ ? venueView_->crowdView().charactersDrawn() : 0;
     if (key == "band_meshes") return venueView_ ? venueView_->bandView().meshesDrawn() : 0;
     if (key == "score") return player_ ? player_->score() : 0;
     if (key == "part_vocals") return parts_[0] == "vocals" ? 1 : 0;
     if (key == "rb_track_frames") return rbTrackFrames_;
+    // GD05-070 / GD05-071 (rbProbes).
+    if (key == "meter_frames") return rbProbe_.meterFrames;
+    if (key == "meter_jumps") return rbProbe_.meterJumps;
+    if (key == "meter_flickers") return rbProbe_.meterFlickers;
+    if (key == "rb_star_tails") return rbProbe_.starTails;
+    if (key == "rb_star_tails_wrong") return rbProbe_.starTailsWrong;
+    if (key == "star_tail_px") return rbProbe_.tailPx;
+    if (key == "star_tail_chroma_pct") return rbProbe_.tailChromaPct;
+    if (key == "crowd_px") return rbProbe_.crowdPx;
+    if (key == "crowd_px_max") return rbProbe_.crowdPxMax;
+    if (key == "crowd_chars_max") return rbProbe_.crowdCharsMax;
+    if (key == "crowd_probes") return rbProbe_.crowdProbes;
+    if (key == "crowd_clips") {
+        int n = 0;
+        if (world_)
+            for (const Crowd::State& st : world_->crowd().crowds())
+                for (const auto& a : st.archetypes) n += a.actor ? a.actor->clipsStarted : 0;
+        return n;
+    }
+    if (key == "rb_track_order_errors") return rbProbe_.trackOrderErrors;
+    if (key == "rb_track_order_parts") return rbProbe_.trackOrderParts;
+    if (key == "rb_hud_order_inversions") return rbProbe_.hudOrderInversions;
+    if (key == "rb_hud_order_dirs") return rbProbe_.hudOrderDirs;
     if (key == "rb_hud_probes") return rbHudProbes_;
     if (key == "rb_nowbar_gem_px") return rbNowBarGemPx_;
     if (key == "rb_nowbar_cover_pct") return rbNowBarCoverPct_;
@@ -2963,10 +3290,12 @@ void App::hudCommand(const std::string& msg, const std::vector<Value>& args) {
 // them out. No venue yet: nothing is drawn and the frame is as before.
 void App::drawWorld() {
     if (rbHudProbeDue_) rbHudProbe();  // under the frame, which the world then covers
+    rbProbes();
     if (!worldDraw_) return;
     canvas_.flush();
     gfx::Renderer& r = canvas_.renderer();
     const float clear[4] = {0, 0, 0, 1};
+    if (r.post().hold()) return;  // the world's frame rate (the PostProc's emulate_fps): the last picture again
     if (r.post().begin(clear)) {
         worldDraw_(r, true);
         r.post().end();
@@ -3026,8 +3355,7 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
     venuePostOn_ = false;
     if (const scene::CamShot* shot = venueView_->shot())
         if (auto* pp = venue_->find<scene::PostProc>(shot->flag("postprocess"))) {
-            const gfx::TextureId lum = pp->luminanceMap.empty() ? gfx::TextureId{} : venueCache_->texture(pp, pp->luminanceMap);
-            venuePost_ = gfx::postProcState(*pp, lum);
+            venuePost_ = gfx::postProcState(*pp, [&](const std::string& t) { return venueCache_->texture(pp, t); });
             venuePostOn_ = true;
         }
     worldDraw_ = [this](gfx::Renderer& r, bool hdr) {
@@ -3040,7 +3368,7 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
             if (director_ && director_->shot()) {
                 const scene::PostProc* pp = director_->postProc();
                 auto ppState = [this](const scene::PostProc& p) {
-                    return gfx::postProcState(p, p.luminanceMap.empty() ? gfx::TextureId{} : venueCache_->texture(&p, p.luminanceMap));
+                    return gfx::postProcState(p, [&](const std::string& t) { return venueCache_->texture(&p, t); });
                 };
                 if (pp) {
                     gfx::PostProcState st = ppState(*pp);
@@ -3183,10 +3511,14 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
                 Band::Config::RbLook look;
                 look.gender = in.send(ch.object, "get_gender", {}).str();
                 look.skin = in.send(ch.object, "skin_color", {}).integerValue();
+                look.attitude = uint32_t(in.send(ch.object, "get_attitude", {}).integerValue());
+                look.weight = in.send(ch.object, "get", {Value::symbol("weight")}).number();
+                look.height = in.send(ch.object, "get", {Value::symbol("height")}).number();
                 const Value ol = in.send(ch.object, "outfit_list", {});
                 if (ol.array)
                     for (const Value& e : *ol.array)
                         if (e.array && e.array->size() >= 2) look.outfit[(*e.array)[0].str()] = (*e.array)[1].str();
+                look.patches = ui::rbWornPatches(*ui_, ch.object);
                 if (!look.outfit.empty()) cfg.rbLooks[part == "drums" ? "drum" : part] = look;
             }
         }
@@ -3508,13 +3840,14 @@ RbHudView::State App::rbHudState(float t) const {
     s.lost = songLost();
     s.coda = rbBonus_ && rbBonus_->inCoda(t) && !rbBonus_->codaBanked();
     s.codaScore = rbBonus_ ? rbBonus_->codaPot() : 0;
+    s.tempo = song_ ? &song_->tempo : nullptr;  // the triggers' beat rates (render/anim_rate.h)
     return s;
 }
 
 void App::drawRbHud(float t) {
     if (const char* h = SDL_getenv("GD05_HUD"); h && *h == '0') return;  // development aid: the track alone
     canvas_.flush();
-    if (rbHud_->introAt() != rbExtendMs_) rbHud_->reset(rbExtendMs_);
+    if (rbHud_->introAt() != rbExtendMs_) rbHud_->reset(rbExtendMs_, song_ ? &song_->tempo : nullptr);
     const RbHudView::State st = rbHudState(t);
     rbHud_->draw(canvas_.renderer(), *sceneCache_, st, t);
     // The walks (or GD05_HUD_PROBE=1): a probe at 15 s and every 20 s after,
@@ -3549,6 +3882,120 @@ void App::drawRbHud(float t) {
     }
 }
 
+void App::rbProbes() {
+    static const bool meterOn = envOn("GD05_METER_PROBE"), tailOn = envOn("GD05_TAIL_PROBE"), crowdOn = envOn("GD05_CROWD_PROBE");
+    if (!meterOn && !tailOn && !crowdOn) return;
+    if (!sceneCache_ || paused_) return;
+    canvas_.flush();
+    gfx::Renderer& r = canvas_.renderer();
+    const float key[4] = {1, 0, 1, 1};
+    // The picture's pixels other than the magenta it was cleared to.
+    struct Px {
+        long n = 0;
+        double luma = 0, chroma = 0;
+    };
+    auto measure = [&](bool overBlack = false) {
+        Px p;
+        SDL_Surface* raw = canvas_.readPixels();
+        SDL_Surface* c = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        if (raw) SDL_DestroySurface(raw);
+        if (!c) return p;
+        for (int y = 0; y < c->h; ++y) {
+            const uint8_t* row = static_cast<const uint8_t*>(c->pixels) + size_t(y) * size_t(c->pitch);
+            for (int x = 0; x < c->w; ++x) {
+                const uint8_t* q = row + size_t(x) * 4;
+                if (overBlack ? std::max({q[0], q[1], q[2]}) <= 24 : 255 - q[0] + q[1] + 255 - q[2] <= 24) continue;
+                const int mx = std::max({q[0], q[1], q[2]}), mn = std::min({q[0], q[1], q[2]});
+                ++p.n, p.luma += 0.2126 * q[0] + 0.7152 * q[1] + 0.0722 * q[2], p.chroma += mx > 0 ? double(mx - mn) / mx : 0.0;
+            }
+        }
+        SDL_DestroySurface(c);
+        if (p.n) p.luma /= double(p.n), p.chroma /= double(p.n);
+        return p;
+    };
+    // The draw-order checks from the last frame (render/rb_track_view.h, rb_hud_view.h).
+    if (rbTrack_ && !vocal_ && !rbTrack_->drawOrder().empty()) {
+        const std::vector<std::string> want = rbTrack_->expectedDrawOrder(), &got = rbTrack_->drawOrder();
+        int err = int(std::max(want.size(), got.size()) - std::min(want.size(), got.size()));
+        for (size_t i = 0; i < std::min(want.size(), got.size()); ++i) err += want[i] != got[i];
+        if (err && rbProbe_.trackOrderErrors == 0) {
+            std::string w, g;
+            for (const auto& n : want) w += " " + n;
+            for (const auto& n : got) g += " " + n;
+            SDL_Log("rb probe: track draw order\n  data:%s\n  drawn:%s", w.c_str(), g.c_str());
+        }
+        rbProbe_.trackOrderErrors = std::max(rbProbe_.trackOrderErrors, err);
+        rbProbe_.trackOrderParts = std::max(rbProbe_.trackOrderParts, int(want.size()));
+        rbProbe_.starTails += rbTrack_->starTails(), rbProbe_.starTailsWrong += rbTrack_->starTails() - rbTrack_->starTailsBonus();
+    }
+    if (rbHud_) {
+        rbProbe_.hudOrderInversions = std::max(rbProbe_.hudOrderInversions, rbHud_->drawOrderInversions());
+        rbProbe_.hudOrderDirs = std::max(rbProbe_.hudOrderDirs, rbHud_->drawOrderDirs());
+    }
+    // The Overdrive meter (star_power_01) alone, every frame: its luma; a
+    // jump is a change of more than 6% of the brightest seen. be_ready's
+    // be_color_pulse loops once a beat (k1_fpb): at most one jump a beat.
+    if (meterOn && rbHud_ && begun_) {
+        r.device().clear(key, true);
+        rbHud_->drawOnly(r, *sceneCache_, "star_power_01");
+        const Px p = measure();
+        auto& m = rbProbe_.meter;
+        if (p.n > 0) m.emplace_back(lastT_, float(p.luma));
+        if (m.size() > 240) m.erase(m.begin());
+        rbProbe_.meterFrames = int(m.size());
+        float hi = 0;
+        for (const auto& e : m) hi = std::max(hi, e.second);
+        // A flicker: a jump straight back (up then down, or down then up, on
+        // the next frame). The pulse's wrap is one jump, then a slope that
+        // may fall up to 40% of the brightest a beat (be_color_pulse's keys:
+        // 0.99 0.80 0.21 -> 0.69 0.53 0.01), so a step counts as a jump past
+        // 6% plus that slope over the step's beats (slow frames under load).
+        int jumps = 0, flickers = 0;
+        auto jump = [&](size_t i) {
+            const double beats = song_ ? gfx::beatAt(&song_->tempo, m[i].first) - gfx::beatAt(&song_->tempo, m[i - 1].first) : 0.0;
+            return std::fabs(m[i].second - m[i - 1].second) > hi * float(0.06 + 0.4 * std::max(0.0, beats));
+        };
+        for (size_t i = 1; i < m.size(); ++i) {
+            if (!jump(i)) continue;
+            ++jumps;
+            const float d = m[i].second - m[i - 1].second;
+            if (i + 1 < m.size() && jump(i + 1)) flickers += (m[i + 1].second - m[i].second > 0) != (d > 0);
+        }
+        rbProbe_.meterJumps = jumps, rbProbe_.meterFlickers = flickers;
+        rbProbe_.meterBeats = m.size() > 1 && song_ ? int(std::ceil(gfx::beatAt(&song_->tempo, m.back().first) - gfx::beatAt(&song_->tempo, m.front().first))) : 0;
+    }
+    // The star tails alone (the last frame's) over black (they add), their
+    // chroma: tail_bonus.mat's track_flash_style.tex is near white.
+    if (tailOn && rbTrack_ && !vocal_ && rbTrack_->starTails() > 0) {
+        const float black[4] = {0, 0, 0, 1};
+        r.device().clear(black, true);
+        rbTrack_->drawLastTails(r, *sceneCache_, true);
+        const Px p = measure(true);
+        if (p.n > 50) rbProbe_.tailPx = int(p.n), rbProbe_.tailChromaPct = int(std::lround(p.chroma * 100));
+    }
+    // The audience alone through the shot's camera, every 30th frame.
+    if (crowdOn && venueView_ && ++rbProbe_.crowdFrames % 30 == 0) {
+        r.device().clear(key, true);
+        int x = 0, y = 0, w = 0, h = 0;
+        r.pictureRect(x, y, w, h);
+        venueView_->setOnlyCrowd(true);
+        venueView_->draw(r, w, h, false);
+        venueView_->setOnlyCrowd(false);
+        const Px p = measure();
+        rbProbe_.crowdPx = int(p.n), rbProbe_.crowdPxMax = std::max(rbProbe_.crowdPxMax, int(p.n)), ++rbProbe_.crowdProbes;
+        rbProbe_.crowdCharsMax = std::max(rbProbe_.crowdCharsMax, venueView_->crowdView().charactersDrawn());
+        SDL_Log("crowd probe: %s %s: %ld px, %d characters drawn", venue_ ? venue_->name().c_str() : "-",
+                director_ && director_->shot() ? director_->shot()->name.c_str() : "-", p.n, venueView_->crowdView().charactersDrawn());
+    }
+    r.device().clear(nullptr, true);
+    if (static int n = 0; (meterOn || tailOn) && ++n % 300 == 0)
+        SDL_Log("rb probe at %.0f ms: Overdrive meter %d frames, %d jumps (%d straight back) over %d beats; star tails %d (%d not tail_bonus.mat), "
+                "chroma %d%% over %d px; track draw order %d off of %d; HUD %d pairs out of draw order in %d directories",
+                double(lastT_), rbProbe_.meterFrames, rbProbe_.meterJumps, rbProbe_.meterFlickers, rbProbe_.meterBeats, rbProbe_.starTails, rbProbe_.starTailsWrong,
+                rbProbe_.tailChromaPct, rbProbe_.tailPx, rbProbe_.trackOrderErrors, rbProbe_.trackOrderParts, rbProbe_.hudOrderInversions,
+                rbProbe_.hudOrderDirs);
+}
+
 void App::rbHudProbe() {
     rbHudProbeDue_ = false;
     if (!rbHud_ || !sceneCache_) return;
@@ -3578,11 +4025,21 @@ void App::rbHudProbe() {
         float dx0 = 0, dy0 = 0, dx1 = 0, dy1 = 0;
         if (x1 >= 0) {
             dx0 = float(x0) * sx, dy0 = float(y0) * sy, dx1 = float(x1 + 1) * sx, dy1 = float(y1 + 1) * sy;
-            err = e.strict ? int(std::lround(std::max({std::fabs(dx0 - e.x0), std::fabs(dy0 - e.y0), std::fabs(dx1 - e.x1), std::fabs(dy1 - e.y1)})))
+            // A side past the meshes' box may reach the glows' (Box::ox0..oy1, GD05-087).
+            auto side = [](float drawn, float box, float glow, bool low) {
+                const bool out = low ? drawn < box : drawn > box;
+                return out ? std::max(0.0f, low ? glow - drawn : drawn - glow) : std::fabs(drawn - box);
+            };
+            err = e.strict ? int(std::lround(std::max({side(dx0, e.x0, e.ox0, true), side(dy0, e.y0, e.oy0, true), side(dx1, e.x1, e.ox1, false),
+                                                       side(dy1, e.y1, e.oy1, false)})))
                            : int(std::lround(std::max({0.0f, e.x0 - dx0, e.y0 - dy0, dx1 - e.x1, dy1 - e.y1})));  // inside the box
         }
-        SDL_Log("rb hud box %-20s expected %4.0f %4.0f - %4.0f %4.0f  drawn %4.0f %4.0f - %4.0f %4.0f  off %d px%s (%s)", e.name.c_str(), double(e.x0),
-                double(e.y0), double(e.x1), double(e.y1), double(dx0), double(dy0), double(dx1), double(dy1), err, e.strict ? "" : " outside", rbHud_->configuration().c_str());
+        SDL_Log("rb hud box %-20s expected %4.0f %4.0f - %4.0f %4.0f  drawn %4.0f %4.0f - %4.0f %4.0f  off %d px%s (%s)%s", e.name.c_str(), double(e.x0),
+                double(e.y0), double(e.x1), double(e.y1), double(dx0), double(dy0), double(dx1), double(dy1), err, e.strict ? "" : " outside",
+                rbHud_->configuration().c_str(),
+                e.ox0 < e.x0 || e.oy0 < e.y0 || e.ox1 > e.x1 || e.oy1 > e.y1
+                    ? (" glow to " + std::to_string(int(e.ox0)) + " " + std::to_string(int(e.oy0)) + " - " + std::to_string(int(e.ox1)) + " " + std::to_string(int(e.oy1))).c_str()
+                    : "");
         worst = std::max(worst, err);
         ++boxes;
     }
@@ -3704,33 +4161,57 @@ void App::drawHud() {
 void App::stopMusic() {
     if (music_ != Music::None && !player_) mixer_.stop();
     music_ = Music::None;
+    musicPending_ = Music::None;
+    musicLoader_.cancel();
+}
+
+// The stream musicLoader_ opened, played once it is ready (GD05-073).
+void App::pollMusic() {
+    std::string key;
+    std::unique_ptr<LoopSource> src = musicLoader_.poll(key);
+    if (!src) return;
+    const Music kind = musicPending_;
+    musicPending_ = Music::None;
+    if (player_ || kind == Music::None) return;
+    std::vector<Mixer::Track> tracks(static_cast<size_t>(src->channels()));
+    if (kind == Music::Preview) {
+        auto it = std::find_if(songs_.begin(), songs_.end(), [&](const SongInfo& s) { return "preview:" + s.id == key; });
+        if (it == songs_.end()) return;
+        tracks = mixerTracks(it->audio);
+    } else if (kind == Music::Menu) {
+        const int ch = src->channels();
+        for (int c = 0; c < ch; ++c) tracks[size_t(c)].pan = ch == 2 ? (c == 0 ? -1.0f : 1.0f) : 0.0f, tracks[size_t(c)].volume = 0.25f;  // -12 dB
+    } else {
+        // Channels 0 / 2 left, 1 / 3 right (CreditsPanel 0x8229B310) [C].
+        for (size_t c = 0; c < tracks.size(); ++c) tracks[c].pan = c % 2 ? 1.0f : -1.0f, tracks[c].volume = 0.8f;
+    }
+    mixer_.play(std::move(src), tracks, 0);
+    music_ = kind;
+    ++musicPlays_;
+    if (kind == Music::Preview) markFrame("preview_play");
 }
 
 void App::songPreview(const std::string& songId) {
     if (player_) return;
     if (songId.empty()) {
-        if (music_ == Music::Preview) stopMusic();
+        if (music_ == Music::Preview || musicPending_ == Music::Preview) stopMusic();
         return;
     }
     auto it = std::find_if(songs_.begin(), songs_.end(), [&](const SongInfo& s) { return s.id == songId; });
-    if (it == songs_.end()) return;
-    try {
-        auto s = std::make_unique<VorbisStream>(data_->read(it->audio.moggPath));
-        auto loop = std::make_unique<LoopSource>(std::move(s), it->previewStartMs, it->previewEndMs, 1000);
-        mixer_.play(std::move(loop), mixerTracks(it->audio), 0);
-        music_ = Music::Preview;
-    } catch (const std::exception& e) {
-        SDL_Log("song_preview %s: %s", songId.c_str(), e.what());
-    }
+    if (it == songs_.end() || !data_) return;
+    // The (preview a b) section with a 1 s fade in and out [I: GH2's fade times].
+    musicLoader_.request(*data_, {"preview:" + songId, it->audio.moggPath, it->previewStartMs, it->previewEndMs, 1000});
+    musicPending_ = Music::Preview;
+    markFrame("preview");
 }
 
 void App::menuMusic(bool on) {
     if (player_) return;
     if (!on) {
-        if (music_ == Music::Menu) stopMusic();
+        if (music_ == Music::Menu || musicPending_ == Music::Menu) stopMusic();
         return;
     }
-    if (music_ == Music::Menu) return;
+    if (music_ == Music::Menu || musicPending_ == Music::Menu || !data_) return;
     // RB's config/synth.dta (metamusic (volume -12.0) (fade_time 2.0) (music
     // shellmusic_29fingers ...)) [C data]: a random loop from sfx/streams
     // [I: the fade-in is not applied].
@@ -3739,16 +4220,8 @@ void App::menuMusic(bool on) {
                                          "shellmusic_epic", "shellmusic_suffragette", "shellmusic_thehandthatfeeds", "shellmusic_gowiththeflow",
                                          "shellmusic_missqueen"};
     const std::string name = kLoops[SDL_GetTicks() % (sizeof kLoops / sizeof kLoops[0])];
-    try {
-        auto s = std::make_unique<VorbisStream>(data_->read("sfx/streams/" + name + ".mogg"));
-        const int ch = s->channels();
-        std::vector<Mixer::Track> tracks(static_cast<size_t>(ch));
-        for (int c = 0; c < ch; ++c) tracks[size_t(c)].pan = ch == 2 ? (c == 0 ? -1.0f : 1.0f) : 0.0f, tracks[size_t(c)].volume = 0.25f;  // -12 dB
-        mixer_.play(std::make_unique<LoopSource>(std::move(s), 0, 0, 0), tracks, 0);
-        music_ = Music::Menu;
-    } catch (const std::exception& e) {
-        SDL_Log("meta_music %s: %s", name.c_str(), e.what());
-    }
+    musicLoader_.request(*data_, {"menu:" + name, "sfx/streams/" + name + ".mogg", 0, 0, 0});
+    musicPending_ = Music::Menu;
 }
 
 void App::metaBackgroundSfx() {
@@ -3769,19 +4242,12 @@ void App::metaBackgroundSfx() {
 void App::creditsMusic(bool on) {
     if (player_) return;
     if (!on) {
-        if (music_ == Music::Credits) stopMusic();
+        if (music_ == Music::Credits || musicPending_ == Music::Credits) stopMusic();
         return;
     }
-    try {
-        auto s = std::make_unique<VorbisStream>(data_->read("sfx/streams/credits.mogg"));
-        // Channels 0 / 2 left, 1 / 3 right (CreditsPanel 0x8229B310) [C].
-        std::vector<Mixer::Track> tracks(static_cast<size_t>(s->channels()));
-        for (size_t c = 0; c < tracks.size(); ++c) tracks[c].pan = c % 2 ? 1.0f : -1.0f, tracks[c].volume = 0.8f;
-        mixer_.play(std::make_unique<LoopSource>(std::move(s), 0, 0, 0), tracks, 0);
-        music_ = Music::Credits;
-    } catch (const std::exception& e) {
-        SDL_Log("credits music: %s", e.what());
-    }
+    if (!data_) return;
+    musicLoader_.request(*data_, {"credits", "sfx/streams/credits.mogg", 0, 0, 0});
+    musicPending_ = Music::Credits;
 }
 
 void App::playMovie(const std::string& name) {
@@ -3938,7 +4404,7 @@ std::string App::hdrStatus() {
     if (mode == "emulated") return "Emulated: HDR rendering tone mapped to your screen";
     if (mode != "true") return "";
     std::string why;
-    if (hdrSurface_ == hdr::Surface::Sdr) {
+    if (!hdrSurface_) {
         why = !hdrReason_.empty() ? "unavailable: " + hdrReason_ : "takes effect the next time the game starts";
     } else {
         const std::string live = canvas_.renderer().device().hdrStatus();
@@ -4318,18 +4784,18 @@ int App::enhancedState(const std::string& key) {
 // any fallback to local), in small white text above the FPS counter
 // (universal-menus.md "Backends"); GH2's help bar legend sits beside the
 // counter and reaches its left, so the label stays on the line above it even
-// when the counter is off. A chosen one that could not start shows as "local (<name>
-// could not start)".
+// when the counter is off. A chosen one that could not start shows as "<the one
+// running> (<name> could not start)"; "none": no audio backend started.
 void App::drawBackendLabel() {
     if (!ui_ || ui_->headless() || player_ || ui_->currentScreen() != "enhanced_options_screen") return;
     auto label = [](const std::string& id) -> std::string {
         static const std::map<std::string, std::string> k = {{"sdl3", "SDL3"},          {"vulkan", "Vulkan"}, {"opengl3", "OpenGL3"},
                                                              {"miniaudio", "miniaudio"}, {"openal", "OpenAL"}, {"faudio", "FAudio"}};
         auto it = k.find(id);
-        return it == k.end() ? std::string("local") : it->second;
+        return it == k.end() ? id : it->second;
     };
     auto shown = [&](const std::string& running, const std::string& chosen) {
-        return label(running) + (chosen != running && label(chosen) != "local" ? " (" + label(chosen) + " could not start)" : "");
+        return label(running) + (chosen != running ? " (" + label(chosen) + " could not start)" : "");
     };
     std::string audio = startupBackends().audio;
     if (const char* b = SDL_getenv("GD05_AUDIO_BACKEND"); b && *b) audio = b;

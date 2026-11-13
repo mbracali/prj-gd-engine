@@ -471,9 +471,16 @@ Value UiManager::route(const std::string& msg, std::vector<Value> args) {
     // screen, then its focus panel.
     Value r = callScript(interp_.findObject("ui"), msg, args);
     if (!r.isUnhandled()) return r;
-    // RB: the player's slot hears its panel's messages first (FOCUS_MSG, SELECT_MSG).
-    if (!slots_.empty()) {
-        r = slots_.front()->dispatch(msg, args);
+    // RB: the player's slot hears its panel's messages first (FOCUS_MSG,
+    // SELECT_MSG): the slot whose directory holds the component (the band
+    // lobby's four), else the one slot.
+    PlayerSlotObj* slot = slots_.size() == 1 ? slots_.front().get() : nullptr;
+    if (slots_.size() > 1 && !args.empty())
+        if (auto* c = dynamic_cast<ComponentObj*>(args[0].object); c && !c->scope.empty())
+            for (auto& sl : slots_)
+                if (sl->scope() == c->scope) slot = sl.get();
+    if (slot) {
+        r = slot->dispatch(msg, args);
         if (!r.isUnhandled()) {
             checkSlotsReady();
             return r;
@@ -492,7 +499,9 @@ Value UiManager::route(const std::string& msg, std::vector<Value> args) {
 }
 
 void UiManager::checkSlotsReady() {
-    if (slots_.empty() || !current_ || phase_ != Phase::Idle) return;
+    // The band lobby goes on by its leader's continue (all_ready,
+    // goto_leader_confirmation), not by its slots' readiness.
+    if (slots_.empty() || slots_.size() > 1 || !current_ || phase_ != Phase::Idle) return;
     for (auto& s : slots_)
         if (!s->ready()) return;
     ScreenObj* s = current_;
@@ -1403,6 +1412,22 @@ void UiManager::routeButton(int button, int player) {
         return;
     }
     ScreenObj* s = current_;
+    // RB's MultiFocusScreen (0x8282EA48) [C]: the button goes to the slot
+    // whose player_num is the player's, else to the first slot without a
+    // player whose allow_button_msg takes it; the slot's handlers, then its
+    // own directory's focus (PanelDir); the screen's only when no slot took it.
+    if (slots_.size() > 1) {
+        PlayerSlotObj* target = nullptr;
+        for (auto& sl : slots_)
+            if (!target && sl->playerNum() == player) target = sl.get();
+        for (auto& sl : slots_)
+            if (!target && player != -1 && sl->playerNum() == -1 && callScript(sl.get(), "allow_button_msg", {Value::integer(player)}).truthy())
+                target = sl.get();
+        if (target) {
+            if (!target->dispatch("button_down", args).isUnhandled() || s != current_) return;
+            if (target->buttonDown(button, player)) return;
+        }
+    }
     if (!callScript(s, "button_down", args).isUnhandled()) {
         if (interp_.logReport) SDL_Log("ui: button %d taken by screen %s", button, s->name().c_str());
         return;
@@ -1417,7 +1442,12 @@ void UiManager::routeButton(int button, int player) {
             return;
         }
     // RB: the player's slot (its state's BUTTON_DOWN_MSG, then the type's).
-    if (!slots_.empty() && !slots_.front()->dispatch("button_down", args).isUnhandled()) {
+    if (slots_.size() == 1 && !slots_.front()->dispatch("button_down", args).isUnhandled()) {
+        checkSlotsReady();
+        return;
+    }
+    // Its directory's focus (a slot copy of its own: seldiff's slot0).
+    if (slots_.size() == 1 && slots_.front()->buttonDown(button, player)) {
         checkSlotsReady();
         return;
     }

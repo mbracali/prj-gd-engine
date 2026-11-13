@@ -163,9 +163,14 @@ public:
     bool enhancing() const { return enhance_; }
     int enhancedTextures() const { return enhancedTextures_; }
     size_t textureCount() const { return textures_.size(); }
+    // Textures and meshes sent to the GPU so far (GD05-073: none should be
+    // made while a song plays: each is a stall on the frame that first
+    // draws it; App::warmWorld makes the world's during the load).
+    int uploads() const { return uploads_; }
 
 private:
     RenderDevice& device_;
+    int uploads_ = 0;
     // Whether `o` is a new object at an address seen before: the milo that held
     // the old one was freed, and its geometry or texture must not be drawn for it.
     bool stale(const scene::Object* o);

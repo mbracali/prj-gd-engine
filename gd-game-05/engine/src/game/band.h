@@ -11,6 +11,7 @@
 
 #include "char/character.h"
 #include "char/facefx.h"
+#include "char/patch.h"
 #include "scene/milo.h"
 #include "scene/objects.h"
 #include "script/script.h"
@@ -21,6 +22,7 @@ namespace scene {
 class Waypoint;
 }
 class MidiParserSet;
+class RbMidiParserSet;
 struct MidiFile;
 struct Song;
 struct SongInfo;
@@ -59,13 +61,33 @@ public:
         struct RbLook {
             std::string gender = "male";
             int skin = 0;
+            uint32_t attitude = 0;  // the creator's kGenre* value (macros.dta: kGenreRocker 256 ...); 0: the premade's
+            float weight = 0.5f, height = 0.5f;  // the creator's sliders (char/deform.h)
             std::map<std::string, std::string> outfit;
+            std::map<std::string, chr::Patch> patches;  // the tattoos (location -> patch)
         };
         std::map<std::string, RbLook> rbLooks;
     };
     // Rock Band's premade characters whose names start with `instrument`
     // (guitar0, guitar1 ... in config/gen/characters.dtb).
     static std::vector<std::string> rbPrefabs(const GameData& data, const std::string& instrument);
+    // A Rock Band character's outfit milos (char/<gender>/outfits/<cat>/gen/
+    // <piece>.milo_xbox; the instrument's own: char/instruments/<cat>/gen/,
+    // a drum kit the venue kind's <kind>_drums_<piece>) [C data], keyed in
+    // order ("+00"...); `missing` gets the paths the disc lacks.
+    static std::map<std::string, std::string> rbOutfitMilos(const GameData& data, const std::string& gender, const std::string& instrument,
+                                                          const std::vector<std::pair<std::string, std::string>>& pieces,
+                                                          const std::string& kind, std::vector<std::string>* missing = nullptr);
+    // The skin tone on the character's placeholder skin materials (a
+    // premade's skin_color_index, or `skinIndex`); see rb_band.cpp.
+    static void rbSkin(const GameData& data, chr::Character& c, const DataNode* prefab, int skinIndex = -1);
+    // The character's patches (location -> layers, char/patch.h) resolved
+    // for its PatchRenderers (render/char_skin.h); renders its skins again.
+    static void rbPatches(const GameData& data, chr::Character& c, const std::map<std::string, chr::Patch>& patches);
+    // ui.dta's (patch ...) block: (sets ...), (stickers ...), (patch_layer ...), (tattoos ...); null without one.
+    static const DataNode* rbPatchConfig(const GameData& data);
+    // A sticker category's milo (archive path) and its stickers (Tex objects of type sticker, in order).
+    static std::string rbStickerMilo(const GameData& data, const std::string& category);
     // The premade character each instrument got (Rock Band).
     const std::map<std::string, std::string>& rbPrefabUsed() const { return rbPrefabUsed_; }
 
@@ -95,6 +117,7 @@ public:
         std::string type;                      // guitarist / singer / keyboardist / bassist / drummer
         int player = -1;                       // guitarists
         std::string miloPath;                  // the character's milo (its proxies resolve from it)
+        std::vector<std::string> pieces;       // RB: the outfit pieces' milos it was built from (the walks' checks)
         // The character's effect dirs (cheat_headflames, hand_flames_L / _R,
         // god_particles...): a RndDir proxying a shared milo (char/shared/og),
         // parented to a bone; script start / stop (char_objects.dta) [C data].
@@ -110,6 +133,18 @@ public:
         std::unique_ptr<facefx::LipSync> lip;
         std::unique_ptr<facefx::ExpressionScript> expr;
         std::string shotGroup;  // RB: the camera shot's clip group for this member (BandCamShot target anim)
+        // Rock Band's CompositeCharacter state (RB 0x822E5908 / 0x822E4A80):
+        // the play flags (+0x254: clip_flags kValidGuitar / kValidBass, the
+        // attitude kGenre*, the play mode kPlay*), the clip group (+0x268),
+        // the driver playing it (+0x264: main.drv, or the drummer's
+        // main_add.drv while he plays), the mode the parser asked for
+        // (cur_play) and whether the player plays (playing).
+        uint32_t rbFlags = 0;
+        std::string rbGroup;
+        chr::ClipDriver* rbActive = nullptr;
+        uint32_t rbCurPlay = 0;
+        bool rbPlaying = true;
+        std::vector<std::unique_ptr<ScriptObject>> rbParts;  // the parsers' sinks (rb_band.cpp)
     };
     // Rock Band's BandCamShot start (RB 0x822D8108) [C data; I: no IK, props,
     // fast-forward or return]: each target's member plays its clip group
@@ -176,7 +211,27 @@ private:
     void assemble(const GameData& data, const SongInfo& song);
     bool assembleRb(const GameData& data, const SongInfo& song);  // game/rb_band.cpp
     void rbPoll(Member& m);
-    void rbSkin(const GameData& data, chr::Character& c, const DataNode* prefab, int skinIndex = -1);
+    // Rock Band's band at run time (game/rb_band.cpp).
+    void rbLoadSong(const MidiFile& midi, const Song* song);
+    void rbEnter(Member& m);
+    void rbChangePlay(Member& m, uint32_t mode);                       // char_objects.dta change_play
+    void rbChangeGroup(Member& m, const std::string& group, uint32_t flags, bool force);  // RB 0x822E5908
+    void rbPlayGroup(Member& m);                                       // RB 0x822E4A80
+    bool rbDriverClip(Member& m, const std::string& driver, scene::CharClipSamples* clip, float length);  // RB 0x82342168
+    class RbPart;
+    friend class RbPart;
+    std::unique_ptr<RbMidiParserSet> rbParsers_;
+    // GD05_BANDCHECK=1: per-frame measurements of the band (rb_band.cpp),
+    // reported when the band goes. GD05_BAND_LEGACY=1: the band as before
+    // wave G06 (no parsers, GH2's weight setters, no draw_only, no RB face),
+    // to show the checks failing without the fixes.
+    struct RbCheck;
+    std::shared_ptr<RbCheck> rbCheck_;
+    void rbCheckFrame();
+    void rbCheckReport();
+public:
+    static bool rbLegacy();
+private:
     void makeScripts(const DataNode* objects);
     void registerDir(Member& m, const scene::Directory& d);
     void setupFace(Member& m, scene::Object* servo);

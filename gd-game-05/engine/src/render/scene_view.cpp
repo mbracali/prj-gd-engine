@@ -15,6 +15,7 @@
 #include "data/game_data.h"
 #include "devaids/screenshot.h"
 #include "render/canvas.h"
+#include "render/core_backend.h"
 #include "render/scene_gpu.h"
 #include "render/ui_view.h"
 #include "render/band_view.h"
@@ -104,7 +105,7 @@ void SceneView::startPost() {
         gfx::PostFx& post = canvas_.renderer().post();
         if (pp) {
             const gfx::TextureId lum = pp->luminanceMap.empty() ? gfx::TextureId{} : cache_->texture(pp, pp->luminanceMap);
-            post.select(gfx::postProcState(*pp, lum));
+            post.select(gfx::postProcState(*pp, [&](const std::string& t) { return cache_->texture(pp, t); }));
             SDL_Log("view: post-process %s (bloom %.2f, luminance map %s%s)", pp->name.c_str(), double(pp->bloomIntensity),
                     pp->luminanceMap.empty() ? "none" : pp->luminanceMap.c_str(), pp->luminanceMap.empty() || lum ? "" : " not found");
         } else {
@@ -281,7 +282,7 @@ int SceneView::run(const std::string& dataPath, const std::string& miloPath) {
         std::fprintf(stderr, "%s --view: cannot start video: %s\n", app::kProgram, SDL_GetError());
         return 2;
     }
-    SDL_Window* window = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), SDL_WINDOW_RESIZABLE | gfx::prepareWindow());
+    SDL_Window* window = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), SDL_WINDOW_RESIZABLE | gfx::prepareWindowFor(gfx::rendererBackend()));
     std::string error;
     if (!window || !canvas_.init(window, error)) {
         std::fprintf(stderr, "%s --view: cannot open the window: %s\n", app::kProgram, window ? error.c_str() : SDL_GetError());
