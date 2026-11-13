@@ -46,7 +46,7 @@ void usage() {
         "  --uitest             boot through the menus, then start every flow state's screen in turn (headless)\n"
         "  --walktest <walk>    play through GH3's own menus: quickplay, lose, back, boot, mouse, gamepads,\n"
         "                       stickyaxis, touch, options, practice, store, hub, venues, career, career_quickplay, pause, pausequit, coop, faceoff, proface, boss_keys,\n"
-        "                       battle, boss, boss_devil, boss_helper, vault, cheats, glitches, attract (headless:\n"
+        "                       battle, boss, boss_devil, boss_helper, vault, cheats, touchcheat, glitches, attract (headless:\n"
         "                       SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy)\n"
         "  --audittest [--out f] the asset / reference audit: names the scripts call and pak types the engine lacks\n"
         "  --scripttest         tokenize every script; run the boot script against the natives (GD04_UILOG=1 logs\n"

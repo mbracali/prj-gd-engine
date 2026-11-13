@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -125,6 +126,7 @@ private:
     int songsWithoutLoading_ = 0;
     std::string failure_;
     std::vector<std::string> log_;
+    std::map<SDL_FingerID, std::pair<float, float>> fingers_;  // the walk's fingers (finger:), where they landed
     // uitest: every flow state with a Create script, started in turn.
     bool uitest_ = false;
     std::vector<uint32_t> states_;

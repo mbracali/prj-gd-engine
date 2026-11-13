@@ -1072,6 +1072,16 @@ void App::overlay() {
             }
             input_.setTouchLanes(p, l);
         }
+        // Enter Cheat (options_enter_new_cheat_fs) reads held frets: the
+        // training guitar's five buttons take fingers, at the pressed notes'
+        // places (green 506, 543, 67 apart) [C script
+        // cheats_create_pressed_notes]. GD04-117 (#85).
+        Input::TouchFrets tf;
+        if (!song_ && front_ && front_->flowState() == "options_enter_new_cheat_fs") {
+            tf.active = true, tf.y = 543, tf.halfW = 33.5f, tf.halfH = 48;
+            for (int k = 0; k < 5; ++k) tf.x[size_t(k)] = 506.0f + 67.0f * float(k);
+        }
+        input_.setTouchFrets(tf);
         for (auto [tx, ty] : input_.takeMenuTaps()) menuMouse(tx, ty, 1);
         drawTouchButtons();
     }

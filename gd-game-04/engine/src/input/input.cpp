@@ -1558,6 +1558,18 @@ void Input::touchEvent(const SDL_TouchFingerEvent& f, bool down, std::vector<Inp
     for (auto& [id, o] : fingers_)
         if (o.fret < 0 && o.button < 0 && ts - o.downNs < kTwoFingerNs) o.multi = fg.multi = true;
     if (!game) {
+        // A menu's fret buttons (Enter Cheat): held while the finger stays
+        // down; the chord strums once, as the strum bar's Down.
+        if (menuFrets_.active && !fg.multi && std::abs(my - menuFrets_.y) <= menuFrets_.halfH)
+            for (int k = 0; k < 5; ++k)
+                if (std::abs(mx - menuFrets_.x[size_t(k)]) <= menuFrets_.halfW) {
+                    fg.fret = k, fg.player = 0, fg.menuFret = true;
+                    emit(out, Action(int(Action::Fret0) + k), true, ts, ControllerMode::Joypad, 0);
+                    PendingStrum& s = strum_[0];
+                    if (!s.on) s.on = true, s.menu = true, s.dueNs = ts + kChordNs;
+                    s.ts = ts;
+                    break;
+                }
         fingers_[f.fingerID] = fg;
         return;
     }
@@ -1800,10 +1812,20 @@ void Input::poll(uint64_t nowNs, std::vector<InputEvent>& out) {
         PendingStrum& s = strum_[size_t(p)];
         if (!s.on || nowNs < s.dueNs) continue;
         s.on = false;
-        emit(out, Action::Strum, true, s.ts, ControllerMode::Joypad, p);
-        emit(out, Action::Strum, false, s.ts, ControllerMode::Joypad, p);
+        const Action a = s.menu ? Action::Down : Action::Strum;
+        s.menu = false;
+        emit(out, a, true, s.ts, ControllerMode::Joypad, p);
+        emit(out, a, false, s.ts, ControllerMode::Joypad, p);
     }
-    if (!lanes_[0].active && !lanes_[1].active) {  // left the game: no fret stays held
-        for (auto& [id, fg] : fingers_) fg.fret = -1;
+    if (!lanes_[0].active && !lanes_[1].active) {  // left the game: no lane fret stays held
+        for (auto& [id, fg] : fingers_)
+            if (!fg.menuFret) fg.fret = -1;
+    }
+    if (!menuFrets_.active) {  // left the fret menu: its fingers let go
+        for (auto& [id, fg] : fingers_)
+            if (fg.menuFret) {
+                emit(out, Action(int(Action::Fret0) + fg.fret), false, nowNs, ControllerMode::Joypad, 0);
+                fg.menuFret = false, fg.fret = -1, fg.done = true;
+            }
     }
 }
