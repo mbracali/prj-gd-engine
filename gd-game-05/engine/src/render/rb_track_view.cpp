@@ -495,6 +495,19 @@ void RbTrackView::loadFx() {
         if (const scene::Object* o = obj(n)) trackFx_.parts.add(o, 977);
     for (FxDir* fx : {&smashFx_[0], &smashFx_[1], &smashFx_[2], &smashFx_[3], &smashFx_[4], &trackFx_})
         for (gfx::ParticleSystem& s : fx->parts.systems()) fxSystem_[&s.def()] = &s;
+    // GD05_TRACKLOG: every EventTrigger of the track system (the effects' inventory).
+    if (SDL_getenv("GD05_TRACKLOG")) {
+        std::function<void(const scene::Directory&, const std::string&, int)> walk = [&](const scene::Directory& d, const std::string& path, int depth) {
+            std::string l;
+            for (const auto& o : d.objects)
+                if (o->as<scene::EventTrigger>()) l += " " + o->name;
+            if (!l.empty()) SDL_Log("RB track triggers %s:%s", path.c_str(), l.c_str());
+            if (depth < 4)
+                for (const auto& [owner, sd] : d.subdirs)
+                    if (sd && !(owner.rfind("gem_smasher", 0) == 0 && owner != "gem_smasher0")) walk(*sd, path + "/" + owner, depth + 1);
+        };
+        walk(track_->root(), track_->root().name, 0);
+    }
     if (SDL_getenv("GD05_TRACKLOG"))
         for (FxDir* fx : {&smashFx_[0], &trackFx_})
             for (gfx::ParticleSystem& s : fx->parts.systems()) {
@@ -778,6 +791,13 @@ void RbTrackView::fxEvents(const PlayerView& player, float nowMs) {
         fx.glowing = on;
     }
     lastHeldSlots_ = heldSlots;
+    // A solo section (player.dta solo_start / solo_end): the track's
+    // guitar_solo_start.trig / guitar_solo_stop.trig [C data]; the port fired
+    // neither (GD05-096).
+    if (player.soloActive != wasSolo_ && !SDL_getenv("GD05_TRACKFX_LEGACY")) {
+        wasSolo_ = player.soloActive;
+        if (fxTrigger(trackFx_, wasSolo_ ? "guitar_solo_start.trig" : "guitar_solo_stop.trig", nowMs)) ++(wasSolo_ ? st.soloStarts : st.soloStops);
+    }
     // Overdrive deployed / over.
     if (player.overdriveActive != wasOd_) {
         wasOd_ = player.overdriveActive;
@@ -1285,7 +1305,7 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
         lastFxMs_ = nowMs;
         for (FxDir* fx : {&smashFx_[0], &smashFx_[1], &smashFx_[2], &smashFx_[3], &smashFx_[4], &trackFx_}) fxReset(*fx);
         colorSmashers();
-        gemSeen_.clear(), seenChart_ = nullptr, wasOd_ = false, lastHeld_ = -1, lastHeldSlots_ = 0;
+        gemSeen_.clear(), seenChart_ = nullptr, wasOd_ = false, wasSolo_ = false, lastHeld_ = -1, lastHeldSlots_ = 0;
     }
     lastFxMs_ = nowMs;
     fxEvents(player, nowMs);

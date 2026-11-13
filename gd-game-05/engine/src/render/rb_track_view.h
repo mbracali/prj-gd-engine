@@ -59,6 +59,7 @@ public:
         float whammy = 0;  // the whammy bar (0 rest .. 1): the held tail's wobble and brightness
         uint32_t heldFrets = 0;  // the frets held (the chart's bits): their smashers glow
         std::function<bool(int gem)> struck;  // the player hit it (the hit flames); unset: `hit`
+        bool soloActive = false;  // in a solo section (player.dta solo_start / solo_end)
     };
 
     // The fret board's effects, counted for the walks (GD05-045): hits whose
@@ -68,6 +69,7 @@ public:
         // GD05-096: hits whose smasher effects drew particles within 100 ms
         // (seen) or not (unseen); particles the smashers' effects drew.
         int hitsSeen = 0, hitsUnseen = 0;
+        int soloStarts = 0, soloStops = 0;  // guitar_solo_start / _stop.trig fired
         long fxParticlesDrawn = 0;
     };
     static FxStats& fxStats();
@@ -236,6 +238,7 @@ private:
     const TempoMap* tempo_ = nullptr;  // the song's (draw), for the beat rates
     int fxLaunchedNow_ = 0;  // particles launched by the triggers being fired
     int hitsPending_ = 0;    // hits not yet seen drawn (fxStats)
+    bool wasSolo_ = false;
     float hitsPendingMs_ = 0;
     float lastFxMs_ = -1e30f;
     // What the view saw last frame (the events are its changes).

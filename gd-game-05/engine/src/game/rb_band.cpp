@@ -847,8 +847,9 @@ void Band::rbShotStart(const scene::BandCamShot& shot, bool teleports) {
             moves.emplace_back(tg.target, tg.to);
         }
         if (tg.freeze && m) m->frozen = true, m->frozenAt = seconds_ + double(tg.freezeDelay);
-        if (log) SDL_Log("band: shot %s target %s (%s) group '%s' teleport %d freeze %d at %.3f", shot.name.c_str(), tg.target.c_str(), m ? "found" : "no member",
-                         tg.anim.c_str(), int(tg.teleport), int(tg.freeze), m ? m->frozenAt : 0.0);
+        if (log) SDL_Log("band: shot %s target %s (%s) group '%s' teleport %d freeze %d at %.3f, now at %.1f %.1f %.1f", shot.name.c_str(), tg.target.c_str(), m ? "found" : "no member",
+                         tg.anim.c_str(), int(tg.teleport), int(tg.freeze), m ? m->frozenAt : 0.0, m && m->character ? double(m->character->xfm().pos[0]) : 0.0,
+                         m && m->character ? double(m->character->xfm().pos[1]) : 0.0, m && m->character ? double(m->character->xfm().pos[2]) : 0.0);
     }
     rbShotTargets(groups, moves);
 }
