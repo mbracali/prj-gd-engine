@@ -30,16 +30,16 @@ This is a list of all the planned and already decompiled games. Every game is pl
 
 | id         | Original game                     | Base version  | Done          |
 | ---------- | --------------------------------- | ------------- | ------------- |
-| gd-game-01 | Guitar Hero                       | Playstation 2 | 99% Playable  |
-| gd-game-02 | Guitar Hero II                    | Xbox 360      | 99% Playable  |
-| gd-game-03 | Guitar Hero Encore: Rocks the 80s | Playstation 2 | 99% Playable  |
-| gd-game-04 | Guitar Hero III: Legends of Rock  | Xbox 360      | 96% Playable  |
-| gd-game-05 | Rock Band                         | Xbox 360      | 36% Playable  |
+| gd-game-01 | Guitar Hero                       | Playstation 2 | 98% Playable  |
+| gd-game-02 | Guitar Hero II                    | Xbox 360      | 92% Playable  |
+| gd-game-03 | Guitar Hero Encore: Rocks the 80s | Playstation 2 | 93% Playable  |
+| gd-game-04 | Guitar Hero III: Legends of Rock  | Xbox 360      | 87% Playable  |
+| gd-game-05 | Rock Band                         | Xbox 360      | 40% Playable  |
 | gd-game-06 | Guitar Hero: Aerosmith            | Xbox 360      | --            |
 | gd-game-07 | Guitar Hero World Tour            | Xbox 360      | --            |
 | gd-game-08 | Rock Band 2                       | Xbox 360      | --            |
 | gd-game-09 | The Beatles: Rock Band            | Xbox 360      | --            |
-| gd-game-10 | Guitar Hero: Metallica            | Xbox 360      | --            |
+| gd-game-10 | Guitar Hero: Metallica            | Xbox 360      | 48% Playable  |
 | gd-game-11 | Guitar Hero: Smash Hits           | Xbox 360      | --            |
 | gd-game-12 | Guitar Hero 5                     | Xbox 360      | --            |
 | gd-game-13 | Lego Rock Band                    | Xbox 360      | --            |
