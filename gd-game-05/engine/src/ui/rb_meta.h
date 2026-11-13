@@ -2,10 +2,12 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "char/patch.h"
 #include "script/script.h"
 
 namespace ui {
@@ -20,6 +22,10 @@ class UiManager;
 void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<ScriptObject>>& owned);
 // The meta game's panel classes (CharCreatorPanel ...), or null.
 std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& cls, const std::string& name);
+// The patches a profile character wears (tattoo location -> layers: its
+// tattoos' patches, ui.dta (patch (tattoos ...)) mapping a location to its
+// set) (GD05-084); empty for other objects.
+std::map<std::string, chr::Patch> rbWornPatches(UiManager& ui, ScriptObject* tourChar);
 // The outfit catalog's price of a piece (char/outfitloader.dta (cost n);
 // an instrument model's, char/instruments.dta (groups (<model> (cost n)))),
 // -1 when the catalog has no such piece [C data] (the walks' expectations).

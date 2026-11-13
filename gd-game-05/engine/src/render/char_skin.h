@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "render/device.h"
 #include "render/material.h"
@@ -15,6 +16,7 @@
 
 namespace chr {
 class Character;
+struct PatchDraw;
 }
 namespace scene {
 class Directory;
@@ -62,6 +64,9 @@ public:
     // The rendered pixels of c's texture `tex` (RGBA, top row first), for
     // the walks' checks; null when it was not rendered. SDL_DestroySurface it.
     SDL_Surface* read(chr::Character& c, const std::string& tex);
+    // The same for whichever view last rendered c's skins (the walks'
+    // checks of a band member on stage), or null.
+    static SDL_Surface* readAny(chr::Character& c, const std::string& tex);
     // TexRenderers rendered so far (all views).
     static int renders() { return renders_; }
 
@@ -76,6 +81,7 @@ private:
     Target* target(const scene::Tex& out);
     void render(MaterialRenderer& mr, chr::Character& c, const scene::TexRenderer& t, const scene::Directory* proxy, Target& tg);
     void drawList(MaterialRenderer& mr, const scene::Directory& dir);
+    void drawPatch(MaterialRenderer& mr, const std::vector<chr::PatchDraw>& layers, Target& t);
     void drawObject(MaterialRenderer& mr, const scene::Object& o, int depth);
     void collect(uint64_t now);
 

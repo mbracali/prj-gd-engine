@@ -166,6 +166,7 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
             continue;
         }
         rbSkin(data, *m->character, pre, look ? look->skin : -1);
+        if (look) rbPatches(data, *m->character, look->patches);
         {
             // The body's height and weight (char/deform.h, GD05-084): the
             // player's character's, else the premade's (characters.dtb) [C data].
@@ -379,6 +380,69 @@ void Band::rbSkin(const GameData& data, chr::Character& c, const DataNode* prefa
                     t ? t->width : 0, t ? t->height : 0, mat->color[0], mat->color[1], mat->color[2], mat->color[3], mat->blend, mat->zMode,
                     int(mat->useEnviron), int(mat->prelit));
         });
+    ++c.skinSerial;
+}
+
+const DataNode* Band::rbPatchConfig(const GameData& data) {
+    static DataNode root;
+    static bool loaded = false;
+    if (!loaded) {
+        loaded = true;
+        try {
+            root = parseDtb(data.read("ui/gen/ui.dtb"));
+        } catch (const std::exception& e) {
+            SDL_Log("band: ui.dtb: %s", e.what());
+        }
+    }
+    return root.find("patch");
+}
+
+std::string Band::rbStickerMilo(const GameData& data, const std::string& category) {
+    const DataNode* cfg = rbPatchConfig(data);
+    const DataNode* st = cfg ? cfg->find("stickers") : nullptr;
+    const DataNode* cat = st ? st->find(category) : nullptr;
+    if (!cat || cat->children.size() < 2) return {};
+    // ../patchcreator/stickers_sailor_jerry.milo, relative to ui/ [C data].
+    return scene::findMiloRelative(data, "ui/gen/ui.dtb", text(cat, 1));
+}
+
+// The character's patches (GD05-084, D93): each layer's sticker (the
+// category milo's Tex objects of type sticker, in table order), its half
+// extents (the sticker's sizex / sizey x the layer's scale), its colour
+// (patch_warpmesh.milo's sticker.pal at the layer's index when the sticker
+// allows a colour, else white) [C data; I: the layer's geometry].
+void Band::rbPatches(const GameData& data, chr::Character& c, const std::map<std::string, chr::Patch>& patches) {
+    c.patches.clear();
+    std::vector<std::array<float, 4>> pal;
+    if (const DataNode* cfg = rbPatchConfig(data))
+        if (const DataNode* pl = cfg->find("patch_layer"); pl && pl->children.size() > 1)
+            if (const scene::Directory* d = c.keepMilo(data, scene::findMiloRelative(data, "ui/gen/ui.dtb", text(pl, 1))))
+                if (const auto* p = d->find<scene::ColorPalette>("sticker.pal")) pal = p->colors;
+    auto prop = [](const scene::ObjectHeader& h, const char* key, float def) {
+        if (!h.hasProps) return def;
+        for (const auto& kv : h.props.children)
+            if (kv.children.size() > 1 && kv.children[0].str == key) return kv.children[1].asFloat();
+        return def;
+    };
+    for (const auto& [loc, layers] : patches) {
+        std::vector<chr::PatchDraw>& out = c.patches[loc];
+        for (const chr::PatchLayer& l : layers) {
+            if (l.category.empty() || l.sticker < 0) continue;
+            const scene::Directory* d = c.keepMilo(data, rbStickerMilo(data, l.category));
+            if (!d) continue;
+            const scene::Tex* tex = nullptr;
+            int n = 0;
+            for (const auto& o : d->objects)
+                if (const auto* t = o->as<scene::Tex>(); t && t->header.type == "sticker" && n++ == l.sticker) tex = t;
+            if (!tex) continue;
+            chr::PatchDraw pd;
+            pd.tex = tex;
+            pd.halfW = 0.5f * prop(tex->header, "sizex", 1) * l.sx, pd.halfH = 0.5f * prop(tex->header, "sizey", 1) * l.sy;
+            pd.x = l.x, pd.y = l.y, pd.rot = l.rot, pd.flipX = l.flipX, pd.flipY = l.flipY;
+            if (prop(tex->header, "allow_color", 0) != 0 && l.color >= 0 && size_t(l.color) < pal.size()) pd.color = pal[size_t(l.color)];
+            out.push_back(pd);
+        }
+    }
     ++c.skinSerial;
 }
 

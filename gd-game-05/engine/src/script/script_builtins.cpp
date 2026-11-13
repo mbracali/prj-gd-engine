@@ -580,6 +580,17 @@ void Interp::installCoreBuiltins() {
     addBuiltin("strlen", [arg](Interp& in, const DataNode& c) {
         return Value::integer(static_cast<int>(arg(in, c, 1).str().size()));
     });
+    // {basename <path>}: the file name without its folders and extension
+    // (RB registers it at 0x8248F908: 0x8248E098 -> FileGetBase 0x823A73B0)
+    // [C]; shop.dta names a tattoo location by {basename {$component name}}
+    // (patch_chest.btn -> patch_chest).
+    addBuiltin("basename", [arg](Interp& in, const DataNode& c) {
+        const Value v = arg(in, c, 1);
+        std::string p = v.type == Value::Type::Object && v.object ? v.object->name() : v.str();
+        if (const size_t sl = p.find_last_of("/\\"); sl != std::string::npos) p = p.substr(sl + 1);
+        if (const size_t dot = p.rfind('.'); dot != std::string::npos) p = p.substr(0, dot);
+        return Value::symbol(p);
+    });
 
     // -- objects
     addBuiltin("exists", [](Interp& in, const DataNode& c) {

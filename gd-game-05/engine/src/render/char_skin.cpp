@@ -3,6 +3,7 @@
 #include "render/char_skin.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <set>
 #include <vector>
@@ -15,6 +16,19 @@
 namespace gfx {
 
 int CharSkin::renders_ = 0;
+
+namespace {
+// The view that last rendered each character's skins (readAny).
+std::map<const chr::Character*, CharSkin*>& owners() {
+    static std::map<const chr::Character*, CharSkin*> m;
+    return m;
+}
+}  // namespace
+
+SDL_Surface* CharSkin::readAny(chr::Character& c, const std::string& tex) {
+    auto it = owners().find(&c);
+    return it == owners().end() ? nullptr : it->second->read(c, tex);
+}
 
 namespace {
 
@@ -35,6 +49,7 @@ Mat4 flipV() {
 CharSkin::CharSkin(SceneCache& cache) : cache_(cache), quad_(std::make_unique<DynamicMesh>(cache.device())) {}
 
 CharSkin::~CharSkin() {
+    for (auto it = owners().begin(); it != owners().end();) it = it->second == this ? owners().erase(it) : std::next(it);
     for (auto& [tex, t] : targets_)
         if (t.id) cache_.device().destroyTarget(t.id);
 }
@@ -75,6 +90,7 @@ void CharSkin::update(MaterialRenderer& mr, chr::Character& c) {
     // GD05_SKIN_LEGACY=1: nothing rendered, as before D84 (the walks' "before").
     static const bool legacy = SDL_getenv("GD05_SKIN_LEGACY") != nullptr;
     if (legacy) return;
+    owners()[&c] = this;
     collect(SDL_GetTicks());
     std::vector<const scene::TexRenderer*> renderers;
     c.forEachRoot([&](scene::Directory& root) {
@@ -90,6 +106,47 @@ void CharSkin::update(MaterialRenderer& mr, chr::Character& c) {
         Target* tg = target(*out);
         if (!tg) continue;
         if (tg->serial != c.skinSerial || t->force) render(mr, c, *t, proxy, *tg);
+    }
+}
+
+// A patch's layers into its target (cleared): each sticker a quad of its
+// half extents about its centre, turned and flipped, in the target's -1..1
+// square, alpha-blended in the layer's colour [I: RB draws each layer
+// through patch_warpmesh.milo's grid (patch.mat), its warp not done].
+void CharSkin::drawPatch(MaterialRenderer& mr, const std::vector<chr::PatchDraw>& layers, Target& t) {
+    Camera cam;
+    cam.ortho = true, cam.aspect = 1, cam.nearPlane = 0.01f, cam.farPlane = 5;
+    LightEnv env;
+    env.ambient = {1, 1, 1}, env.envAmbient = {1, 1, 1}, env.lightCount = 0;
+    mr.setFrame(cam, env, t.w, t.h);
+    for (const chr::PatchDraw& l : layers) {
+        if (!l.tex) continue;
+        Material gm;
+        gm.blend = MatBlend::SrcAlpha;
+        gm.zMode = ZMode::Disable;
+        gm.cull = false;
+        gm.useEnviron = false;
+        gm.alphaWrite = true;
+        gm.color[0] = l.color[0], gm.color[1] = l.color[1], gm.color[2] = l.color[2], gm.alpha = l.color[3];
+        gm.diffuseTex = cache_.texture(l.tex);
+        gm.texWrap = TexWrap::Clamp;
+        const float c = std::cos(l.rot), s = std::sin(l.rot);
+        scene::Mesh quad;
+        quad.verts.resize(4);
+        const float corner[4][2] = {{-1, 1}, {1, 1}, {1, -1}, {-1, -1}};
+        for (int i = 0; i < 4; ++i) {
+            const float px = corner[i][0] * l.halfW, py = corner[i][1] * l.halfH;
+            scene::MeshVertex& v = quad.verts[size_t(i)];
+            v.pos[0] = l.x + px * c - py * s, v.pos[1] = 1, v.pos[2] = l.y + px * s + py * c;
+            v.normal[0] = 0, v.normal[1] = -1, v.normal[2] = 0;
+            v.color[0] = v.color[1] = v.color[2] = v.color[3] = 1;
+            const float u = corner[i][0] * 0.5f + 0.5f, w = 0.5f - corner[i][1] * 0.5f;
+            v.uv[0] = l.flipX ? 1 - u : u, v.uv[1] = l.flipY ? 1 - w : w;
+        }
+        quad.faces = {{0, 1, 2}, {0, 2, 3}};
+        const GpuMesh g = quad_->upload(packVertices(quad), {0, 1, 2, 0, 2, 3});
+        const Mat4 bones[1] = {Mat4::identity()};
+        mr.draw(g, bones, gm, DrawContext{});
     }
 }
 
@@ -130,6 +187,10 @@ void CharSkin::render(MaterialRenderer& mr, chr::Character& c, const scene::TexR
         const float clear[4] = {0, 0, 0, 0};
         dev.clear(clear, true);
         pt->serial = c.skinSerial;
+        // Its patch (PatchRenderer's proxy, set by the character's
+        // set_patch / set_tattoo_patch, RB 0x822E5010: "<location>.patch").
+        const std::string loc = o.name.size() > 6 && o.name.compare(o.name.size() - 6, 6, ".patch") == 0 ? o.name.substr(0, o.name.size() - 6) : o.name;
+        if (auto it = c.patches.find(loc); it != c.patches.end() && !it->second.empty()) drawPatch(mr, it->second, *pt);
         proxy->forEach([&](scene::Object& m) {
             auto* mat = m.as<scene::Mat>();
             if (mat && mat->dir && mat->dir->resolve<scene::Tex>(mat->diffuseTex) == out) {

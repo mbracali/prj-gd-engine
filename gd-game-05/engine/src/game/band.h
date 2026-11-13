@@ -11,6 +11,7 @@
 
 #include "char/character.h"
 #include "char/facefx.h"
+#include "char/patch.h"
 #include "scene/milo.h"
 #include "scene/objects.h"
 #include "script/script.h"
@@ -63,6 +64,7 @@ public:
             uint32_t attitude = 0;  // the creator's kGenre* value (macros.dta: kGenreRocker 256 ...); 0: the premade's
             float weight = 0.5f, height = 0.5f;  // the creator's sliders (char/deform.h)
             std::map<std::string, std::string> outfit;
+            std::map<std::string, chr::Patch> patches;  // the tattoos (location -> patch)
         };
         std::map<std::string, RbLook> rbLooks;
     };
@@ -79,6 +81,13 @@ public:
     // The skin tone on the character's placeholder skin materials (a
     // premade's skin_color_index, or `skinIndex`); see rb_band.cpp.
     static void rbSkin(const GameData& data, chr::Character& c, const DataNode* prefab, int skinIndex = -1);
+    // The character's patches (location -> layers, char/patch.h) resolved
+    // for its PatchRenderers (render/char_skin.h); renders its skins again.
+    static void rbPatches(const GameData& data, chr::Character& c, const std::map<std::string, chr::Patch>& patches);
+    // ui.dta's (patch ...) block: (sets ...), (stickers ...), (patch_layer ...), (tattoos ...); null without one.
+    static const DataNode* rbPatchConfig(const GameData& data);
+    // A sticker category's milo (archive path) and its stickers (Tex objects of type sticker, in order).
+    static std::string rbStickerMilo(const GameData& data, const std::string& category);
     // The premade character each instrument got (Rock Band).
     const std::map<std::string, std::string>& rbPrefabUsed() const { return rbPrefabUsed_; }
 

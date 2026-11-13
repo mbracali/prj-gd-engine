@@ -37,6 +37,7 @@
 #include "render/texture_codec.h"
 #include "char/character.h"
 #include "game/camera_director.h"  // ShotScene (rb_front_creator)
+#include "char/patch.h"  // rb_tattoo
 #include "render/ui_view.h"
 #include "char/char_objects.h"
 #include "scene/milo.h"
@@ -1439,6 +1440,174 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("game_screen", 60000);
         wait(3000);
         check("rb_kit_on_stage");
+    } else if (scenario == "rb_tattoo" || scenario == "rb_tattoo_restarted") {
+        // GD05-084 (car9): the patch creator. A new character, the Rock
+        // Shop's INK > TATTOO > chest: patch 1 edited (shop_patch_screen:
+        // a layer, the first category, its first sticker, moved right and
+        // up), saved; the torso texture shows it where torso_body.mesh maps
+        // the patch (rb_tattoo_torso); restarted, the save keeps it
+        // (rb_tattoo_torso again in the shop).
+        const bool again = scenario == "rb_tattoo_restarted";
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        if (again) {
+            press(kX);  // the saved character (row 0, rb_tattoo's own save)
+        } else {
+            press(kX), wait(800), press(kX);  // create new, male
+            at("charcreator_maker_screen", 20000);
+            wait(1500);
+            press(kX);  // NAME
+            wait(800);
+            check("focus_to create.btn", 5000);
+            press(kX);  // CREATE
+            at("charcreator_confirm_screen", 10000);
+            wait(1500);
+            press(kUp), wait(400), press(kX);  // yes
+        }
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROKK SHOPPE
+        at("shop_screen", 20000);
+        wait(1000);
+        check("focus_to ink.btn", 5000);
+        press(kX);  // INK
+        at("shop_ink_screen", 20000);
+        wait(1000);
+        check("focus_to tattoo.btn", 5000);
+        press(kX);  // TATTOO
+        at("shop_tattoo_screen", 20000);
+        wait(1500);
+        if (again) {
+            check("rb_tattoo_torso");
+            // The first gig: the character on stage wears it.
+            check("rb_tattoo_to_hub", 15000);
+            at("tour_solo_hub_screen", 30000);
+            wait(1000);
+            check("focus_up_to gigguide.btn", 5000);
+            press(kX);  // GIG GUIDE
+            at("tour_solo_diff_screen");
+            press(kX);
+            at("tour_solo_guitar_welcome_screen|tour_solo_event_screen", 20000);
+            wait(800);
+            press(kX);
+            at("tour_solo_event_screen", 20000);
+            wait(1000);
+            press(kX);  // the first event
+            at("game_screen", 60000);
+            wait(4000);
+            check("rb_tattoo_stage");
+            return;
+        }
+        check("rb_tattoo_base");
+        check("focus_to patch_chest.btn", 5000);
+        press(kX);  // the chest
+        at("tattoo_select_screen", 20000);
+        wait(1200);
+        press(kDown), wait(600);  // patch 1
+        check("print_focus");
+        press(kX);  // empty: edit it
+        at("shop_patch_help_screen|shop_patch_screen", 20000);
+        wait(1200);
+        press(kX);  // continue (the help, once)
+        at("shop_patch_screen", 20000);
+        wait(1500);
+        check("print_focus");
+        press(kX), wait(800);  // layer 1: no sticker, the categories
+        check("print_focus");
+        press(kX), wait(800);  // the first category: its stickers
+        check("print_focus");
+        press(kX), wait(800);  // the first sticker: the layer menu
+        check("print_focus");
+        press(kX), wait(800);  // EDIT: the modify menu
+        check("print_focus");
+        press(kX), wait(800);  // MOVE
+        check("print_focus");
+        for (int i = 0; i < 6; ++i) press(kRight), wait(150);
+        for (int i = 0; i < 4; ++i) press(kUp), wait(150);
+        press(kX), wait(800);  // done moving
+        check("rb_tattoo_layer");
+        press(kTri), wait(800);  // the layer menu
+        press(kTri), wait(800);  // the layers
+        press(kTri), wait(800);  // quit
+        check("print_focus");
+        check("focus_to cnf_save.btn", 5000);
+        press(kX);  // SAVE
+        at("shop_tattoo_screen", 20000);
+        wait(2500);
+        check("rb_tattoo_torso");
+        check("restart_app");
+    } else if (scenario == "rb_facepaint") {
+        // GD05-084 (car9): face paint, the patch creator on the head
+        // (shop.dta facepaint_select_panel: location patch_facepaint, set
+        // general): a sticker moved left and up, saved; the head's texture
+        // shows it where head_skin_proxy's patch mesh maps the patch
+        // (rb_tattoo_head).
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROKK SHOPPE
+        at("shop_screen", 20000);
+        wait(1000);
+        check("focus_to ink.btn", 5000);
+        press(kX);  // INK
+        at("shop_ink_screen", 20000);
+        wait(1500);
+        check("rb_tattoo_head_base");
+        check("focus_to facepaint.btn", 5000);
+        press(kX);  // FACE PAINT
+        at("facepaint_select_screen", 20000);
+        wait(1200);
+        press(kDown), wait(600);  // patch 1
+        press(kX);  // empty: edit it
+        at("shop_patch_help_screen|shop_patch_screen", 20000);
+        wait(1200);
+        press(kX);  // continue (the help, once)
+        at("shop_patch_screen", 20000);
+        wait(1500);
+        press(kX), wait(800);  // layer 1: the categories
+        press(kX), wait(800);  // the first category
+        press(kX), wait(800);  // the first sticker
+        press(kX), wait(800);  // EDIT
+        press(kX), wait(800);  // MOVE
+        for (int i = 0; i < 4; ++i) press(kLeft), wait(150);
+        for (int i = 0; i < 2; ++i) press(kUp), wait(150);
+        press(kX), wait(800);  // done moving
+        check("rb_tattoo_layer");
+        press(kTri), wait(800), press(kTri), wait(800), press(kTri), wait(800);  // quit
+        check("focus_to cnf_save.btn", 5000);
+        press(kX);  // SAVE
+        at("shop_ink_screen", 20000);
+        wait(2500);
+        check("rb_tattoo_head");
     } else if (scenario == "rb_makeup") {
         // GD05-022 / GD05-084: the skins rendered at run time. A new
         // character, the Rock Shop's INK > MAKEUP, the first eye make-up
@@ -4800,6 +4969,191 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::printf("  head texture in makeup_eyes.mask's rect (%d,%d)-(%d,%d): expected the make-up over the bare skin (mean error <= 3), %ld pixels "
                     "changed by > 8 levels; measured mean error %.2f, %ld pixels changed\n", x0, y0, x1, y1, wantPx, merr, gotPx);
         if (n == 0 || merr > 3 || wantPx < 200 || std::labs(gotPx - wantPx) > wantPx / 10) return fail("the eyes' make-up is not in the head's texture as the data says");
+        return pass();
+    }
+    // rb_tattoo_* (GD05-084, car9): the patch creator's tattoo in the
+    // shop preview's torso texture (render/char_skin.h).
+    // rb_tattoo_head_base / rb_tattoo_head (rb_facepaint): the head's texture
+    // where the face paint's centre lands (the patch mesh of
+    // head_skin_proxy whose material samples patch_facepaint's output).
+    if (s.screen == "rb_tattoo_head_base" || s.screen == "rb_tattoo_head") {
+        static std::vector<uint8_t> base;
+        ui::RbCharPreview* p = ui::RbCharPreview::drawnLast();
+        chr::Character* ch = p ? p->character() : nullptr;
+        if (!ch) return fail("no character preview drawn");
+        std::string out;
+        ch->forEachObject([&](scene::Object& o) {
+            if (const auto* t = o.as<scene::TexRenderer>(); t && o.name == "head_skin.rndtex") out = t->outputTexture;
+        });
+        SDL_Surface* sf = out.empty() ? nullptr : p->readSkin(out);
+        if (!sf) return fail("the head's texture was not rendered");
+        std::vector<uint8_t> px(size_t(sf->w) * size_t(sf->h) * 4);
+        for (int y = 0; y < sf->h; ++y) std::memcpy(&px[size_t(y) * size_t(sf->w) * 4], static_cast<uint8_t*>(sf->pixels) + y * sf->pitch, size_t(sf->w) * 4);
+        const int w = sf->w, h = sf->h;
+        SDL_DestroySurface(sf);
+        if (s.screen == "rb_tattoo_head_base") return base = px, pass();
+        ScriptObject* perf = ui.interp().send("tour", "performer", {}).object;
+        const std::map<std::string, chr::Patch> worn = ui::rbWornPatches(ui, perf);
+        const chr::PatchLayer* layer = nullptr;
+        if (auto it = worn.find("patch_facepaint"); it != worn.end())
+            for (const chr::PatchLayer& l : it->second)
+                if (!layer && !l.category.empty()) layer = &l;
+        if (!layer) return fail("no face paint worn");
+        if (base.size() != px.size()) return fail("rb_tattoo_head_base did not run");
+        const scene::Directory* proxy = ch->proxyDir("head_skin_proxy");
+        const auto* pr = proxy ? proxy->find<scene::PatchRenderer>("patch_facepaint.patch") : nullptr;
+        const scene::Mesh* mesh = nullptr;
+        if (proxy && pr)
+            for (const auto& o : proxy->objects)
+                if (const auto* m = o->as<scene::Mesh>())
+                    if (const auto* mat = proxy->find<scene::Mat>(m->mat); mat && mat->diffuseTex == pr->outputTexture) mesh = m;
+        if (!mesh) return fail("no patch mesh in head_skin_proxy");
+        const float u = (layer->x + 1) * 0.5f, v = (1 - layer->y) * 0.5f;
+        bool found = false;
+        float wx = 0, wz = 0;
+        for (const auto& f : mesh->faces) {
+            if (f[0] >= mesh->verts.size() || f[1] >= mesh->verts.size() || f[2] >= mesh->verts.size()) continue;
+            const scene::MeshVertex &a = mesh->verts[f[0]], &b = mesh->verts[f[1]], &c = mesh->verts[f[2]];
+            const float d = (b.uv[1] - c.uv[1]) * (a.uv[0] - c.uv[0]) + (c.uv[0] - b.uv[0]) * (a.uv[1] - c.uv[1]);
+            if (std::fabs(d) < 1e-9f) continue;
+            const float l0 = ((b.uv[1] - c.uv[1]) * (u - c.uv[0]) + (c.uv[0] - b.uv[0]) * (v - c.uv[1])) / d;
+            const float l1 = ((c.uv[1] - a.uv[1]) * (u - c.uv[0]) + (a.uv[0] - c.uv[0]) * (v - c.uv[1])) / d;
+            if (l0 < 0 || l1 < 0 || 1 - l0 - l1 < 0) continue;
+            const float l2 = 1 - l0 - l1;
+            wx = l0 * a.pos[0] + l1 * b.pos[0] + l2 * c.pos[0], wz = l0 * a.pos[2] + l1 * b.pos[2] + l2 * c.pos[2];
+            found = true;
+            break;
+        }
+        if (!found) return fail("the face paint's centre is outside the patch mesh's uvs");
+        const int ex = int((wx + 1) * 0.5f * w), ey = int((1 - wz * float(w) / float(h)) * 0.5f * h);
+        int changed = 0, total = 0;
+        for (int y = ey - 4; y <= ey + 4; ++y)
+            for (int x = ex - 4; x <= ex + 4; ++x) {
+                if (x < 0 || y < 0 || x >= w || y >= h) continue;
+                const size_t i = (size_t(y) * size_t(w) + size_t(x)) * 4;
+                ++total;
+                changed += std::max({std::abs(int(px[i]) - int(base[i])), std::abs(int(px[i + 1]) - int(base[i + 1])), std::abs(int(px[i + 2]) - int(base[i + 2]))}) > 8;
+            }
+        std::printf("  face paint layer: %s sticker %d at (%.2f, %.2f): expected in the head texture at (%d, %d) (%s's uvs, the parallel Cam.cam); "
+                    "measured %d of %d pixels there changed from the bare face (>= 50%% expected)\n", layer->category.c_str(), layer->sticker, layer->x,
+                    layer->y, ex, ey, mesh->name.c_str(), changed, total);
+        if (total == 0 || changed * 2 < total) return fail("the face paint is not in the head's texture where the patch maps it");
+        return pass();
+    }
+    if (s.screen == "rb_tattoo_base" || s.screen == "rb_tattoo_torso" || s.screen == "rb_tattoo_layer" || s.screen == "rb_tattoo_stage" || s.screen == "rb_tattoo_to_hub") {
+        static std::vector<uint8_t> base;
+        static std::array<int, 4> gTattooAt{-1, -1, 0, 0};  // the tattoo's centre in the torso texture, its rgb, the bare skin's (rb_tattoo_torso)
+        static int bw = 0, bh = 0;
+        ScriptObject* perf = ui.interp().send("tour", "performer", {}).object;
+        const std::map<std::string, chr::Patch> worn = ui::rbWornPatches(ui, perf);
+        const chr::PatchLayer* layer = nullptr;
+        if (auto it = worn.find("patch_chest"); it != worn.end())
+            for (const chr::PatchLayer& l : it->second)
+                if (!layer && !l.category.empty()) layer = &l;
+        if (s.screen == "rb_tattoo_to_hub") {  // back out of the shop (Triangle until the hub)
+            if (ui.inTransition()) return;
+            if (ui.currentScreen() == "tour_solo_hub_screen") return pass();
+            ui.buttonDown(kTri, 0), ui.buttonUp(kTri, 0);
+            return;
+        }
+        if (s.screen == "rb_tattoo_stage") {
+            // The guitarist on stage (player_guitar0) wears the patch, its
+            // torso texture as the shop's preview rendered it from the same
+            // data: the pixel at the tattoo's centre (rb_tattoo_torso's).
+            const int layers = ui.host().gameCounter(0, "band_patch:player_guitar0:patch_chest");
+            const int rgb = ui.host().gameCounter(0, "band_patch:player_guitar0:torso_naked.tex:" + std::to_string(gTattooAt[0]) + ":" + std::to_string(gTattooAt[1]));
+            std::printf("  on stage: expected 1 chest layer and the torso texture's pixel at (%d, %d) = the shop preview's #%06x (bare skin #%06x); "
+                        "measured %d layer(s), #%06x\n", gTattooAt[0], gTattooAt[1], gTattooAt[2], gTattooAt[3], layers, rgb < 0 ? 0 : rgb);
+            if (layers != 1) return fail("the guitarist on stage has no chest tattoo");
+            if (rgb < 0) return fail("the guitarist's torso texture was not rendered on stage");
+            const int dr = std::abs(((rgb >> 16) & 255) - ((gTattooAt[2] >> 16) & 255)), dg = std::abs(((rgb >> 8) & 255) - ((gTattooAt[2] >> 8) & 255)),
+                      db = std::abs((rgb & 255) - (gTattooAt[2] & 255));
+            if (std::max({dr, dg, db}) > 2) return fail("the tattoo's pixel on stage differs from the shop's");
+            return pass();
+        }
+        if (s.screen == "rb_tattoo_layer") {
+            ui::PanelObj* pp = ui.panel("patch_panel");
+            const Value e = pp ? ui.interp().send(pp, "edit_layer", {}) : Value::integer(0);
+            std::printf("  the edited layer: category %s, sticker %d, mode %s\n", e.object ? ui.interp().send(e.object, "get", {Value::symbol("sticker_category")}).str().c_str() : "-",
+                        e.object ? ui.interp().send(e.object, "get", {Value::symbol("sticker_idx")}).integerValue() : -1,
+                        pp ? ui.interp().send(pp, "get", {Value::symbol("mode")}).str().c_str() : "-");
+            if (!e.object || ui.interp().send(e.object, "has_sticker", {}).integerValue() == 0) return fail("the layer has no sticker");
+            return pass();
+        }
+        ui::RbCharPreview* p = ui::RbCharPreview::drawnLast();
+        chr::Character* ch = p ? p->character() : nullptr;
+        if (!ch) return fail("no character preview drawn");
+        SDL_Surface* sf = p->readSkin("torso_naked.tex");
+        if (!sf) return fail("the torso's texture was not rendered");
+        std::vector<uint8_t> px(size_t(sf->w) * size_t(sf->h) * 4);
+        for (int y = 0; y < sf->h; ++y) std::memcpy(&px[size_t(y) * size_t(sf->w) * 4], static_cast<uint8_t*>(sf->pixels) + y * sf->pitch, size_t(sf->w) * 4);
+        const int w = sf->w, h = sf->h;
+        SDL_DestroySurface(sf);
+        if (s.screen == "rb_tattoo_base") {
+            base = px, bw = w, bh = h;
+            std::printf("  torso texture %dx%d kept (no tattoo: %d layer(s) worn on the chest)\n", w, h, layer ? 1 : 0);
+            return layer ? fail("a tattoo before the patch was made") : pass();
+        }
+        if (!layer)
+            return fail("no chest tattoo worn (tattoo_patch patch_chest " +
+                        std::to_string(perf ? ui.interp().send(perf, "tattoo_patch", {Value::symbol("patch_chest")}).integerValue() : -9) + ")");
+        if (base.empty() || bw != w || bh != h) return fail("rb_tattoo_base did not run");
+        // Where the layer's centre lands in the torso texture: the patch's
+        // uv (u = (x + 1) / 2, v = (1 - y) / 2) found in torso_body.mesh's
+        // uvs (patch_chest.mat samples patch_chest.tex), the triangle's
+        // position through the proxy's parallel Cam.cam [C data].
+        const scene::Directory* proxy = ch->proxyDir("torso_skin_proxy");
+        const auto* mesh = proxy ? proxy->find<scene::Mesh>("torso_body.mesh") : nullptr;
+        const auto* cam = proxy ? proxy->find<scene::Cam>("Cam.cam") : nullptr;
+        if (!mesh || !cam) return fail("no torso_body.mesh / Cam.cam in torso_skin_proxy");
+        const float u = (layer->x + 1) * 0.5f, v = (1 - layer->y) * 0.5f;
+        bool found = false;
+        float wx = 0, wz = 0;
+        for (const auto& f : mesh->faces) {
+            if (f[0] >= mesh->verts.size() || f[1] >= mesh->verts.size() || f[2] >= mesh->verts.size()) continue;
+            const scene::MeshVertex &a = mesh->verts[f[0]], &b = mesh->verts[f[1]], &c = mesh->verts[f[2]];
+            const float d = (b.uv[1] - c.uv[1]) * (a.uv[0] - c.uv[0]) + (c.uv[0] - b.uv[0]) * (a.uv[1] - c.uv[1]);
+            if (std::fabs(d) < 1e-9f) continue;
+            const float l0 = ((b.uv[1] - c.uv[1]) * (u - c.uv[0]) + (c.uv[0] - b.uv[0]) * (v - c.uv[1])) / d;
+            const float l1 = ((c.uv[1] - a.uv[1]) * (u - c.uv[0]) + (a.uv[0] - c.uv[0]) * (v - c.uv[1])) / d;
+            const float l2 = 1 - l0 - l1;
+            if (l0 < 0 || l1 < 0 || l2 < 0) continue;
+            wx = l0 * a.pos[0] + l1 * b.pos[0] + l2 * c.pos[0], wz = l0 * a.pos[2] + l1 * b.pos[2] + l2 * c.pos[2];
+            found = true;
+            break;
+        }
+        if (!found) return fail("the layer's centre is outside torso_body.mesh's uvs");
+        // The parallel camera (RB 0x8218CAE0): x across, z up x the aspect;
+        // Cam.cam sits at the origin unturned in the data [C data] (its
+        // own transform is added below).
+        const float ndcX = wx - cam->trans.local.pos[0], ndcY = (wz - cam->trans.local.pos[2]) * float(w) / float(h);
+        const int ex = int((ndcX + 1) * 0.5f * w), ey = int((1 - ndcY) * 0.5f * h);
+        int changed = 0, total = 0;
+        for (int y = ey - 4; y <= ey + 4; ++y)
+            for (int x = ex - 4; x <= ex + 4; ++x) {
+                if (x < 0 || y < 0 || x >= w || y >= h) continue;
+                const size_t i = (size_t(y) * size_t(w) + size_t(x)) * 4;
+                ++total;
+                changed += std::max({std::abs(int(px[i]) - int(base[i])), std::abs(int(px[i + 1]) - int(base[i + 1])), std::abs(int(px[i + 2]) - int(base[i + 2]))}) > 8;
+            }
+        // Far from it (the other side of the texture): unchanged.
+        long elsewhere = 0, n = 0;
+        for (int y = 0; y < h; y += 7)
+            for (int x = 0; x < w; x += 7) {
+                if (std::abs(x - ex) < w / 4 && std::abs(y - ey) < h / 3) continue;
+                const size_t i = (size_t(y) * size_t(w) + size_t(x)) * 4;
+                ++n;
+                elsewhere += std::max({std::abs(int(px[i]) - int(base[i])), std::abs(int(px[i + 1]) - int(base[i + 1])), std::abs(int(px[i + 2]) - int(base[i + 2]))}) > 8;
+            }
+        std::printf("  tattoo layer: %s sticker %d at (%.2f, %.2f) scale %.2f x %.2f: expected in the torso texture at (%d, %d) (torso_body.mesh's "
+                    "uvs, Cam.cam); measured %d of %d pixels there changed from the bare skin (>= 50%% expected), %ld of %ld far from it (<= 2%%)\n",
+                    layer->category.c_str(), layer->sticker, layer->x, layer->y, layer->sx, layer->sy, ex, ey, changed, total, elsewhere, n);
+        {
+            const size_t i = (size_t(ey) * size_t(w) + size_t(ex)) * 4;
+            gTattooAt = {ex, ey, (px[i] << 16) | (px[i + 1] << 8) | px[i + 2], (base[i] << 16) | (base[i + 1] << 8) | base[i + 2]};
+        }
+        if (total == 0 || changed * 2 < total) return fail("the tattoo is not in the torso's texture where the patch maps it");
+        if (elsewhere * 50 > n) return fail("the torso's texture changed away from the tattoo");
         return pass();
     }
     // rb_slots_drawn (GD05-083, car9): the band lobby's players'

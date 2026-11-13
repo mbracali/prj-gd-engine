@@ -8,6 +8,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "char/patch.h"
 #include "scene/objects.h"
 
 class BandView;
@@ -40,6 +41,7 @@ public:
         int skin = 0;
         uint32_t attitude = 0;
         float weight = 0.5f, height = 0.5f;
+        std::map<std::string, chr::Patch> patches;  // tattoo location -> its patch (char/patch.h)
         bool operator==(const Look&) const = default;
     };
     RbCharPreview();

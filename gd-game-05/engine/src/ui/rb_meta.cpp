@@ -32,13 +32,16 @@
 #include <sstream>
 
 #include "data/dta.h"
+#include "data/game_data.h"
 #include "data/json.h"
 #include "char/char_objects.h"
+#include "char/patch.h"
 #include "scene/milo.h"
 #include "scene/world_objects.h"
 #include "render/ui_view.h"
 #include "game/camera_director.h"
 #include "char/character.h"
+#include "game/band.h"
 #include "game/song_db.h"
 #include "platform/paths.h"
 #include "ui/natives.h"
@@ -142,6 +145,13 @@ struct CharData {
     std::set<std::string> seenUnlocks[4];
     std::string town, venue, event, newTown;
     int score = 0;
+    // The patch creator's patches (GD05-084, D93): per set of ui.dta's
+    // (patch (sets (general 10) (chest 5) (arm 5))) that many patches [I:
+    // the counts read as the slots of the set], and the patch each tattoo
+    // location wears ((tattoos (patch_chest chest ...) ...)): its index in
+    // the location's set, -1 none.
+    std::map<std::string, std::vector<chr::Patch>> patchSets;
+    std::map<std::string, int> tattoos;
 };
 
 struct BandData {
@@ -660,6 +670,19 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "set_eye_color") return d.eye = iArg(args, last), true;
     if (msg == "set_eyebrow_color") return d.eyebrow = iArg(args, last), true;
     if (msg == "skin_color") return r = Value::integer(d.skin), true;
+    // The tattoos (shop.dta tattoo_select_panel / facepaint_select_panel):
+    // {$tour_char tattoo_patch <location>} the patch index, -1 none;
+    // {$tour_char set_tattoo_patch $char <location> <index>} [C data: the
+    // calls; I: RB's TourCharLocal patch records].
+    if (msg == "tattoo_patch") {
+        auto it = d.tattoos.find(sArg(args, 0));
+        return r = Value::integer(it == d.tattoos.end() ? -1 : it->second), true;
+    }
+    if (msg == "set_tattoo_patch") {
+        d.tattoos[sArg(args, args.size() >= 3 ? args.size() - 2 : 0)] = iArg(args, last, -1);
+        return true;
+    }
+    if (msg == "patch") return r = Value::integer(-1), true;  // an outfit piece's patch (logos): none [I]
     // The character's properties the creator reads ({$char get weight},
     // skin_color_palette / _index, eye_color_palette / _index: band_objects.dta
     // Character) [C data]; the palettes are char/gen/skin.milo's skin.pal
@@ -1106,6 +1129,26 @@ void RbMeta::save() {
         Json o = Json::object();
         for (const auto& [k, v] : c->d.outfit) o.set(k, Json::string(v));
         j.set("outfit", o);
+        Json ps = Json::object();
+        for (const auto& [set, patches] : c->d.patchSets) {
+            Json pa = Json::array();
+            for (const chr::Patch& patch : patches) {
+                Json la = Json::array();
+                for (const chr::PatchLayer& l : patch) {
+                    Json lj = Json::object();
+                    lj.set("category", Json::string(l.category)), lj.set("sticker", Json::number(l.sticker)), lj.set("color", Json::number(l.color));
+                    lj.set("x", Json::number(l.x)), lj.set("y", Json::number(l.y)), lj.set("sx", Json::number(l.sx)), lj.set("sy", Json::number(l.sy));
+                    lj.set("rot", Json::number(l.rot)), lj.set("flip_x", Json::number(l.flipX)), lj.set("flip_y", Json::number(l.flipY));
+                    la.a.push_back(lj);
+                }
+                pa.a.push_back(la);
+            }
+            ps.set(set, pa);
+        }
+        j.set("patches", ps);
+        Json tt = Json::object();
+        for (const auto& [loc, i] : c->d.tattoos) tt.set(loc, Json::number(i));
+        j.set("tattoos", tt);
         Json st = Json::object();
         for (const auto& [k, v] : c->d.stars) st.set(k, Json::number(v));
         j.set("stars", st);
@@ -1182,6 +1225,19 @@ void RbMeta::load() {
         c->d.town = j["town"].str(), c->d.venue = j["venue"].str();
         for (const Json& s : j["seen_towns"].a) c->d.seenTowns.insert(s.str());
         for (const auto& [k, v] : j["outfit"].o) c->d.outfit[k] = v.str();
+        for (const auto& [set, pa] : j["patches"].o)
+            for (const Json& la : pa.a) {
+                chr::Patch patch;
+                for (const Json& lj : la.a) {
+                    chr::PatchLayer l;
+                    l.category = lj["category"].str(), l.sticker = int(lj["sticker"].num(-1)), l.color = int(lj["color"].num(-1));
+                    l.x = float(lj["x"].num()), l.y = float(lj["y"].num()), l.sx = float(lj["sx"].num(1)), l.sy = float(lj["sy"].num(1));
+                    l.rot = float(lj["rot"].num()), l.flipX = lj["flip_x"].num() != 0, l.flipY = lj["flip_y"].num() != 0;
+                    patch.push_back(l);
+                }
+                c->d.patchSets[set].push_back(patch);
+            }
+        for (const auto& [loc, v] : j["tattoos"].o) c->d.tattoos[loc] = int(v.num(-1));
         for (const auto& [k, v] : j["stars"].o) c->d.stars[k] = int(v.num());
         for (const Json& s : j["owned"].a) c->d.owned.insert(s.str());
         for (const Json& s : j["seen_hints"].a) c->d.seenHints.insert(s.str());
@@ -1393,6 +1449,23 @@ private:
     std::set<std::string> quiet_;
 };
 
+// A tattoo location's set (ui.dta (patch (tattoos (<location> <set> <proxy>)))) [C data].
+std::string patchSetOf(UiManager& ui, const std::string& location) {
+    const DataNode* cfg = Band::rbPatchConfig(ui.data());
+    const DataNode* t = cfg ? cfg->find("tattoos") : nullptr;
+    const DataNode* e = t ? t->find(location) : nullptr;
+    return e && e->children.size() > 1 ? e->children[1].s : std::string();
+}
+
+std::map<std::string, chr::Patch> wornPatches(UiManager& ui, const CharData& d) {
+    std::map<std::string, chr::Patch> out;
+    for (const auto& [loc, i] : d.tattoos) {
+        auto it = d.patchSets.find(patchSetOf(ui, loc));
+        if (i >= 0 && it != d.patchSets.end() && size_t(i) < it->second.size()) out[loc] = it->second[size_t(i)];
+    }
+    return out;
+}
+
 // A profile character's look for its menu preview (ui/rb_char_preview.h).
 RbCharPreview::Look previewLook(const RbCharObj& c) {
     RbCharPreview::Look l;
@@ -1400,6 +1473,7 @@ RbCharPreview::Look previewLook(const RbCharObj& c) {
     l.instrument = c.d.instrument.empty() ? "guitar" : c.d.instrument;
     l.outfit = c.d.outfit;
     l.skin = c.d.skin, l.attitude = uint32_t(c.d.attitude), l.weight = c.d.weight, l.height = c.d.height;
+    if (gMeta) l.patches = wornPatches(gMeta->ui(), c.d);
     return l;
 }
 
@@ -1901,6 +1975,11 @@ public:
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         if (msg == "select_cam") return cam_.select(args.empty() ? std::string() : in.evalValue(args[0]).str()), r = Value::integer(0), true;
         if (msg == "update_appearance" || msg == "load_char") return r = Value::integer(0), true;
+        // {shop_char_panel save} (shop.dta: a patch confirmed or deleted): the profile [I: RB saves the character].
+        if (msg == "save") {
+            if (gMeta) gMeta->save();
+            return r = Value::integer(0), true;
+        }
         // get_tour_char, or the property ({shop_char_panel get tour_char}: shop.dta's back of shop_instrument_screen).
         if (msg == "get_tour_char" || (msg == "get" && sArg(args, 0) == "tour_char")) {
             const int pn = getProp(in, "char_player_num").integerValue();
@@ -1914,6 +1993,400 @@ private:
     RbCharPreview preview_;
     PanelShotCamera cam_;
 };
+
+// ------------------------------------------------------------ the patch creator
+class PatchPanelObj;
+//
+// GD05-084, DECISIONS D93. Rock Band's patches (char/patch.h): the shop's
+// tattoo / face paint pickers (PatchSelectPanel tattoo_select_panel /
+// facepaint_select_panel, shop.dta PATCH_SELECT_PANEL_HANDLERS) list the
+// set's patches (patch.lst: none, then the set's slots), edit_patch opens
+// the creator (PatchPanel patch_panel, patchcreator.dta) on the selected
+// one. The scripts drive the modes (on_set_mode, BUTTON_DOWN_MSG,
+// SELECT_START_MSG) [C data]; the natives below are the port's [I: RB's
+// PatchPanel / PatchSelectPanel (RB 0x8282B4E0 / 0x8282B600 ..., layer
+// records RB 0x823CB348) not read]: kLayers layers a patch, a d-pad press
+// in move / rotate / scale steps the layer once (RB moves it while held,
+// with velocities), warp does nothing, the creator's own preview of the
+// patch (patch.milo patch.rndtex) is not drawn.
+namespace {
+
+constexpr int kPatchLayers = 10;  // [I]
+
+// The stickers of a category (ui.dta (patch (stickers ...))): the milo's Tex
+// objects of type sticker, in order, with their properties [C data].
+struct StickerInfo {
+    std::string name, display;
+    float sizex = 1, sizey = 1;
+    int palette = 0;
+    bool allowColor = false;
+};
+const std::vector<StickerInfo>& stickersOf(UiManager& ui, const std::string& category) {
+    static std::map<std::string, std::vector<StickerInfo>> cache;
+    auto it = cache.find(category);
+    if (it != cache.end()) return it->second;
+    std::vector<StickerInfo>& out = cache[category];
+    const std::string path = Band::rbStickerMilo(ui.data(), category);
+    if (path.empty() || !ui.data().exists(path)) return out;
+    try {
+        auto milo = scene::loadMilo(ui.data(), path);
+        for (const auto& o : milo->root().objects) {
+            const auto* t = o->as<scene::Tex>();
+            if (!t || t->header.type != "sticker") continue;
+            StickerInfo si;
+            si.name = t->name, si.display = t->name;
+            if (t->header.hasProps)
+                for (const auto& kv : t->header.props.children) {
+                    if (kv.children.size() < 2) continue;
+                    const std::string& k = kv.children[0].str;
+                    if (k == "sizex") si.sizex = kv.children[1].asFloat();
+                    else if (k == "sizey") si.sizey = kv.children[1].asFloat();
+                    else if (k == "palette_index") si.palette = int(kv.children[1].asFloat());
+                    else if (k == "allow_color") si.allowColor = kv.children[1].asFloat() != 0;
+                    else if (k == "display_name") si.display = kv.children[1].str;
+                }
+            out.push_back(si);
+        }
+    } catch (const std::exception& e) {
+        ui.logOnce("patch: " + path + ": " + e.what());
+    }
+    return out;
+}
+
+// The categories a set offers ((stickers (<category> <milo> <preview> (sets ...)))), in the data's order.
+std::vector<std::string> patchCategories(UiManager& ui, const std::string& set) {
+    std::vector<std::string> out;
+    const DataNode* cfg = Band::rbPatchConfig(ui.data());
+    const DataNode* st = cfg ? cfg->find("stickers") : nullptr;
+    if (!st) return out;
+    for (size_t i = 1; i < st->children.size(); ++i) {
+        const DataNode& c = st->children[i];
+        if (!c.isList() || c.children.empty()) continue;
+        const DataNode* sets = c.find("sets");
+        bool in = set.empty();
+        for (size_t k = 1; sets && k < sets->children.size(); ++k) in = in || sets->children[k].s == set;
+        if (in) out.push_back(c.children[0].s);
+    }
+    return out;
+}
+
+// How many patches a set holds ((patch (sets (general 10) (chest 5) (arm 5)))) [C data; I: the meaning].
+int patchSlots(UiManager& ui, const std::string& set) {
+    const DataNode* cfg = Band::rbPatchConfig(ui.data());
+    const DataNode* sets = cfg ? cfg->find("sets") : nullptr;
+    const DataNode* e = sets ? sets->find(set) : nullptr;
+    return e && e->children.size() > 1 ? e->children[1].i : 0;
+}
+
+// One patch of a character's set (patch_dir): has_layers, clear.
+class RbPatchRef : public ScriptObject {
+public:
+    RbPatchRef(const std::string& name) : ScriptObject(name, "RbPatch") {}
+    RbCharObj* ch = nullptr;
+    std::string set;
+    int index = -1;
+    chr::Patch* patch() {
+        if (!ch || index < 0) return nullptr;
+        std::vector<chr::Patch>& v = ch->d.patchSets[set];
+        if (v.size() <= size_t(index)) v.resize(size_t(index) + 1);
+        chr::Patch& p = v[size_t(index)];
+        if (p.size() < size_t(kPatchLayers)) p.resize(size_t(kPatchLayers));
+        return &p;
+    }
+    bool handleNative(Interp&, const std::string& msg, std::vector<Value>&, Value& r) override {
+        r = Value::integer(0);
+        chr::Patch* p = patch();
+        if (msg == "has_layers") {
+            bool any = false;
+            for (const chr::PatchLayer& l : p ? *p : chr::Patch{}) any = any || !l.category.empty();
+            return r = Value::integer(any ? 1 : 0), true;
+        }
+        if (msg == "clear") {
+            if (p) *p = chr::Patch(size_t(kPatchLayers));
+            return true;
+        }
+        return false;
+    }
+};
+
+// The layer being edited ({$this edit_layer}).
+class RbLayerRef : public ScriptObject {
+public:
+    RbLayerRef(UiManager& u, PatchPanelObj& panel) : ScriptObject("patch_edit_layer", "PatchLayer"), ui_(u), panel_(panel) {}
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override;
+    Value getProp(Interp& in, const std::string& key) override;
+    void setProp(Interp& in, const std::string& key, const Value& v) override;
+
+private:
+    chr::PatchLayer* layer();
+    const StickerInfo* sticker();
+    UiManager& ui_;
+    PatchPanelObj& panel_;
+};
+
+}  // namespace
+
+// PatchSelectPanel (tattoo_select_panel, facepaint_select_panel, patch_select_panel).
+class PatchSelectPanelObj : public PanelObj {
+public:
+    using PanelObj::PanelObj;
+    // The type's (set <name>) property (PATCH_SELECT_PANEL_HANDLERS: the
+    // patch set) is not the set message: {tattoo_select_panel set location
+    // ...} (shop.dta) sets the property [C data: the scripts rely on it].
+    bool nativeFirst(const std::string& msg) const override { return msg == "set" || PanelObj::nativeFirst(msg); }
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        if (msg == "set" && args.size() >= 2) return setProp(in, args[0].str(), in.evalValue(args[1])), r = args[1], true;
+        if (msg == "patch_dir") {
+            const int pos = iArg(args, 0);
+            RbPatchRef* p = ref(in, pos - 1);
+            return r = p ? Value::obj(p) : Value::integer(0), true;
+        }
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+    void enter() override {
+        PanelObj::enter();
+        attach(ui.interp());
+    }
+
+private:
+    std::string set(Interp& in) { return getProp(in, "set").str(); }
+    RbCharObj* tourChar(Interp& in) { return dynamic_cast<RbCharObj*>(in.send("shop_char_panel", "get", {Value::symbol("tour_char")}).object); }
+    RbPatchRef* ref(Interp& in, int index) {
+        if (index < 0 || !gMeta) return nullptr;
+        if (refs_.size() <= size_t(index)) refs_.resize(size_t(index) + 1, nullptr);
+        RbPatchRef*& p = refs_[size_t(index)];
+        if (!p) p = gMeta->own(std::make_unique<RbPatchRef>(name() + "_patch" + std::to_string(index)));
+        p->ch = tourChar(in), p->set = set(in), p->index = index;
+        return p;
+    }
+    void attach(Interp& in) {
+        if (!gMeta) return;
+        if (!list_) list_ = gMeta->own(std::make_unique<RbList>(name() + "_patches"));
+        const int n = patchSlots(ui, set(in));
+        list_->build = [n] {
+            std::vector<std::string> v{"patch_none"};
+            for (int i = 0; i < n; ++i) v.push_back("patch_" + std::to_string(i + 1));
+            return v;
+        };
+        list_->label = [this, &in](const std::string& sym) {
+            if (sym == "patch_none") return std::string("None");
+            const int i = std::atoi(sym.c_str() + 6) - 1;
+            RbPatchRef* p = ref(in, i);
+            Value has = Value::integer(0);
+            std::vector<Value> none;
+            if (p) p->handleNative(in, "has_layers", none, has);
+            return std::string(has.truthy() ? "Patch " : "Empty patch ") + std::to_string(i + 1);
+        };
+        list_->refresh();
+        if (ComponentObj* c = component("patch.lst"); c && c->provider != list_) in.send(c, "set_provider", {Value::obj(list_)});
+    }
+    RbList* list_ = nullptr;
+    std::vector<RbPatchRef*> refs_;
+};
+
+// PatchPanel patch_panel (patchcreator.dta).
+class PatchPanelObj : public PanelObj {
+public:
+    using PanelObj::PanelObj;
+    chr::Patch* patch(Interp& in) {
+        auto* p = dynamic_cast<RbPatchRef*>(getProp(in, "patch").object);
+        return p ? p->patch() : nullptr;
+    }
+    chr::PatchLayer* editLayer(Interp& in) {
+        chr::Patch* p = patch(in);
+        const int i = getProp(in, "edit_layer_idx").integerValue();
+        return p && i >= 0 && size_t(i) < p->size() ? &(*p)[size_t(i)] : nullptr;
+    }
+    std::string setName(Interp& in) { return getProp(in, "set").str(); }
+    std::vector<std::string> categories;
+
+    bool nativeFirst(const std::string& msg) const override { return msg == "set" || PanelObj::nativeFirst(msg); }
+    void setProp(Interp& in, const std::string& key, const Value& v) override {
+        PanelObj::setProp(in, key, v);
+        // RB's PatchPanel runs on_set_mode when the mode changes (the script's
+        // {$this set mode ...} expects it) [I].
+        if (key == "mode") in.send(this, "on_set_mode", {}, false);
+    }
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        r = Value::integer(0);
+        if (msg == "set" && args.size() >= 2) return setProp(in, args[0].str(), in.evalValue(args[1])), r = args[1], true;
+        if (!gMeta) return PanelObj::handleNative(in, msg, args, r);
+        if (msg == "edit_layer") {
+            if (!layerRef_) layerRef_ = gMeta->own(std::make_unique<RbLayerRef>(ui, *this));
+            return r = Value::obj(layerRef_), true;
+        }
+        if (msg == "category_provider") {
+            if (!cats_) cats_ = gMeta->own(std::make_unique<RbList>("patch_categories"));
+            categories = patchCategories(ui, setName(in));
+            const std::vector<std::string> c = categories;
+            cats_->build = [c] { return c; };
+            cats_->label = [this](const std::string& sym) {
+                const std::string l = ui.localize(sym);
+                return l.empty() ? sym : l;
+            };
+            cats_->refresh();
+            return r = Value::obj(cats_), true;
+        }
+        if (msg == "sticker_provider") {
+            if (!stickers_) stickers_ = gMeta->own(std::make_unique<RbList>("patch_stickers"));
+            const int pos = iArg(args, 0);
+            const std::string cat = pos >= 0 && size_t(pos) < categories.size() ? categories[size_t(pos)] : std::string();
+            std::vector<std::string> names;
+            std::map<std::string, std::string> labels;
+            for (const StickerInfo& si : stickersOf(ui, cat)) names.push_back(si.name), labels[si.name] = si.display;
+            stickers_->build = [names] { return names; };
+            stickers_->label = [labels](const std::string& n) {
+                auto it = labels.find(n);
+                return it != labels.end() ? it->second : n;
+            };
+            stickers_->refresh();
+            return r = Value::obj(stickers_), true;
+        }
+        if (msg == "layer_provider") {
+            if (!layers_) layers_ = gMeta->own(std::make_unique<RbList>("patch_layers"));
+            layers_->build = [] {
+                std::vector<std::string> v;
+                for (int i = 0; i < kPatchLayers; ++i) v.push_back("layer_" + std::to_string(i + 1));
+                return v;
+            };
+            layers_->label = [this, &in](const std::string& sym) {
+                const int i = std::atoi(sym.c_str() + 6) - 1;
+                chr::Patch* p = patch(in);
+                const bool used = p && size_t(i) < p->size() && !(*p)[size_t(i)].category.empty();
+                return std::string(used ? "Layer " : "Empty layer ") + std::to_string(i + 1);
+            };
+            layers_->refresh();
+            return r = Value::obj(layers_), true;
+        }
+        if (msg == "cache_patch") {
+            if (chr::Patch* p = patch(in)) cached_ = *p;
+            return true;
+        }
+        if (msg == "restore_patch") {
+            if (chr::Patch* p = patch(in); p && !cached_.empty()) *p = cached_;
+            return true;
+        }
+        if (msg == "store_undo") {
+            if (chr::PatchLayer* l = editLayer(in)) undo_ = *l;
+            return true;
+        }
+        if (msg == "restore_undo") {
+            if (chr::PatchLayer* l = editLayer(in)) *l = undo_;
+            return true;
+        }
+        if (msg == "clear_layer" || msg == "dupe_layer") {
+            chr::Patch* p = patch(in);
+            const int i = iArg(args, 0);
+            if (!p || i < 0 || size_t(i) >= p->size()) return true;
+            if (msg == "clear_layer") (*p)[size_t(i)] = chr::PatchLayer{};
+            else
+                for (size_t k = 0; k < p->size(); ++k)
+                    if ((*p)[k].category.empty()) {
+                        (*p)[k] = (*p)[size_t(i)];
+                        break;
+                    }
+            return true;
+        }
+        if (msg == "swap_layers") {
+            chr::Patch* p = patch(in);
+            const int a = iArg(args, 0), b = iArg(args, 1);
+            if (!p || a < 0 || b < 0 || size_t(a) >= p->size() || size_t(b) >= p->size()) return r = Value::integer(0), true;
+            std::swap((*p)[size_t(a)], (*p)[size_t(b)]);
+            return r = Value::integer(1), true;
+        }
+        if (msg == "reset_velocities" || msg == "reset_directions") return true;
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+    // The d-pad in move / rotate / scale (flip: the script's): the script's
+    // BUTTON_DOWN_MSG takes the press, RB's panel moves the layer in its
+    // poll [I: one step a press, RB moves it while held].
+    void poll(double dtMs) override {
+        PanelObj::poll(dtMs);
+        Interp& in = ui.interp();
+        const std::string mode = up ? getProp(in, "mode").str() : std::string();
+        for (const int b : {kPad_DUp, kPad_DDown, kPad_DLeft, kPad_DRight}) {
+            const int n = ui.pressCount(b), d = n - seen_[size_t(b - kPad_DUp)];
+            seen_[size_t(b - kPad_DUp)] = n;
+            if (d <= 0 || (mode != "move" && mode != "rotate" && mode != "scale")) continue;
+            chr::PatchLayer* l = editLayer(in);
+            if (!l) continue;
+            const int dx = b == kPad_DRight ? 1 : b == kPad_DLeft ? -1 : 0, dy = b == kPad_DUp ? 1 : b == kPad_DDown ? -1 : 0;
+            for (int k = 0; k < d; ++k) {
+                if (mode == "move") l->x = std::clamp(l->x + 0.05f * float(dx), -1.0f, 1.0f), l->y = std::clamp(l->y + 0.05f * float(dy), -1.0f, 1.0f);
+                if (mode == "rotate") l->rot += 0.0872665f * float(dx ? -dx : dy);  // 5 degrees
+                if (mode == "scale") {
+                    const float f = (dx + dy) > 0 ? 1.1f : 1 / 1.1f;
+                    l->sx = std::clamp(l->sx * f, 0.1f, 8.0f), l->sy = std::clamp(l->sy * f, 0.1f, 8.0f);
+                }
+            }
+        }
+    }
+
+private:
+    RbLayerRef* layerRef_ = nullptr;
+    RbList *cats_ = nullptr, *stickers_ = nullptr, *layers_ = nullptr;
+    chr::Patch cached_;
+    chr::PatchLayer undo_;
+    std::array<int, 4> seen_{};
+};
+
+namespace {
+
+chr::PatchLayer* RbLayerRef::layer() { return panel_.editLayer(ui_.interp()); }
+
+const StickerInfo* RbLayerRef::sticker() {
+    chr::PatchLayer* l = layer();
+    if (!l || l->category.empty() || l->sticker < 0) return nullptr;
+    const std::vector<StickerInfo>& v = stickersOf(ui_, l->category);
+    return size_t(l->sticker) < v.size() ? &v[size_t(l->sticker)] : nullptr;
+}
+
+bool RbLayerRef::handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) {
+    r = Value::integer(0);
+    chr::PatchLayer* l = layer();
+    if (msg == "has_sticker") return r = Value::integer(l && !l->category.empty() && l->sticker >= 0 ? 1 : 0), true;
+    if (msg == "allow_color") {
+        const StickerInfo* s = sticker();
+        return r = Value::integer(s && s->allowColor ? 1 : 0), true;
+    }
+    if (msg == "color_palette") return true;
+    if (msg == "set_scale") {
+        if (l) l->sx = args.empty() ? 1 : in.evalValue(args[0]).number(), l->sy = args.size() > 1 ? in.evalValue(args[1]).number() : l->sx;
+        return true;
+    }
+    if (msg == "set_default_color") {
+        if (const StickerInfo* s = sticker(); s && l) l->color = s->allowColor ? s->palette : -1;
+        return true;
+    }
+    if (msg == "flip_x" || msg == "flip_y") {
+        if (l) (msg == "flip_x" ? l->flipX : l->flipY) = !(msg == "flip_x" ? l->flipX : l->flipY);
+        return true;
+    }
+    if (msg == "select_fx") return true;
+    return false;
+}
+
+Value RbLayerRef::getProp(Interp& in, const std::string& key) {
+    chr::PatchLayer* l = layer();
+    if (key == "color_idx") return Value::integer(l ? std::max(0, l->color) : 0);
+    if (key == "sticker_idx") return Value::integer(l ? l->sticker : -1);
+    if (key == "sticker_category") return Value::symbol(l ? l->category : std::string());
+    return ScriptObject::getProp(in, key);
+}
+
+void RbLayerRef::setProp(Interp& in, const std::string& key, const Value& v) {
+    chr::PatchLayer* l = layer();
+    if (!l) return ScriptObject::setProp(in, key, v);
+    if (key == "color_idx") l->color = v.integerValue();
+    else if (key == "sticker_idx") l->sticker = v.integerValue();
+    else if (key == "sticker_category") {
+        if (l->category != v.str()) l->sticker = -1;
+        l->category = v.str();
+        if (l->sticker < 0 && !stickersOf(ui_, l->category).empty()) l->sticker = 0;
+    } else ScriptObject::setProp(in, key, v);
+}
+
+}  // namespace
 
 // AudioLatencyPanel (ui/options.dta, the A/V calibration): its click track
 // [I: the port's calibration is Enhanced Options' (GDALL-038); the panel's
@@ -2016,6 +2489,8 @@ std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& 
     if (cls == "AudioLatencyPanel" || (name.rfind("calibrate_", 0) == 0 && cls != "UIScreen")) return std::make_unique<AudioLatencyPanelObj>(ui, name, cls);
     if (cls == "OutfitPanel") return std::make_unique<OutfitPanelObj>(ui, name, cls);
     if (cls == "CharPanel") return std::make_unique<CharPanelObj>(ui, name, cls);
+    if (cls == "PatchSelectPanel") return std::make_unique<PatchSelectPanelObj>(ui, name, cls);
+    if (cls == "PatchPanel") return std::make_unique<PatchPanelObj>(ui, name, cls);
     if (cls == "BandCreatePanel") return std::make_unique<BandCreatePanelObj>(ui, name, cls);
     if (cls == "DialogPanel") return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"set_player_num"});
     if (cls == "CharCreatorPanel") return std::make_unique<CharCreatorPanelObj>(ui, name, cls);
@@ -2049,6 +2524,11 @@ RbTourUnlocks rbTourUnlocks() {
     for (const RbBandObj* b : gMeta->bands) played.insert(b->d.played.begin(), b->d.played.end());
     u.bandPlayed.assign(played.begin(), played.end());
     return u;
+}
+
+std::map<std::string, chr::Patch> rbWornPatches(UiManager& ui, ScriptObject* tourChar) {
+    auto* c = dynamic_cast<RbCharObj*>(tourChar);
+    return c ? wornPatches(ui, c->d) : std::map<std::string, chr::Patch>{};
 }
 
 int rbOutfitCost(UiManager& ui, const std::string& gender, const std::string& category, const std::string& outfit) {

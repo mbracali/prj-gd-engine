@@ -638,8 +638,10 @@ void PanelObj::load() {
         // A file is relative to the script that names it: RB's tutorial
         // panels (tutorial/*.dta) name tutorial/ milos [C data; the port
         // keeps no script file per node, so tutorial/ is tried next].
-        if (!ui.data().exists(path))
-            if (const std::string alt = scene::miloArkPath(scene::resolveMiloRelative("tutorial/panel.milo", file)); ui.data().exists(alt)) path = alt;
+        // patchcreator/patchcreator.dta's panels (patch_panel, patch_help_panel) name patchcreator/ milos [C data].
+        for (const char* dir : {"tutorial/panel.milo", "patchcreator/panel.milo"})
+            if (!ui.data().exists(path))
+                if (const std::string alt = scene::miloArkPath(scene::resolveMiloRelative(dir, file)); ui.data().exists(alt)) path = alt;
         std::string error;
         if (path.rfind("world/", 0) == 0) {
             // The venue (world_panel): the program's (game/world.h).

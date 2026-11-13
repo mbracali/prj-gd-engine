@@ -16,6 +16,7 @@
 #include "char/char_walk.h"
 #include "char/clip.h"
 #include "char/facefx.h"
+#include "char/patch.h"
 #include "char/rig.h"
 #include "char/skeleton.h"
 #include "scene/milo.h"
@@ -85,6 +86,11 @@ public:
     // Bumped whenever what the skin proxies draw changes (the skin colour,
     // make-up, a patch): render/char_skin.h renders them again.
     uint32_t skinSerial = 0;
+    // The patches its PatchRenderers draw, by location (patch_chest ...;
+    // char/patch.h); a milo the stickers come from is kept with linkMilo.
+    std::map<std::string, std::vector<PatchDraw>> patches;
+    // Loads (once) and keeps a milo the character's patches need.
+    const scene::Directory* keepMilo(const GameData& data, const std::string& path);
     const scene::CharacterObj& own() const { return *own_; }
     bool band() const { return own_->band; }
     const std::string& type() const { return own_->header.type; }  // guitarist / singer / ... / crowd / ui

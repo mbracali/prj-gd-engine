@@ -53,6 +53,7 @@ bool RbCharPreview::set(UiManager& ui, const Look& look) {
         return false;
     }
     Band::rbSkin(ui.data(), *ch_, nullptr, look.skin);
+    Band::rbPatches(ui.data(), *ch_, look.patches);
     chr::applyDeform(*ch_, look.weight, look.height);
     // The main driver's stand group (a drummer's sit), a clip with the
     // attitude's flag if one has it [I: the shell's attitude groups].

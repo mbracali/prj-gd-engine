@@ -1423,3 +1423,42 @@ pattern). Each says what, why and how to undo it.
   (rb_band_lobby) (PROGRESS 2026-11-12 car9).
 - **Undo:** GD05_SHOTCAM_LEGACY=1 (the panels' own cameras, creator.trans,
   no slot characters).
+
+## D93
+- **What (2026-11-12, GD05-084, car9):** the patch creator (tattoos and
+  face paint). The shop's pickers (PatchSelectPanel tattoo_select_panel /
+  facepaint_select_panel, shop.dta) and the creator (PatchPanel patch_panel,
+  patchcreator/patchcreator.dta, patch.milo) run their own scripts [C
+  data]; the port's natives [I: RB's PatchPanel / PatchSelectPanel and the
+  TourCharLocal patch records not read]: patch.lst lists none then the
+  set's patches (ui.dta (patch (sets (general 10) (chest 5) (arm 5))), read
+  as the slots of each set [I]), patch_dir the selected one (has_layers,
+  clear); the creator's category_provider (the (stickers ...) whose (sets
+  ...) hold the patch's set), sticker_provider (the category milo's Tex
+  objects of type sticker, in order, their display_name), layer_provider
+  (10 layers a patch [I]), edit_layer (sticker_category, sticker_idx,
+  color_idx, set_scale, set_default_color = the sticker's palette_index
+  when allow_color, flip_x / flip_y, has_sticker, allow_color),
+  cache_patch / restore_patch, store_undo / restore_undo, clear_layer,
+  dupe_layer, swap_layers; {$this set mode m} runs on_set_mode [I: RB's
+  property sync]; in move / rotate / scale a d-pad press steps the layer
+  (0.05 of the patch square, 5 degrees, x 1.1) [I: RB moves it while held,
+  with velocities]; warp does nothing; the creator's own canvas
+  (patch.rndtex) is not drawn [I]. A patch is drawn into its
+  PatchRenderer's output (patch_chest / _left_arm / _right_arm /
+  _facepaint, the "<location>.patch" RB 0x822E5010 names): each layer's
+  sticker a quad of half extents sizex / sizey x the layer's scale about
+  its centre in the target's -1..1 square, turned, flipped, alpha-blended
+  in sticker.pal's colour (patch_warpmesh.milo) [C data: the sizes and the
+  palette; I: the quad stands in for patch_warpmesh's grid]. The profile
+  keeps each character's patches and tattoo locations (rb_profile.json
+  "patches", "tattoos"); the shop preview and the band on stage wear them
+  (Look / RbLook patches, Band::rbPatches). Also: the script builtin
+  {basename} (RB 0x8248E098 -> FileGetBase 0x823A73B0) [C], missing (the
+  tattoo location was empty); a PatchSelectPanel's (set ...) property no
+  longer swallows the set message; patchcreator/ panels' milos found;
+  {shop_char_panel save} saves the profile.
+- **Measured:** rb_tattoo (+ _restarted, a gig), rb_facepaint (PROGRESS
+  2026-11-12 car9).
+- **Undo:** PatchPanelObj / PatchSelectPanelObj, CharSkin::drawPatch,
+  Band::rbPatches.

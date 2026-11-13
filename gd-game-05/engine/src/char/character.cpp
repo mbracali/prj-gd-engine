@@ -353,6 +353,19 @@ const scene::Directory* Character::proxyDir(const std::string& owner) {
     return found;
 }
 
+const scene::Directory* Character::keepMilo(const GameData& data, const std::string& path) {
+    for (const auto& m : linked_)
+        if (m->path() == path) return &m->root();
+    if (!data.exists(path)) return nullptr;
+    try {
+        linked_.push_back(scene::loadMilo(data, path));
+    } catch (const std::exception& e) {
+        SDL_Log("char %s: %s: %s", name_.c_str(), path.c_str(), e.what());
+        return nullptr;
+    }
+    return &linked_.back()->root();
+}
+
 const scene::Directory* Character::linkMilo(const GameData& data, scene::Directory& into, const std::string& path) {
     for (const auto& m : linked_)
         if (m->path() == path) {

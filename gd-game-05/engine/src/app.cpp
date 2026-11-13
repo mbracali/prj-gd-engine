@@ -73,6 +73,8 @@
 #include "ui/enhanced_panel.h"
 #include "ui/screen_text.h"
 #include "ui/ui_host.h"
+#include "render/char_skin.h"
+#include "ui/rb_meta.h"
 #include "ui/ui_manager.h"
 #include "video/wmv_player.h"
 
@@ -3121,6 +3123,34 @@ int App::gameCounter(int player, const std::string& key) const {
                 for (const std::string& p : m->pieces) n += p.find(key.substr(18) + ".milo") != std::string::npos;
         return n;
     }
+    if (key.rfind("band_patch:", 0) == 0) {  // GD05-084 (rb_tattoo): band_patch:<slot>:<location> the layers, band_patch:<slot>:<tex>:<x>:<y> its texture's rgb
+        std::vector<std::string> f;
+        for (size_t a = 11, b; a <= key.size(); a = b + 1) {
+            b = key.find(':', a);
+            if (b == std::string::npos) b = key.size();
+            f.push_back(key.substr(a, b - a));
+        }
+        if (band_ && f.size() >= 2)
+            for (const auto& m : band_->members())
+                if (m->slot == f[0] && m->character) {
+                    if (f.size() == 2) {
+                        auto it = m->character->patches.find(f[1]);
+                        return it == m->character->patches.end() ? 0 : int(it->second.size());
+                    }
+                    if (f.size() < 4) return -1;
+                    SDL_Surface* sf = gfx::CharSkin::readAny(*m->character, f[1]);
+                    if (!sf) return -1;
+                    const int x = std::atoi(f[2].c_str()), y = std::atoi(f[3].c_str());
+                    int rgb = -1;
+                    if (x >= 0 && y >= 0 && x < sf->w && y < sf->h) {
+                        const uint8_t* p = static_cast<const uint8_t*>(sf->pixels) + y * sf->pitch + x * 4;
+                        rgb = (p[0] << 16) | (p[1] << 8) | p[2];
+                    }
+                    SDL_DestroySurface(sf);
+                    return rgb;
+                }
+        return -1;
+    }
     if (key.rfind("band_slot_piece:", 0) == 0) {  // GD05-082: the member in a venue slot (player_guitar0...) built with that outfit piece
         const std::string rest = key.substr(16);
         const size_t c = rest.find(':');
@@ -3488,6 +3518,7 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
                 if (ol.array)
                     for (const Value& e : *ol.array)
                         if (e.array && e.array->size() >= 2) look.outfit[(*e.array)[0].str()] = (*e.array)[1].str();
+                look.patches = ui::rbWornPatches(*ui_, ch.object);
                 if (!look.outfit.empty()) cfg.rbLooks[part == "drums" ? "drum" : part] = look;
             }
         }
