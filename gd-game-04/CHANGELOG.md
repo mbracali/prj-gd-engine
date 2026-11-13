@@ -5,6 +5,29 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-11-13
+
+### Fixed
+- Max FPS works: 120, 144, 240 and Unlimited go above 60, in the menus and in songs.
+- Enhanced options that did nothing now apply: HDR (Emulated), Particles 2x, All Band Mates Cast Shadows, More Lights, Dust in Light Beams.
+- The band's shadows are solid instead of grey stripes.
+- Better performance, mostly in the Art Deco venue.
+- Battle mode: the whammy and broken-string prompts show, so attacks can be shaken off; the battle meter is no longer upside down.
+- Android: cheats can be entered by touching the frets; Unlock All Songs / Everything are buttons that unlock at once (#85).
+- Restart Now (Enhanced > backends) starts the game again from its start, with the controllers working.
+
+
+### Added
+- Enhanced > HDR: Emulated (a filmic curve and an automatic exposure) now works; True HDR is not available yet.
+
+### Fixed
+- Enhanced > Max FPS: 120, 144, 240 and Unlimited now apply in songs (the game stayed at 60 or, in Art Deco, slowed to a crawl).
+- Enhanced > Enable Particles FX: 2x now doubles the particles.
+- Enhanced > All Band Mates Cast Shadows, More Lights on Venues and Dust in Light Beams: the shadows, the light pools and the dust were hidden under the stage.
+- The band's shadows no longer draw grey stripes over the characters.
+- Performance: the Art Deco venue's dragon and knights cost several milliseconds a frame (more at high frame rates); gameplay there is much faster.
+- Battle (boss battles too): a Whammy attack shows GH3's whammy bar prompt and lifts the fret buttons until you whammy; a broken string's button is raised until repaired.
+
 ## [1.1.6] - 2026-11-10
 
 ### Added

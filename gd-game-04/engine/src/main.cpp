@@ -26,6 +26,7 @@
 #include "tests/scripttest.h"
 #include "tests/selftest.h"
 #include "tests/chartest.h"
+#include "tests/enhancedtest.h"
 #include "tests/venuetest.h"
 #include "video/movie_player.h"
 #include "tests/sfxtest.h"
@@ -44,8 +45,8 @@ void usage() {
         "  --selftest           check the data (song list, every chart), auto-play every chart\n"
         "  --uitest             boot through the menus, then start every flow state's screen in turn (headless)\n"
         "  --walktest <walk>    play through GH3's own menus: quickplay, lose, back, boot, mouse, gamepads,\n"
-        "                       stickyaxis, touch, options, practice, store, hub, venues, career, career_quickplay, pause, pausequit, coop, faceoff, proface,\n"
-        "                       battle, boss, boss_devil, boss_helper, vault, cheats, glitches, attract (headless:\n"
+        "                       stickyaxis, touch, options, practice, store, hub, venues, career, career_quickplay, pause, pausequit, coop, faceoff, proface, boss_keys,\n"
+        "                       battle, boss, boss_devil, boss_helper, vault, cheats, touchcheat, glitches, attract (headless:\n"
         "                       SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy)\n"
         "  --audittest [--out f] the asset / reference audit: names the scripts call and pak types the engine lacks\n"
         "  --scripttest         tokenize every script; run the boot script against the natives (GD04_UILOG=1 logs\n"
@@ -57,6 +58,7 @@ void usage() {
         "  --venuetest          draw every venue with a song's camera cuts and light show; check they are the\n"
         "                       same at 60 and 240 fps (GD04_VENUE=<zone>, GD04_VENUETEST_SONG / _FRAMES / _SHOTS=<dir>);\n"
         "                       in a song GD04_VENUE=<zone> picks the venue, GD04_NO_VENUE=1 draws none\n"
+        "  --enhancedtest       draw a venue with every Enhanced picture option at each value; each must change the frame\n"
         "  --chartest           load, skin and animate every character, outfit and instrument; the band in every\n"
         "                       venue (60 vs 240 fps, framed by its cameras); GD04_CHARTEST_SHOTS=<dir> saves grids\n"
         "Environment: GD04_KEYS=\"<ms>:<key>,...\" scripted menu keys; GD04_SCREENSHOT=<file.bmp> with\n"
@@ -147,7 +149,7 @@ int run(int argc, char** argv) {
     Options opt;
     std::string movie;
     bool audittest = false, formattest = false, shadertest = false, selftest = false, sfxtest = false, scripttest = false;
-    bool venuetest = false, chartest = false;
+    bool venuetest = false, chartest = false, enhancedtest = false;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto value = [&]() -> std::string {
@@ -164,6 +166,7 @@ int run(int argc, char** argv) {
         else if (a == "--formattest") formattest = true;
         else if (a == "--selftest") selftest = true;
         else if (a == "--venuetest") venuetest = true;
+        else if (a == "--enhancedtest") enhancedtest = true;
         else if (a == "--chartest") chartest = true;
         else if (a == "--sfxtest") sfxtest = true;
         else if (a == "--scripttest") scripttest = true;
@@ -177,11 +180,11 @@ int run(int argc, char** argv) {
         else if (!a.empty() && a[0] == '-' && a.rfind("-psn_", 0) != 0) { usage(); return 2; }  // -psn_: macOS Finder
         else if (a.rfind("-psn_", 0) != 0) opt.dataPath = a;
     }
-    if (shadertest || !movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest ||
+    if (shadertest || !movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || enhancedtest || chartest ||
         !opt.walk.empty())
         SDL_setenv_unsafe("GD04_SEED", "12345", 0);  // the tests' scripts pick the same randoms every run
     if (shadertest) return runShaderTest(opt.dataPath);
-    if ((!movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest || !opt.walk.empty()) &&
+    if ((!movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || enhancedtest || chartest || !opt.walk.empty()) &&
         opt.dataPath.empty()) {
         usage();
         return 2;
@@ -190,6 +193,7 @@ int run(int argc, char** argv) {
     if (formattest) return runFormatTest(opt.dataPath);
     if (selftest) return runSelfTest(opt.dataPath);
     if (venuetest) return runVenueTest(opt.dataPath);
+    if (enhancedtest) return runEnhancedTest(opt.dataPath);
     if (chartest) return runCharTest(opt.dataPath);
     if (sfxtest) return runSfxTest(opt.dataPath);
     if (scripttest) return runScriptTest(opt.dataPath);

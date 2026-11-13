@@ -141,8 +141,10 @@ public:
     std::function<void(MaterialRenderer&)> overlay;
     // Text in a template Text's font and style at `world`; returns its width.
     // `key` keeps the layout between frames.
+    // `fitWidth` > 0: on one line (no wrap), squeezed across to at most that
+    // width (a song list's name before its stars / score; GD02-165).
     float drawTemplate(MaterialRenderer& r, const std::string& key, const scene::Text& tmpl, const std::string& str,
-                       const scene::Xfm& world, const float* rgb = nullptr, float alpha = 1, int align = -1);
+                       const scene::Xfm& world, const float* rgb = nullptr, float alpha = 1, int align = -1, float fitWidth = 0);
     float templateWidth(const scene::Text& tmpl, const std::string& str);
     void drawMeshAt(MaterialRenderer& r, const scene::Mesh& mesh, const scene::Mat* mat, const scene::Xfm& world);
     // The width drawTemplate gives `str` (no draw).
@@ -180,6 +182,8 @@ public:
         float x0, y0, x1, y1;
     };
     const std::vector<Hit>& hits() const { return hits_; }
+    // The lines a keyed text (a list row's element, "<list>#<row>#<element>") was laid out in, 0 if none.
+    int textLines(const std::string& key) const;
     // Records `key` from a local box (lo..hi) placed by `world`.
     void addHit(const std::string& key, const float lo[3], const float hi[3], const Mat4& world);
 

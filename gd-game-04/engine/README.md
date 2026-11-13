@@ -32,7 +32,7 @@ The game folder is the disc's extracted files (the one containing
 `gen/main.hdr`). Options: `--song <id>`, `--difficulty 0-3`, `--venue <name>`
 (battle, small1, small2, big, theatre, fest, arena, stone), `--autoplay`,
 `--no-fail`, `--selftest` (checks the data and auto-plays every chart without
-a window; also `--scripttest`, `--uitest`, `--venuetest`, `--sfxtest`,
+a window; also `--scripttest`, `--uitest`, `--venuetest`, `--enhancedtest`, `--sfxtest`,
 `--walktest quickplay|lose|pause|attract`), `--playmovie intro.wmv` (plays one of the disc's videos: `intro.wmv`,
 `hmx.wmv`, `wg.wmv`; Start, Enter or A skips it), `--help`. `GD04_SKIP_MOVIES=1`
 skips the videos.
@@ -40,7 +40,8 @@ skips the videos.
 Bug reports: on Windows the log is written to `gd04.log` in the save folder
 (`%APPDATA%\gd-engine\gd04\`), with the address of a crash; elsewhere it
 goes to the terminal, or to a file with `GD04_LOG=<file>`. `GD04_PERF=1` logs
-a frame-time breakdown every 2 s.
+a frame-time breakdown every 2 s (the parts of a song's frame, draws, uploads,
+the wait for the GPU; `GD04_PERF=2` adds each part's GPU time).
 
 ## Controls
 

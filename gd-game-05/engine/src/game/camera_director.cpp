@@ -8,6 +8,7 @@
 #include <cmath>
 #include <set>
 
+#include "data/dta.h"
 #include "game/band.h"
 #include "game/world.h"
 #include "render/scene_gpu.h"
@@ -232,6 +233,8 @@ CameraDirector::CameraDirector(World& world, uint32_t seed) : world_(world), rng
         d.blendStart_ = (d.blendUnits_ == kTaskBeats ? d.world_.beats() : d.world_.seconds()) + double(delay);
         d.blendTime_ = std::max(0.0f, time);
         if (d.blendTime_ <= 0 && delay <= 0) d.blendFrom_ = nullptr;
+        ++d.ppCalls_;
+        if (SDL_getenv("GD05_SHOTLOG")) SDL_Log("pp_blend_task %s -> %s over %.2f (%d)", d.blendFrom_ ? d.blendFrom_->name.c_str() : "-", to->name.c_str(), double(time), units);
         return Value::integer(0);
     });
     // `rnd reset_postproc` (the UI's rnd answers it quietly; the director
@@ -380,7 +383,7 @@ bool CameraDirector::native(Interp& in, const std::string& msg, std::vector<Valu
         if (!sequence_.empty()) {
             const scene::CamShot* first = sequence_.front();
             sequence_.erase(sequence_.begin());
-            forceShot(first);
+            startShot(first);
         }
         return true;
     }
@@ -415,7 +418,7 @@ bool CameraDirector::objectNative(Interp& in, scene::Object& o, const std::strin
         return false;
     }
     if (auto* p = o.as<scene::PostProc>()) {
-        if (msg == "select") return postProc_ = p, blendFrom_ = nullptr, true;
+        if (msg == "select") return postProc_ = p, blendFrom_ = nullptr, ++ppCalls_, true;
         return false;
     }
     // The band slots: guitarist0's clip flags, walk and lose_teleport.
@@ -509,7 +512,16 @@ const scene::CamShot* CameraDirector::drawShot(const std::vector<std::string>& c
 }
 
 void CameraDirector::forceShot(const scene::CamShot* shot) {
-    if (shot) startShot(shot);
+    if (!shot) return;
+    if (!sequence_.empty() && SDL_getenv("GD05_SHOTLOG")) SDL_Log("director: %s drops the sequence's %zu shots", shot->name.c_str(), sequence_.size());
+    sequence_.clear();
+    startShot(shot);
+}
+
+void CameraDirector::playSequence(const std::vector<const scene::CamShot*>& shots) {
+    if (shots.empty()) return;
+    sequence_.assign(shots.begin() + 1, shots.end());
+    startShot(shots.front());
 }
 
 bool CameraDirector::camShotOk(const scene::CamShot& shot) {
@@ -577,6 +589,8 @@ void CameraDirector::startShot(const scene::CamShot* shot) {
     // or the VENUE track's override (pp_blend_task) [C data].
     const scene::PostProc* own = world_.venue().find<scene::PostProc>(shot->flag("postprocess"));
     if (own || !world_.venue().find<scene::PostProc>("override_blender.pp")) postProc_ = own;
+    const scene::PostProc* before = postProc_;
+    const int ppCalls = ppCalls_;
     blendFrom_ = nullptr;
     if (onShot) onShot("shot " + shot->name + " (" + shot->category + ")");
     if (world_.log) {
@@ -588,6 +602,20 @@ void CameraDirector::startShot(const scene::CamShot* shot) {
                 double(shot->farPlane), hides.empty() ? "" : ", hides", hides.c_str(), shows.empty() ? "" : ", shows", shows.c_str());
     }
     world_.interp().send(world_.scriptFor(const_cast<scene::CamShot*>(shot)), "start_shot", {}, false);
+    // A shot without its own PostProc after one with its own (the intro's
+    // freeze, intro_test.pp): band_objects.dta's start_shot goes to the VENUE
+    // track's override or ProFilm_a.pp (postproc_blendtime 0) [C data]; when
+    // the script selected nothing (the port's start_shot did not reach its pp
+    // branch after the freeze), that here, so the freeze's grey look does not
+    // stay all song (GD05-098).
+    if (!own && current_ == shot && ppCalls == ppCalls_ && before && before == lastOwn_) {
+        Interp& in = world_.interp();
+        const Value ov = in.var("camera.postproc_override");
+        const scene::PostProc* pp = ov.truthy() ? world_.venue().find<scene::PostProc>(ov.type == Value::Type::Object && ov.object ? ov.object->name() : ov.str()) : nullptr;
+        if (!pp) pp = world_.venue().find<scene::PostProc>("ProFilm_a.pp");
+        if (pp) postProc_ = pp, blendFrom_ = nullptr;
+    }
+    if (current_ == shot) lastOwn_ = own;
     if (current_ == shot) {
         showShotCrowd(*shot);
         applyShowLists(*shot);
@@ -909,7 +937,7 @@ void CameraDirector::update() {
         if (!sequence_.empty()) {
             const scene::CamShot* next = sequence_.front();
             sequence_.erase(sequence_.begin());
-            forceShot(next);
+            startShot(next);
         } else {
             in.send(o, "shot_over", {}, false);
         }

@@ -1531,3 +1531,143 @@ pattern). Each says what, why and how to undo it.
   2026-11-12 car9).
 - **Undo:** PatchPanelObj / PatchSelectPanelObj, CharSkin::drawPatch,
   Band::rbPatches.
+
+## D94
+- **What (2026-11-13, GD05-097, bl05):** the RB face set's clips are
+  relative. Base holds the face's absolute rest; every other clip of the
+  set (the visemes, the exp_* expressions) holds offsets from it [C data:
+  female head_1's Base bone_jaw.pos 0.31 0.91 and .quat a half turn
+  (-0.456 -0.890 0 0, the bind); Oat_hi's .pos 0 0 0.009, .quat
+  (0 0 -0.166 0.986); every viseme's quaternion within 21 degrees of the
+  identity]. The lip servo's pose is Base, then per lit viseme its weight
+  of the offset: positions + w x a, rotations the identity nlerped to a by
+  w, composed on the bone's side (q x d) [I: RB's relative clip blend not
+  read; the other side shut the jaw into the upper lip]. A clip's pose
+  starts from zero, not the identity (Bones::add starts a quaternion at
+  w 1, which turned Base's half-turn jaw and chin 90 degrees). The port had
+  taken the visemes as absolute poses (a - Base): the jaw turned 90 degrees
+  at rest and 180 while singing, the lower lip 7..11 units out: the
+  vocalist's chin and jaw went into the neck and showed the mouth's inside
+  (the owner's "face not rendered, inside visible").
+- **Measured:** bandcheck (inbloom, 60 s; GD05_PREFAB_VOCALS picks the
+  singer): the new "face rest" line, every member's jaw from its bind
+  against the face clips' largest turn from Base (x 1.5, two visemes lit
+  at once): vocals0 180.0 -> 40.8 deg (clips 41.6), vocals2 179.9 -> 23.2
+  (clips 21.8); low lip 7.17 / 11.46 -> 0.62 / 0.50 units.
+  GD05_FACEPOSE_LEGACY=1 fails it.
+- **Undo:** Character::facePoseOf / pollFace (GD05_FACEPOSE_LEGACY=1).
+
+## D95
+- **What (2026-11-13, GD05-097, bl05):** CHAR_COMMON sync_objects'
+  {char_mesh_hide $this} (RB 0x8235BB58 -> 0x8235B760 -> 0x8235AF50) [C]:
+  the flags of every CharMeshHide of the character (its outfits' too) are
+  ORed; each hide's entry (drawable, flags) shows only when none of its
+  flags is among them. 16 CharMeshHides on the disc (female coats and
+  skirts, legs); the port decoded them and never applied them.
+  GD05_BANDLOG logs each. Not the face's cause (D94), done while looking.
+- **Undo:** Character::applyMeshHides (GD05_MESHHIDE_LEGACY=1).
+
+## D96
+- **What (2026-11-13, GD05-098, bl05):** the song's first shot as
+  worldbase.dta's game start [C data]: the mode's intro_category
+  (modes.dta: qp_solo / tour_solo / practice INTRO_VENUE, the band's
+  coop_intro_category, defaults INTRO); INTRO_VENUE / INTRO_QUICK pick a
+  shot of that category (find_shot); INTRO runs construct_active_shot: an
+  INTRO shot with the active player's focus flag (guitar_focus,
+  bass_focus, drums_focus, vocal_focus) [I: the chain's next_shot not
+  followed; one player]. The port drew any INTRO shot: a close-up of a
+  random member (a guitar player got coop_intro_bass.shot).
+- **Measured:** GD05_SHOTLOG on inbloom (guitar, its venue): before
+  coop_intro_bass.shot, after "intro category INTRO" ->
+  coop_intro_guitarist.shot.
+  The quick play solo intro (INTRO_VENUE) runs 6.7 s where the port's
+  ran 0.7: rb_od_* and rb_look now wait for the song clock (walk check
+  song_clock_running) then as long as before.
+- **Undo:** App::rbIntroShot (GD05_INTRO_LEGACY=1).
+
+## D97
+- **What (2026-11-13, GD05-098, bl05):** RB's VENUE track text reaches
+  the world as midi_parsers.dta's parsers send it [C data]:
+  world_event_parser [verse] / [chorus] on time ([bonusfx] /
+  [bonusfx_optional] go to WorldDir natives the port lacks: not sent); world_lighting_one_bar_to (start_offset -4) one_bar_to verse /
+  chorus (worldbase.dta: set_lighting (VERSE VERSECHORUS) / (CHORUS
+  VERSECHORUS)) and [lighting (x)] as set_lighting () x, a bar early. The
+  port read sections and lighting from the EVENTS track only, so the
+  lighting category stayed whatever was set first: the load's CHORUS
+  before D96, the intro shot's INTRO_VENUE (its lighting_override) after,
+  which darkened rb_look (arena_04 luma 64 -> 31). Light presets with
+  platform_only 4 are left out as the PS3-only shots are
+  (coop_intro_venue_ps3.pst was picked beside coop_intro_venue.pst,
+  platform_only 2) [I: RB's filter not read].
+- **Measured (rb_look arena_04, one run each, movies 69.3):** both
+  switches legacy 58.8; intro legacy + VENUE text 46.0; D96 + VENUE text
+  39.9; D96 without VENUE text 31.1. The songs' own lighting (blackouts,
+  flares, silhouettes) is darker than the stuck CHORUS preset the old
+  pass measured; the venues' luma against the movies stays open
+  (GD05-069 / 095). Gate rb_look (fix10 -> now): small_club_02 64.7 ->
+  61.6 (fails on grain, as before), big_club_03 48.9 -> 50.0, arena_04
+  64.1 -> 41.5, theater_02 45.3 -> 31.2 (luma).
+- **Undo:** WorldDriver::poll's VENUE text (GD05_VENUE_TEXT_LEGACY=1),
+  LightPresets::rebuild's platform filter.
+
+## D98
+- **What (2026-11-13, GD05-098, g5b):** the song's start as RB's script
+  runs it [C data + C]: the world's enter (worldbase.dta) forces the intro
+  shot (find_shot keeps the shot's own next_shot chain; construct_active_shot
+  takes per player the INTRO shot with its focus and that shot's next_shot);
+  game.dta pick_intro sets the clock to minus the shot's duration_seconds,
+  which for a BandCamShot is frames / 30 + 0.0425 plus its next shot's
+  (0x822D6560, recursive on +0x188). The port took the first shot's 20
+  frames: coop_intro_guitarist.shot ran 0.67 s, then the VENUE track cut in;
+  now coop_intro_guitarist.shot + coop_intro_guitarist_freeze.shot, 2.585 s.
+  Every BandCamShot's targets apply as the shot starts (the intro's too:
+  intro_guitar, teleports, freeze after freeze_delay, return to the place
+  before the shot) [I: RB 0x822D8108 not traced for freeze / return]. The
+  chain is picked when a song is loaded and the world draws before the clock
+  (the game's first frames showed no shot / the venue's load shot).
+  gem_track.dta play_intro's delay is 0.25 x index + 0.05 s when
+  $game.play_mode is coop (every solo mode), 0.55 s only for h2h; the port
+  gave a solo player 0.55 s, so the HUD's meters stood half a second without
+  the track. A shot without its own PostProc after one with it (the freeze's
+  intro_test.pp) goes to the VENUE override or ProFilm_a.pp when start_shot
+  selected nothing (the port's start_shot did not reach that branch; the
+  grey freeze look stayed all song).
+- **Measured:** walk quickplay's intro check (App::rbIntroErrors: frames
+  before the clock and until 0 show only the chain's shots, in order, each
+  within 2 frames + 50 ms of its place, the clock at minus the chain): 0
+  errors (qp solo: coop_intro-venue.shot 6.709 s); GD05_INTRO_LEGACY=1:
+  FAILED (no chain). --song inbloom: chain 2.585 s (was 0.667), the freeze
+  shot from -1920 ms, the first VENUE shot at 0.
+- **Undo:** App::rbIntroShots / recordShotSpan, CameraDirector::playSequence,
+  Band::rbShotStart, rbIntroAt (all: GD05_INTRO_LEGACY=1).
+
+## D99
+- **What (2026-11-13, GD05-096, g5b):** smasher_fx.grp is drawn: it is
+  where smasher_plate.dta's setup_draworder collects every smasher's
+  effects.grp (after_gems) [C data]; the track hid it with the event
+  effects (bass superstreak, unison hit) since GD05-070 [I there], so every
+  hit's radial_flare / shockwave / debris / broken glass / gem caps were
+  launched (rb_fx_hits_no_flame 0) and never drawn. Walk counter
+  rb_fx_hits_unseen_pct: hits with no smasher-effect particle drawn within
+  100 ms.
+- **Measured:** quickplay 18 of 18 hits seen (81,652 particles), rb_guitar_none
+  86 of 86 (339,374); GD05_SMASHFX_LEGACY=1: 0 seen (FAILED).
+- **Undo:** RbTrackView::draw's hide list (GD05_SMASHFX_LEGACY=1).
+
+## D100
+- **What (2026-11-13, GD05-096, g5b):** the track's solo triggers:
+  player.dta solo_start / solo_end fire the track's guitar_solo_start.trig /
+  guitar_solo_stop.trig [C data]; the port only ran the HUD's
+  player_feedback solo. The track system's triggers (TrackDir) and which
+  the port fires: intro, reset, star_deploy / star_stop_deploy,
+  spotlight_phrase_success, guitar_solo_start / stop (now); not fired:
+  3x_ / 4x_deploy and stop_deploy, BassSuperStreak_ON / OFF,
+  unison_phrase_success, enter_coda, bre_success, retract / win_retract /
+  immediate_retract, spotlight_fail(_guilty), indv_player_warning(_off),
+  solo_hit / solo_reset, dynamic_gem_activate, kick_drummer / kick_neighbor,
+  fill_hit_1..3 / drum_fill_reset, bfb_*. Smashers (gem_smasher):
+  hit, hit_bonus, break, burn, burn_bonus, stop_burn, miss, reset,
+  spotlight_phrase_success fired; big_rock_hit / big_rock_burn,
+  BRE_final_gem_hit, finger_tap(_bonus), hit_fill, hit_drums / hit_cymbals,
+  drumfill_complete_hit, break_bonus not.
+- **Undo:** RbTrackView::fxEvents' solo (GD05_TRACKFX_LEGACY=1).

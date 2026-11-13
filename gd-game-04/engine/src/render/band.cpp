@@ -206,7 +206,7 @@ bool Band::bonePos(uint32_t member, uint32_t bone, venue::Vec3& out) const {
 }
 
 void Band::drawShadow(double ms, const gh3shader::Globals& light, const venue::Venue& v, const std::vector<venue::LightState>& lights,
-                      const venue::LightShow& show) {
+                      const venue::LightShow& show, const gh3shader::Globals* doubleSided) {
     if (!view_) return;
     evaluate(ms);
     std::vector<BandView::Instance> inst;
@@ -219,7 +219,7 @@ void Band::drawShadow(double ms, const gh3shader::Globals& light, const venue::V
         i.lightGroups = e.lightGroups;
         inst.push_back(std::move(i));
     }
-    view_->setShadowPass(&light);
+    view_->setShadowPass(&light, doubleSided);
     view_->setReuseSkinning(skinnedAt_ == ms);  // the second cascade: the first's vertices
     view_->draw(venue::CamPose{}, inst, v, lights, show);
     view_->setReuseSkinning(false);

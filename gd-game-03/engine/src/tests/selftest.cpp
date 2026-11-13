@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "tests/selftest.h"
+#include "ui/enhanced_panel.h"
 
 #include <algorithm>
 #include <cctype>
@@ -554,6 +555,26 @@ int runRuleChecks(const Rules& rules) {
         }
         std::printf("      (rock meter: failed after %d passes, expected %d)\n", r2.p->penalties(), expect);
         check("rock meter: the song fails once the rating drops below lose_level", r2.p->failed() && r2.p->penalties() == expect);
+    }
+    {
+        // GDALL-050: graphics backend default Vulkan on Windows / Linux, local
+        // elsewhere; an old enhanced.json's local takes it once, a new one's stays.
+#if !defined(__APPLE__) && !defined(__ANDROID__)
+        const std::string want = "vulkan";
+#else
+        const std::string want = "local";
+#endif
+        check("graphics backend default: vulkan on Windows / Linux, local elsewhere",
+              ui::defaultGraphicsBackend() == want && ui::enhancedSetting("graphics_backend")->values.front() == want &&
+                  ui::enhancedSetting("audio_backend")->values.front() == "local");
+        Json old = Json::parse(R"({"graphics_backend":"local","audio_backend":"local"})");
+        ui::migrateEnhanced(old);
+        check("an old enhanced.json's local graphics backend takes the new default",
+              old["graphics_backend"].str() == want && old["audio_backend"].str() == "local" && old["settings_version"].num() == ui::kEnhancedVersion);
+        ui::migrateEnhanced(old);
+        Json fresh = Json::parse(R"({"settings_version":2,"graphics_backend":"local"})");
+        ui::migrateEnhanced(fresh);
+        check("local picked in a new enhanced.json stays", old["graphics_backend"].str() == want && fresh["graphics_backend"].str() == "local");
     }
     {
         // Enhanced > Accessibility > Easy Chords (GDALL-039): off by default, as the original.

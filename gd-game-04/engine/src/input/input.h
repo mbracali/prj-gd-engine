@@ -299,6 +299,16 @@ public:
     // Window-normalised (0..1) to menu units.
     void setTouchToMenu(std::function<void(float, float, float&, float&)> f) { toMenu_ = std::move(f); }
     void setTouchLanes(int player, const TouchLanes& lanes) { lanes_[size_t(player & 1)] = lanes; }
+    // A menu that reads held frets (GH3's Enter Cheat: GetHeldPattern, strummed
+    // with pad_up / pad_down): its five fret buttons, in menu units, take
+    // fingers as the highway's lanes do (a finger holds that fret; fingers
+    // landing within 30 ms strum once, as Down). GD04-117 (#85).
+    struct TouchFrets {
+        bool active = false;
+        std::array<float, 5> x{};
+        float y = 0, halfW = 0, halfH = 0;
+    };
+    void setTouchFrets(const TouchFrets& f) { menuFrets_ = f; }
     // Emits the strums of chords whose 30 ms window has closed; reads MIDI.
     void poll(uint64_t nowNs, std::vector<InputEvent>& out);
     // Shake-to-whammy (Android only, phone accelerometer via SDL sensors):
@@ -418,6 +428,7 @@ private:
         bool multi = false;         // landed with another finger (a two-finger tap or swipe, no tap)
         bool done = false;          // its two-finger tap or swipe already acted
         int button = -1;            // the on-screen button it holds (an Action), -1 none
+        bool menuFret = false;      // its fret is a menu's fret button (setTouchFrets), not a lane
     };
     void touchEvent(const SDL_TouchFingerEvent& f, bool down, std::vector<InputEvent>& out);
     void touchMotion(const SDL_TouchFingerEvent& f);
@@ -465,8 +476,9 @@ private:
     std::function<void(float, float, float&, float&)> toMenu_;
     std::array<TouchLanes, 2> lanes_;
     std::unordered_map<SDL_FingerID, Finger> fingers_;
+    TouchFrets menuFrets_;
     struct PendingStrum {
-        bool on = false;
+        bool on = false, menu = false;  // menu: strums as Down (pad_down), the menus' strum
         uint64_t dueNs = 0, ts = 0;
     };
     std::array<PendingStrum, 2> strum_;

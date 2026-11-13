@@ -127,6 +127,7 @@ void PssMovie::onAudio(const uint8_t* p, size_t n) {
     auto emit = [&](const uint8_t* b) {
         size_t base = audio_.size();
         audio_.resize(base + half * 2);
+        audioTotal_ += half;
         for (size_t i = 0; i < half; ++i) {
             audio_[base + 2 * i] = static_cast<int16_t>(b[2 * i] | b[2 * i + 1] << 8);
             audio_[base + 2 * i + 1] = static_cast<int16_t>(b[interleave_ + 2 * i] | b[interleave_ + 2 * i + 1] << 8);
@@ -161,6 +162,15 @@ const Mpeg2Frame* PssMovie::nextFrame() {
 
 void PssMovie::prefetchAudio(size_t frames) {
     while (!finished_ && audio_.size() / 2 < frames) {
+        if (!demuxPacket()) {
+            video_.pushEnd();
+            finished_ = true;
+        }
+    }
+}
+
+void PssMovie::demuxAudioUntil(uint64_t total) {
+    while (!finished_ && audioTotal_ < total) {
         if (!demuxPacket()) {
             video_.pushEnd();
             finished_ = true;

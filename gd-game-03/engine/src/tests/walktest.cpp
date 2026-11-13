@@ -167,6 +167,7 @@ WalkDriver::WalkDriver(const std::string& name)
         check("intro_camera");
         check("star_phrase");
         check("track_surface");
+        check("band_shadows");
         at("endgame_screen", 90000);
         check("song_sounds");
         wait(600);
@@ -1852,6 +1853,15 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         return pass();
     }
+    if (s.screen == "band_shadows") {
+        // GD03-107: the venue's target_shadow spotlights (SHADOW_*.spot) drew
+        // their band member's flattened shadow group (BandView::drawShadow).
+        const int n = ui.host().gameCounter(0, "spot_shadows");
+        std::printf("  band shadows: %d drawn so far\n", n);
+        if (n < 1) return fail("no spotlight drew a band member's shadow");
+        ++step_, stepStart_ = -1;
+        return;
+    }
     if (s.screen == "finalsong_encore") {
         std::printf("  final song encore: %s\n", ui.session().song.c_str());
         return ui.session().song == "playwithme" ? pass() : fail("the encore played " + ui.session().song + ", not playwithme");
@@ -2294,8 +2304,10 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             for (const char* key : {"graphics_backend", "audio_backend"}) {
                 const std::string got = ui.host().enhancedValue(key), file = saved.has(key) ? saved[key].str() : "(unset)";
                 std::printf("  enhanced: %s %s (enhanced.json %s)\n", key, got.c_str(), file.c_str());
-                if (got != "local" || (file != "(unset)" && file != "local"))
-                    problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + " / " + file + ", not local";
+                // GDALL-050: graphics defaults to Vulkan on Windows / Linux.
+                const std::string def = std::string(key) == "graphics_backend" ? ui::defaultGraphicsBackend() : std::string("local");
+                if (got != def || (file != "(unset)" && file != def))
+                    problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + " / " + file + ", not " + def;
             }
             Json j = Json::parse(R"({"graphics_backend":"vulkan","audio_backend":"openal","bloom":"2x"})");
             ui::migrateEnhanced(j);
@@ -2318,14 +2330,15 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (w == "enhanced_backends_start") {
                 // (the file keeps what it had until the next save; the game reads local)
                 for (const char* key : {"graphics_backend", "audio_backend"})
-                    if (ui.host().enhancedValue(key) != "local") add(std::string(key) + " is " + ui.host().enhancedValue(key));
-                if (g0 != "local" || a0 != "local" || aNow != "local") add("an unknown saved backend was not dropped at start");
+                    if (ui.host().enhancedValue(key) != (std::string(key) == "graphics_backend" ? ui::defaultGraphicsBackend() : "local"))
+                        add(std::string(key) + " is " + ui.host().enhancedValue(key));
+                if (g0 != ui::defaultGraphicsBackend() || a0 != "local" || aNow != "local") add("an unknown saved backend was not dropped at start");
             } else if (w == "enhanced_backends_saved") {
                 want("graphics_backend", "vulkan"), want("audio_backend", "openal");
                 if (!saved.has("graphics_backend") || saved["graphics_backend"].str() != "vulkan" || !saved.has("audio_backend") ||
                     saved["audio_backend"].str() != "openal")
                     add("the backends were not saved");
-                if (g0 != "local" || a0 != "local" || aNow != "local") add("a backend changed before the restart");
+                if (g0 != ui::defaultGraphicsBackend() || a0 != "local" || aNow != "local") add("a backend changed before the restart");
             } else {
                 want("graphics_backend", "sdl3"), want("audio_backend", "openal");
                 if (g0 != "sdl3" || a0 != "openal") add("the restart did not start on the saved backends");

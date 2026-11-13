@@ -55,6 +55,9 @@ public:
     // Enhanced backdrop's framing on the guitarist); 0: none.
     void setLensShift(float x) { lensShift_ = x; }
     const gfx::EnhancedFx* enhancedFx() const { return enh_.get(); }
+    // The 3D scene's size this frame (Resolution, SSAA, FSR 1: --enhancedtest).
+    int sceneHeight() const { return fx_.sceneH(); }
+    size_t particleQuads() const { return particles_ ? particles_->lastQuads : 0; }
     uint64_t teslaFrames = 0;  // frames with Tesla bolts drawn
     // Loads the zone (and uploads it when `device` is given); false and
     // `error` on failure. Without a device nothing draws until attach().
@@ -123,6 +126,13 @@ public:
     int shadowLight() const { return shadowLight_; }  // the index of the dynamic shadow's light (-1: none yet)
     // The casters (band draws) each dynamic shadow cascade drew last frame (venuetest).
     const std::array<size_t, 2>& shadowCascadeDraws() const { return shadowDraws_; }
+    // The band's self-shadowing probe, summed over the frames drawn while
+    // acneProbe is on (BandView::AcneProbe; --venuetest, GD04-119).
+    static inline bool acneProbe = false;
+    struct Acne {
+        double area, prone, proneOld;
+    };
+    static inline Acne acne{0, 0, 0};
     static venue::Performance performance(float health);
 
 private:

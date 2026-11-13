@@ -378,6 +378,19 @@ void Particles::addObjectNatives() {
         run.waitFor = [this, obj] { return vmTime_ >= animEnd_[obj]; };
         return true;
     });
+    // LightShow_GetParams: the light show's parameters, of which the zones'
+    // node scripts read <performance> (z_artdeco's dragon and knights:
+    // begin / if LightShow_GetParams / switch <performance> ... repeat) [C
+    // scripts; I: performance from the rock meter's bands, as the light
+    // show's]. Without it the call returned true with no <performance>, no
+    // case matched and the loop never waited: the VM's whole instruction
+    // budget each step, 3 x ~2 ms of every frame in z_artdeco (GD04-121).
+    vm_->addNative("LightShow_GetParams", [this, setLocal](qs::Vm&, qs::ScriptRun& run, qb::Struct&) {
+        const venue::Performance pf = perf_ ? perf_->at(vmTime_) : venue::Performance::Medium;
+        setLocal(run, K("performance"),
+                 qs::Vm::makeKey(K(pf == venue::Performance::Poor ? "poor" : pf == venue::Performance::Good ? "good" : "medium")));
+        return true;
+    });
     vm_->addNative("obj_getid", [setLocal](qs::Vm&, qs::ScriptRun& run, qb::Struct&) {
         setLocal(run, K("ObjID"), qs::Vm::makeKey(run.object));
         return true;
@@ -932,6 +945,7 @@ void Particles::advance(double ms) {
 }
 
 void Particles::draw(const venue::CamPose& cam, double ms) {
+    lastQuads = 0;
     if (!dev_ || !program_ || systems_.empty()) return;
     gfx::RenderDevice& d = *dev_;
     const venue::Vec3 fwd = venue::rotate(cam.rot, {0, 0, 1});
@@ -972,9 +986,12 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
         Batch b{p.texture, p.additive, p.blend, p.burn, p.alphaCut, verts.size(), 0};
         venue::Vec3 base = s.pos;
         if (s.member && !(bonePos && bonePos(s.member, s.bone, base))) continue;
-        // The burst at the start, then emit_rate a second for `lifetime` [I].
-        const int continuous = int(std::floor(double(p.rate) * double(p.lifetime)));
-        const int total = p.burst + continuous;
+        // The burst at the start, then emit_rate a second for `lifetime` [I];
+        // Enhanced > Particles 2x: twice as many of both.
+        const int burst = int(float(p.burst) * density);
+        const float rateD = p.rate * density;
+        const int continuous = int(std::floor(double(rateD) * double(p.lifetime)));
+        const int total = burst + continuous;
         venue::Vec3 dir = p.target;
         const float dl = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
         if (dl > 1e-6f) for (float& c : dir) c /= dl;
@@ -987,14 +1004,14 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
         // Only the particles that can be alive now: the burst while age < lifeMax,
         // then the continuous ones born in [age - lifeMax, age] (a long-lived
         // emitter has millions of indices; walking them all took seconds a frame).
-        const double rate = std::max(1.0f, p.rate);
-        const int burstEnd = age <= double(p.lifeMax) ? p.burst : 0;
-        const int contLo = p.burst + std::max(0, int(std::floor((age - double(p.lifeMax)) * rate)));
-        const int contHi = int(std::min<double>(double(total), double(p.burst) + std::floor(age * rate) + 1.0));
+        const double rate = std::max(1.0f, rateD);
+        const int burstEnd = age <= double(p.lifeMax) ? burst : 0;
+        const int contLo = burst + std::max(0, int(std::floor((age - double(p.lifeMax)) * rate)));
+        const int contHi = int(std::min<double>(double(total), double(burst) + std::floor(age * rate) + 1.0));
         for (int i = 0; i < total && verts.size() / 6 < kMaxParticles; ++i) {
             if (i == burstEnd && i < contLo) i = contLo;
             if (i >= contHi) break;
-            const double born = i < p.burst ? 0.0 : double(i - p.burst) / std::max(1.0f, p.rate);
+            const double born = i < burst ? 0.0 : double(i - burst) / std::max(1.0f, rateD);
             const float life = p.lifeMin + (p.lifeMax - p.lifeMin) * rnd(s.seed, uint64_t(i), 0);
             const double a = age - born;
             if (a < 0 || a > life) continue;
@@ -1217,6 +1234,7 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
         b.count = verts.size() - b.first;
         if (b.count) batches.push_back(b);
     }
+    lastQuads = verts.size() / 6;
     if (verts.empty()) return;
     const size_t bytes = verts.size() * sizeof(PVtx);
     if (bytes > vbSize_) {

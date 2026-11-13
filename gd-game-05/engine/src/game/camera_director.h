@@ -117,6 +117,10 @@ public:
     // by the INTRO shot it picks this way [C].
     const scene::CamShot* drawShot(const std::vector<std::string>& categories, const std::vector<std::pair<std::string, Value>>& filter = {});
     void forceShot(const scene::CamShot* shot);
+    // A chain of shots, each after the one before ends (RB's BandCamShot
+    // next_shot, 0x822D6560; play_camera_sequence); a forceShot drops the rest.
+    void playSequence(const std::vector<const scene::CamShot*>& shots);
+    size_t sequenceLeft() const { return sequence_.size(); }
     bool camShotOk(const scene::CamShot& shot);
     bool camCheckShot(const scene::CamShot& shot);
 
@@ -201,6 +205,8 @@ private:
     bool shake_ = true;
     bool pickEnabled_ = true, freeCam_ = false;
     std::vector<const scene::CamShot*> sequence_;
+    int ppCalls_ = 0;                             // pp_blend_task / PostProc select calls
+    const scene::PostProc* lastOwn_ = nullptr;    // the last shot's own PostProc
     double nearestBeat_ = -1e30;               // cam_check_shot's nearest walk spot, once per beat
     const scene::Waypoint* nearest_ = nullptr;
     double lastSeconds_ = 0;

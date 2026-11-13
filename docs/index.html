@@ -80,6 +80,13 @@
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
   .card h3 { margin: 0 0 8px; font-size: 22px; }
   .card p { margin: 0; color: var(--dim); }
+  .news { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .news ul { list-style: none; margin: 0; padding: 0; }
+  .news li { padding: 8px 0; border-top: 1px solid var(--line); }
+  .news li:first-child { border-top: 0; }
+  .news a { color: inherit; text-decoration: none; overflow-wrap: anywhere; }
+  .news a:hover { text-decoration: underline; }
+  .news .when { display: block; color: var(--dim); font-size: 13px; }
 
   .dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
   .dlcard { display: flex; flex-direction: column; gap: 8px; padding: 18px 18px 16px; border-radius: 12px; background: var(--panel);
@@ -205,6 +212,17 @@
     </div>
   </section>
 
+  <section id="updates">
+    <div class="wrap">
+      <h2>Latest updates</h2>
+      <p class="lead">Straight from the repository: the newest releases and the changes merged lately.</p>
+      <div class="news">
+        <div class="card"><h3>Releases</h3><ul id="news-releases"><li class="when">Loading...</li></ul></div>
+        <div class="card"><h3>Merged changes</h3><ul id="news-prs"><li class="when">Loading...</li></ul></div>
+      </div>
+    </div>
+  </section>
+
   <section id="launcher">
     <div class="wrap launcher">
       <div>
@@ -219,11 +237,12 @@
         </ul>
       </div>
       <div class="screen" aria-label="Launcher preview">
-        <div class="row lit"><span><b>gd-game-01</b>/Guitar Hero</span><span class="bar"><i style="width:99%"></i></span></div>
-        <div class="row lit"><span><b>gd-game-02</b>/Guitar Hero II</span><span class="bar"><i style="width:99%"></i></span></div>
-        <div class="row lit"><span><b>gd-game-03</b>/Guitar Hero 80s</span><span class="bar"><i style="width:99%"></i></span></div>
-        <div class="row lit"><span><b>gd-game-04</b>/Guitar Hero III</span><span class="bar"><i style="width:96%;background:var(--yellow)"></i></span></div>
-        <div class="row" style="margin:0"><span><b>gd-game-05</b>/Rock Band</span><span class="bar"><i style="width:36%;background:var(--yellow)"></i></span></div>
+        <div class="row lit"><span><b>gd-game-01</b>/Guitar Hero</span><span class="bar"><i style="width:98%"></i></span></div>
+        <div class="row lit"><span><b>gd-game-02</b>/Guitar Hero II</span><span class="bar"><i style="width:92%"></i></span></div>
+        <div class="row lit"><span><b>gd-game-03</b>/Guitar Hero 80s</span><span class="bar"><i style="width:93%"></i></span></div>
+        <div class="row lit"><span><b>gd-game-04</b>/Guitar Hero III</span><span class="bar"><i style="width:87%;background:var(--yellow)"></i></span></div>
+        <div class="row"><span><b>gd-game-05</b>/Rock Band</span><span class="bar"><i style="width:40%;background:var(--yellow)"></i></span></div>
+        <div class="row" style="margin:0"><span><b>gd-game-10</b>/GH Metallica</span><span class="bar"><i style="width:48%;background:var(--yellow)"></i></span></div>
       </div>
     </div>
   </section>
@@ -252,16 +271,16 @@
 <script>
   // The setlist, from the project's README.
   const games = [
-    ["gd-game-01", "Guitar Hero", "PlayStation 2", "play", "99% playable"],
-    ["gd-game-02", "Guitar Hero II", "Xbox 360", "play", "99% playable"],
-    ["gd-game-03", "Guitar Hero Encore: Rocks the 80s", "PlayStation 2", "play", "99% playable"],
-    ["gd-game-04", "Guitar Hero III: Legends of Rock", "Xbox 360", "wip", "96% playable"],
-    ["gd-game-05", "Rock Band", "Xbox 360", "wip", "36% playable"],
+    ["gd-game-01", "Guitar Hero", "PlayStation 2", "play", "98% playable"],
+    ["gd-game-02", "Guitar Hero II", "Xbox 360", "play", "92% playable"],
+    ["gd-game-03", "Guitar Hero Encore: Rocks the 80s", "PlayStation 2", "play", "93% playable"],
+    ["gd-game-04", "Guitar Hero III: Legends of Rock", "Xbox 360", "wip", "87% playable"],
+    ["gd-game-05", "Rock Band", "Xbox 360", "wip", "40% playable"],
     ["gd-game-06", "Guitar Hero: Aerosmith", "Xbox 360", "", "Planned"],
     ["gd-game-07", "Guitar Hero World Tour", "Xbox 360", "", "Planned"],
     ["gd-game-08", "Rock Band 2", "Xbox 360", "", "Planned"],
     ["gd-game-09", "The Beatles: Rock Band", "Xbox 360", "", "Planned"],
-    ["gd-game-10", "Guitar Hero: Metallica", "Xbox 360", "", "Planned"],
+    ["gd-game-10", "Guitar Hero: Metallica", "Xbox 360", "wip", "48% playable"],
     ["gd-game-11", "Guitar Hero: Smash Hits", "Xbox 360", "", "Planned"],
     ["gd-game-12", "Guitar Hero 5", "Xbox 360", "", "Planned"],
     ["gd-game-13", "Lego Rock Band", "Xbox 360", "", "Planned"],
@@ -301,6 +320,32 @@
       }
     })
     .catch(() => {});
+
+  // Latest updates (GDSITE-002): releases and merged pull requests read from
+  // the GitHub API in the visitor's browser (no build step); text only.
+  const repo = "https://api.github.com/repos/mbracali/prj-gd-engine";
+  const day = d => new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  function fill(id, items, fallback) {
+    const ul = document.getElementById(id);
+    ul.textContent = "";
+    if (!items.length) { const li = document.createElement("li"); li.className = "when"; li.textContent = fallback; ul.appendChild(li); return; }
+    for (const it of items) {
+      const li = document.createElement("li"), a = document.createElement("a"), w = document.createElement("span");
+      a.href = it.url; a.textContent = it.title; a.rel = "noopener";
+      w.className = "when"; w.textContent = it.when;
+      li.append(a, w); ul.appendChild(li);
+    }
+  }
+  const failed = id => () => fill(id, [], "Could not reach GitHub right now. See the repository for the latest news.");
+  fetch(repo + "/releases?per_page=6")
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(rs => fill("news-releases", rs.filter(r => !r.draft).map(r => ({ url: r.html_url, title: r.name || r.tag_name, when: day(r.published_at || r.created_at) })), "No releases yet."))
+    .catch(failed("news-releases"));
+  fetch(repo + "/pulls?state=closed&sort=updated&direction=desc&per_page=30")
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(ps => fill("news-prs", ps.filter(p => p.merged_at).sort((a, b) => b.merged_at.localeCompare(a.merged_at)).slice(0, 6)
+      .map(p => ({ url: p.html_url, title: p.title, when: "Merged " + day(p.merged_at) })), "Nothing merged lately."))
+    .catch(failed("news-prs"));
 
   // A note highway scrolling behind the title. Each gem is drawn once, glow
   // included, into a sprite and then only copied: a canvas blur per gem and

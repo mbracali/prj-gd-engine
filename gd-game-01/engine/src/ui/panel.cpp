@@ -113,9 +113,16 @@ void Panel::setShowing(const std::string& object, bool showing) {
     if (SceneObject* o = scene_->find(object); o && o->drawable()) o->drawable()->showing = showing;
 }
 
-void Panel::draw(const std::string& view) {
+bool Panel::showing(const std::string& object) const {
+    const SceneObject* o = scene_->find(object);
+    return o && o->drawable() && o->drawable()->showing;
+}
+
+void Panel::draw(const std::string& view, float widenX) {
     Mat4 vp;
     if (!viewProj(vp)) return;
+    if (widenX != 1)
+        for (int c = 0; c < 4; ++c) vp.m[size_t(c * 4)] *= widenX;  // column-major: clip x
     // The shared ui.env ambient (ui.enm: the transition fade, turn_off_ambient /
     // reset_ambient) lights the panel's own ui.env.
     if (const SceneObject* se = sharedObject("ui.env"); se && se->environment)
@@ -142,8 +149,32 @@ void Panel::drawComponent(const SceneObject& o, const Mat4& viewProj, const Mat4
             const UiResources::Style& st = res_.style(u.kind == UiObj::Kind::Picture ? "pictureex" : "picturetoggle", u.style);
             const std::string& mesh = state(o.name) == UiResources::Disabled && !st.disabledMesh.empty() ? st.disabledMesh : st.mesh;
             auto tex = texFiles_.find(o.name);
-            if (!mesh.empty() && trans)
-                res_.drawMesh(mesh, viewProj, model * Mat4::fromRowXfm(trans->world.rot, trans->world.pos), tex == texFiles_.end() ? 0 : tex->second, ambient());
+            if (!mesh.empty() && trans) {
+                const Mat4 world = model * Mat4::fromRowXfm(trans->world.rot, trans->world.pos);
+                res_.drawMesh(mesh, viewProj, world, tex == texFiles_.end() ? 0 : tex->second, ambient());
+                // The picture's screen rectangle, for the mouse (GD01-322, #98:
+                // the character portraits take clicks, not only the wheel).
+                const SceneObject* mo = res_.scene().find(mesh);
+                // As UiResources::drawMesh: the component's world, then the mesh's local transform.
+                const Mat4 local = mo && mo->mesh ? Mat4::fromRowXfm(mo->mesh->trans.local.rot, mo->mesh->trans.local.pos) : Mat4{};
+                if (mo && mo->mesh && !mo->mesh->geomOwner.empty() && mo->mesh->geomOwner != mesh)  // shared geometry (SceneRenderer::build)
+                    if (const SceneObject* g = res_.scene().find(mo->mesh->geomOwner); g && g->mesh) mo = g;
+                if (mo && mo->mesh && !mo->mesh->verts.empty()) {
+                    const Mat4 m = viewProj * world * local;
+                    Hit h{o.name, 1e30f, 1e30f, -1e30f, -1e30f};
+                    bool ok = true;
+                    for (const MeshVertex& v : mo->mesh->verts) {
+                        const float cx = m.m[0] * v.pos[0] + m.m[4] * v.pos[1] + m.m[8] * v.pos[2] + m.m[12];
+                        const float cy = m.m[1] * v.pos[0] + m.m[5] * v.pos[1] + m.m[9] * v.pos[2] + m.m[13];
+                        const float cw = m.m[3] * v.pos[0] + m.m[7] * v.pos[1] + m.m[11] * v.pos[2] + m.m[15];
+                        if (cw <= 1e-6f) ok = false;
+                        if (!ok) break;
+                        const float sx = (cx / cw + 1) * 0.5f * kScreenW, sy = (1 - cy / cw) * 0.5f * kScreenH;
+                        h.x0 = std::min(h.x0, sx), h.x1 = std::max(h.x1, sx), h.y0 = std::min(h.y0, sy), h.y1 = std::max(h.y1, sy);
+                    }
+                    if (ok) hits_.push_back(std::move(h));
+                }
+            }
             return;
         }
         if (u.kind == UiObj::Kind::List || u.kind == UiObj::Kind::Slider) {

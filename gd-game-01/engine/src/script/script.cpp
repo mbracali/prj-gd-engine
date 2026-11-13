@@ -393,7 +393,13 @@ Value arith(const Value& a, const Value& b, char op) {
     case '-': r = x - y; break;
     case '*': r = x * y; break;
     case '/': r = y != 0 ? x / y : 0; break;
-    case '%': r = y != 0 ? std::fmod(x, y) : 0; break;
+    case '%':
+        // Harmonix's Mod: the remainder wrapped into [0, y) (fmod keeps the
+        // sign): career.dta's store steps back with {mod {+ itemIdx -1} n},
+        // so the first item's Up must give the last (#100, GD01-319).
+        r = y != 0 ? std::fmod(x, y) : 0;
+        if (r != 0 && (r < 0) != (y < 0)) r += y;
+        break;
     }
     if (op == '/' && a.type == Value::Type::Int && b.type == Value::Type::Int && b.i != 0 && a.i % b.i == 0)
         return Value::integer(a.i / b.i);

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <memory>
 #include <set>
@@ -17,8 +18,10 @@
 #include "game/song_db.h"
 #include "input/input.h"
 #include "render/canvas.h"
+#include "render/text_layout.h"
 #include "scene/milo.h"
 #include "ui/campaign.h"
+#include "ui/dev_key_cheats.h"
 #include "ui/natives.h"
 #include "ui/ui_host.h"
 #include "ui/ui_manager.h"
@@ -252,6 +255,97 @@ static int campaignChecks(ui::UiManager& ui) {
     return fails;
 }
 
+// The Enhanced menu's Developer Keyboard Cheats list (GD02-160, #103):
+// every key it shows runs, on the disc, the cheat it names.
+static int devKeyCheatChecks(ui::UiManager& ui) {
+    const DataNode* qc = ui.bootTree() ? ui.bootTree()->find("quick_cheats") : nullptr;
+    const DataNode* kb = qc ? qc->find("keyboard") : nullptr;
+    if (!kb) return std::printf("  FAIL dev cheats: no quick_cheats keyboard list\n"), 1;
+    int fails = 0;
+    for (const ui::DevKeyCheat& c : ui::devKeyCheats()) {
+        std::string disc;
+        for (size_t k = 1; k < kb->children.size(); ++k) {
+            const DataNode& e = kb->children[k];
+            if (!e.isList() || e.children.size() < 3 || !e.children[0].isText() || e.children[0].s.size() != 1) continue;
+            if (e.children[0].s[0] == c.key && e.children[1].isText()) disc = e.children[1].s;
+        }
+        if (disc != c.disc) std::printf("  FAIL dev cheats: key '%c' is \"%s\" on the disc, the menu says \"%s\"\n", c.key, disc.c_str(), c.disc), ++fails;
+    }
+    std::printf("uitest: %zu developer keyboard cheats checked against cheats.dta\n", ui::devKeyCheats().size());
+    return fails;
+}
+
+// GD02-165: the song lists' names against their stars and score. Each row
+// template (list_song*.milo: list.txt, stars.txt, score.txt) laid out with
+// every song's name as the list draws it; reports the widest name's right
+// edge, its lines, and whether any line reaches the stars' / score's left
+// edge (a 3-star text and a 7-digit score, the template's own). Fails only
+// when a template cannot be read.
+static int setlistChecks(const GameData& data, scene::MiloLibrary& lib, const std::vector<SongInfo>& songs) {
+    int fails = 0;
+    for (const char* file : {"ui/gen/list_song.milo_xbox", "ui/gen/list_song2.milo_xbox"}) {
+        scene::Milo* m = nullptr;
+        try {
+            m = &lib.load(file);
+        } catch (const std::exception& e) {
+            std::printf("  FAIL setlist: %s: %s\n", file, e.what());
+            ++fails;
+            continue;
+        }
+        // Its subdirectories (the fonts), linked as UiView::resource does.
+        std::function<void(scene::Milo&, int)> link = [&](scene::Milo& milo, int depth) {
+            const auto* own = milo.root().self ? milo.root().self->as<scene::DirObj>() : nullptr;
+            if (!own || depth > 4) return;
+            for (const std::string& sub : own->objectDir.subdirs) {
+                const std::string sp = scene::findMiloRelative(data, milo.path(), sub);
+                if (!data.exists(sp)) continue;
+                scene::Milo& sm = lib.load(sp);
+                auto& linked = milo.root().linked;
+                if (std::find(linked.begin(), linked.end(), &sm.root()) == linked.end()) linked.push_back(&sm.root()), link(sm, depth + 1);
+            }
+        };
+        link(*m, 0);
+        const auto* list = m->find<scene::Text>("list.txt");
+        const auto* stars = m->find<scene::Text>("stars.txt");
+        const auto* score = m->find<scene::Text>("score.txt");
+        const scene::Font* font = list && list->dir ? list->dir->resolve<scene::Font>(list->font) : nullptr;
+        if (!list || !stars || !score || !font) {
+            std::printf("  FAIL setlist: %s: no list / stars / score text or font\n", file);
+            ++fails;
+            continue;
+        }
+        gfx::FontMetrics fm(*font);
+        auto style = [](const scene::Text& t) {
+            gfx::TextStyle st;
+            st.size = t.size, st.leading = t.leading, st.wrapWidth = t.wrapWidth, st.italics = t.italics;
+            st.align = t.align, st.capsMode = t.capsMode, st.markup = t.markup;
+            return st;
+        };
+        const float starsLeft = stars->trans.local.pos[0];
+        const float scoreLeft = score->trans.local.pos[0] - gfx::layoutText(&fm, score->text, style(*score)).maxWidth();
+        const float limit = std::min(starsLeft, scoreLeft);
+        float widest = 0;
+        size_t maxLines = 0;
+        std::string widestName;
+        int over = 0;
+        for (const SongInfo& s : songs) {
+            const gfx::TextLayout l = gfx::layoutText(&fm, s.name, style(*list));
+            const float right = list->trans.local.pos[0] + l.maxWidth();
+            if (right > widest) widest = right, widestName = s.name;
+            maxLines = std::max(maxLines, l.lines.size());
+            if (right > limit) ++over;
+        }
+        std::printf("uitest: setlist %s: wrap %.0f, widest name '%s' ends at x %.1f (stars from %.1f, score from %.1f), up to %zu lines, %d "
+                    "name(s) reaching the stars or score\n",
+                    file, double(list->wrapWidth), widestName.c_str(), double(widest), double(starsLeft), double(scoreLeft), maxLines, over);
+        // A measurement (GD02-165, open): the career / co-op list (list_song,
+        // wrap 316) ends at most 0.3 units into the stars' column; quick
+        // play's (list_song2, wrap 600) shows no stars or score outside
+        // co-op (0x822C3428), which takes sel_song.milo's list_song.
+    }
+    return fails;
+}
+
 int runUiTest(const std::string& dataPath) {
     std::unique_ptr<GameData> data;
     std::vector<SongInfo> songs;
@@ -281,6 +375,7 @@ int runUiTest(const std::string& dataPath) {
 
     // Every panel's milo, and the components its own script names.
     scene::MiloLibrary lib(*data);
+    failures += setlistChecks(*data, lib, songs);
     std::set<std::string> sends;
     if (ui.bootTree()) collectSends(*ui.bootTree(), sends);
     int unreachable = 0;
@@ -348,6 +443,7 @@ int runUiTest(const std::string& dataPath) {
     std::printf("uitest: %d panels, %d milos loaded, %d component names checked, %d run-time milos skipped, %d handlers nothing calls\n",
                 panels, loaded, checked, dynamic, unreachable);
     failures += campaignChecks(ui);
+    failures += devKeyCheatChecks(ui);
     for (const auto& [k, n] : in.unknownCounts()) std::printf("  UNKNOWN %s (%d)\n", k.c_str(), n), ++failures;
     for (const auto& [k, n] : in.unhandledCounts()) std::printf("  UNHANDLED %s (%d)\n", k.c_str(), n), ++failures;
     for (const auto& [k, n] : in.stubCounts()) std::printf("  STUB %s (%d)\n", k.c_str(), n);

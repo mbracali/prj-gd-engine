@@ -601,7 +601,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", D, D, D, D, C}, 10000});
         steps_.push_back({"options_select_option_fs", {"wait", "wait", "click:item"}, 20000});
         steps_.push_back({"port_enhanced",
-                          {"check:enhanced:easy_chords=off", "check:enhanced:max_fps=60", "check:enhanced:hdr=none", "check:enhanced:graphics_backend=local",
+                          {"check:enhanced:easy_chords=off", "check:enhanced:max_fps=60", "check:enhanced:hdr=none", "check:enhanced:graphics_backend=" + enhancedDefault("graphics_backend"),
                            "check:enhanced:audio_backend=local", "shot:enhanced_top@", "click:row:max_fps", "click:option:1", "check:enhanced:max_fps=120",
                            "click:row:easy_chords", "check:enhanced:easy_chords=on", "click:row:film_grain", "click:option:2",
                            "check:enhanced:film_grain=medium", "shot:enhanced_accessibility@", "dialog:savedir", "click:row:export",

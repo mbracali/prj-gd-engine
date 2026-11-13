@@ -6,6 +6,17 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.13] - 2026-11-13
+
+### Fixed
+- The shop: pressing Up on the first item now goes to the last one instead of showing "_shop_desc" and $0 (#100).
+- Menus no longer keep scrolling by themselves after changing "Bind to" on the Gamepads screen (#100).
+- Venues, characters and menus now free their graphics memory when they close (local backend) (#100).
+- The intro video's sound no longer pops (#79).
+- The mouse cursor shows only in the menus and hides during songs or when a guitar, gamepad or key is used; no white pixels around the bottom buttons; the tutorial's dark background covers the whole screen; one Back button (the original); characters can be picked with the mouse; the menu highlight follows the mouse only over the items (#98).
+- Restart Now (Enhanced > backends) starts the game again from its start, with the controllers working.
+
+
 ## [1.1.12] - 2026-11-10
 
 ### Added

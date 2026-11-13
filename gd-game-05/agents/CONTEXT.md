@@ -122,6 +122,9 @@ Wave G06 band (GD05-066/067/068):
   draw_only ignored, no RB face) to show the checks failing.
 - `GD05_FACE_CAM=player_guitar0:50:0:bone_spine2.mesh GD05_POST=0
   GD05_TRACK=0 GD05_HUD=0` with `GD05_SCREENSHOT(_AT)`: close shots of a member.
+  `GD05_PREFAB_VOCALS=vocals2` (any instrument: GD05_PREFAB_GUITAR, _BASS,
+  _DRUM) picks the premade; bandcheck's "face rest" line checks each
+  member's jaw against its face clips (D94).
 
 Wave G06 highway and crowd (GD05-070 / GD05-071):
 - `--walktest rb_highway`: App::rbProbes under every frame: the Overdrive

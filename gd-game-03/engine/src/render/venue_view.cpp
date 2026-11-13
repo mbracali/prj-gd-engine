@@ -70,6 +70,7 @@ VenueView::VenueView(World& world, gfx::SceneCache& cache) : world_(world), cach
     spotlights_ = std::make_unique<gfx::SpotlightView>(world, cache);
     crowdView_ = std::make_unique<CrowdView>(world, cache);
     bandView_ = std::make_unique<BandView>(world, cache);
+    spotlights_->setBandView(bandView_.get());  // the target_shadow spotlights' shadows (GD03-107)
     build();
     setShot(world_.firstShot());
 }

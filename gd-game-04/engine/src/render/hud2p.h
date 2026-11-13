@@ -39,6 +39,7 @@ public:
 
     struct Counters {
         uint64_t needleChanges = 0, scoreChanges = 0, leadChanges = 0, cardsShown = 0, attackTexts = 0, raiseAxe = 0, missingTextures = 0;
+        uint64_t whammyBars = 0;  // frames the Whammy attack's bar was drawn (update_training_whammy_bar)
         uint64_t alertUpdates = 0, alertFramesShown = 0, stealHands = 0, bites = 0;
     };
     const Counters& counters() const { return n_; }

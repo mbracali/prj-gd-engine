@@ -444,7 +444,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         else wait(1500);
         key(SDLK_RETURN);  // the difficulty
         at("game_screen", 60000);
-        wait(4000);  // the intro: the track is out
+        // The intro (its shot's length: qp_solo's INTRO_VENUE runs 6.7 s,
+        // D96), then as before (the intro was 0.7 s).
+        checkS("song_clock_running", 30000);
+        wait(3300);  // the track is out
         if (path == "drums" || path == "vocals") {
             checkS("od_auto:" + path + ":45", 60000);  // refused under half
             checkS("od_auto:" + path + ":60", 90000);  // deployed
@@ -2162,7 +2165,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1500);
         press(kX);
         at("game_screen", 60000);
-        wait(12000);
+        check("song_clock_running", 30000);  // past the intro (D96: INTRO_VENUE, 6.7 s)
+        wait(11300);
         // Fixed shots: the venue's BandCamShots by name, every 7th (#0, #7,
         // ... GD05_FORCE_SHOT), 1.5 s into each.
         for (int i = 0; i < 30; ++i) {
@@ -2253,10 +2257,22 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         endMs_ = 30000;  // the song ends early (the walk's end time; GD05_WALK_END overrides)
         if (const char* e = SDL_getenv("GD05_WALK_END")) endMs_ = float(std::atof(e));
         rbQuickplay();
+        // GD05-098: the song's start as RB's script runs it (App::rbIntroErrors):
+        // the intro chain's shots in order with their lengths, nothing else
+        // first, the clock from minus the chain (GD05_INTRO_LEGACY=1 fails it).
+        check("song_clock_running", 30000);
+        wait(300);
+        check("counter:rb_intro_shots:1");
+        check("counter_max:rb_intro_errors:0");
         wait(3000);
         check("counter:rb_track_frames:30");
         check("counter:band_members:4");
         at("endgame_waiting_screen", 90000);  // modes.dta win_screen (the default mode)
+        // GD05-096: the hits' effects (hit flares, shockwaves, glass) drawn:
+        // particles from the smashers' effects.grp within 100 ms of each hit
+        // (GD05_SMASHFX_LEGACY=1, smasher_fx.grp hidden as before: 100 %).
+        check("counter:rb_fx_hits_seen:10");
+        check("counter_max:rb_fx_hits_unseen_pct:5");
         // GD05-058: RB's own HUD (render/rb_hud_view.h): each element drawn alone
         // lands within 4 px of the box its milo data gives; the score, the
         // multiplier, the Overdrive and crowd meters show the players' values.
@@ -2414,6 +2430,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // smashers, a sustain burned, the deploy showed its spotlight.
         check("counter:rb_fx_hits:20");
         check("counter_max:rb_fx_hits_no_flame:0");
+        // GD05-096: the hits' effects are drawn, not only launched: particles
+        // from the smashers' effects.grp within 100 ms of each hit
+        // (GD05_SMASHFX_LEGACY=1, smasher_fx.grp hidden: 100 %).
+        check("counter_max:rb_fx_hits_unseen_pct:5");
         check("counter:rb_fx_glows:1");
         check("counter:rb_fx_burns:1");
         check("counter:rb_fx_deploys:1");
@@ -7411,6 +7431,11 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (k != std::size(want)) return fail("intro: " + std::to_string(k) + " of 7 sounds");
         if (begin != 1) return fail("the crowd's crowd_begin did not play once at the intro");
         ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "song_clock_running") {
+        // Held until the song's clock reaches 0 (the intro shot over).
+        if (ui.host().gameLoaded() && ui.host().gameTimeMs() >= 0) ++step_, stepStart_ = -1;
         return;
     }
     if (s.screen == "task_clock_song") {

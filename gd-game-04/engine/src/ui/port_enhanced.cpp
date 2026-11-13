@@ -75,9 +75,17 @@ std::vector<Item> gh3Cheats(qs::Vm& vm) {
             code += (code.empty() ? "" : " ") + chord;
         }
         const qb::Value* var = qs::Vm::param(*c.st, qbkey::key("var"));
-        Item it{Kind::Cheat, key, name, var != nullptr,
-                "The original cheat, on or off (unlocked if it was not). Its code, in Options > Cheats > Enter Cheat, one strum "
-                "per chord (G R Y B O: green, red, yellow, blue, orange): " + code + "."};
+        // Unlocked All Songs / Unlocked Everything are not switches in GH3:
+        // their code unlocks once (unlock_cheat runs GlobalTags_UnlockAll and
+        // returns before setting the var) and the Cheats menu never lists
+        // them [C script menu_cheats.qb]. Here a button does the same. GD04-117 (#85).
+        const bool once = var && (var->key == qbkey::key("Cheat_UnlockAll") || var->key == qbkey::key("Cheat_UnlockAll_Everything"));
+        Item it{once ? Kind::Button : Kind::Cheat, key, name, var != nullptr,
+                once ? "The original cheat: unlocks " + std::string(var->key == qbkey::key("Cheat_UnlockAll") ? "every song" : "every song, guitar, character, outfit and video") +
+                           " at once, as entering its code does (GH3's Cheats menu does not list it: it is not a switch). Its code, in Options > "
+                           "Cheats > Enter Cheat, one strum per chord (G R Y B O: green, red, yellow, blue, orange): " + code + "."
+                     : "The original cheat, on or off (unlocked if it was not, and then listed in Options > Cheats). Its code, in Options > "
+                       "Cheats > Enter Cheat, one strum per chord (G R Y B O: green, red, yellow, blue, orange): " + code + "."};
         it.cheatVar = var ? var->key : 0, it.cheatIndex = index;
         out.push_back(std::move(it));
     }
@@ -189,10 +197,10 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          {{"60", "60"}, {"120", "120"}, {"144", "144"}, {"240", "240"}, {"unlimited", "Unlimited"}}},
         {Kind::Check, "fps_counter", "Show FPS Counter", true,
          "Shows the frames drawn per second in the bottom-left corner of the screen."},
-        {Kind::Choice, "hdr", "HDR", false,
-         "High dynamic range for the venue and the band: None, Emulated (a filmic curve and an automatic exposure) or True "
-         "HDR on an HDR display. Not in gd04 yet.",
-         {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR"}}},
+        {Kind::Choice, "hdr", "HDR", true,
+         "High dynamic range for the venue and the band: None (as the original), Emulated (a filmic curve and an automatic "
+         "exposure, on any display) or True HDR on an HDR display (not in gd04 yet).",
+         {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR", false}}},
         {Kind::Choice, "bokeh", "Bokeh Effect", true,
          "The depth-of-field blur of the close shots. None: always sharp. Medium: as the original game. Light is softer; "
          "Strong and Stronger blur wider.",
@@ -555,6 +563,9 @@ private:
             qs::Vm::set(p, qbkey::key("index"), qs::Vm::makeInt(it.cheatIndex));
             qs::Vm::set(p, qbkey::key("id"), qs::Vm::makeKey(qbkey::key("port_enhanced_cheat")));
             vm.run(qbkey::key("toggle_cheat"), p);
+            // The Cheats menu lists a cheat once its user_options tag says it
+            // is unlocked (updateUnlockedCheats, as entering its code does) [C script].
+            vm.run(qbkey::key("updateUnlockedCheats"), qb::Struct{});
             rebuild();
             ctx_.sound("select");
             return;
@@ -577,6 +588,15 @@ private:
             ctx_.sound("select");
             if (it.key == "gamepads") return ctx_.screens.open(PortScreens::Id::Gamepads);
             if (it.key == "calibrate") return calibStart();
+            if (it.cheatVar) {  // Unlocked All Songs / Everything: GH3's unlock_cheat, once (gh3Cheats)
+                qb::Struct p;
+                qs::Vm::set(p, qbkey::key("cheat"), qs::Vm::makeKey(it.cheatVar));
+                qs::Vm::set(p, qbkey::key("index"), qs::Vm::makeInt(it.cheatIndex));
+                ctx_.fe.vm().run(qbkey::key("unlock_cheat"), p);
+                status_ = it.name + ": done", statusMs_ = 5000;
+                rebuild();
+                return;
+            }
             if (it.key == "calibrate_reset") {  // #47 (gd01-gd03's)
                 store("audio_offset", "0"), store("video_offset", "0");
                 status_ = "Calibration reset: audio 0 ms, video 0 ms", statusMs_ = 5000;
@@ -679,6 +699,7 @@ private:
         if (key == "calibrate_reset") return "Reset";
         if (key == "export") return "Export...";
         if (key == "load_settings" || key == "load_progress") return "Load...";
+        if (key.rfind("cheat_", 0) == 0) return "Unlock";
         return "Apply";
     }
 

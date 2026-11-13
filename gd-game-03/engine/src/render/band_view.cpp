@@ -2,6 +2,10 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/band_view.h"
 
+#include <functional>
+
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -101,6 +105,49 @@ void BandView::drawCharacter(gfx::MaterialRenderer& mr, chr::Character& c, const
     for (const scene::Mesh* m : meshesToDraw(c, world_ ? &world_->pose() : nullptr)) drawMesh(mr, c, *m);
 }
 
+void BandView::drawShadow(gfx::MaterialRenderer& mr, chr::Character& c, const std::array<float, 3>& dir, bool hdr) {
+    const scene::Group* g = c.shadowGroup();
+    if (!g) return;
+    hdr_ = hdr;
+    flatten_ = true, flatDir_ = dir, flatZ_ = c.xfm().pos[2] + 1.5f;
+    std::vector<const scene::Mesh*> meshes;
+    std::function<void(const scene::Group*, int)> walk = [&](const scene::Group* grp, int depth) {
+        if (depth > 8) return;
+        for (const std::string& n : grp->objects) {
+            const scene::Object* o = c.dir().get(n);
+            if (!o) continue;
+            if (auto* m = o->as<scene::Mesh>()) meshes.push_back(m);
+            else if (auto* sub = o->as<scene::Group>(); sub && sub != grp) walk(sub, depth + 1);
+        }
+    };
+    walk(g, 0);
+    static bool logged = false;  // the material the reading assumes (adds black, writes depth): logged once
+    if (!logged && !meshes.empty() && meshes[0]->dir)
+        if (const scene::Mat* mat = meshes[0]->dir->resolve<scene::Mat>(meshes[0]->mat)) {
+            logged = true;
+            SDL_Log("band shadow: %s, %zu meshes, %s blend %d zmode %d colour %.2f %.2f %.2f %.2f", c.dir().name.c_str(), meshes.size(),
+                    meshes[0]->mat.c_str(), mat->blend, mat->zMode, double(mat->color[0]), double(mat->color[1]), double(mat->color[2]),
+                    double(mat->color[3]));
+        }
+    for (const scene::Mesh* m : meshes) drawMesh(mr, c, *m);
+    flatten_ = false;
+}
+
+// A world transform pushed along the light onto z = flatZ_: each row of the
+// rotation loses its height through the light's direction, as the shear of
+// GH2's Character::DrawShadow (P' = P - dir (P.z - plane) / dir.z).
+scene::Xfm BandView::flattened(scene::Xfm x) const {
+    if (!flatten_) return x;
+    const float dx = flatDir_[0] / flatDir_[2], dy = flatDir_[1] / flatDir_[2];
+    for (int r = 0; r < 3; ++r) {
+        const float h = x.rot[size_t(r * 3 + 2)];
+        x.rot[size_t(r * 3)] -= dx * h, x.rot[size_t(r * 3 + 1)] -= dy * h, x.rot[size_t(r * 3 + 2)] = 0;
+    }
+    const float h = x.pos[2] - flatZ_;
+    x.pos[0] -= dx * h, x.pos[1] -= dy * h, x.pos[2] = flatZ_;
+    return x;
+}
+
 namespace {
 
 void collect(const chr::Character& c, const gfx::ScenePose* pose, const scene::Object* o, int depth, std::vector<const scene::Mesh*>& out) {
@@ -167,14 +214,14 @@ void BandView::drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scen
     Mat4 bones[4];
     const int self = sk.find(m.name);
     const scene::Xfm world = self >= 0 ? sk.world(self) : sk.root();
-    bones[0] = gfx::toMat4(world);
+    bones[0] = gfx::toMat4(flattened(world));
     int boneCount = 1;
     if (g.skinned && !geom->bones.empty()) {
         boneCount = int(std::min<size_t>(geom->bones.size(), 4));
         for (int i = 0; i < boneCount; ++i) {
             const auto& bone = geom->bones[size_t(i)];
             const int b = sk.find(bone.name);
-            bones[i] = b >= 0 ? gfx::toMat4(scene::compose(bone.offset, sk.world(b))) : bones[0];
+            bones[i] = b >= 0 ? gfx::toMat4(flattened(scene::compose(bone.offset, sk.world(b)))) : bones[0];
         }
     } else {
         g.skinned = false;

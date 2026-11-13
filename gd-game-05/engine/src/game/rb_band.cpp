@@ -136,7 +136,11 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
             if (c.isList() && startsWith(text(&c, 0), pool.c_str())) cands.push_back(&c);
         }
         if (cands.empty()) continue;
-        const std::string want = config_.rbPrefab.count(instrument) ? config_.rbPrefab.at(instrument) : std::string();
+        std::string want = config_.rbPrefab.count(instrument) ? config_.rbPrefab.at(instrument) : std::string();
+        // Development aid: GD05_PREFAB_<INSTRUMENT>=<premade> (GD05_PREFAB_VOCALS=vocals2) picks the premade.
+        std::string envName = "GD05_PREFAB_" + instrument;
+        for (char& ch : envName) ch = char(std::toupper(uint8_t(ch)));
+        if (const char* e = SDL_getenv(envName.c_str()); e && *e) want = e;
         const DataNode* pre = cands[(h + (instrument == "bass" ? 7u : 0u)) % cands.size()];
         for (const DataNode* c : cands)
             if (!want.empty() && text(c, 0) == want) pre = c;
@@ -827,6 +831,29 @@ void Band::rbShotTargets(const std::vector<std::pair<std::string, std::string>>&
         if (Member* m = member(slot); m && m->character) m->character->teleport(to);
 }
 
+void Band::rbShotStart(const scene::BandCamShot& shot, bool teleports) {
+    for (auto& m : members_) {
+        m->frozen = false;
+        if (m->hasReturn && m->character) m->character->teleport(m->returnTo);
+        m->hasReturn = false;
+    }
+    std::vector<std::pair<std::string, std::string>> groups;
+    std::vector<std::pair<std::string, scene::Xfm>> moves;
+    for (const auto& tg : shot.bandTargets) {
+        if (!tg.anim.empty()) groups.emplace_back(tg.target, tg.anim);
+        Member* m = member(tg.target);
+        if (tg.teleport && teleports) {
+            if (tg.returns && m && m->character) m->hasReturn = true, m->returnTo = m->character->xfm();
+            moves.emplace_back(tg.target, tg.to);
+        }
+        if (tg.freeze && m) m->frozen = true, m->frozenAt = seconds_ + double(tg.freezeDelay);
+        if (log) SDL_Log("band: shot %s target %s (%s) group '%s' teleport %d freeze %d at %.3f, now at %.1f %.1f %.1f", shot.name.c_str(), tg.target.c_str(), m ? "found" : "no member",
+                         tg.anim.c_str(), int(tg.teleport), int(tg.freeze), m ? m->frozenAt : 0.0, m && m->character ? double(m->character->xfm().pos[0]) : 0.0,
+                         m && m->character ? double(m->character->xfm().pos[1]) : 0.0, m && m->character ? double(m->character->xfm().pos[2]) : 0.0);
+    }
+    rbShotTargets(groups, moves);
+}
+
 // ---- measurements (GD05_BANDCHECK=1) -----------------------------------------
 //
 // Objective checks of the band, frame by frame (the owner's rule: measured,
@@ -874,6 +901,9 @@ struct Band::RbCheck {
     std::map<std::string, float> channelWorst;               // |value| / bound
     std::map<std::string, std::string> channelWorstName;
     std::map<std::string, int> channelFrames;                // frames with a channel past 1.01
+    // The face's rest (GD05-097): each member's jaw from its bind (degrees),
+    // the most over the run.
+    std::map<std::string, float> jawWorst;
 };
 
 bool Band::rbLegacy() {
@@ -982,6 +1012,8 @@ void Band::rbCheckFrame() {
             if (r > 1.01f) over = true;
         }
         if (over) ++k.channelFrames[m.slot];
+        if (const int jaw = sk.find("bone_jaw.mesh"); jaw >= 0 && c.rbFace())
+            k.jawWorst[m.slot] = std::max(k.jawWorst[m.slot], angleBetween(sk.local(jaw).rot, sk.bind(jaw).rot));
         auto at = [&](const char* n, std::array<float, 3>& out) {
             const int i = sk.find(n);
             if (i < 0) return false;
@@ -1048,6 +1080,15 @@ void Band::rbCheckReport() {
                      k.channelWorst.count(m.slot) ? double(k.channelWorst.at(m.slot)) : 0.0,
                      k.channelWorstName.count(m.slot) ? k.channelWorstName.at(m.slot).c_str() : "-", cf, k.frames);
         line(cf == 0, buf);
+        // The face's rest (GD05-097): the jaw (its bind is the face set's
+        // Base) never turns further from it than the face set's clips reach.
+        if (k.jawWorst.count(m.slot)) {
+            const float spread = m.character->faceRestSpread("bone_jaw.quat");
+            SDL_snprintf(buf, sizeof buf, "%s face rest: jaw up to %.1f deg from bind, the face clips reach %.1f from Base", m.slot.c_str(),
+                         double(k.jawWorst.at(m.slot)), double(spread));
+            // Two visemes lit at once (the lip sync's blends) may add up: 1.5 x.
+            line(spread >= 0 && k.jawWorst.at(m.slot) <= spread * 1.5f, buf);
+        }
         if (m.type == "rb_guitar" || m.type == "rb_bass") {
             const auto fret = k.reachFret.count(m.slot) ? k.reachFret.at(m.slot) : std::vector<float>{};
             const auto pick = k.reachPick.count(m.slot) ? k.reachPick.at(m.slot) : std::vector<float>{};

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 # Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 cmake_minimum_required(VERSION 3.24)
-project(gd04 VERSION 1.1.6 LANGUAGES C CXX)
+project(gd04 VERSION 1.1.7 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)  # as gd-game-02 (agents/DECISIONS.md D2)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -58,6 +58,7 @@ target_sources(gd04 PRIVATE
   src/data/xdvdfs.cpp
   src/devaids/menu_keys.cpp
   src/devaids/screenshot.cpp
+  src/devaids/perf.cpp
   src/input/input.cpp
   src/input/midi_in.cpp
   src/input/input_selftest.cpp
@@ -117,6 +118,7 @@ target_sources(gd04 PRIVATE
   src/tests/selftest_play.cpp
   src/tests/sfxtest.cpp
   src/tests/venuetest.cpp
+  src/tests/enhancedtest.cpp
   src/ui/song_screen.cpp
   src/ui/song_hooks.cpp
   src/ui/song_preview.cpp

@@ -201,6 +201,10 @@ void LightPresets::rebuild() {
         auto it = byCategory_.find(c);
         if (it == byCategory_.end()) continue;
         for (const scene::LightPreset* p : it->second) {
+            // PS3-only presets (platform_only 4, as the BandCamShots': the
+            // coop_intro_venue_ps3.pst beside coop_intro_venue.pst) are not
+            // the Xbox's (GD05-098) [I: RB's filter not read; the shots' rule].
+            if (p->platformOnly == 4) continue;
             if (p->minExcitement > excitement_ || excitement_ > p->maxExcitement) continue;
             if (!adjectives_.empty() && !p->adjectives.empty()) {
                 bool any = false;
@@ -269,7 +273,7 @@ void LightPresets::switchTo(const scene::LightPreset* p) {
     if (!p->trigger.empty())
         if (auto* t = world_.venue().find<scene::EventTrigger>(p->trigger)) world_.trigger(t);
     if (onSwitch) onSwitch("preset " + p->name + " (" + p->category + ")");
-    if (world_.log) SDL_Log("world: lighting %s (%s)", p->name.c_str(), p->category.c_str());
+    if (world_.log) SDL_Log("world: lighting %s (%s, platform_only %d)", p->name.c_str(), p->category.c_str(), p->platformOnly);
 }
 
 // ---- playback --------------------------------------------------------------------

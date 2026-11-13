@@ -57,7 +57,7 @@ private:
     bool gameEvents_ = false;
     float lastMs_ = 0;
     bool introSent_ = false, introEndSent_ = false, overSent_ = false;
-    size_t beat_ = 0, note_ = 0, lookNote_ = 0, event_ = 0, lookEvent_ = 0;
+    size_t beat_ = 0, note_ = 0, lookNote_ = 0, event_ = 0, lookEvent_ = 0, venueEvent_ = 0, lookVenueEvent_ = 0;
     std::vector<int> drumsDue_;  // BAND DRUMS pitches waiting for the drum parser's next poll (GD02-050 G5)
     int excitement_ = -1;
     bool peak_ = false;

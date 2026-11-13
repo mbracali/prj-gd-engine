@@ -242,6 +242,16 @@ Renderer::RenderState SceneRenderer::liveState(const DrawMesh& dm) {
     return st;
 }
 
+SceneRenderer::~SceneRenderer() {
+    for (const auto& [key, id] : textures_) renderer_.deleteTexture(id);
+    for (const auto& [key, dm] : meshes_) {
+        renderer_.deleteMesh(dm.mesh);
+        for (const DrawMesh::Pass& p : dm.passes) renderer_.deleteMesh(p.mesh);  // the same as dm.mesh unless texgen made its own
+    }
+    for (const auto& [name, mesh] : particleMeshes_) renderer_.deleteMesh(mesh);
+    for (int mesh : dynamic_) renderer_.deleteMesh(mesh);
+}
+
 void SceneRenderer::replaceTexture(const std::string& tex, const Image& image) {
     if (image.width <= 0) return;
     std::map<int, int> swap;  // old handle -> new
@@ -266,8 +276,11 @@ int SceneRenderer::texture(const std::string& name, bool repeat) {
     const SceneObject* t = scene_.find(name);
     if (!t && lookup_) t = lookup_(name);
     int id = 0;
-    if (t && t->tex && t->tex->image.width > 0)
-        id = renderer_.createTexture(enhance ? enhanceImage(t->tex->image, glyphTextures_.count(name) > 0) : t->tex->image, repeat);
+    if (t && t->tex && t->tex->image.width > 0) {
+        Image img = enhance ? enhanceImage(t->tex->image, glyphTextures_.count(name) > 0) : t->tex->image;
+        if (uiTextures_) bleedTransparent(img);  // the menus' blended edges without a light fringe (GD01-322, #98)
+        id = renderer_.createTexture(img, repeat);
+    }
     textures_[key] = id;
     return id;
 }

@@ -179,6 +179,8 @@ void gdshim_begin(const GdHost* host) {
     g_inits.clear(), g_contexts.clear(), g_windows.clear();
     g_api = GD_WINDOW_API_OPENGL;
     clearWindowProperties();
+    // The game's runApp: Restart Now goes back to the launcher (GD_GAME_EXIT_RESTART).
+    gdshim_setenv("GD_LAUNCHER_HOSTED", "1");
 }
 
 void gdshim_end() {
@@ -193,6 +195,7 @@ void gdshim_end() {
     g_api = GD_WINDOW_API_OPENGL;
     g_host = nullptr;
     g_exploring = false;
+    gdshim_setenv("GD_LAUNCHER_HOSTED", "0");
 }
 
 uint32_t gdshim_window_api() { return g_api; }

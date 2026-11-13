@@ -316,12 +316,50 @@ int BandView::add(gfx::RenderDevice& dev, const band::Model& model, std::string&
     stats_.vertices += mem.src.size();
     mem.vb = dev.createBuffer(gfx::BufferKind::Vertex, mem.src.size() * sizeof(Vtx), nullptr, true);
     mem.ib = dev.createBuffer(gfx::BufferKind::Index, idx.size() * sizeof(uint32_t), idx.data(), false);
+    mem.idx = idx;
     // Opaque meshes first, then the blended ones (hair, lashes).
     std::stable_sort(mem.meshes.begin(), mem.meshes.end(), [](const Mesh& a, const Mesh& b) {
         return (a.mode != Mode::Opaque) < (b.mode != Mode::Opaque);
     });
     members_.push_back(std::move(mem));
     return int(members_.size() - 1);
+}
+
+void BandView::probeAcne(const Member& m, const void* skinned) {
+    AcneProbe& a = *acne_;
+    const Vtx* v = static_cast<const Vtx*>(skinned);
+    // World -> the map's texels (u, v) and depth (Direct3D's 0..1).
+    const gfx::Mat4& M = a.vp;
+    auto project = [&](const float* p, float& u, float& w, float& z) {
+        float q[4];
+        for (int r = 0; r < 4; ++r) q[r] = M.at(r, 0) * p[0] + M.at(r, 1) * p[1] + M.at(r, 2) * p[2] + M.at(r, 3);
+        if (q[3] <= 1e-6f) return false;
+        u = (0.5f + 0.5f * q[0] / q[3]) * a.size, w = (0.5f - 0.5f * q[1] / q[3]) * a.size, z = q[2] / q[3];
+        return true;
+    };
+    for (const Mesh& mesh : m.meshes) {
+        if (!mesh.gh3 || mesh.mode != Mode::Opaque) continue;
+        const float bias = a.bias[1];  // the band casts cull none: double-sided (draw)
+        for (uint32_t k = mesh.firstIndex; k + 2 < mesh.firstIndex + mesh.indexCount && k + 2 < m.idx.size(); k += 3) {
+            float u[3], w[3], z[3];
+            bool ok = true;
+            for (int j = 0; j < 3; ++j) ok = ok && project(v[m.idx[k + size_t(j)]].pos, u[j], w[j], z[j]);
+            if (!ok) continue;
+            // The triangle in texels; facing the light when its map area is
+            // not degenerate (edge-on triangles cover no texel).
+            const float e1u = u[1] - u[0], e1w = w[1] - w[0], e2u = u[2] - u[0], e2w = w[2] - w[0];
+            const float det = e1u * e2w - e2u * e1w;
+            const float area = 0.5f * std::fabs(det);
+            if (area < 0.25f) continue;  // under a quarter texel: no texel of its own
+            const float dz1 = z[1] - z[0], dz2 = z[2] - z[0];
+            // The depth's plane gradient per texel (d z / d u, d z / d w).
+            const float gu = (dz1 * e2w - dz2 * e1w) / det, gw = (dz2 * e1u - dz1 * e2u) / det;
+            const float err = std::fabs(gu) + std::fabs(gw);  // up to one texel off in u and w
+            a.area += area;
+            if (err > bias) a.prone += area;
+            if (err > a.oldBias) a.proneOld += area;
+        }
+    }
 }
 
 void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& instances, const venue::Venue& v,
@@ -354,7 +392,7 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
     const gfx::UniformData frame = d.stageUniforms(&fu, sizeof fu);
     // GH3's shaders: the camera's engine constants (world = identity: the
     // vertices are skinned into world space).
-    gfx::UniformData gframe;
+    gfx::UniformData gframe, gframeDouble;
     gh3shader::Globals globals;
     std::vector<gfx::UniformData> matVs(mats_.size()), matPs(mats_.size());
     if (!mats_.empty()) {
@@ -365,6 +403,7 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
             gh3shader::setShadowGlobals(globals, shadow_, viewM);  // as VenueView::draw's receivers
         }
         gframe = d.stageUniforms(&globals, sizeof globals);
+        gframeDouble = shadowPass_ && shadowPassDouble_ ? d.stageUniforms(shadowPassDouble_, sizeof *shadowPassDouble_) : gframe;
     } else if (shadowPass_) {
         return;  // the approximation casts no shadows
     }
@@ -413,7 +452,7 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
         }
         lu.info[0] = float(n);
         c.uniforms[1] = d.stageUniforms(&lu, sizeof lu);
-        gfx::UniformData objData;
+        gfx::UniformData objData, objDouble;
         if (!mats_.empty()) {
             std::vector<gh3shader::LightIn> lin;
             for (size_t i = 0; i < v.lights.size() && i < lights.size(); ++i) {
@@ -444,7 +483,15 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
             // A model's query point: its origin (823E4F20: the world matrix's translation) [C].
             const bandanim::Vec centre = bandanim::xform(in.root, {0, 0, 0});
             gh3shader::lightObject(lin.data(), lin.size(), {centre.x, centre.y, centre.z}, obj);
-            objData = d.stageUniforms(&obj, sizeof obj);
+            objData = objDouble = d.stageUniforms(&obj, sizeof obj);
+            if (shadowPass_ && shadowPassDouble_) {
+                gh3shader::Globals dbl = *shadowPassDouble_;
+                for (int r = 0; r < 4; ++r) {
+                    std::memcpy(obj.reg(gh3shader::kRegWorldView + r), dbl.reg(gh3shader::kRegView + r), 16);
+                    std::memcpy(obj.reg(gh3shader::kRegWorldViewProj + r), dbl.reg(gh3shader::kRegViewProj + r), 16);
+                }
+                objDouble = d.stageUniforms(&obj, sizeof obj);
+            }
         }
 
         // CPU skinning into world space (once a frame: a second pass reuses it).
@@ -485,6 +532,7 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
                 std::memcpy(o.uv, s.uv, sizeof o.uv);
             }
             d.updateBuffer(m.vb, 0, out, m.src.size() * sizeof(Vtx));
+            if (acne_ && shadowPass_) probeAcne(m, out);
         }
         c.vertices = m.vb;
         c.indices = m.ib;
@@ -505,10 +553,13 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
                     matVs[mi] = d.stageUniforms(mats_[mi].consts.vs, sizeof mats_[mi].consts.vs);
                     matPs[mi] = d.stageUniforms(mats_[mi].consts.ps, sizeof mats_[mi].consts.ps);
                 }
-                gc.uniforms[0] = gframe;
+                // A shadow pass: GH3 biases a caster by its sides (VenueStage::shadowPass);
+                // the band's draw cull none (gc.state), so double-sided.
+                const bool twoSided = shadowPass_ != nullptr;
+                gc.uniforms[0] = twoSided ? gframeDouble : gframe;
                 gc.uniforms[1] = matVs[mi];
                 gc.uniforms[2] = matPs[mi];
-                gc.uniforms[3] = objData;
+                gc.uniforms[3] = twoSided ? objDouble : objData;
                 for (int k = 0; k < 16; ++k) {
                     gc.textures[k] = mats_[mi].tex[k];
                     gc.samplers[k] = {gfx::Filter::Trilinear, gfx::Wrap::Repeat, 0};

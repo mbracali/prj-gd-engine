@@ -32,9 +32,13 @@ std::vector<std::pair<std::string, std::string>> enhancedPreset(const std::strin
 // A value saved by 0.0.3 (before the universal menu) in today's terms.
 std::string migrateEnhancedValue(const std::string& key, const std::string& value);
 
-// The values, saved at once on every change (enhanced.json: {"version": 1,
+// The values, saved at once on every change (enhanced.json: {"version": 3,
 // "settings": {key: value}}, written to a temporary file and renamed). A
 // value missing or not valid keeps its default.
+class EnhancedStore;
+// Applies the Enhanced options kept in the engine's statics (app.cpp).
+void applyEnhancedGlobals(const EnhancedStore& st);
+
 class EnhancedStore {
 public:
     // `dir`: the folder, with a trailing separator ("" : nothing is saved).

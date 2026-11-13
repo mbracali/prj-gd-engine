@@ -49,6 +49,12 @@ uint32_t standardKey(const Material& m, const LightEnv* env, const DrawContext& 
     return k;
 }
 
+uint32_t meshDrawKey(bool skinned, const Material& m, const LightEnv* env, const DrawContext& ctx) {
+    uint32_t key = standardKey(m, env, ctx);
+    if (skinned && (key & stdkey::Prelit)) key |= stdkey::NoColorInput;
+    return key;
+}
+
 PipelineState materialPipeline(const Material& m, const LightEnv* env) {
     PipelineState s;
     MatBlend blend = m.blend;
@@ -128,7 +134,7 @@ void MaterialRenderer::setFrame(const Camera& camera, const LightEnv& env, int v
 }
 
 void MaterialRenderer::draw(const GpuMesh& mesh, const Mat4* bones, const Material& m, const DrawContext& ctx) {
-    const uint32_t key = standardKey(m, &env_, ctx);
+    const uint32_t key = meshDrawKey(mesh.skinned, m, &env_, ctx);
     DrawCall c;
     c.program = shaders_.program(key);
     if (!c.program) return;

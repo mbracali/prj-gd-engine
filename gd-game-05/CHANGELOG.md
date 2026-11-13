@@ -6,6 +6,16 @@ inside the Guitar Dream Universal Launcher's release
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-11-13
+
+### Fixed
+- The singers' faces: the jaw and lips no longer open into the head.
+- The song starts with Rock Band's own intro shot and its follow-up, instead of a random close-up.
+- The strike line's hit effects and the solo effects on the highway are drawn.
+- The venues follow each song's own lighting cues.
+- Restart Now (Enhanced > backends) starts the game again from its start, with the controllers working.
+
+
 ### Fixed
 - A Rock Band guitar (or any controller) set to "None" in GAMEPADS now plays a one-player song; before, the song took only its Start and ignored every fret and strum.
 - A gamepad or guitar's Start works on the title screen.

@@ -216,7 +216,7 @@ private:
 // enhanced.json once, at the start of App::run (each restart reads it again).
 struct StartupBackends {
     bool latched = false;
-    std::string graphics = "local", audio = "local";
+    std::string graphics = ui::defaultGraphicsBackend(), audio = "local";  // GDALL-050
 };
 StartupBackends& startupBackends() {
     static StartupBackends b;
@@ -2173,6 +2173,7 @@ int App::gameCounter(int player, const std::string& key) const {
         if (key == "star_combos") return tv->comboStarts();
         if (key == "surface_overrides") return tv->surfaceOverrides();
         if (key == "band_fx_particles") return venueView_ ? venueView_->bandView().fxParticles() : 0;
+        if (key == "spot_shadows") return venueView_ ? int(venueView_->spotlights().shadowsTotal()) : 0;  // GD03-107
         if (key.rfind("venue_loaded:", 0) == 0) {  // the walks: is that venue's world the one loaded
             for (VenueVariant var : {VenueVariant::Single, VenueVariant::Mp, VenueVariant::Coop})
                 if (venue_ && venuePath_ == venues::worldMilo(key.substr(13), var)) return 1;
@@ -2747,6 +2748,7 @@ void App::setEnhancedValue(const std::string& key, const std::string& value) {
 // Written atomically, as the save (ui/career.h).
 void App::saveEnhanced() {
     enhanced_.set("format", Json::string("gd03-enhanced"));
+    enhanced_.set("settings_version", Json::number(ui::kEnhancedVersion));  // GDALL-050: no second migration
     const std::string path = enhancedPath(), tmp = path + ".tmp";
     std::error_code ec;
     if (const std::filesystem::path dir = std::filesystem::path(path).parent_path(); !dir.empty()) std::filesystem::create_directories(dir, ec);
@@ -2823,6 +2825,7 @@ void App::exportUserFiles(const std::string& dir) {
     if (!base.empty() && base.back() != '/' && base.back() != '\\') base += '/';
     Json all = Json::object();
     all.set("format", Json::string("gd03-enhanced"));
+    all.set("settings_version", Json::number(ui::kEnhancedVersion));
     for (const ui::EnhancedSetting& e : ui::enhancedSettings()) all.set(e.key, Json::string(enhancedValue(e.key)));
     bool ok = false;
     {
@@ -3437,11 +3440,15 @@ int runApp(const Options& options) {
         }
         if (!restart || r != 0) return r;
         SDL_Log("restart: Enhanced Options asked for a restart (the new backends)");
+        // In the launcher the launcher starts the game again, as a new Play
+        // (its controllers and window handed over again: in the module they
+        // were lost, GDUL-028); on its own the game starts again from its start.
+        if (const char* h = SDL_getenv("GD_LAUNCHER_HOSTED"); h && h[0] == '1') return 75;  // GD_GAME_EXIT_RESTART
         const std::string walk = o.walk;
         o = options;
         o.song.clear();
-        o.startScreen = "enhanced_options_screen";
-        if (!walk.empty()) o.walk = walk + "_restarted";
+        o.startScreen.clear();
+        if (!walk.empty()) o.walk = walk + "_restarted", o.startScreen = "enhanced_options_screen";  // a walk checks the backends there
     }
 }
 

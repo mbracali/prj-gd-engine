@@ -187,7 +187,14 @@ public:
     // Base), scaled by the servo's weight (expression.weight /
     // singalong.weight). `names[i]` is the clip of pose frame i.
     void setRbFace(ClipSet* set, const std::vector<std::string>& names);
+    // CharMeshHide (char_mesh_hide, RB 0x8235B760): the drawables the outfits hide.
+    void applyMeshHides();
+    int meshHidden() const { return meshHidden_; }
     bool rbFace() const { return faceBase_ != nullptr; }
+    // The largest turn (degrees) of a face quaternion channel (bone_jaw.quat)
+    // over the face set's clips (visemes, expressions) from Base, the face's
+    // rest; -1 without one (GD05-097).
+    float faceRestSpread(const std::string& channel);
     ClipSet* faceClips() const { return faceSet_; }
     void attachFace(facefx::LipSync* lip) { lip_ = lip; }
     facefx::LipSync* lipSync() const { return lip_; }
@@ -234,6 +241,7 @@ private:
     const scene::Group* outfitShadow_ = nullptr;  // an outfit's, when the character has none
     int lod_ = -1;
     int outfitObjects_ = 0;
+    int meshHidden_ = 0;
     // The servo: channel -> bone (skeleton index), and the root channels.
     std::vector<int> channelBone_;
     size_t channelsMapped_ = 0;

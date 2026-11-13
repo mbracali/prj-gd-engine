@@ -6,6 +6,17 @@ matches the tag's version. Nothing is released yet.
 
 ## [Unreleased]
 
+## [1.1.15] - 2026-11-13
+
+### Fixed
+- Characters no longer look partly transparent on Vulkan and on Windows; Izzy Sparks and Pandora are lit like the others.
+- Character select no longer stutters when moving between characters.
+- The gauges and meters disappear when a song ends.
+- Long song names in the setlist stay on one line and no longer run into the stars.
+- Developer Keyboard Cheats' help lists every key, with Shift for the capital ones (#103).
+- Restart Now (Enhanced > backends) starts the game again from its start, with the controllers working.
+
+
 ## [1.1.14] - 2026-11-10
 
 ### Added

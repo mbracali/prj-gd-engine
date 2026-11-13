@@ -75,7 +75,7 @@ bool envOn(const char* name) {
 // enhanced.json once, at the start of App::run (each restart reads it again).
 struct StartupBackends {
     bool latched = false;
-    std::string graphics = "local", audio = "local";
+    std::string graphics = enhancedDefault("graphics_backend"), audio = "local";  // GDALL-050: Vulkan on Windows / Linux
 };
 StartupBackends& startupBackends() {
     static StartupBackends b;
@@ -91,7 +91,7 @@ void latchStartupBackends(const std::string& dir) {
     EnhancedStore st;
     st.load(dir);
     b.graphics = st.get("graphics_backend"), b.audio = st.get("audio_backend");
-    if (b.graphics.empty()) b.graphics = "local";
+    if (b.graphics.empty()) b.graphics = enhancedDefault("graphics_backend");
     if (b.audio.empty()) b.audio = "local";
 }
 // GD10_AUDIO_BACKEND=<id> (development aid; the walks on each backend) over the latched one.
@@ -2109,11 +2109,15 @@ int runApp(const Options& options) {
         }
         if (!restart || r != 0) return r;
         SDL_Log("restart: Enhanced Options asked for a restart (the new backends)");
+        // In the launcher the launcher starts the game again, as a new Play
+        // (its controllers and window handed over again: in the module they
+        // were lost, GDUL-028); on its own the game starts again from its start.
+        if (const char* h = SDL_getenv("GD_LAUNCHER_HOSTED"); h && h[0] == '1') return 75;  // GD_GAME_EXIT_RESTART
         const std::string walk = o.walk;
         o = options;
         o.song.clear();
-        o.startScreen = "port_enhanced";
-        if (!walk.empty()) o.walk = walk + "_restarted";
+        o.startScreen.clear();
+        if (!walk.empty()) o.walk = walk + "_restarted", o.startScreen = "port_enhanced";  // a walk checks the backends there
     }
 }
 

@@ -76,6 +76,7 @@
 #include "render/char_skin.h"
 #include "ui/rb_meta.h"
 #include "ui/ui_manager.h"
+#include "ui/natives.h"
 #include "video/wmv_player.h"
 
 namespace {
@@ -660,10 +661,32 @@ private:
     int rbTrackFrames_ = 0;  // frames RB's instrument track drew (the walks)
     // RB's track intro (ui/game.dta intro_start: on_extend at song time 0;
     // intro_skip: at once) and each gem track's intro.trig delay
-    // (gem_track.dta play_intro: 0.55 s alone, 0.25 s x index + 0.05 s in a
-    // band) [C data].
+    // (gem_track.dta play_intro: 0.25 s x index + 0.05 s when $game.play_mode
+    // is coop, else 0.55 s) [C data].
     float rbExtendMs_ = -1e30f;
-    float rbIntroAt(int index) const { return rbExtendMs_ + (seats_.empty() ? 550.0f : 250.0f * float(index) + 50.0f); }
+    std::vector<const scene::CamShot*> rbIntroChain_;  // the song's intro shots (walk check)
+    bool rbShotsPicking_ = false;  // GD05_INTRO_LEGACY: targets for the VENUE track's picks only
+    // The world frames' shots from the song's load (GD05-098 walk check):
+    // each change of shot (or of the clock's start) with the song time.
+    struct ShotSpan {
+        std::string shot;
+        float fromMs = 0, toMs = 0;
+        bool begun = false;
+        int frames = 0;
+    };
+    std::vector<ShotSpan> rbShotSpans_;
+    double rbIntroStartMs_ = 0;
+    void recordShotSpan();
+    int rbIntroErrors(bool print) const;
+    // The delay is coop's for every coop play_mode (a solo player too: RB's
+    // solo modes play coop, modes.dta), 0.55 s for the h2h modes only; the
+    // port gave a solo player 0.55 s, so its meters stood half a second
+    // without the track (GD05-098). GD05_INTRO_LEGACY=1: as before.
+    float rbIntroAt(int index) const {
+        static const bool legacy = SDL_getenv("GD05_INTRO_LEGACY") != nullptr;
+        const bool h2h = legacy ? seats_.empty() : mode_ == DevMode::FaceOff || mode_ == DevMode::ProFaceOff;
+        return rbExtendMs_ + (h2h ? 550.0f : 250.0f * float(index) + 50.0f);
+    }
     MenuMovie menuMovie_;       // the menus' background video (movie_panel)
     int songLoads_ = 0;         // songs loaded (the walks: a key must not reload the song, GD05-024)
     int menuVenueSounds_ = 0;   // venue sounds played before the first song (the walks: none at boot, GD05-023)
@@ -801,6 +824,7 @@ private:
     float rbNextCamMs_ = -1e9f;
     std::set<const scene::CamShot*> rbShotUsed_;
     const scene::CamShot* rbShot(const std::string& category, const std::function<bool(const scene::CamShot&)>& ok = {});
+    std::vector<const scene::CamShot*> rbIntroShots();
     void rbShots(float t);
     // The band on stage (M9, game/band.h): made when the song begins in the venue.
     std::unique_ptr<Band> band_;
@@ -1357,6 +1381,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
     extendAtMs_ = float(kTrackExtendMs);
     info_ = &info;
     begun_ = wonSent_ = lostSent_ = outroSent_ = spReadySent_ = false;
+    rbShotSpans_.clear(), rbIntroChain_.clear(), rbIntroStartMs_ = 0;
     musicPaused_ = false;
     spPhrases_[0] = spPhrases_[1] = spStarted_[0] = spStarted_[1] = streaksBroken_[0] = streaksBroken_[1] = 0;
     paused_ = false;
@@ -1546,10 +1571,32 @@ void App::beginSong() {
     // 30 a second, 0x82226630) [C].
     double startMs = kTrackExtendMs;
     if (!fastIntro_ && director_) {
-        const scene::CamShot* shot = director_->drawShot({encoreFx_ ? "INTRO_ENCORE" : "INTRO"});
-        // RB: the shot of the category itself (rbShot) [I].
-        if (!shot && !rbShots_.empty())
-            if ((shot = rbShot("INTRO"))) director_->forceShot(shot);
+        const scene::CamShot* shot = nullptr;
+        if (!rbShots_.empty() && !SDL_getenv("GD05_INTRO_LEGACY")) {
+            // RB's intro: the chain (next_shot), the song clock at minus its
+            // duration_seconds (game.dta pick_intro set_intro_real_time):
+            // per shot its frames / 30 + 0.0425, and its next shot's
+            // (BandCamShot 0x822D6560) [C]. GD05-098: the port ran the first
+            // shot's 20 frames (0.67 s), then cut to the VENUE track's shots.
+            // The world enter's pick when the world drew before the song began
+            // (drawWorld), else now.
+            const std::vector<const scene::CamShot*> chain = rbIntroChain_.empty() ? rbIntroShots() : rbIntroChain_;
+            if (!chain.empty()) {
+                double secs = 0;
+                std::string names;
+                for (const scene::CamShot* c : chain) secs += c->lengthFrames() / 30.0 + 0.0425, names += " " + c->name;
+                if (SDL_getenv("GD05_INTRO_FIRST_ONLY")) secs = chain.front()->lengthFrames() / 30.0;  // the old length (check)
+                SDL_Log("intro chain:%s, %.3f s", names.c_str(), secs);
+                rbIntroChain_ = chain;
+                startMs = std::min(-secs * 1000.0, 0.0);
+                rbIntroStartMs_ = startMs;
+            }
+        } else {
+            shot = director_->drawShot({encoreFx_ ? "INTRO_ENCORE" : "INTRO"});
+            // RB: the shot of the category itself (rbShot) [I].
+            if (!shot && !rbShots_.empty())
+                if ((shot = rbShot("INTRO"))) director_->forceShot(shot);
+        }
         if (shot) startMs = std::min(-double(shot->lengthFrames()) / 30.0 * 1000.0, 0.0);
     }
     rbVenueNote_ = rbVenueEvent_ = 0;
@@ -1581,6 +1628,8 @@ void App::beginSong() {
     // intro_start_msg follows at once and the world picks the INTRO shot,
     // which must start at this time, not at the previous clock.
     if (world_) world_->setClock(startMs / 1000.0, startMs / 500.0);
+    // The intro chain from the clock's start (its shots' frames count from it).
+    if (!rbIntroChain_.empty() && director_ && !fastIntro_ && !practice) director_->playSequence(rbIntroChain_);
     SDL_Log("intro: the song clock starts at %.0f ms, the track extends at %.0f ms", startMs, double(extendAtMs_));
     mixer_.setSpeed(1);
     const SongAudio& audio = *audio_;
@@ -2281,6 +2330,7 @@ void App::drawSeats(float t, float speed) {
         pv.whammy = p->whammyBar();
         pv.heldFrets = p->heldFrets();
         pv.struck = [p](int i) { return p->gemHit(i); };
+        pv.soloActive = st.bonus && st.bonus->soloShare(t) >= 0;
         if (st.part == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
         st.track->setIntroAt(rbIntroAt(gemTrack++));
         st.track->draw(canvas_.renderer(), *sceneCache_, *song_, pv, t + float(videoOffsetMs_), speed);
@@ -3173,6 +3223,8 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "score") return player_ ? player_->score() : 0;
     if (key == "part_vocals") return parts_[0] == "vocals" ? 1 : 0;
     if (key == "rb_track_frames") return rbTrackFrames_;
+    if (key == "rb_intro_shots") return int(rbIntroChain_.size());
+    if (key == "rb_intro_errors") return rbIntroErrors(true);
     // GD05-070 / GD05-071 (rbProbes).
     if (key == "meter_frames") return rbProbe_.meterFrames;
     if (key == "meter_jumps") return rbProbe_.meterJumps;
@@ -3205,6 +3257,14 @@ int App::gameCounter(int player, const std::string& key) const {
     // GD05-045: the fret board's effects (render/rb_track_view.h FxStats).
     if (key == "rb_fx_hits") return RbTrackView::fxStats().hits;
     if (key == "rb_fx_hits_no_flame") return RbTrackView::fxStats().hitsNoFx;
+    if (key == "rb_fx_hits_seen") return RbTrackView::fxStats().hitsSeen;
+    if (key == "rb_fx_solo_starts") return RbTrackView::fxStats().soloStarts;
+    if (key == "rb_fx_hits_unseen_pct") {
+        const auto& f = RbTrackView::fxStats();
+        const int n = f.hitsSeen + f.hitsUnseen;
+        if (SDL_getenv("GD05_FXLOG") || walk_) SDL_Log("smasher fx: %d hits, %d seen drawn within 100 ms, %d not; %ld particles drawn", f.hits, f.hitsSeen, f.hitsUnseen, f.fxParticlesDrawn);
+        return n ? int(std::lround(100.0 * f.hitsUnseen / n)) : 100;
+    }
     if (key == "rb_fx_deploys") return RbTrackView::fxStats().deploys;
     if (key == "rb_fx_deploys_no_visual") return RbTrackView::fxStats().deploysNoFx;
     if (key == "rb_fx_glows") return RbTrackView::fxStats().glows;
@@ -3288,7 +3348,79 @@ void App::hudCommand(const std::string& msg, const std::vector<Value>& args) {
 // luminance map; render/post_fx.h), or straight to the screen with
 // GD05_POST=0; the track and HUD then go on top, as GH2's final pass leaves
 // them out. No venue yet: nothing is drawn and the frame is as before.
+// The world frames' shots while a song is loaded, until 4 s into it.
+void App::recordShotSpan() {
+    if (!song_ || !director_ || !worldDraw_ || rbShotSpans_.size() > 64 || (begun_ && lastT_ > 4000)) return;
+    const scene::CamShot* s = director_->shot();
+    const std::string name = s ? s->name : "-";
+    const float t = begun_ ? lastT_ : -1e9f;
+    if (rbShotSpans_.empty() || rbShotSpans_.back().shot != name || rbShotSpans_.back().begun != begun_)
+        rbShotSpans_.push_back({name, t, t, begun_, 0});
+    rbShotSpans_.back().toMs = t, ++rbShotSpans_.back().frames;
+}
+
+// GD05-098: the song's start as RB's script runs it (worldbase.dta game
+// start, game.dta pick_intro / intro_start): every world frame of the song
+// before its clock reaches 0 shows the intro chain's shots in order (none
+// other first: not the venue's load shot), each from its place in the chain
+// (its start within 2 frames + 50 ms of the sum of the shots before it,
+// duration_seconds = frames / 30 + 0.0425), the clock started at minus the
+// chain's duration, and the first VENUE track shot at 0 or after.
+int App::rbIntroErrors(bool print) const {
+    int errors = 0;
+    auto fail = [&](const std::string& why) {
+        ++errors;
+        if (print) SDL_Log("intro check: %s", why.c_str());
+    };
+    if (rbIntroChain_.empty()) return fail("no intro chain"), errors;
+    double sum = 0;
+    std::vector<double> starts;
+    for (const scene::CamShot* c : rbIntroChain_) starts.push_back(rbIntroStartMs_ + sum * 1000.0), sum += c->lengthFrames() / 30.0 + 0.0425;
+    if (std::fabs(rbIntroStartMs_ + sum * 1000.0) > 1.0) fail("the clock starts at " + std::to_string(rbIntroStartMs_) + " ms, not minus the chain");
+    size_t k = 0;
+    bool first = true;
+    for (const ShotSpan& sp : rbShotSpans_) {
+        if (print)
+            SDL_Log("intro span: %s %s %.0f..%.0f ms, %d frames", sp.begun ? "song" : "before the clock", sp.shot.c_str(), double(sp.fromMs), double(sp.toMs), sp.frames);
+        if (sp.begun && sp.fromMs >= -1.0f) break;  // the song proper
+        if (!sp.begun) {
+            if (sp.shot != rbIntroChain_.front()->name) fail("a frame before the clock shows " + sp.shot);
+            first = false;
+            continue;
+        }
+        if (first && sp.shot != rbIntroChain_.front()->name) fail("the song's first frame shows " + sp.shot);
+        first = false;
+        size_t at = k;
+        while (at < rbIntroChain_.size() && rbIntroChain_[at]->name != sp.shot) ++at;
+        if (at == rbIntroChain_.size()) {
+            fail("the intro shows " + sp.shot + ", not in the chain");
+            continue;
+        }
+        if (at < k) fail(sp.shot + " again after a later shot");
+        if (at > k + 1) fail("the chain skipped a shot before " + sp.shot);
+        const double tol = 2000.0 / 30.0 + 50.0;
+        if (at > 0 && at != k && std::fabs(sp.fromMs - starts[at]) > tol)
+            fail(sp.shot + " starts at " + std::to_string(int(sp.fromMs)) + " ms, its place in the chain " + std::to_string(int(starts[at])));
+        k = at;
+    }
+    if (k + 1 != rbIntroChain_.size()) fail("the intro ended at shot " + std::to_string(k + 1) + " of " + std::to_string(rbIntroChain_.size()));
+    if (print) SDL_Log("intro check: %zu shots, %.3f s, clock from %.0f ms: %d errors", rbIntroChain_.size(), sum, rbIntroStartMs_, errors);
+    return errors;
+}
+
 void App::drawWorld() {
+    // worldbase.dta's enter forces the intro shot as the game's world enters,
+    // before its first frame [C data]: a song loaded, not begun yet, picks its
+    // chain now (beginSong starts it again with the clock). The port drew
+    // these frames from whatever shot the world had (GD05-098).
+    if (song_ && pendingStream_ && !begun_ && !fastIntro_ && director_ && rbIntroChain_.empty() && !rbShots_.empty() &&
+        mode_ != DevMode::Practice && !SDL_getenv("GD05_INTRO_LEGACY")) {
+        rbIntroChain_ = rbIntroShots();
+        director_->playSequence(rbIntroChain_);
+        director_->update();
+        if (venueView_ && director_->hasCamera()) venueView_->setCamera(director_->camera());
+    }
+    recordShotSpan();
     if (rbHudProbeDue_) rbHudProbe();  // under the frame, which the world then covers
     rbProbes();
     if (!worldDraw_) return;
@@ -3332,7 +3464,31 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
         lighting_ = std::make_unique<LightPresets>(*world_);
         director_ = std::make_unique<CameraDirector>(*world_);
         // The crowd: each shot's crowd3d / rotate (game/crowd.h), and its audio.
-        director_->onShotStarted = [this](const scene::CamShot& s) { world_->crowd().startShot(&s); };
+        // Every BandCamShot's targets as it starts (the VENUE track's picks, the
+        // intro chain's shots, the scripts' force_shot): RB 0x822D8108. The
+        // port applied them to the VENUE track's picks only: the intro's
+        // guitarist did not play intro_guitar nor freeze (GD05-098).
+        director_->onShotStarted = [this](const scene::CamShot& s) {
+            world_->crowd().startShot(&s);
+            if (SDL_getenv("GD05_SHOTLOG")) SDL_Log("shot started %s at %.0f ms (band %d), PostProc %s", s.name.c_str(), double(lastT_), band_ ? 1 : 0, director_->postProc() ? director_->postProc()->name.c_str() : "-");
+            if (SDL_getenv("GD05_SHOTLOG2")) {
+                for (const auto& k : s.keyframes) {
+                    std::string tg;
+                    for (const auto& t : k.targets) tg += " " + t.object + "/" + t.subpart;
+                    SDL_Log("  key so %.2f %.2f rot fwd %.2f %.2f %.2f dur %.0f blend %.0f fov %.2f pos %.1f %.1f %.1f parent %s/%s focal %s/%s targets%s", double(k.screenOffset[0]), double(k.screenOffset[1]), double(k.xfm.rot[3]), double(k.xfm.rot[4]), double(k.xfm.rot[5]), double(k.duration), double(k.blend), double(k.fieldOfView),
+                            double(k.xfm.pos[0]), double(k.xfm.pos[1]), double(k.xfm.pos[2]), k.parent.object.c_str(), k.parent.subpart.c_str(), k.focalTarget.object.c_str(), k.focalTarget.subpart.c_str(), tg.c_str());
+                }
+                if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(&s))
+                    for (const auto& tg : bs->bandTargets)
+                        SDL_Log("  band target %s anim '%s' teleport %d to %.1f %.1f %.1f", tg.target.c_str(), tg.anim.c_str(), int(tg.teleport), double(tg.to.pos[0]), double(tg.to.pos[1]), double(tg.to.pos[2]));
+                std::string hl;
+                for (const auto& h : s.hideList) hl += " " + h;
+                SDL_Log("  near %.2f far %.0f hide%s show %zu", double(s.nearPlane), double(s.farPlane), hl.c_str(), s.showList.size());
+            }
+            static const bool legacy = SDL_getenv("GD05_INTRO_LEGACY") != nullptr, noTeleport = SDL_getenv("GD05_NO_TELEPORT") != nullptr;
+            if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(&s); bs && band_ && !rbShots_.empty() && (!legacy || rbShotsPicking_))
+                band_->rbShotStart(*bs, !noTeleport);
+        };
         world_->crowd().audio().open();
         if (!ui_)
             director_->provideGameObjects(variant != VenueVariant::Single,
@@ -3597,6 +3753,60 @@ const scene::CamShot* App::rbShot(const std::string& category, const std::functi
     return pick;
 }
 
+// The song's first shot (worldbase.dta's WORLD_OBJECT_BASE game_start)
+// [C data]: the mode's intro_category (modes.dta: qp_solo, tour_solo,
+// practice INTRO_VENUE; the band's coop_intro_category; defaults INTRO);
+// INTRO_VENUE / INTRO_QUICK: find_shot of that category; INTRO:
+// construct_active_shot, a shot of INTRO with each active player's focus
+// (bass_focus, drums_focus, guitar_focus, vocal_focus), the first played
+// first [I: the chain's next shots (next_shot) are not followed]. GD05-098:
+// the port drew any INTRO shot, a close-up of a random member.
+// GD05_INTRO_LEGACY=1: as before.
+std::vector<const scene::CamShot*> App::rbIntroShots() {
+    std::string cat = ui_ ? gameCfgValue(*ui_, "intro_category").str() : std::string();
+    if (cat.empty() || cat == "0") cat = "INTRO";
+    if (SDL_getenv("GD05_SHOTLOG")) SDL_Log("intro category %s (mode %s)", cat.c_str(), ui_ ? ui_->session().mode.c_str() : "-");
+    auto nextOf = [&](const scene::CamShot* c) -> const scene::CamShot* {
+        auto* b = dynamic_cast<const scene::BandCamShot*>(c);
+        if (!b || b->nextShot.empty() || !venue_) return nullptr;
+        return venue_->find<scene::CamShot>(b->nextShot);
+    };
+    std::vector<const scene::CamShot*> chain;
+    if (cat == "INTRO") {
+        // construct_active_shot: per active player find_shot_segment, the
+        // shot and its own next_shot (one step), then the chain relinked.
+        auto focus = [](const std::string& part) {
+            return part == "bass" ? "bass_focus" : part == "drum" ? "drums_focus" : part == "vocals" ? "vocal_focus" : "guitar_focus";
+        };
+        std::vector<std::string> parts;
+        for (const RbSeat& seat : seats_) parts.push_back(seat.part);
+        if (parts.empty()) parts.push_back(parts_[0]);
+        for (const std::string& part : parts) {
+            const std::string f = focus(part);
+            const scene::CamShot* s = rbShot("INTRO", [&](const scene::CamShot& c) { return c.flag(f) == "TRUE" || c.flag(f) == "1"; });
+            if (!s) continue;
+            chain.push_back(s);
+            if (const scene::CamShot* n = nextOf(s)) chain.push_back(n);
+        }
+    } else if (const scene::CamShot* s = rbShot(cat)) {
+        // find_shot: the shot keeps its own next_shot chain.
+        for (const scene::CamShot* c = s; c && chain.size() < 16; c = nextOf(c)) chain.push_back(c);
+    }
+    if (chain.empty())
+        if (const scene::CamShot* s = rbShot("INTRO")) chain.push_back(s);
+    if (SDL_getenv("GD05_SHOTLOG"))
+        for (const scene::CamShot* shot : chain)
+            SDL_Log("intro shot %s: %.0f frames, next_shot '%s', postprocess '%s' lighting_override '%s'", shot->name.c_str(), double(shot->lengthFrames()),
+                    shot->flag("next_shot").c_str(), shot->flag("postprocess").c_str(), shot->flag("lighting_override").c_str());
+    if (SDL_getenv("GD05_SHOTLOG"))
+        for (const scene::CamShot* shot : chain)
+            if (auto* b = dynamic_cast<const scene::BandCamShot*>(shot))
+                for (const auto& tg : b->bandTargets)
+                    SDL_Log("intro shot %s: target %s anim '%s' freeze %d delay %.2f teleport %d return %d", shot->name.c_str(), tg.target.c_str(), tg.anim.c_str(),
+                            int(tg.freeze), double(tg.freezeDelay), int(tg.teleport), int(tg.returns));
+    return chain;
+}
+
 // The VENUE track's camera (worldbase.dta pick_new_shot, midi_parsers.dta's
 // world_camera_parser / world_focus_parser) [C data]: note 60 picks a
 // NORMAL<bass drums guitar vocal> shot from the held focus notes 61..64 and
@@ -3677,18 +3887,11 @@ void App::rbShots(float t) {
     if (next && next != director_->shot()) {
         static const bool log = SDL_getenv("GD05_SHOTLOG") != nullptr;
         if (log) SDL_Log("shot %.0f: %s (%s, %s %s)", double(t), next->name.c_str(), next->category.c_str(), next->flag("distance").c_str(), next->flag("facing").c_str());
-        if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(next)) {
-            std::vector<std::pair<std::string, std::string>> groups;
-            std::vector<std::pair<std::string, scene::Xfm>> moves;
-            static const bool noTeleport = SDL_getenv("GD05_NO_TELEPORT") != nullptr;
-            for (const auto& tg : bs->bandTargets) {
-                if (log) SDL_Log("  target %s anim %s teleport %d", tg.target.c_str(), tg.anim.c_str(), int(tg.teleport));
-                if (!tg.anim.empty()) groups.emplace_back(tg.target, tg.anim);
-                if (tg.teleport && !noTeleport) moves.emplace_back(tg.target, tg.to);
-            }
-            if (band_) band_->rbShotTargets(groups, moves);
-        }
-        director_->forceShot(next);
+        if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(next); bs && log)
+            for (const auto& tg : bs->bandTargets) SDL_Log("  target %s anim %s teleport %d", tg.target.c_str(), tg.anim.c_str(), int(tg.teleport));
+        rbShotsPicking_ = true;
+        director_->forceShot(next);  // its targets: onShotStarted
+        rbShotsPicking_ = false;
     }
 }
 
@@ -4118,6 +4321,7 @@ void App::drawRbTrack0(float t, float speed) {
     pv.whammy = p->whammyBar();
     pv.heldFrets = p->heldFrets();
     pv.struck = [p](int i) { return p->gemHit(i); };
+    pv.soloActive = rbBonus_ && rbBonus_->soloShare(t) >= 0;
     // The drums' permuted lanes back to the chart's (kick = lane 0).
     if (parts_[0] == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
     rbTrack_->setLefty(input_.lefty(0));
@@ -5170,11 +5374,15 @@ int runApp(const Options& options) {
         }
         if (!restart || r != 0) return r;
         SDL_Log("restart: Enhanced Options asked for a restart (the new backends)");
+        // In the launcher the launcher starts the game again, as a new Play
+        // (its controllers and window handed over again: in the module they
+        // were lost, GDUL-028); on its own the game starts again from its start.
+        if (const char* h = SDL_getenv("GD_LAUNCHER_HOSTED"); h && h[0] == '1') return 75;  // GD_GAME_EXIT_RESTART
         const std::string walk = o.walk;
         o = options;
         o.song.clear();
-        o.startScreen = "enhanced_options_screen";
-        if (!walk.empty()) o.walk = walk + "_restarted";
+        o.startScreen.clear();
+        if (!walk.empty()) o.walk = walk + "_restarted", o.startScreen = "enhanced_options_screen";  // a walk checks the backends there
     }
 }
 

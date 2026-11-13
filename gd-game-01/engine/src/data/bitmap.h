@@ -21,3 +21,9 @@ struct Image {
 // Throws std::runtime_error on malformed input.
 Image decodeBitmap(const uint8_t* data, size_t size, size_t* consumed = nullptr);
 inline Image decodeBitmap(const Bytes& b) { return decodeBitmap(b.data(), b.size()); }
+
+// Gives every fully transparent texel next to a drawn one (alpha > 0) the mean
+// colour of those neighbours, alpha left 0: a filtered, blended edge then
+// fades the drawn colour out instead of mixing in whatever colour the
+// transparent texels had (a light fringe; GD01-322, #98, the help bar's boxes).
+void bleedTransparent(Image& img);

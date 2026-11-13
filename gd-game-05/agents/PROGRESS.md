@@ -1662,3 +1662,87 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   reference in the XEX strings, the .dtb files are not plain text; not
   traced); [I] items of D91 (the density pass's +0x25 flag, the beam
   buffer's 0xA2 format / blend, cut-outs, target colour).
+
+## 2026-11-13: the bug list's band and camera items (bl05: GD05-096..098)
+
+- **Vocalist's face (GD05-097, D94) [C data]:** the face set's clips
+  other than Base are offsets from it; the lip servo took them as poses
+  (a - Base) and started each clip's pose from the identity quaternion: the
+  jaw sat 90 degrees open at rest and turned 180 while singing, the lower
+  lip 7..11 units out, so the chin went into the neck and the mouth's
+  inside showed (every head; worst on the female tank-top singers). Now
+  Base plus each lit viseme's weight of its offset. bandcheck's new "face
+  rest" line (each member's jaw against the face clips' largest turn,
+  x 1.5): vocals0 180.0 -> 40.8 deg (clips 41.6), vocals2 179.9 -> 23.2
+  (21.8); low lip 7.17 / 11.46 -> 0.62 / 0.50 units;
+  GD05_FACEPOSE_LEGACY=1 fails it. Also CharMeshHide applied (D95).
+- **Song-start shot (GD05-098, D96):** the mode's intro_category; a
+  guitar player in a --song run got coop_intro_bass.shot, now
+  coop_intro_guitarist.shot (INTRO with guitar_focus); quick play solo
+  takes INTRO_VENUE.
+- **Strike line (GD05-096):** findings only: launcher 1.1.14 predates D41
+  (meter / multiplier over the now bar) and D61 (track order); the branch's
+  inbloom 30 s shot shows the meter under the now bar.
+- **Left:** strum hand (GD05-092's IK pieces), drummer, shots in the crowd
+  / behind objects, next_shot chains, a pale seam under the jaw on tank
+  tops, highway effects, brightness / grain, world emulate_fps.
+- Dev aid: GD05_PREFAB_<INSTRUMENT>=<premade> (GD05_PREFAB_VOCALS=vocals2)
+  picks a premade from characters.dtb.
+- **Gate** (gate_par.sh, bl05 binary, 4 at a time): 61 walks OK, 5 of 5
+  tests, bandcheck 4 of 4 passed (face rest jaw 40.8 deg, clips 41.6), the
+  legacy run FAILED as it should. Failed: rb_od_guitar / keys / pad (the
+  6.7 s INTRO_VENUE intro; the walks now wait for the song clock: od_guitar
+  and od_keys OK after), rb_stutter (song_begin spike 337..501; fails with
+  GD05_INTRO_LEGACY=1 too: not this change), rb_look x4 (luma 31 in
+  arena_04 against 64 before; GD05_INTRO_LEGACY=1 passes: the intro
+  shot's lighting preset / PostProc is still in force when the walk's
+  forced shots are measured; open, next step: follow BandCamShot
+  start_shot's lighting_override / postprocess for forced shots and check
+  against the movies).
+
+### Follow-up round (bl05, D97)
+- The intro's lighting no longer stays all song: RB's VENUE track text
+  ([verse] / [chorus] one_bar_to, [lighting (x)]) now drives the
+  lighting (it only came from the EVENTS track); PS3-only presets left out.
+- rb_od_pad OK (and od_guitar, od_keys, od_vocals). rb_stutter fails with
+  the fix10 binary too on this machine (song_begin spike 176 > 150):
+  pre-existing, not this branch.
+- Gate (4 at a time): 58 walks OK + the 5 walks that failed on an
+  unhandled `bonusfx` world message re-run OK after it was dropped
+  (quickplay_vocals, rb_highway, rb_keys_play, rb_keys_rebind,
+  rb_od_vocals); 5 of 5 tests; bandcheck 4 of 4 (legacy FAILED as it
+  should). Failing: rb_stutter (pre-existing), rb_look x4: small_club_02
+  grain (as before), big_club_03 luma 50.0 (48.9 before), arena_04 41.5
+  (64.1), theater_02 31.2 (45.3): the songs' own lighting cues are
+  darker than the preset that used to stay stuck; GD05_INTRO_LEGACY=1
+  GD05_VENUE_TEXT_LEGACY=1 gives the old reading (arena_04 58.8). Open:
+  the venues' luma against the movies (GD05-069 / 095).
+
+## 2026-11-13: song start, strike line, track effects (g5b: GD05-096 / 098)
+
+- **Song start (GD05-098, D98) [C data + C]:** the intro runs the shot's
+  next_shot chain with the clock at minus its duration_seconds (frames / 30
+  + 0.0425 per shot): --song inbloom coop_intro_guitarist +
+  coop_intro_guitarist_freeze 2.585 s (was 0.667 s, then a hard cut); every
+  BandCamShot's targets as it starts (the guitarist's intro_guitar, the
+  teleports, the freeze frame, return); the chain picked before the game's
+  first world frame; the track's intro 0.05 s after on_extend for a solo
+  player (was 0.55 s: meters without the highway); the freeze's grey
+  intro_test.pp no longer stays all song. Walk quickplay: intro check 0
+  errors (qp solo: coop_intro-venue.shot 6.709 s); GD05_INTRO_LEGACY=1 fails.
+- **Strike line (GD05-096, D99):** smasher_fx.grp (the smashers'
+  effects.grp after the gems) was hidden since GD05-070: the hit flares,
+  shockwaves, glass and gem caps launched but never drew. Now drawn:
+  quickplay 18 / 18 hits seen within 100 ms (81,652 particles),
+  rb_guitar_none 86 / 86; GD05_SMASHFX_LEGACY=1: 0.
+- **Track effects (D100):** the TrackDir / gem_smasher triggers listed with
+  fired / not; guitar_solo_start / stop.trig now fire on solos.
+- **Camera in the drum kit (30 s inbloom):** coop_d_c07.shot (NORMAL drums
+  closeup, VENUE note 60 with the drums focus): camera (45.7, -21.0, 59.7),
+  11 units above the stage behind the drummer's left side, near 10, target
+  player_drum0 without a subpart (the character's root on the floor). The
+  port follows the shot's data; not changed: whether RB aims a
+  subpart-less character target at its root or its bounding centre
+  (0x82226800 region) is not read [I].
+- **Not done:** the freeze frame's name / instrument labels (worldbase.dta
+  name_*.lbl), the other track triggers of D100, venue look (GD05-069).

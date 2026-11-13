@@ -91,6 +91,7 @@
     X(decltype(&::glFrontFace), glFrontFace)                                    \
     X(decltype(&::glGenTextures), glGenTextures)                                \
     X(decltype(&::glGetError), glGetError)                                      \
+    X(decltype(&::glFinish), glFinish)                                          \
     X(decltype(&::glGetIntegerv), glGetIntegerv)                                \
     X(decltype(&::glGetString), glGetString)                                    \
     X(decltype(&::glPixelStorei), glPixelStorei)                                \
