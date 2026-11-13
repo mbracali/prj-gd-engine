@@ -115,6 +115,7 @@ std::vector<std::string> PortDraw::wrap(const std::string& s, float w, float h, 
     };
     for (char ch : s) {
         if (ch == ' ') flush();
+        else if (ch == '\n') flush(), out.push_back(line), line.clear();  // a line break (an empty line too)
         else word += ch;
     }
     flush();

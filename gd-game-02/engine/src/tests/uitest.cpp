@@ -19,6 +19,7 @@
 #include "render/canvas.h"
 #include "scene/milo.h"
 #include "ui/campaign.h"
+#include "ui/dev_key_cheats.h"
 #include "ui/natives.h"
 #include "ui/ui_host.h"
 #include "ui/ui_manager.h"
@@ -252,6 +253,26 @@ static int campaignChecks(ui::UiManager& ui) {
     return fails;
 }
 
+// The Enhanced menu's Developer Keyboard Cheats list (GD02-160, #103):
+// every key it shows runs, on the disc, the cheat it names.
+static int devKeyCheatChecks(ui::UiManager& ui) {
+    const DataNode* qc = ui.bootTree() ? ui.bootTree()->find("quick_cheats") : nullptr;
+    const DataNode* kb = qc ? qc->find("keyboard") : nullptr;
+    if (!kb) return std::printf("  FAIL dev cheats: no quick_cheats keyboard list\n"), 1;
+    int fails = 0;
+    for (const ui::DevKeyCheat& c : ui::devKeyCheats()) {
+        std::string disc;
+        for (size_t k = 1; k < kb->children.size(); ++k) {
+            const DataNode& e = kb->children[k];
+            if (!e.isList() || e.children.size() < 3 || !e.children[0].isText() || e.children[0].s.size() != 1) continue;
+            if (e.children[0].s[0] == c.key && e.children[1].isText()) disc = e.children[1].s;
+        }
+        if (disc != c.disc) std::printf("  FAIL dev cheats: key '%c' is \"%s\" on the disc, the menu says \"%s\"\n", c.key, disc.c_str(), c.disc), ++fails;
+    }
+    std::printf("uitest: %zu developer keyboard cheats checked against cheats.dta\n", ui::devKeyCheats().size());
+    return fails;
+}
+
 int runUiTest(const std::string& dataPath) {
     std::unique_ptr<GameData> data;
     std::vector<SongInfo> songs;
@@ -348,6 +369,7 @@ int runUiTest(const std::string& dataPath) {
     std::printf("uitest: %d panels, %d milos loaded, %d component names checked, %d run-time milos skipped, %d handlers nothing calls\n",
                 panels, loaded, checked, dynamic, unreachable);
     failures += campaignChecks(ui);
+    failures += devKeyCheatChecks(ui);
     for (const auto& [k, n] : in.unknownCounts()) std::printf("  UNKNOWN %s (%d)\n", k.c_str(), n), ++failures;
     for (const auto& [k, n] : in.unhandledCounts()) std::printf("  UNHANDLED %s (%d)\n", k.c_str(), n), ++failures;
     for (const auto& [k, n] : in.stubCounts()) std::printf("  STUB %s (%d)\n", k.c_str(), n);

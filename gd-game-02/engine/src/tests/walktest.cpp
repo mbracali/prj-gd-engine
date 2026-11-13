@@ -855,6 +855,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // Forgiving Hammer-ons and Pull-offs.
         row(kX), row(kX), row(kX), row(kX);
         check("enhanced_cheats");
+        // Developer Keyboard Cheats' help, one key a line (GD02-160, #103).
+        press(kDown), wait(150);
+        check("shot_enhanced_dev_keys");
+        press(kUp), wait(150);
         // The port's cheats back off (the walk's own save; tidy).
         press(kUp), wait(120), press(kX), wait(150), press(kUp), wait(120), press(kX), wait(150);
         press(kTri);
