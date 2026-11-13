@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "game/world.h"
+#include "render/spotlight_view.h"
 #include "scene/anim.h"
 #include "scene/world_objects.h"
 #include "script/tasks.h"
@@ -383,6 +384,26 @@ void LightPresets::apply(const scene::LightPreset& p, int a, int b, float t, flo
             st.target = e.target, st.subpart = e.subpart;
             st.flare = e.flare;
         }
+    }
+    // The SpotlightDrawers (RB 0x822BF6B8, GD05-093) [C]: per drawer entry
+    // (RB 0x822B9EF0 reads the file's three f32 into +4, +8, +0), smoke
+    // (+0x40) eases towards +8 and base (+0x3c) towards +4, but the next
+    // store writes total (+0x28) eased towards +0 into base again (stfs
+    // f0,0x3c twice, 0x822BF8B4 / 0x822BF8D4): base ends as total eased
+    // towards the third f32, total stays. The keyframes' entries are lerped
+    // as the spotlights' [I].
+    for (size_t i = 0; i < p.spotlightDrawers.size() && i < ka.drawers.size() && i < kb.drawers.size(); ++i) {
+        scene::Object* d = v.find(p.spotlightDrawers[i]);
+        if (!d || d->cls != "SpotlightDrawer") continue;
+        World::DrawerState& st = world_.drawerState(d);
+        if (!st.set) {
+            gfx::DrawerParams dp;
+            if (!gfx::readDrawerParams(d->record, dp)) continue;
+            st.total = dp.total, st.base = dp.base, st.smoke = dp.smoke, st.set = true;
+        }
+        const float second = lerp(ka.drawers[i][1], kb.drawers[i][1], t), third = lerp(ka.drawers[i][2], kb.drawers[i][2], t);
+        st.smoke = lerp(st.smoke, second, weight);
+        st.base = lerp(st.total, third, weight);
     }
     for (size_t i = 0; i < p.environs.size() && i < ka.environs.size() && i < kb.environs.size(); ++i) {
         auto* env = v.find<scene::Environ>(p.environs[i]);

@@ -121,8 +121,11 @@ void dumpObject(const Object& o, int indent) {
         std::printf("%sevents [%s] anims [%s] shows [%s] hides %zu proxy calls %zu sounds [%s]\n", pad.c_str(), join(t->triggerEvents).c_str(),
                     anims.c_str(), join(t->shows).c_str(), t->hideDelays.size(), t->proxyCalls.size(), join(t->sounds).c_str());
     } else if (auto* sp = o.as<Spotlight>()) {
-        std::printf("%sbeam '%s' spot '%s' target '%s' intensity %.2f color %.2f %.2f %.2f showing %d\n", pad.c_str(), sp->beam.material.c_str(),
-                    sp->spotMaterial.c_str(), sp->target.c_str(), sp->intensity, sp->color[0], sp->color[1], sp->color[2], sp->draw.showing);
+        std::printf("%sbeam '%s' spot '%s' target '%s' intensity %.2f color %.2f %.2f %.2f showing %d shape %d length %.1f radii %.1f %.1f "
+                    "brighten %.2f xsection '%s' cutouts %zu\n", pad.c_str(), sp->beam.material.c_str(),
+                    sp->spotMaterial.c_str(), sp->target.c_str(), sp->intensity, sp->color[0], sp->color[1], sp->color[2], sp->draw.showing,
+                    sp->beam.shape, sp->beam.length, sp->beam.topRadius, sp->beam.bottomRadius, sp->beam.brighten, sp->beam.xsection.c_str(),
+                    sp->beam.cutouts.size());
     } else if (auto* s = o.as<SynthSample>()) {
         std::printf("%sfile '%s' format %u, %u frames at %u Hz, %u bytes%s\n", pad.c_str(), s->file.c_str(), s->sample.format,
                     s->sample.sampleCount, s->sample.rate, s->sample.size,

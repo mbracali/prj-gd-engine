@@ -1976,7 +1976,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         if (!SDL_getenv("GD05_VENUE")) SDL_setenv_unsafe("GD05_VENUE", "small_club_02", 1);
         SDL_setenv_unsafe("GD05_TRACK", "0", 1);
         SDL_setenv_unsafe("GD05_HUD", "0", 1);
-        endMs_ = 90000;
+        endMs_ = 110000;  // the song on past the beam check (GD05-093)
+        SDL_setenv_unsafe("GD05_BEAM_PROBE", "1", 1);  // the beam pixels each frame (GD05-093)
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -2025,6 +2026,20 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             at("game_screen", 10000);
             wait(4000);
         }
+        // GD05-093: RB's spotlight beams reach the picture (the composite
+        // adds to some pixels in the shots), and with the drawer's base and
+        // smoke intensities at 0 (gFogDensity 0) they add nothing while
+        // beams are still drawn into the beam buffer.
+        // Shots 0, 7, ... until one draws beams (a blackout draws none).
+        check("setenv:GD05_DRAWER_ZERO=1");
+        for (int i = 0; i < 8; ++i) {
+            const std::string next = "look:shot:" + std::to_string(i * 7);
+            check(next.c_str());
+            wait(1000);
+            for (int k = 0; k < 3; ++k) check("look:beamzero"), wait(200);
+        }
+        check("setenv:GD05_DRAWER_ZERO=");
+        check("look:shot:");
         check("look:eval");
     } else if (scenario == "rb_win_sparks") {
         // GD05-090: arena_04's win fountains (sparks_fountain_blue_WIN..07,
@@ -5971,7 +5986,19 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                     }
             return pass();
         }
+        if (what == "beamzero") {
+            // Counted only on a frame that drew beams into the buffer.
+            const int drawn = ui.host().gameCounter(0, "rb_beams_drawn"), px = ui.host().gameCounter(0, "rb_beam_pixels");
+            if (drawn > 0 && px >= 0) lookBeamZero_ = std::max(lookBeamZero_, (long long)px);
+            std::printf("  look: base / smoke 0: %d beams drawn, %d beam pixels\n", drawn, px);
+            return pass();
+        }
         const int draws = ui.host().gameCounter(0, "world_draws"), holds = ui.host().gameCounter(0, "world_holds");
+        if (what == "frame") {
+            const int px = ui.host().gameCounter(0, "rb_beam_pixels");
+            lookBeamPx_ = std::max(lookBeamPx_, (long long)px);
+            if (px > 0) ++lookBeamFrames_;
+        }
         if (what == "frame" && lookPace_[0] < 0) lookPace_ = {nowMs, double(draws), double(draws + holds)};
         if (what == "eval") {
             if (lookFrames_.empty()) return fail("look: no frames");
@@ -5999,6 +6026,11 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             const int sdProxies = ui.host().gameCounter(0, "venue_sd_proxies"), sdListed = ui.host().gameCounter(0, "venue_sd_proxies_listed");
             std::printf("  look: SpotlightDrawer proxies %d, in the draw list %d (RB: 0)\n", sdProxies, sdListed);
             if (sdProxies < 1 || sdListed != 0) return fail("look: SpotlightDrawer proxies " + std::to_string(sdProxies) + ", drawn " + std::to_string(sdListed));
+            // GD05-093 (D91): RB's beams through the post composite.
+            std::printf("  look: beam pixels: most %lld in a frame, %d of %zu frames with some; with base / smoke 0: %lld\n", lookBeamPx_, lookBeamFrames_,
+                        lookFrames_.size(), lookBeamZero_);
+            if (lookBeamPx_ <= 0) return fail("look: no spotlight beam pixels in any frame");
+            if (lookBeamZero_ != 0) return fail("look: beam pixels with the drawer's base / smoke at 0: " + std::to_string(lookBeamZero_));
             if (std::fabs(m[0] / kLuma - 1) > 0.15) return fail("look: luma " + std::to_string(m[0]) + " not within 15% of the movies'");
             if (std::fabs(m[1] / kContrast - 1) > 0.15) return fail("look: contrast " + std::to_string(m[1]) + " not within 15% of the movies'");
             if (std::fabs(m[3] / kGrain - 1) > 0.40) return fail("look: grain " + std::to_string(m[3]) + " not within 40% of the movies'");

@@ -3073,6 +3073,10 @@ int App::gameCounter(int player, const std::string& key) const {
     // GD05-069: SpotlightDrawer proxies (the stage fog) found / left in the venue's draw list.
     if (key == "venue_sd_proxies") return venueView_ ? venueView_->spotlightDrawerProxies() : -1;
     if (key == "venue_sd_proxies_listed") return venueView_ ? venueView_->spotlightDrawerProxiesListed() : -1;
+    // GD05-093: RB's volume beams drawn this frame, and (GD05_BEAM_PROBE=1)
+    // the pixels the beam composite adds to (-1: not measured).
+    if (key == "rb_beams_drawn") return venueView_ ? venueView_->spotlights().rbBeamsDrawn() : -1;
+    if (key == "rb_beam_pixels") return venueView_ ? int(venueView_->spotlights().beamPixels()) : -1;
     // GD05-090: a venue milo's particles ("parts_started:<milo path part>",
     // parts_alive, parts_drawn); the world's EventAnim triggers fired.
     for (const char* k : {"parts_started:", "parts_alive:", "parts_drawn:"})

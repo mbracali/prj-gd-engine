@@ -2,7 +2,9 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <array>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -12,8 +14,23 @@
 
 class BandView;
 class World;
+namespace scene {
+class Object;
+}
 
 namespace gfx {
+
+// A SpotlightDrawer's parameters (rev 4, Load RB 0x82299660 into the
+// drawer's +0x28 block) [C]: total (+0x28), base_intensity (+0x3c),
+// smoke_intensity (+0x40), an unnamed f32 (+0x44: 250 in every venue, the
+// volume passes' gFogRange.y), color (+0x2c); then a texture and the proxy
+// (the stage fog / smoke group, +0x5c). False when the record is not rev 4.
+struct DrawerParams {
+    float total = 1, base = 1, smoke = 1, range = 250;
+    std::array<float, 4> color{1, 1, 1, 1};
+    std::string proxy;
+};
+bool readDrawerParams(const std::vector<unsigned char>& rec, DrawerParams& out);
 
 // GH2's Spotlights and RndFlares (docs/venues.md "Spotlights"), drawn after
 // the venue's draw list. Spotlight::DrawShowing (0x822328E8) queues a lit
@@ -65,6 +82,30 @@ public:
     int shadowsTotal() const { return shadowsTotal_; }  // since the venue's load
 
     int beamsDrawn() const { return beams_; }
+
+    // Rock Band's beams (NgSpotlightDrawer, GD05-093, D91): the venue's
+    // SpotlightDrawer and its proxy; VenueView draws the proxy into the
+    // density map between beginDensity and endDensity (0x822A9E58: through
+    // the drawer's camera, a copy of the shot's, into a quarter-size
+    // texture), then draw() runs the volume passes (0x822ABC28) into the
+    // half-size beam buffer and fog() hands PostFx the composite's inputs
+    // (0x822A8E78 / 0x822AB5B8). Off without post-processing or with
+    // GD05_BEAMS_LEGACY=1 (GH2's beam sheets, the port before).
+    void setDrawer(const scene::Object* drawer, const scene::Object* proxy);
+    const scene::Object* drawerProxy() const { return proxy_; }
+    bool rbBeams() const;
+    bool beginDensity(int viewW, int viewH);
+    void endDensity(TargetId worldTarget, int viewW, int viewH);
+    struct Fog {
+        bool on = false;
+        TextureId beams, density;
+        float c82x = 0, c82y = 0, c91x = 0;  // gFogDensity.xy, gFogRange.x
+    };
+    const Fog& fog() const { return fog_; }
+    int rbBeamsDrawn() const { return rbBeamsDrawn_; }
+    // GD05_BEAM_PROBE=1: each frame's beam buffer and density map read back:
+    // the pixels the composite adds at least 1/255 to (-1: not measured).
+    long long beamPixels() const { return beamPixels_; }
     int flaresDrawn() const { return flares_; }
     int spotsDrawn() const { return spots_; }
 
@@ -89,6 +130,28 @@ private:
     void drawBeams(const Camera& camera, int viewW, int viewH, bool hdr, TargetId worldTarget, TextureId worldDepth);
     static constexpr float kBeamGain = 1.0f;  // FogPixel's 1024 x 0.2 on the 360's fixed-point buffer: effective gain [I]
     int slotOf(const void* key);
+    struct RbBeam {
+        Vec3 pos, dir;
+        float length = 0, rTop = 0, rBottom = 0;
+        float color[3] = {0, 0, 0};  // gFogColor: colour x intensity x 8 x brighten
+        TextureId xsection;
+    };
+    void drawRbBeams(const Camera& camera, int viewW, int viewH, TextureId worldDepth);
+    void probeBeams();
+    const scene::Object* drawer_ = nullptr;
+    const scene::Object* proxy_ = nullptr;
+    DrawerParams drawerParams_;
+    std::vector<RbBeam> rbList_;
+    ProgramId rbBeamProgram_;
+    TargetId rbBeamTarget_, densityTarget_;
+    int rbW_ = 0, rbH_ = 0, densW_ = 0, densH_ = 0;
+    BufferId rbVb_;
+    size_t rbVbSize_ = 0;
+    TextureId white_;
+    Fog fog_;
+    int rbBeamsDrawn_ = 0;
+    bool densityDrawn_ = false;
+    long long beamPixels_ = -1;
 
     World& world_;
     SceneCache& cache_;

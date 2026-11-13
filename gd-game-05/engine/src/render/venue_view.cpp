@@ -159,6 +159,17 @@ void VenueView::build() {
     // The walks' check (rb_look): every SpotlightDrawer proxy out of the list.
     sdProxies_ = int(proxies.size()), sdProxiesListed_ = 0;
     for (const Root& r : roots_) sdProxiesListed_ += int(std::count(proxies.begin(), proxies.end(), r.object));
+    // The venue's SpotlightDrawer (one per venue type's lighting milo) and
+    // its proxy for RB's beams (render/spotlight_view.h, GD05-093).
+    for (const scene::Directory* d : dirs) {
+        if (spotlights_->drawerProxy()) break;
+        d->forEach([&](scene::Object& o) {
+            if (o.cls != "SpotlightDrawer" || !o.dir || spotlights_->drawerProxy()) return;
+            gfx::DrawerParams dp;
+            if (!gfx::readDrawerParams(o.record, dp)) return;
+            spotlights_->setDrawer(&o, dp.proxy.empty() ? nullptr : o.dir->resolve(dp.proxy));
+        });
+    }
     for (const auto& p : v.proxies()) {
         auto& list = proxyRoots_[p.object];
         for (const scene::Object* o : drawList({&p.milo->root()})) list.push_back({o, dirEnv(p.milo->root())});
@@ -300,9 +311,32 @@ void VenueView::draw(gfx::Renderer& r, int viewW, int viewH, bool hdr) {
     } else if (lights_) {
         lights_->draw(look_, {}, camera_, hdr, timeSec_);  // clears its counts
     }
+    // RB's beams' density map (0x822A9E58, GD05-093): the drawer's proxy,
+    // the stage fog / smoke group, drawn through the shot's camera into a
+    // quarter-size texture (not into the picture: D79 / D89).
+    if (hdr && spotlights_->drawerProxy() && spotlights_->beginDensity(viewW_, viewH_)) {
+        const int w = viewW_, h = viewH_;
+        viewW_ = std::max(1, w / 4), viewH_ = std::max(1, h / 4);
+        envSet_ = false;
+        particleRenderer_->setHdr(false);
+        hdr_ = false;
+        const scene::Object* proxy = spotlights_->drawerProxy();
+        drawObject(mr, proxy, proxy->dir ? dirEnv(*proxy->dir) : nullptr, nullptr, 0);
+        hdr_ = hdr;
+        particleRenderer_->setHdr(hdr);
+        viewW_ = w, viewH_ = h;
+        envSet_ = false;
+        spotlights_->endDensity(r.post().worldTarget(), viewW_, viewH_);
+    }
     // Spotlights (cans, floor spots, beams, lenses) and flares after the list.
     spotlights_->draw(mr, camera_, viewW_, viewH_, hdr, hdr ? r.post().worldTarget() : gfx::TargetId{},
                       hdr ? r.post().worldDepth() : gfx::TextureId{});
+    {
+        const gfx::SpotlightView::Fog& f = spotlights_->fog();
+        gfx::PostFx::Fog pf;
+        pf.on = hdr && f.on, pf.beams = f.beams, pf.density = f.density, pf.c82x = f.c82x, pf.c82y = f.c82y, pf.c91x = f.c91x;
+        r.post().setFog(pf);
+    }
     envSet_ = false;
 }
 

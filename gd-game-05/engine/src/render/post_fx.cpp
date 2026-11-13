@@ -24,6 +24,7 @@ struct PostBlock {
     float noiseScale[4];   // xy base scale, z the second layer's extra scale, w intensity
     float source[4];       // xy the source's texel size, z debug view
     float taps[16][4];     // blur taps: xy offset (uv), z weight
+    float fog[4];          // the spotlight beams: gFogDensity.xy, gFogRange.x (FOG)
 };
 
 // GH2's DoPost sets the UI plane to 0.1 every frame [C] (0x82303E68: rnd
@@ -58,6 +59,7 @@ layout(std140) uniform GdPost {
     vec4 uNoiseScale;
     vec4 uSource;
     vec4 uTaps[16];
+    vec4 uFog;
 };
 const vec3 kLuminance = vec3(0.2125, 0.7154, 0.0721);
 
@@ -113,6 +115,8 @@ uniform sampler2D sDepth;
 uniform sampler2D sBloom;
 uniform sampler2D sLum;
 uniform sampler2D sNoise;
+uniform sampler2D sBeams;
+uniform sampler2D sDensity;
 void main() {
     vec4 c = texture(sHdr, vUv);
     c.rgb *= 4.0;
@@ -128,6 +132,13 @@ void main() {
 #endif
 #if BLOOM
         c.rgb += texture(sBloom, vUv).rgb * uBloom.x;
+#endif
+#if FOG
+        // The spotlight beams (RB's postprocess variants with gFogDepth,
+        // #2381 / #2397): the beam buffer (s12) x (gFogDensity.x +
+        // gFogDensity.y x the density map's x (s6)) x gFogRange.x, added
+        // after the bloom, before the grain and the ColorXfm [C].
+        c.rgb += texture(sBeams, vUv).rgb * (uFog.x + uFog.y * texture(sDensity, vUv).x) * uFog.z;
 #endif
 #if NOISE
         // The film grain: two layers of the noise map multiplied, then an
@@ -375,7 +386,8 @@ ProgramDesc PostFx::describe(Pass pass, uint32_t key) {
     def("LUMMAP", (key & postkey::LumMap) ? 1 : 0);
     def("DEBUG", pass == Pass::Debug ? 1 : 0);
     def("HDR_OUT", (key & postkey::HdrOut) ? 1 : 0);
-    d.samplers = {"sHdr", "sDofLow", "sDepth", "sBloom", "sLum", "sNoise"};
+    def("FOG", (key & postkey::Fog) ? 1 : 0);
+    d.samplers = {"sHdr", "sDofLow", "sDepth", "sBloom", "sLum", "sNoise", "sBeams", "sDensity"};
     return d;
 }
 
@@ -402,10 +414,10 @@ std::vector<ProgramDesc> PostFx::allPrograms() {
     std::vector<ProgramDesc> all;
     for (Pass p : {Pass::Collapse, Pass::Bright, Pass::Downsample, Pass::Blur7, Pass::Blur15, Pass::Debug, Pass::Copy})
         all.push_back(describe(p, postkey::All));
-    const uint32_t bits[6] = {postkey::ColorXfm, postkey::Noise, postkey::Dof, postkey::Bloom, postkey::LumMap, postkey::HdrOut};
-    for (uint32_t m = 0; m < 64; ++m) {
+    const uint32_t bits[7] = {postkey::ColorXfm, postkey::Noise, postkey::Dof, postkey::Bloom, postkey::LumMap, postkey::HdrOut, postkey::Fog};
+    for (uint32_t m = 0; m < 128; ++m) {
         uint32_t key = 0;
-        for (int b = 0; b < 6; ++b)
+        for (int b = 0; b < 7; ++b)
             if (m & (1u << b)) key |= bits[b];
         all.push_back(describe(Pass::Composite, key));
     }
@@ -592,13 +604,22 @@ void PostFx::end() {
     // takes (Enhanced Options) or the paced world is held in.
     int x, y, pw, ph;
     renderer_.pictureRect(x, y, pw, ph);
-    const TextureId tex[6] = {hdrTex, device_.targetTexture(dofA_), device_.targetDepth(hdr_), device_.targetTexture(bloomA_),
-                              state_.luminanceMap, state_.noiseMap ? state_.noiseMap : noise_};
-    const SamplerState samp[6] = {point, linear, point, linear, linear, SamplerState{Filter::Linear, Wrap::Repeat, 0}};
+    // The spotlight beams (render/spotlight_view.h, GD05-093): unused slots get the noise texture.
+    const bool fog = fog_.on && fog_.beams && fog_.density;
+    if (fog) b.fog[0] = fog_.c82x, b.fog[1] = fog_.c82y, b.fog[2] = fog_.c91x;
+    const TextureId tex[8] = {hdrTex, device_.targetTexture(dofA_), device_.targetDepth(hdr_), device_.targetTexture(bloomA_),
+                              state_.luminanceMap, state_.noiseMap ? state_.noiseMap : noise_, fog ? fog_.beams : noise_, fog ? fog_.density : noise_};
+    // The noise map (s13, 0x827D9190): Function_8246AC70(13, 1) sets the
+    // fetch constant's mag / min filter linear and its mip filter (bits 23-24)
+    // linear, 8246ACF8(13, 0) wraps it [C]: noise_mono.tex (512 x 512, six
+    // levels) at noise_base_scale 8 x 4.5 is 3.2 texels a pixel across RB's
+    // 1280 x 720 and is read from its smaller levels (GD05-095, D92).
+    const SamplerState samp[8] = {point, linear, point, linear, linear, SamplerState{Filter::Trilinear, Wrap::Repeat, 0}, linear, linear};
     PostProcState keyed = state_;
     for (int r = 0; r < 3; ++r)
         for (int c = 0; c < 3; ++c) keyed.colorXfm[size_t(r * 3 + c)] *= flicker_;
-    lastKey_ = compositeKey(keyed, dof), lastDof_ = dof;
+    lastKey_ = compositeKey(keyed, dof) | (fog ? postkey::Fog : 0), lastDof_ = dof;
+    fog_ = {};
     const ProgramId p = debug_ ? program(Pass::Debug, postkey::All) : program(Pass::Composite, lastKey_);
     state_ = saved, dof_ = savedDof;
     const bool chain = settings_.any() && !debug_ && !(enhanced_ && enhanced_->failed());
@@ -616,7 +637,7 @@ void PostFx::end() {
         }
         if (ldr_) {
             const ProgramId pc = ldrF16_ && !debug_ ? program(Pass::Composite, lastKey_ | postkey::HdrOut) : p;
-            quad(ldr_, pc ? pc : p, tex, samp, 6, &b, sizeof b);
+            quad(ldr_, pc ? pc : p, tex, samp, 8, &b, sizeof b);
             held_ = true;
             present(x, y, pw, ph);
         }
@@ -624,7 +645,7 @@ void PostFx::end() {
     if (!held_) {
         device_.setTarget({});
         device_.setViewport(x, y, pw, ph);
-        quad({}, p, tex, samp, 6, &b, sizeof b);
+        quad({}, p, tex, samp, 8, &b, sizeof b);
     }
     device_.setTarget({});
     device_.setViewport(x, y, pw, ph);

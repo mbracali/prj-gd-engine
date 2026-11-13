@@ -120,6 +120,7 @@ constexpr uint32_t CopyPrevious = 1u << 6;   // not built
 constexpr int NumTapsShift = 14;             // blur.fx: taps - 1
 constexpr uint32_t LumMap = 1u << 20;
 constexpr uint32_t HdrOut = 1u << 21;  // the port's: Enhanced > HDR, no clamp at 1.0 (not GH2's)
+constexpr uint32_t Fog = 1u << 22;     // RB's spotlight beams (gFogDepth / gFogDensity variants)
 constexpr uint32_t All = ColorXfm | Noise | Dof | Bloom | LumMap;
 }  // namespace postkey
 
@@ -143,6 +144,15 @@ public:
     void setSettings(const PostSettings& s) { settings_ = s; }
     const PostSettings& settings() const { return settings_; }
     void setFrame(const PostFrame& f) { frame_ = f; }
+    // This frame's spotlight beams (RB's NgSpotlightDrawer, render/
+    // spotlight_view.h): the beam buffer, the density map and the
+    // composite's gFogDensity.xy / gFogRange.x; cleared by end().
+    struct Fog {
+        bool on = false;
+        TextureId beams, density;
+        float c82x = 0, c82y = 0, c91x = 0;
+    };
+    void setFog(const Fog& f) { fog_ = f; }
     // TAA's sub-pixel jitter for this frame's world (NDC; 0 when off).
     std::array<float, 2> jitter() { return capturing_ && enhanced_ && settings_.any() ? enhanced_->jitter(settings_, w_, h_) : std::array<float, 2>{0, 0}; }
     // The port's chain (tests: frames run, the last frame's passes); nullptr before the first.
@@ -206,6 +216,7 @@ private:
     bool ldrF16_ = false, worldF16_ = false;  // Enhanced > HDR: RGBA16F
     PostSettings settings_;
     PostFrame frame_;
+    Fog fog_;
     std::unique_ptr<EnhancedFx> enhanced_;
     uint32_t lastKey_ = 0;
     bool lastDof_ = false;
