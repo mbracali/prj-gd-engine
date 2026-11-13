@@ -58,6 +58,7 @@ struct UiView::LabelText {
     const scene::Font* font = nullptr;
     TextLayout layout;
     std::array<float, 2> fit{1, 1};
+    bool oneLine = false;  // laid out without the template's wrap (drawTemplate's fitWidth)
 };
 
 UiView::UiView(const GameData& data, scene::MiloLibrary& library, const scene::UiStyles& styles, const scene::Locale& locale,
@@ -393,6 +394,11 @@ void UiView::addHit(const std::string& key, const float lo[3], const float hi[3]
     if (x1 > x0 && y1 > y0) hits_.push_back({key, x0, y0, x1, y1});
 }
 
+int UiView::textLines(const std::string& key) const {
+    auto it = keyed_.find(key);
+    return it == keyed_.end() || !it->second ? 0 : int(it->second->layout.lines.size());
+}
+
 void UiView::addLayoutHit(const std::string& key, const TextLayout& layout, const Mat4& world) {
     if (layout.verts.empty()) return;
     float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
@@ -579,26 +585,30 @@ float UiView::templateWidth(const scene::Text& tmpl, const std::string& str) {
 }
 
 float UiView::drawTemplate(MaterialRenderer& r, const std::string& key, const scene::Text& tmpl, const std::string& str,
-                           const scene::Xfm& world, const float* rgb, float alpha, int align) {
+                           const scene::Xfm& world, const float* rgb, float alpha, int align, float fitWidth) {
     const scene::Font* font = tmpl.dir ? tmpl.dir->resolve<scene::Font>(tmpl.font) : nullptr;
     if (!font || str.empty()) return 0;
     auto& lt = keyed_[key];
-    if (!lt || lt->str != str || lt->font != font) {
+    const bool oneLine = fitWidth > 0;
+    if (!lt || lt->str != str || lt->font != font || lt->oneLine != oneLine) {
         if (!lt) lt = std::make_unique<LabelText>();
         lt->str = str;
         lt->font = font;
+        lt->oneLine = oneLine;
         FontMetrics fm(*font);
         TextStyle st;
-        st.size = tmpl.size, st.leading = tmpl.leading, st.wrapWidth = tmpl.wrapWidth, st.italics = tmpl.italics;
+        st.size = tmpl.size, st.leading = tmpl.leading, st.wrapWidth = oneLine ? 0 : tmpl.wrapWidth, st.italics = tmpl.italics;
         st.align = align >= 0 ? align : tmpl.align, st.capsMode = tmpl.capsMode, st.markup = tmpl.markup, st.color = tmpl.color;
         lt->layout = layoutText(&fm, str, st);
     }
     const float tint[4] = {1, 1, 1, alpha};
-    const Mat4 wm = toMat4(world);
+    const float w = lt->layout.maxWidth();
+    const float squeeze = oneLine && w > fitWidth ? fitWidth / w : 1.0f;
+    const Mat4 wm = toMat4(squeeze < 1 ? scene::compose(scaleXfm(squeeze, 1, 1), world) : world);
     texts_.draw(r, lt.get(), *font, lt->layout, wm, rgb, alpha < 1 ? tint : nullptr);
     addLayoutHit(key, lt->layout, wm);
     ++textsDrawn_;
-    return lt->layout.maxWidth();
+    return w * squeeze;
 }
 
 float UiView::templateWidth(const std::string& key, const scene::Text& tmpl, const std::string& str) {
@@ -614,6 +624,7 @@ float UiView::templateWidth(const std::string& key, const scene::Text& tmpl, con
         st.size = tmpl.size, st.leading = tmpl.leading, st.wrapWidth = tmpl.wrapWidth, st.italics = tmpl.italics;
         st.align = tmpl.align, st.capsMode = tmpl.capsMode, st.markup = tmpl.markup, st.color = tmpl.color;
         lt->layout = layoutText(&fm, str, st);
+        lt->oneLine = false;
     }
     return lt->layout.maxWidth();
 }
@@ -744,15 +755,54 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
                 if (it == lr.mats.end() || it->second.empty()) continue;
                 const scene::Mesh* m = res->find<scene::Mesh>(elements[e].name);
                 if (!m) continue;
-                drawMeshAt(r, *m, findMat(*m, it->second), scene::compose(m->trans.local, rowWorld));
+                const scene::Xfm mw = scene::compose(m->trans.local, rowWorld);
+                drawMeshAt(r, *m, findMat(*m, it->second), mw);
+                if (!m->verts.empty()) {
+                    float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+                    for (const scene::MeshVertex& v : m->verts)
+                        for (int k = 0; k < 3; ++k) lo[k] = std::min(lo[k], v.pos[k]), hi[k] = std::max(hi[k], v.pos[k]);
+                    addHit(o.name + "#" + std::to_string(row) + "#" + elements[e].name, lo, hi, toMat4(mw));
+                }
                 continue;
             }
             auto it = lr.texts.find(elements[e].name);
             if (it == lr.texts.end() || it->second.empty()) continue;
             const scene::Text* tmpl = res->find<scene::Text>(elements[e].name);
             if (!tmpl) continue;
+            // GH2 breaks a long name over two lines at the template's wrap
+            // width (list_song.milo's list.txt: 316; GH2's sample text there
+            // is "TONIGHT I'M GONNA ROCK YOU TONIGHT"), where the second line
+            // runs into the next row; the owner's rule [owner]: one line,
+            // squeezed across to the wrap width and to the row's elements
+            // drawn to its right (stars, score), three quarters of the text size
+            // apart [I] (GD02-165).
+            float fitWidth = 0;
+            const bool leftAligned = !(tmpl->align & (kAlignCenter | kAlignRight));
+            if (tmpl->wrapWidth > 0 && leftAligned) {
+                fitWidth = tmpl->wrapWidth;
+                const float x = tmpl->trans.local.pos[0];
+                for (size_t o2 = 0; o2 < elements.size(); ++o2) {
+                    if (o2 == e) continue;
+                    float left = 1e9f;
+                    if (elements[o2].mesh) {
+                        auto mi = lr.mats.find(elements[o2].name);
+                        const scene::Mesh* m = mi == lr.mats.end() || mi->second.empty() ? nullptr : res->find<scene::Mesh>(elements[o2].name);
+                        if (m && !m->verts.empty())
+                            for (const scene::MeshVertex& v : m->verts) left = std::min(left, m->trans.local.pos[0] + v.pos[0]);
+                    } else {
+                        auto ti = lr.texts.find(elements[o2].name);
+                        const scene::Text* ot = ti == lr.texts.end() || ti->second.empty() ? nullptr : res->find<scene::Text>(elements[o2].name);
+                        if (ot) {
+                            const float ow = templateWidth(o.name + "#" + std::to_string(row) + "#" + elements[o2].name, *ot, ti->second);
+                            left = ot->trans.local.pos[0] - ((ot->align & kAlignRight) ? ow : (ot->align & kAlignCenter) ? ow * 0.5f : 0.0f);
+                        }
+                    }
+                    if (left > x && left < 1e8f) fitWidth = std::min(fitWidth, left - x - tmpl->size * 0.75f);
+                }
+                fitWidth = std::max(fitWidth, 1.0f);
+            }
             drawTemplate(r, o.name + "#" + std::to_string(row) + "#" + elements[e].name, *tmpl, it->second,
-                         scene::compose(tmpl->trans.local, rowWorld), hasRgb ? rgb : nullptr);
+                         scene::compose(tmpl->trans.local, rowWorld), hasRgb ? rgb : nullptr, 1, -1, fitWidth);
         }
     }
 }
