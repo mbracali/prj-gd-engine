@@ -167,6 +167,7 @@ WalkDriver::WalkDriver(const std::string& name)
         check("intro_camera");
         check("star_phrase");
         check("track_surface");
+        check("band_shadows");
         at("endgame_screen", 90000);
         check("song_sounds");
         wait(600);
@@ -1851,6 +1852,15 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (shown != (g <= n)) return fail("finalsong" + std::to_string(g) + ".grp " + (shown ? "shown" : "hidden"));
         }
         return pass();
+    }
+    if (s.screen == "band_shadows") {
+        // GD03-107: the venue's target_shadow spotlights (SHADOW_*.spot) drew
+        // their band member's flattened shadow group (BandView::drawShadow).
+        const int n = ui.host().gameCounter(0, "spot_shadows");
+        std::printf("  band shadows: %d drawn so far\n", n);
+        if (n < 1) return fail("no spotlight drew a band member's shadow");
+        ++step_, stepStart_ = -1;
+        return;
     }
     if (s.screen == "finalsong_encore") {
         std::printf("  final song encore: %s\n", ui.session().song.c_str());

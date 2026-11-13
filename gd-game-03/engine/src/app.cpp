@@ -2173,6 +2173,7 @@ int App::gameCounter(int player, const std::string& key) const {
         if (key == "star_combos") return tv->comboStarts();
         if (key == "surface_overrides") return tv->surfaceOverrides();
         if (key == "band_fx_particles") return venueView_ ? venueView_->bandView().fxParticles() : 0;
+        if (key == "spot_shadows") return venueView_ ? int(venueView_->spotlights().shadowsTotal()) : 0;  // GD03-107
         if (key.rfind("venue_loaded:", 0) == 0) {  // the walks: is that venue's world the one loaded
             for (VenueVariant var : {VenueVariant::Single, VenueVariant::Mp, VenueVariant::Coop})
                 if (venue_ && venuePath_ == venues::worldMilo(key.substr(13), var)) return 1;

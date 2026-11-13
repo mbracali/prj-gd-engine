@@ -9,7 +9,10 @@
 #include <cstring>
 #include <map>
 
+#include "char/character.h"
+#include "game/band.h"
 #include "game/world.h"
+#include "render/band_view.h"
 #include "render/venue_view.h"
 #include "scene/anim.h"
 #include "scene/world_objects.h"
@@ -261,6 +264,11 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
         const scene::Environ* env;
     };
     std::vector<Can> cans;
+    struct Shadow {
+        std::string target;
+        Vec3 dir;
+    };
+    std::vector<Shadow> shadows;
     const auto& states = world_.spots();
     for (const scene::Spotlight* s : venue.all<scene::Spotlight>()) {
         if (!s->decoded || !pose.showing(s)) continue;
@@ -283,9 +291,11 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
         const Vec3 pos = v3(x.pos);
         Vec3 right{x.rot[0], x.rot[1], x.rot[2]}, fwd{x.rot[3], x.rot[4], x.rot[5]}, up{x.rot[6], x.rot[7], x.rot[8]};
         // A target turns the light's -z onto it (Spotlight target).
+        bool targeted = false;
         if (!target.empty()) {
             scene::Xfm tx;
             if (venueObjectXfm(world_, target, mp, tx)) {
+                targeted = true;
                 Vec3 tp = v3(tx.pos);
                 if (const scene::Object* o = venue.find(target); !o || o->cls == "Character" || o->cls == "BandCharacter") tp.z += 35;
                 const Vec3 d = tp - pos;
@@ -299,6 +309,9 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
             }
         }
         Vec3 dir = up * -1.0f;
+        // target_shadow (GH2's SpotlightDrawer draws these first): the target
+        // character's shadow group flattened along the light.
+        if (targeted && s->targetShadow) shadows.push_back({target, dir});
         // angle_offset (degrees) tilts the beam about the light's x and y [I].
         if (s->beam.angleOffset[0] != 0 || s->beam.angleOffset[1] != 0) {
             const float ax = s->beam.angleOffset[0] * kPi / 180, ay = s->beam.angleOffset[1] * kPi / 180;
@@ -471,6 +484,20 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
     // Floor spots, beams and lenses: unlit, added.
     LightEnv plain;
     plain.ambient = {1, 1, 1};
+    mr.setFrame(camera, plain, viewW, viewH);
+    // GH2's SpotlightDrawer starts with the shadows: shadow.mat adds black
+    // and writes depth, so the flattened character, just above the floor,
+    // keeps the floor spots out of its shape, a hole in the pool of light
+    // (gd02 docs/band.md "Shadows": [C] for the order and the material on the
+    // 360, [I] the same on the PS2's GH2 engine). GD03-107.
+    shadowsDrawn_ = 0;
+    if (bandView_ && world_.band)
+        for (const Shadow& sh : shadows)
+            if (chr::Character* c = world_.band->character(sh.target); c && c->visible && sh.dir.z != 0) {
+                bandView_->drawShadow(mr, *c, {sh.dir.x, sh.dir.y, sh.dir.z}, hdr);
+                ++shadowsDrawn_, ++shadowsTotal_;
+                if (shadowTargets_.insert(sh.target).second) SDL_Log("spotlight: %s casts its shadow", sh.target.c_str());
+            }
     mr.setFrame(camera, plain, viewW, viewH);
     const Mat4 identity[1] = {Mat4::identity()};
     for (auto& [m, b] : batches) {

@@ -3,6 +3,8 @@
 #pragma once
 
 #include <memory>
+#include <set>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -11,6 +13,7 @@
 #include "render/scene_gpu.h"
 
 class World;
+class BandView;
 
 namespace gfx {
 
@@ -61,6 +64,12 @@ public:
     int beamsDrawn() const { return beams_; }
     int flaresDrawn() const { return flares_; }
     int spotsDrawn() const { return spots_; }
+    // GH2's target_shadow spotlights (SHADOW_*.spot): their target
+    // character's shadow group, flattened along the light, drawn first
+    // (BandView::drawShadow): this frame's count and since the start. GD03-107.
+    int shadowsDrawn() const { return shadowsDrawn_; }
+    long long shadowsTotal() const { return shadowsTotal_; }
+    void setBandView(BandView* v) { bandView_ = v; }
 
     // The programs this draws with (--shadertest).
     static std::vector<ProgramDesc> allPrograms();
@@ -77,6 +86,10 @@ private:
     };
     void drawFlares(const Camera& camera, int viewW, int viewH, bool hdr, TargetId worldTarget, TextureId worldDepth);
     int slotOf(const void* key);
+    BandView* bandView_ = nullptr;
+    int shadowsDrawn_ = 0;
+    long long shadowsTotal_ = 0;
+    std::set<std::string> shadowTargets_;  // logged once each
 
     World& world_;
     SceneCache& cache_;
