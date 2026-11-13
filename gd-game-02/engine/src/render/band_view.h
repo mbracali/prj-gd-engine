@@ -5,6 +5,8 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
+#include <string>
 #include <vector>
 
 #include "render/camera.h"
@@ -61,6 +63,8 @@ public:
 
 private:
     void drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scene::Mesh& m);
+    void logMaterial(const chr::Character& c, const scene::Mat& mat, const gfx::Material& gm, const gfx::DrawContext& ctx,
+                     const gfx::MaterialRenderer& mr);
     scene::Xfm flattened(scene::Xfm x) const;
     // The member's started effects (game/band.h Member::fx): the proxied milo's
     // particle systems at the object's transform under its parent bone.
@@ -82,6 +86,7 @@ private:
     std::unique_ptr<gfx::DynamicMesh> dynamic_;
     bool hdr_ = false;
     int meshes_ = 0;
+    std::set<std::string> logged_;  // character materials logged (GD02-161)
 };
 
 // The screen size GH2 compares with a LOD's screen_size (0x8214FCD0 /

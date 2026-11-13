@@ -246,7 +246,9 @@ void main() {
     gdRegularLights(pos, n, v, uSpecular, vec4(0.0), lit.rgb, spec);
     lit *= uDiffuse;
 #endif
-#if GD_PRELIT
+#if GD_PRELIT && GD_NO_COLOR_INPUT
+    vec4 base = vec4(0.0, 0.0, 0.0, 1.0);  // no colour input (skinned): GL's default attribute
+#elif GD_PRELIT
     vec4 base = aColor;
 #else
     vec4 base = uDiffuse;
@@ -441,6 +443,7 @@ ProgramDesc StandardShaders::describe(uint32_t key) {
     def("GD_PROJ_LIGHTS", projLights(key));
     def("GD_REGULAR", std::max(0, lights(key) - projLights(key)));
     def("GD_USE_ENVIRON", (key & UseEnviron) != 0);
+    def("GD_NO_COLOR_INPUT", (key & NoColorInput) != 0);
     // Development aid: GD02_SHADER_FAIL=<hex bits> breaks every variant
     // that has all those bits, to watch the fallback at work.
     if (const char* fail = SDL_getenv("GD02_SHADER_FAIL"); fail && key != 0) {
@@ -483,6 +486,7 @@ std::string StandardShaders::name(uint32_t key) {
     add(CustomDiffuse, "custom_diffuse");
     add(PerPixel, "per_pixel");
     add(Prelit, "prelit");
+    add(NoColorInput, "no_color_input");
     add(UseEnviron, "use_environ");
     add(Fog, "fog");
     add(ShadowBuffer, "shadow");
@@ -510,7 +514,7 @@ ProgramId StandardShaders::program(uint32_t key) {
     using namespace stdkey;
     // Simpler and simpler stand-ins: keep the texture, colour source and
     // skinning, then only the skinning, then nothing.
-    const uint32_t keep = (3u << WeightsShift);
+    const uint32_t keep = (3u << WeightsShift) | NoColorInput;
     const uint32_t tries[] = {key, key & (DiffuseMap | Prelit | UseEnviron | keep), key & (DiffuseMap | keep), key & keep, 0};
     ProgramId result;
     for (uint32_t k : tries) {
@@ -571,6 +575,11 @@ std::vector<uint32_t> StandardShaders::testKeys() {
         add(mat | litEnv | ShadowBuffer);
         add(mat | litEnv | Hdr);
         add(mat | (2u << LightsShift) | UseEnviron | ShadowBuffer);  // point lights with a shadow
+    }
+    // 4. Prelit skinned meshes: no colour input (gd02's bit 31, GD02-161).
+    for (uint32_t w = 0; w < 4; ++w) {
+        add(PerPixel | DiffuseMap | NormalMap | Specular | SpecularMap | Prelit | NoColorInput | litEnv | (w << WeightsShift));
+        add(DiffuseMap | Prelit | NoColorInput | (w << WeightsShift));
     }
     return keys;
 }

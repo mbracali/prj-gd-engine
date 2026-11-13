@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <set>
@@ -29,6 +30,8 @@
 #include "game/world.h"
 #include "game/world_driver.h"
 #include "render/band_view.h"
+#include "render/material.h"
+#include "render/standard_shader.h"
 #include "render/scene_gpu.h"
 #include "scene/milo.h"
 #include "tests/miditest.h"
@@ -478,8 +481,65 @@ int hairRateRun(const GameData& data) {
 
 }  // namespace
 
+namespace {
+
+// GD02-161: a prelit material on a skinned mesh reads a vertex colour the
+// skinned layout does not have (bone weights take its place). GL reads the
+// missing input as (0, 0, 0, 1); Vulkan / D3D12 leave it undefined (RADV
+// reads 0: Pandora's body, prelit with alpha_cut, drew nothing). Every
+// playable character's prelit skinned meshes must draw with NoColorInput,
+// rigid prelit meshes without it.
+int prelitSkinRun(const GameData& data) {
+    static const char* kChars[] = {"alterna1", "alterna2", "classic", "deathmetal1", "deathmetal2", "funk1", "glam1",
+                                   "glam2", "goth1", "goth2", "grim", "metal1", "metal2", "punk1", "punk2", "rock1",
+                                   "rock2", "rockabill1", "rockabill2"};
+    int problems = 0, skinnedPrelit = 0, chars = 0;
+    std::string per;
+    for (const char* name : kChars) {
+        const std::string path = std::string("char/") + name + "/ng/gen/" + name + ".milo_xbox";
+        std::unique_ptr<scene::Milo> milo;
+        try {
+            milo = std::make_unique<scene::Milo>(data.read(path), path);
+        } catch (const std::exception& e) {
+            std::printf("  prelit skin: %s: %s\n", path.c_str(), e.what());
+            ++problems;
+            continue;
+        }
+        ++chars;
+        int n = 0;
+        for (const auto& o : milo->root().objects) {
+            const auto* m = o->as<scene::Mesh>();
+            if (!m) continue;
+            const scene::Mat* mat = milo->root().resolve<scene::Mat>(m->mat);
+            if (!mat || !mat->prelit) continue;
+            const scene::Mesh* geom = m;
+            if (m->verts.empty() && !m->geomOwner.empty())
+                if (auto* g = milo->root().resolve<scene::Mesh>(m->geomOwner)) geom = g;
+            const bool skinned = !geom->bones.empty();
+            gfx::Material gm;
+            gm.prelit = true;
+            gfx::DrawContext ctx;
+            ctx.bones = skinned ? int(std::min<size_t>(geom->bones.size(), 4)) : 1;
+            const uint32_t key = gfx::meshDrawKey(skinned, gm, nullptr, ctx);
+            if (skinned != ((key & gfx::stdkey::NoColorInput) != 0)) {
+                std::printf("  prelit skin: %s %s: key %#x\n", name, m->name.c_str(), key);
+                ++problems;
+            }
+            n += skinned;
+        }
+        skinnedPrelit += n;
+        if (!std::strcmp(name, "goth1") || !std::strcmp(name, "punk1")) per += std::string(" ") + name + " " + std::to_string(n);
+    }
+    std::printf("prelit skinned meshes: %d in %d characters (%s), drawn without a colour input: %s\n", skinnedPrelit, chars,
+                per.c_str() + (per.empty() ? 0 : 1), problems ? "NO" : "yes");
+    return problems;
+}
+
+}  // namespace
+
 int chartestBandChecks(const GameData& data) {
     int failures = loadChecks(data);
+    failures += prelitSkinRun(data);
     failures += driverRun(data);
     failures += hairRateRun(data);
     failures += runMidiParserTest(data);
