@@ -1531,3 +1531,56 @@ pattern). Each says what, why and how to undo it.
   2026-11-12 car9).
 - **Undo:** PatchPanelObj / PatchSelectPanelObj, CharSkin::drawPatch,
   Band::rbPatches.
+
+## D94
+- **What (2026-11-13, GD05-097, bl05):** the RB face set's clips are
+  relative. Base holds the face's absolute rest; every other clip of the
+  set (the visemes, the exp_* expressions) holds offsets from it [C data:
+  female head_1's Base bone_jaw.pos 0.31 0.91 and .quat a half turn
+  (-0.456 -0.890 0 0, the bind); Oat_hi's .pos 0 0 0.009, .quat
+  (0 0 -0.166 0.986); every viseme's quaternion within 21 degrees of the
+  identity]. The lip servo's pose is Base, then per lit viseme its weight
+  of the offset: positions + w x a, rotations the identity nlerped to a by
+  w, composed on the bone's side (q x d) [I: RB's relative clip blend not
+  read; the other side shut the jaw into the upper lip]. A clip's pose
+  starts from zero, not the identity (Bones::add starts a quaternion at
+  w 1, which turned Base's half-turn jaw and chin 90 degrees). The port had
+  taken the visemes as absolute poses (a - Base): the jaw turned 90 degrees
+  at rest and 180 while singing, the lower lip 7..11 units out: the
+  vocalist's chin and jaw went into the neck and showed the mouth's inside
+  (the owner's "face not rendered, inside visible").
+- **Measured:** bandcheck (inbloom, 60 s; GD05_PREFAB_VOCALS picks the
+  singer): the new "face rest" line, every member's jaw from its bind
+  against the face clips' largest turn from Base (x 1.5, two visemes lit
+  at once): vocals0 180.0 -> 40.8 deg (clips 41.6), vocals2 179.9 -> 23.2
+  (clips 21.8); low lip 7.17 / 11.46 -> 0.62 / 0.50 units.
+  GD05_FACEPOSE_LEGACY=1 fails it.
+- **Undo:** Character::facePoseOf / pollFace (GD05_FACEPOSE_LEGACY=1).
+
+## D95
+- **What (2026-11-13, GD05-097, bl05):** CHAR_COMMON sync_objects'
+  {char_mesh_hide $this} (RB 0x8235BB58 -> 0x8235B760 -> 0x8235AF50) [C]:
+  the flags of every CharMeshHide of the character (its outfits' too) are
+  ORed; each hide's entry (drawable, flags) shows only when none of its
+  flags is among them. 16 CharMeshHides on the disc (female coats and
+  skirts, legs); the port decoded them and never applied them.
+  GD05_BANDLOG logs each. Not the face's cause (D94), done while looking.
+- **Undo:** Character::applyMeshHides (GD05_MESHHIDE_LEGACY=1).
+
+## D96
+- **What (2026-11-13, GD05-098, bl05):** the song's first shot as
+  worldbase.dta's game start [C data]: the mode's intro_category
+  (modes.dta: qp_solo / tour_solo / practice INTRO_VENUE, the band's
+  coop_intro_category, defaults INTRO); INTRO_VENUE / INTRO_QUICK pick a
+  shot of that category (find_shot); INTRO runs construct_active_shot: an
+  INTRO shot with the active player's focus flag (guitar_focus,
+  bass_focus, drums_focus, vocal_focus) [I: the chain's next_shot not
+  followed; one player]. The port drew any INTRO shot: a close-up of a
+  random member (a guitar player got coop_intro_bass.shot).
+- **Measured:** GD05_SHOTLOG on inbloom (guitar, its venue): before
+  coop_intro_bass.shot, after "intro category INTRO" ->
+  coop_intro_guitarist.shot.
+  The quick play solo intro (INTRO_VENUE) runs 6.7 s where the port's
+  ran 0.7: rb_od_* and rb_look now wait for the song clock (walk check
+  song_clock_running) then as long as before.
+- **Undo:** App::rbIntroShot (GD05_INTRO_LEGACY=1).

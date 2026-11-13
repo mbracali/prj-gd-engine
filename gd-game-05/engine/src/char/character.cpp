@@ -114,6 +114,7 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
     for (const auto& [loader, file] : outfits)
         if (!file.empty() && (loader.rfind('+', 0) == 0 || d.get(loader))) loadOutfit(data, file);
     skeleton_.build(d);
+    applyMeshHides();
     // LOD and shadow groups.
     for (const auto& l : own_->lods) lodGroups_.push_back(d.get(l.group) ? d.get(l.group)->as<scene::Group>() : nullptr);
     if (!own_->shadow.empty())
@@ -688,6 +689,34 @@ void Character::poll(RigContext ctx) {
     rig_->poll(ctx);
 }
 
+// CHAR_COMMON sync_objects' {char_mesh_hide $this} (RB 0x8235BB58 ->
+// 0x8235B760) [C]: the flags of every CharMeshHide in the character (its
+// outfits' too) ORed; then each hide's entry (drawable, flags) shows only
+// when none of its flags is among them (0x8235AF50: showing = (flags & all)
+// == 0); 16 on the disc (coats, skirts, leggings). GD05_MESHHIDE_LEGACY=1:
+// not applied (the port before GD05-097).
+void Character::applyMeshHides() {
+    static const bool legacy = SDL_getenv("GD05_MESHHIDE_LEGACY") != nullptr;
+    if (legacy) return;
+    std::vector<const scene::CharMeshHide*> hides;
+    uint32_t all = 0;
+    forEachObject([&](scene::Object& o) {
+        if (const auto* h = o.as<scene::CharMeshHide>()) hides.push_back(h), all |= h->flags;
+    });
+    static const bool log = SDL_getenv("GD05_BANDLOG") != nullptr;
+    meshHidden_ = 0;
+    for (const scene::CharMeshHide* h : hides)
+        for (const auto& [name, flags] : h->hides) {
+            scene::Object* o = h->dir ? h->dir->resolve(name) : nullptr;
+            if (!o) o = milo_->root().get(name);
+            auto* draw = const_cast<scene::Draw*>(gfx::drawOf(o));
+            if (!draw) continue;
+            draw->showing = (flags & all) == 0;
+            if (!draw->showing) ++meshHidden_;
+            if (log) SDL_Log("char %s: %s hides %s (flags %#x of %#x): %s", name_.c_str(), h->name.c_str(), name.c_str(), flags, all, draw->showing ? "shown" : "hidden");
+        }
+}
+
 void Character::setRbFace(ClipSet* set, const std::vector<std::string>& names) {
     faceSet_ = set;
     faceBase_ = set ? set->clip("Base") : nullptr;
@@ -706,16 +735,54 @@ const Bones& Character::facePoseOf(const scene::CharClipSamples& clip) {
     if (!b) {
         b = std::make_unique<Bones>();
         for (const auto& c : faceBones_.channels()) b->add(c.name);
+        // The clip's own values: Bones::add starts a quaternion at the
+        // identity (w 1), so adding the clip on top of it turned every face
+        // bone whose rest is a half turn (w 0: bone_jaw, bone_chin) 90 degrees
+        // off (GD05-097: the jaw swung into the neck, the face torn open).
+        // GD05_FACEPOSE_LEGACY=1: added onto the identity as before.
+        static const bool legacy = SDL_getenv("GD05_FACEPOSE_LEGACY") != nullptr;
+        if (!legacy) b->scaleDown(clip, 0);
         b->scaleAdd(clip, 1, clip.startFrame, 0);
     }
     return *b;
 }
 
+float Character::faceRestSpread(const std::string& channel) {
+    if (!faceBase_) return -1;
+    const Bones& base = facePoseOf(*faceBase_);
+    const int i = base.find(channel);
+    if (i < 0 || base.channels()[size_t(i)].type != scene::CharBonesSamples::kQuat) return -1;
+    auto unit = [](const float* v, float* q) {
+        const float l = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]);
+        for (int k = 0; k < 4; ++k) q[k] = l > 1e-12f ? v[k] / l : (k == 3 ? 1.0f : 0.0f);
+    };
+    float most = 0;
+    for (const scene::CharClipSamples* c : faceSet_->clips()) {
+        if (!c || c == faceBase_) continue;
+        const Bones& p = facePoseOf(*c);
+        if (p.channels()[size_t(i)].weight <= 0) continue;
+        float q[4];
+        unit(p.channels()[size_t(i)].v, q);  // an offset from Base
+        most = std::max(most, 2 * std::acos(std::min(1.0f, std::fabs(q[3]))) * 57.29578f);
+    }
+    return most;
+}
+
 // FaceFxLipSyncServo Poll 0x8218E7E0 / 0x821A7978.
 void Character::pollFace(const RigContext& ctx) {
     if (lip_ && visible && faceBase_) {
-        // Rock Band: Base plus the lit visemes' offsets from it [I: the delta
-        // blend of RB's relative clips; quaternions as q = (qi qb^-1)^w q].
+        // Rock Band: Base plus the lit visemes. Base is the face's absolute
+        // rest; every other clip of the set (the visemes, the exp_*
+        // expressions) holds offsets from it [C data: their bone_jaw.pos
+        // 0..0.25 against Base's 0.31 0.91, their quaternions within 20
+        // degrees of the identity, Base's a half turn]. Each lit viseme adds
+        // its weight of its offset: positions w x a, rotations the identity
+        // nlerped to a by w, composed onto the bone's (GD05-097: the port took
+        // them as absolute poses, a - Base, which threw the lips 7..11 units
+        // and turned the jaw 180 degrees while singing; GD05_FACEPOSE_LEGACY=1
+        // keeps that) [I: RB's relative clip blend not read; composed on the
+        // bone's side, the jaw opens on the open vowels].
+        static const bool facePoseLegacy = SDL_getenv("GD05_FACEPOSE_LEGACY") != nullptr;
         const float servoWeight = faceServo_ ? rig_->weightOf(faceServo_->name) : 1.0f;
         std::vector<float> values;
         for (const auto& [b, axis] : faceEntries_) values.push_back(b >= 0 ? facefx::eyeAngle(skeleton_.local(b).rot.data(), axis) : 0.0f);
@@ -727,6 +794,12 @@ void Character::pollFace(const RigContext& ctx) {
             std::copy(std::begin(base.channels()[i].v), std::end(base.channels()[i].v), out[i].v);
             out[i].weight = base.channels()[i].weight;
         }
+        auto qmul = [](const float* x, const float* y, float* r) {
+            r[0] = x[3] * y[0] + x[0] * y[3] + x[1] * y[2] - x[2] * y[1];
+            r[1] = x[3] * y[1] - x[0] * y[2] + x[1] * y[3] + x[2] * y[0];
+            r[2] = x[3] * y[2] + x[0] * y[1] - x[1] * y[0] + x[2] * y[3];
+            r[3] = x[3] * y[3] - x[0] * y[0] - x[1] * y[1] - x[2] * y[2];
+        };
         for (const auto& f : pose.frames) {
             if (f.frame < 0 || size_t(f.frame) >= faceClips_.size() || !faceClips_[size_t(f.frame)]) continue;
             const Bones& vis = facePoseOf(*faceClips_[size_t(f.frame)]);
@@ -736,25 +809,24 @@ void Character::pollFace(const RigContext& ctx) {
                 const auto& b = base.channels()[i];
                 if (a.weight <= 0 || b.weight <= 0) continue;
                 if (out[i].type == scene::CharBonesSamples::kQuat) {
-                    // d = qa * conj(qb), nlerped from identity by w, applied first.
-                    const float* qa = a.v;
-                    const float qb[4] = {-b.v[0], -b.v[1], -b.v[2], b.v[3]};
-                    float d[4] = {qa[3] * qb[0] + qa[0] * qb[3] + qa[1] * qb[2] - qa[2] * qb[1],
-                                  qa[3] * qb[1] - qa[0] * qb[2] + qa[1] * qb[3] + qa[2] * qb[0],
-                                  qa[3] * qb[2] + qa[0] * qb[1] - qa[1] * qb[0] + qa[2] * qb[3],
-                                  qa[3] * qb[3] - qa[0] * qb[0] - qa[1] * qb[1] - qa[2] * qb[2]};
+                    float d[4] = {a.v[0], a.v[1], a.v[2], a.v[3]};
+                    if (facePoseLegacy) {
+                        const float qb[4] = {-b.v[0], -b.v[1], -b.v[2], b.v[3]};
+                        qmul(a.v, qb, d);
+                    }
                     if (d[3] < 0) d[0] = -d[0], d[1] = -d[1], d[2] = -d[2], d[3] = -d[3];
                     float dw[4] = {d[0] * w, d[1] * w, d[2] * w, 1 - w + d[3] * w};
                     const float n = std::sqrt(dw[0] * dw[0] + dw[1] * dw[1] + dw[2] * dw[2] + dw[3] * dw[3]);
                     if (n > 0) dw[0] /= n, dw[1] /= n, dw[2] /= n, dw[3] /= n;
                     float* q = out[i].v;
-                    const float r[4] = {dw[3] * q[0] + dw[0] * q[3] + dw[1] * q[2] - dw[2] * q[1],
-                                        dw[3] * q[1] - dw[0] * q[2] + dw[1] * q[3] + dw[2] * q[0],
-                                        dw[3] * q[2] + dw[0] * q[1] - dw[1] * q[0] + dw[2] * q[3],
-                                        dw[3] * q[3] - dw[0] * q[0] - dw[1] * q[1] - dw[2] * q[2]};
+                    float r[4];
+                    if (facePoseLegacy) qmul(dw, q, r);
+                    else qmul(q, dw, r);  // in the bone's own frame (the other side shut the jaw into the lip)
                     std::copy(r, r + 4, q);
-                } else {
+                } else if (facePoseLegacy) {
                     for (int k = 0; k < 4; ++k) out[i].v[k] += w * (a.v[k] - b.v[k]);
+                } else {
+                    for (int k = 0; k < 3; ++k) out[i].v[k] += w * a.v[k];
                 }
             }
         }

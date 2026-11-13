@@ -136,7 +136,11 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
             if (c.isList() && startsWith(text(&c, 0), pool.c_str())) cands.push_back(&c);
         }
         if (cands.empty()) continue;
-        const std::string want = config_.rbPrefab.count(instrument) ? config_.rbPrefab.at(instrument) : std::string();
+        std::string want = config_.rbPrefab.count(instrument) ? config_.rbPrefab.at(instrument) : std::string();
+        // Development aid: GD05_PREFAB_<INSTRUMENT>=<premade> (GD05_PREFAB_VOCALS=vocals2) picks the premade.
+        std::string envName = "GD05_PREFAB_" + instrument;
+        for (char& ch : envName) ch = char(std::toupper(uint8_t(ch)));
+        if (const char* e = SDL_getenv(envName.c_str()); e && *e) want = e;
         const DataNode* pre = cands[(h + (instrument == "bass" ? 7u : 0u)) % cands.size()];
         for (const DataNode* c : cands)
             if (!want.empty() && text(c, 0) == want) pre = c;
@@ -874,6 +878,9 @@ struct Band::RbCheck {
     std::map<std::string, float> channelWorst;               // |value| / bound
     std::map<std::string, std::string> channelWorstName;
     std::map<std::string, int> channelFrames;                // frames with a channel past 1.01
+    // The face's rest (GD05-097): each member's jaw from its bind (degrees),
+    // the most over the run.
+    std::map<std::string, float> jawWorst;
 };
 
 bool Band::rbLegacy() {
@@ -982,6 +989,8 @@ void Band::rbCheckFrame() {
             if (r > 1.01f) over = true;
         }
         if (over) ++k.channelFrames[m.slot];
+        if (const int jaw = sk.find("bone_jaw.mesh"); jaw >= 0 && c.rbFace())
+            k.jawWorst[m.slot] = std::max(k.jawWorst[m.slot], angleBetween(sk.local(jaw).rot, sk.bind(jaw).rot));
         auto at = [&](const char* n, std::array<float, 3>& out) {
             const int i = sk.find(n);
             if (i < 0) return false;
@@ -1048,6 +1057,15 @@ void Band::rbCheckReport() {
                      k.channelWorst.count(m.slot) ? double(k.channelWorst.at(m.slot)) : 0.0,
                      k.channelWorstName.count(m.slot) ? k.channelWorstName.at(m.slot).c_str() : "-", cf, k.frames);
         line(cf == 0, buf);
+        // The face's rest (GD05-097): the jaw (its bind is the face set's
+        // Base) never turns further from it than the face set's clips reach.
+        if (k.jawWorst.count(m.slot)) {
+            const float spread = m.character->faceRestSpread("bone_jaw.quat");
+            SDL_snprintf(buf, sizeof buf, "%s face rest: jaw up to %.1f deg from bind, the face clips reach %.1f from Base", m.slot.c_str(),
+                         double(k.jawWorst.at(m.slot)), double(spread));
+            // Two visemes lit at once (the lip sync's blends) may add up: 1.5 x.
+            line(spread >= 0 && k.jawWorst.at(m.slot) <= spread * 1.5f, buf);
+        }
         if (m.type == "rb_guitar" || m.type == "rb_bass") {
             const auto fret = k.reachFret.count(m.slot) ? k.reachFret.at(m.slot) : std::vector<float>{};
             const auto pick = k.reachPick.count(m.slot) ? k.reachPick.at(m.slot) : std::vector<float>{};

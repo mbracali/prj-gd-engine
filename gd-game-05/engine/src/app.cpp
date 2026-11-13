@@ -76,6 +76,7 @@
 #include "render/char_skin.h"
 #include "ui/rb_meta.h"
 #include "ui/ui_manager.h"
+#include "ui/natives.h"
 #include "video/wmv_player.h"
 
 namespace {
@@ -801,6 +802,7 @@ private:
     float rbNextCamMs_ = -1e9f;
     std::set<const scene::CamShot*> rbShotUsed_;
     const scene::CamShot* rbShot(const std::string& category, const std::function<bool(const scene::CamShot&)>& ok = {});
+    const scene::CamShot* rbIntroShot();
     void rbShots(float t);
     // The band on stage (M9, game/band.h): made when the song begins in the venue.
     std::unique_ptr<Band> band_;
@@ -1546,10 +1548,15 @@ void App::beginSong() {
     // 30 a second, 0x82226630) [C].
     double startMs = kTrackExtendMs;
     if (!fastIntro_ && director_) {
-        const scene::CamShot* shot = director_->drawShot({encoreFx_ ? "INTRO_ENCORE" : "INTRO"});
-        // RB: the shot of the category itself (rbShot) [I].
-        if (!shot && !rbShots_.empty())
-            if ((shot = rbShot("INTRO"))) director_->forceShot(shot);
+        const scene::CamShot* shot = nullptr;
+        if (!rbShots_.empty() && !SDL_getenv("GD05_INTRO_LEGACY")) {
+            if ((shot = rbIntroShot())) director_->forceShot(shot);
+        } else {
+            shot = director_->drawShot({encoreFx_ ? "INTRO_ENCORE" : "INTRO"});
+            // RB: the shot of the category itself (rbShot) [I].
+            if (!shot && !rbShots_.empty())
+                if ((shot = rbShot("INTRO"))) director_->forceShot(shot);
+        }
         if (shot) startMs = std::min(-double(shot->lengthFrames()) / 30.0 * 1000.0, 0.0);
     }
     rbVenueNote_ = rbVenueEvent_ = 0;
@@ -3595,6 +3602,33 @@ const scene::CamShot* App::rbShot(const std::string& category, const std::functi
         }
     rbShotUsed_.insert(pick);
     return pick;
+}
+
+// The song's first shot (worldbase.dta's WORLD_OBJECT_BASE game_start)
+// [C data]: the mode's intro_category (modes.dta: qp_solo, tour_solo,
+// practice INTRO_VENUE; the band's coop_intro_category; defaults INTRO);
+// INTRO_VENUE / INTRO_QUICK: find_shot of that category; INTRO:
+// construct_active_shot, a shot of INTRO with each active player's focus
+// (bass_focus, drums_focus, guitar_focus, vocal_focus), the first played
+// first [I: the chain's next shots (next_shot) are not followed]. GD05-098:
+// the port drew any INTRO shot, a close-up of a random member.
+// GD05_INTRO_LEGACY=1: as before.
+const scene::CamShot* App::rbIntroShot() {
+    std::string cat = ui_ ? gameCfgValue(*ui_, "intro_category").str() : std::string();
+    if (cat.empty() || cat == "0") cat = "INTRO";
+    if (SDL_getenv("GD05_SHOTLOG")) SDL_Log("intro category %s (mode %s)", cat.c_str(), ui_ ? ui_->session().mode.c_str() : "-");
+    const scene::CamShot* shot = nullptr;
+    if (cat == "INTRO") {
+        auto focus = [](const std::string& part) {
+            return part == "bass" ? "bass_focus" : part == "drum" ? "drums_focus" : part == "vocals" ? "vocal_focus" : "guitar_focus";
+        };
+        const std::string f = focus(parts_[0]);
+        shot = rbShot("INTRO", [&](const scene::CamShot& c) { return c.flag(f) == "TRUE" || c.flag(f) == "1"; });
+    } else {
+        shot = rbShot(cat);
+    }
+    if (!shot) shot = rbShot("INTRO");
+    return shot;
 }
 
 // The VENUE track's camera (worldbase.dta pick_new_shot, midi_parsers.dta's
