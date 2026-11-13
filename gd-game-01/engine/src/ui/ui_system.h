@@ -108,6 +108,11 @@ public:
     void sendPanel(const std::string& panel, const std::string& msg, std::vector<Value> args = {});
 
     UiSystem(Renderer& renderer, const GameData& data, Hooks hooks);
+    // The held direction a release ends (#100, GD01-320): the releasing
+    // player's; else the other player's, when the device changed player
+    // between the press and the release (Gamepads > Bind to), which kept
+    // repeating it forever. -1: none. held0 / held1: each player's held button.
+    static int releasedHeldSlot(int held0, int held1, int button, int player);
     ~UiSystem();
 
     void gotoScreen(const std::string& screen);

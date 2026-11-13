@@ -74,6 +74,15 @@ public:
     int createTexture(const Image& image, bool repeat = false);
     // Replaces a texture's pixels (same or new size; no mipmaps), for movies.
     void updateTexture(int texture, const Image& image);
+    // Frees a texture / mesh made by createTexture / createMesh (#100,
+    // GD01-321: they lived until the game quit). The local backend only (the
+    // core backends keep theirs, as before); nothing once shutdown ran; a
+    // handle freed twice or 0 does nothing. The handle is not reused.
+    void deleteTexture(int texture);
+    void deleteMesh(int mesh);
+    // The local backend's live textures and meshes (the shader test's check).
+    int liveTextures() const;
+    int liveMeshes() const;
 
     // Immediate drawing. `mvp` is column-major; nullptr = the 2D screen projection.
     void draw(const Vertex* v, size_t count, int texture, Blend blend, const float* mvp = nullptr,

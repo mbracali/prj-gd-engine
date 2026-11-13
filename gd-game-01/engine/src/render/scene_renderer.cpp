@@ -242,6 +242,16 @@ Renderer::RenderState SceneRenderer::liveState(const DrawMesh& dm) {
     return st;
 }
 
+SceneRenderer::~SceneRenderer() {
+    for (const auto& [key, id] : textures_) renderer_.deleteTexture(id);
+    for (const auto& [key, dm] : meshes_) {
+        renderer_.deleteMesh(dm.mesh);
+        for (const DrawMesh::Pass& p : dm.passes) renderer_.deleteMesh(p.mesh);  // the same as dm.mesh unless texgen made its own
+    }
+    for (const auto& [name, mesh] : particleMeshes_) renderer_.deleteMesh(mesh);
+    for (int mesh : dynamic_) renderer_.deleteMesh(mesh);
+}
+
 void SceneRenderer::replaceTexture(const std::string& tex, const Image& image) {
     if (image.width <= 0) return;
     std::map<int, int> swap;  // old handle -> new

@@ -2708,8 +2708,17 @@ void UiSystem::buttonDown(int button, bool guitar, int player) {
     route("button_down", {{"button", Value::integer(button)}, {"player_num", Value::integer(player)}});
 }
 
+int UiSystem::releasedHeldSlot(int held0, int held1, int button, int player) {
+    const int p = player & 1;
+    const int mine = p ? held1 : held0, other = p ? held0 : held1;
+    if (button < 0) return -1;
+    if (mine == button) return p;
+    if (other == button) return p ^ 1;
+    return -1;
+}
+
 void UiSystem::buttonUp(int button, int player) {
-    if (held_[size_t(player & 1)].button == button) held_[size_t(player & 1)] = {};
+    if (const int s = releasedHeldSlot(held_[0].button, held_[1].button, button, player); s >= 0) held_[size_t(s)] = {};
     if (phase_ != Phase::Idle) return;
     route("button_up", {{"button", Value::integer(button)}, {"player_num", Value::integer(player)}});
 }

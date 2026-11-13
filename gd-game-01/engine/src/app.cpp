@@ -339,6 +339,9 @@ void rememberPath(const std::string& path) {
 class App {
 public:
     explicit App(const Options& o) : opt_(o), difficulty_(std::clamp(o.difficulty, 0, 3)) {}
+    // track2_ is declared before renderer_, so it would be destroyed after
+    // it: its SceneRenderer frees GPU objects through renderer_ (#100).
+    ~App() { track2_.reset(); }
     int run(int* restartSlot = nullptr);  // restartSlot: set (the profile slot) when Restart Now ends the run
 
 private:
@@ -2850,6 +2853,35 @@ std::string startupAudioBackend() {
 }
 
 namespace {
+// The script's {mod a b} as Harmonix's Mod (#100, GD01-319): wrapped into
+// [0, b); the store's {mod {+ itemIdx -1} n} on the first item gives n - 1.
+int scriptModSelfTest() {
+    Interp in;
+    int failures = 0;
+    const struct { const char* code; float want; bool real; } cases[] = {
+        {"{mod -1 5}", 4, false}, {"{mod {+ 0 -1} 7}", 6, false}, {"{mod 7 5}", 2, false}, {"{mod -6 5}", 4, false},
+        {"{mod -5 5}", 0, false}, {"{mod 0 5}", 0, false}, {"{mod 5.5 2}", 1.5f, true}, {"{mod -0.5 2}", 1.5f, true},
+    };
+    for (const auto& c : cases) {
+        const DataNode tree = parseDtaText(c.code);
+        const Value v = tree.children.empty() ? Value() : in.eval(tree.children[0]);
+        const bool ok = std::fabs(v.number() - c.want) < 1e-4f && (v.type == Value::Type::Float) == c.real;
+        if (!ok) std::printf("  FAIL script mod: %s = %g, want %g\n", c.code, double(v.number()), double(c.want)), ++failures;
+    }
+    std::printf("script mod: %d of %zu cases\n", int(std::size(cases)) - failures, std::size(cases));
+    // The menus' held direction (#100, GD01-320): a release ends the
+    // releasing player's, else the other's (Bind to moved the device).
+    const int U = UiSystem::Up, D = UiSystem::Down;
+    const struct { int h0, h1, button, player, want; } rel[] = {
+        {U, -1, U, 0, 0}, {-1, U, U, 1, 1}, {U, -1, U, 1, 0}, {-1, D, D, 0, 1}, {U, D, D, 1, 1}, {U, U, U, 1, 1}, {U, -1, D, 0, -1}, {-1, -1, U, 0, -1},
+    };
+    int relFails = 0;
+    for (const auto& r : rel)
+        if (UiSystem::releasedHeldSlot(r.h0, r.h1, r.button, r.player) != r.want) ++relFails;
+    std::printf("menu held release: %d of %zu cases\n", int(std::size(rel)) - relFails, std::size(rel));
+    return failures + relFails;
+}
+
 // The universal controls' rules (universal_mechanisms.md 1.1.4 / 1.2.1),
 // on the keyboard's default bindings: no double inputs where two controls
 // share a key, none missed, the keyboard's Start selects in the menus, and
@@ -3082,6 +3114,7 @@ int easyChordsSelfTest(const std::vector<SongInfo>& songs, GameData& data, const
 int runSelfTest(const Options& options) {
     std::string path = options.dataPath.empty() ? loadRememberedPath() : options.dataPath;
     if (inputSelfTest()) return 1;
+    if (scriptModSelfTest()) return 1;
     try {
         GameData data(path);
         Rules rules = loadRules(data);
@@ -3154,10 +3187,35 @@ int runShaderTest() {
     for (const std::string& name : failed) std::printf("  FAILED: %s (the compiler's message is above)\n", name.c_str());
     if (failed.empty()) std::printf("all %d shader programs compiled\n", programs);
     else std::printf("%d of %d shader programs failed\n", int(failed.size()), programs);
+    // GPU objects are freed (#100, GD01-321): made, freed (twice: nothing
+    // more), drawn freed (skipped), back to the count before.
+    int gpuFails = 0;
+    if (renderer.backend() == "local") {
+        const int t0 = renderer.liveTextures(), m0 = renderer.liveMeshes();
+        Image img;
+        img.width = img.height = 4, img.rgba.assign(4 * 4 * 4, 255);
+        const std::vector<Vertex> quad{{0, 0, 0, 0, 0, 255, 255, 255, 255}, {1, 0, 0, 1, 0, 255, 255, 255, 255}, {1, 1, 0, 1, 1, 255, 255, 255, 255}};
+        const std::vector<uint32_t> idx{0, 1, 2};
+        std::vector<int> ts, ms;
+        for (int k = 0; k < 8; ++k) ts.push_back(renderer.createTexture(img)), ms.push_back(renderer.createMesh(quad, idx));
+        const bool made = renderer.liveTextures() == t0 + 8 && renderer.liveMeshes() == m0 + 8;
+        for (int k = 0; k < 8; ++k) renderer.deleteTexture(ts[size_t(k)]), renderer.deleteMesh(ms[size_t(k)]);
+        for (int k = 0; k < 8; ++k) renderer.deleteTexture(ts[size_t(k)]), renderer.deleteMesh(ms[size_t(k)]);
+        renderer.deleteTexture(0), renderer.deleteMesh(0);
+        Renderer::RenderState st;
+        Mat4 id;
+        renderer.drawMesh(ms[0], id.m.data(), st);
+        renderer.updateMesh(ms[0], quad, idx);
+        const bool freed = renderer.liveTextures() == t0 && renderer.liveMeshes() == m0;
+        gpuFails = !made + !freed;
+        std::printf("gpu objects: %d / %d live before, +8 / +8 made: %s, freed: %s (%d / %d)\n", t0, m0, made ? "yes" : "NO",
+                    freed ? "yes" : "NO", renderer.liveTextures(), renderer.liveMeshes());
+    }
     renderer.shutdown();
+    renderer.deleteTexture(1), renderer.deleteMesh(1);  // after shutdown: nothing
     SDL_DestroyWindow(window);
     SDL_Quit();
-    return failed.empty() ? 0 : 1;
+    return failed.empty() && !gpuFails ? 0 : 1;
 }
 
 int runSceneTest(const Options& options) {
