@@ -219,6 +219,7 @@ shipped in the universal launcher.
 | GDALL-046 | Enhancement | ❌ | #96: explore the songs' stems and sound effects |  | Owner 11-13 (BUGLIST_20261113.md) |
 | GDALL-047 | Enhancement | ❌ | #95: Explore Models: full screen, shortcuts, keep the animation across characters, transparent screenshots |  | Owner 11-13 (BUGLIST_20261113.md) |
 | GDALL-048 | Enhancement | ❌ | #94: extra cheats: forced multiplier, Star Power always full, hyperspeed in GH1 |  | Owner 11-13 (BUGLIST_20261113.md) |
+| GDALL-049 | Enhancement | ❌ | Faster test suite (owner 11-13: a 30-40 min gd05 gate is too much): a quick tier per game under ~5 min (selftest + the walks that cover the files changed, run in parallel, no full songs where a seek works), the full gate only before a release; songs entered at a seek point; one script that picks the walks from the changed files |  | Owner 11-13 |
 
 ## gd-engine-core
 
