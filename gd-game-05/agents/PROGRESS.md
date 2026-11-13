@@ -1699,3 +1699,21 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   forced shots are measured; open, next step: follow BandCamShot
   start_shot's lighting_override / postprocess for forced shots and check
   against the movies).
+
+### Follow-up round (bl05, D97)
+- The intro's lighting no longer stays all song: RB's VENUE track text
+  ([verse] / [chorus] one_bar_to, [lighting (x)]) now drives the
+  lighting (it only came from the EVENTS track); PS3-only presets left out.
+- rb_od_pad OK (and od_guitar, od_keys, od_vocals). rb_stutter fails with
+  the fix10 binary too on this machine (song_begin spike 176 > 150):
+  pre-existing, not this branch.
+- Gate (4 at a time): 58 walks OK + the 5 walks that failed on an
+  unhandled `bonusfx` world message re-run OK after it was dropped
+  (quickplay_vocals, rb_highway, rb_keys_play, rb_keys_rebind,
+  rb_od_vocals); 5 of 5 tests; bandcheck 4 of 4 (legacy FAILED as it
+  should). Failing: rb_stutter (pre-existing), rb_look x4: small_club_02
+  grain (as before), big_club_03 luma 50.0 (48.9 before), arena_04 41.5
+  (64.1), theater_02 31.2 (45.3): the songs' own lighting cues are
+  darker than the preset that used to stay stuck; GD05_INTRO_LEGACY=1
+  GD05_VENUE_TEXT_LEGACY=1 gives the old reading (arena_04 58.8). Open:
+  the venues' luma against the movies (GD05-069 / 095).

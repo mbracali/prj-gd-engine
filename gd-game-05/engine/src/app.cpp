@@ -3628,6 +3628,9 @@ const scene::CamShot* App::rbIntroShot() {
         shot = rbShot(cat);
     }
     if (!shot) shot = rbShot("INTRO");
+    if (shot && SDL_getenv("GD05_SHOTLOG"))
+        SDL_Log("intro shot %s: postprocess '%s' lighting_override '%s' preset '%s' category '%s'", shot->name.c_str(), shot->flag("postprocess").c_str(),
+                shot->flag("lighting_override").c_str(), shot->flag("lighting_preset").c_str(), shot->flag("lighting_category").c_str());
     return shot;
 }
 

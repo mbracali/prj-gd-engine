@@ -1584,3 +1584,28 @@ pattern). Each says what, why and how to undo it.
   ran 0.7: rb_od_* and rb_look now wait for the song clock (walk check
   song_clock_running) then as long as before.
 - **Undo:** App::rbIntroShot (GD05_INTRO_LEGACY=1).
+
+## D97
+- **What (2026-11-13, GD05-098, bl05):** RB's VENUE track text reaches
+  the world as midi_parsers.dta's parsers send it [C data]:
+  world_event_parser [verse] / [chorus] on time ([bonusfx] /
+  [bonusfx_optional] go to WorldDir natives the port lacks: not sent); world_lighting_one_bar_to (start_offset -4) one_bar_to verse /
+  chorus (worldbase.dta: set_lighting (VERSE VERSECHORUS) / (CHORUS
+  VERSECHORUS)) and [lighting (x)] as set_lighting () x, a bar early. The
+  port read sections and lighting from the EVENTS track only, so the
+  lighting category stayed whatever was set first: the load's CHORUS
+  before D96, the intro shot's INTRO_VENUE (its lighting_override) after,
+  which darkened rb_look (arena_04 luma 64 -> 31). Light presets with
+  platform_only 4 are left out as the PS3-only shots are
+  (coop_intro_venue_ps3.pst was picked beside coop_intro_venue.pst,
+  platform_only 2) [I: RB's filter not read].
+- **Measured (rb_look arena_04, one run each, movies 69.3):** both
+  switches legacy 58.8; intro legacy + VENUE text 46.0; D96 + VENUE text
+  39.9; D96 without VENUE text 31.1. The songs' own lighting (blackouts,
+  flares, silhouettes) is darker than the stuck CHORUS preset the old
+  pass measured; the venues' luma against the movies stays open
+  (GD05-069 / 095). Gate rb_look (fix10 -> now): small_club_02 64.7 ->
+  61.6 (fails on grain, as before), big_club_03 48.9 -> 50.0, arena_04
+  64.1 -> 41.5, theater_02 45.3 -> 31.2 (luma).
+- **Undo:** WorldDriver::poll's VENUE text (GD05_VENUE_TEXT_LEGACY=1),
+  LightPresets::rebuild's platform filter.
