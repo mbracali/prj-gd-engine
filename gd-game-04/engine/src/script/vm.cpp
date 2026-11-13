@@ -1391,7 +1391,10 @@ bool Vm::step(ScriptRun& run, int budget) {
         while (ex.i < t.size() && !isEnd(t[ex.i].op)) ++ex.i;
         fr.pc = ex.i < fr.pc + 1 ? fr.pc + 1 : ex.i;
     }
-    return true;  // out of budget: treat as waiting a frame
+    // Out of budget: treat as waiting a frame. A loop that never waits costs
+    // the whole budget every frame (GD04-121): logged once per script.
+    logOnce("script " + qbkey::name(run.name) + " ran out of its instruction budget (a loop without a wait)");
+    return true;
 }
 
 }  // namespace qs

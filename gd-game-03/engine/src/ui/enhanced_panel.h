@@ -54,5 +54,12 @@ std::vector<std::pair<std::string, std::string>> enhancedPreset(const std::strin
 // dropped. Unknown values are left for the
 // validation (they fall back to the default).
 void migrateEnhanced(Json& e);
+// enhanced.json's settings_version (written on every save): 2 = Vulkan became
+// the default graphics backend on Windows / Linux (GDALL-050); migrateEnhanced
+// turns an older file's "local" (the old default) into the new default once.
+constexpr int kEnhancedVersion = 2;
+// The graphics backend a fresh start uses: Vulkan on Windows / Linux, local
+// on macOS / Android (GDALL-050).
+std::string defaultGraphicsBackend();
 
 }  // namespace ui

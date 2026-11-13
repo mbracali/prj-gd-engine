@@ -80,8 +80,10 @@ bool transition(const scene::CharClipSamples& from, float frame, const scene::Ch
 
 // ---- ClipSet ---------------------------------------------------------------
 
-ClipSet::ClipSet(scene::Milo& milo) : milo_(milo), path_(milo.path()) {
-    const scene::Directory& d = milo.root();
+ClipSet::ClipSet(scene::Milo& milo) : ClipSet(milo.root(), milo.path()) {}
+
+ClipSet::ClipSet(scene::Directory& dir, std::string path) : dir_(dir), path_(std::move(path)) {
+    const scene::Directory& d = dir_;
     for (const auto& o : d.objects) {
         if (auto* c = o->as<scene::CharClipSamples>()) {
             clips_.push_back(c);
@@ -235,7 +237,7 @@ void ClipSet::listChannels(Bones& bones, bool delta) const {
     // The skeleton: CharBone entries ("bone_x.trans": position, scale,
     // rotation and delta types), else every channel the clips carry.
     bool any = false;
-    for (const auto& o : milo_.root().objects) {
+    for (const auto& o : dir_.objects) {
         auto* b = o->as<scene::CharBone>();
         if (!b) continue;
         any = true;
@@ -522,7 +524,20 @@ void ClipDriver::poll(double beat, float dBeats, float dSeconds, Bones* bones) {
     }
     if (!bones) return;
     const float w = weight ? weight() : 1.0f;
-    if (!skipScaleDown) bones->scaleDown(*chain_.back().clip, 1 - total * w);
+    // RB 0x82313988: kApplyBlend only scales down (the newest clip, slot 6
+    // RB 0x8234EB08) before the chain's ScaleAdd (0x823613C8); kApplyAdd adds
+    // the chain as it is; kApplyRotateTo composes each node (0x82361490).
+    if (apply == kApplyRotateTo) {
+        float left = w;
+        for (size_t k = chain_.size(); k-- > 0 && left != 0;) {
+            Node& n = chain_[k];
+            n.blendWeight = eased(n.weight) * left;
+            bones->rotateTo(*n.clip, n.blendWeight, n.frame);
+            left -= n.blendWeight;
+        }
+        return;
+    }
+    if (apply == kApplyBlend) bones->scaleDown(*chain_.back().clip, 1 - total * w);
     // 0x821A4988: newest first, each its eased share of what is left.
     float left = w;
     for (size_t k = chain_.size(); k-- > 0 && left != 0;) {

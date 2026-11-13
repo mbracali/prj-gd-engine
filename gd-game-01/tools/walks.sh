@@ -117,17 +117,55 @@ walk_song_end() {
 # then Credits, skipped with green (1.1.1).
 walk_mouse() {
   needs_band
-  run mouse 24000 "3000:click640_554,5500:click520_376,8000:click200_190,8500:click200_252,9000:click480_455,9300:keyUp,9400:keyUp,9500:keyUp,9700:keyReturn,10500:click150_606,13000:click520_376,15500:click150_606,18000:click600_564,21000:green" GD01_SKIP_BOOT=1
+  run mouse 24000 "3000:click640_554,5500:click520_376,8000:click200_190,8500:click200_252,9000:click480_455,9300:keyUp,9400:keyUp,9500:keyUp,9700:keyReturn,10500:click490_687,13000:click520_376,15500:click490_687,18000:click600_564,21000:green" GD01_SKIP_BOOT=1
   local backs
   backs=$(grep -c "goto_screen options" "$work/mouse.log")
   result mouse "$(( $(json "$(save mouse)/enhanced.json" "d['internal_res'] == '720'") && backs >= 4 && $(has mouse "goto_screen credits") ))" \
-    "clicks through Options and Enhanced, a dropdown, < Back twice, credits skipped"
+    "clicks through Options and Enhanced, a dropdown, the help bar's BACK twice, credits skipped"
   # The main menu's GAMEPADS pill opens GAMEPADS on a click (#51).
   run mouse_gamepads 6000 "3000:hover560_685,3500:click560_685" GD01_SKIP_BOOT=1
   result mouse_gamepads "$(has mouse_gamepads "goto_screen gamepads")" "a click on the help bar's GAMEPADS opens GAMEPADS"
   walk_mouse_highlight
   walk_mouse_song_hover
+  walk_mouse_song_gaps
+  walk_mouse_away
+  walk_mouse_character
   walk_enhanced_one_back
+}
+
+# The character select (#98, GD01-322): the portraits take the pointer
+# (before: only the wheel): a hover on Johnny Napalm focuses him, a locked
+# portrait (Grim Ripper) takes nothing, a click on Casey Lynch picks her.
+walk_mouse_character() {
+  run mouse_character 7000 "3000:hover398_115,3500:hover400_572,4000:click278_267" GD01_SKIP_BOOT=1 GD01_SCREEN=sel_character_new
+  local seq
+  seq="$(grep -oE "ui: (mouse focus [a-z_.]+|goto_screen sel_guitar)" "$work/mouse_character.log" | tr '\n' '|')"
+  result mouse_character "$([ "$seq" = "ui: mouse focus sc_char_punk.pic|ui: mouse focus sc_char_classic.pic|ui: goto_screen sel_guitar|" ] && echo 1 || echo 0)" \
+    "a portrait hovered and one clicked, a locked one ignored ($seq)"
+}
+
+# The song list (#98, GD01-322): the pointer moved slowly down from row 1 to
+# row 3 (4 units a step) highlights rows 1, 2, 3 only: the gaps between rows
+# belong to a row (before: each gap dropped the highlight back to the selection).
+walk_mouse_song_gaps() {
+  local k="3000:keyDown,3300:keyReturn" t=4500 y
+  for y in $(seq 400 4 560); do k="$k,$t:hover450_$y"; t=$((t + 60)); done
+  run mouse_song_gaps 8000 "$k" GD01_SKIP_BOOT=1
+  local seq
+  seq="$(grep -oE "ui: (hover row -?[0-9]+|highlight [a-z ]+)" "$work/mouse_song_gaps.log" | tr '\n' '|')"
+  result mouse_song_gaps "$([ "$seq" = "ui: hover row 1|ui: hover row 2|ui: hover row 3|" ] && echo 1 || echo 0)" \
+    "rows 1 to 3 under the pointer with no gap between them ($seq)"
+}
+
+# The menus (#98, GD01-322): the highlight follows the pointer only over the
+# items: off them (empty space) nothing is highlighted; back on an item, it
+# is; a key press gives the focus its highlight back.
+walk_mouse_away() {
+  run mouse_away 6500 "3000:hover640_340,3500:hover100_100,4000:hover640_340,4500:hover100_100,5000:keyDown" GD01_SKIP_BOOT=1 GD01_SCREEN=options
+  local seq
+  seq="$(grep -o "ui: highlight [a-z ]*" "$work/mouse_away.log" | tr '\n' '|')"
+  result mouse_away "$([ "$seq" = "ui: highlight none|ui: highlight menu focus|ui: highlight none|ui: highlight menu focus|" ] && echo 1 || echo 0)" \
+    "no highlight while the pointer is off the items ($seq)"
 }
 
 # The song list (#76): the pointer on Smoke on the Water (row 3) highlights
@@ -141,16 +179,15 @@ walk_mouse_song_hover() {
     "the hovered song row takes the highlight, a key gives it back ($seq)"
 }
 
-# Enhanced Settings has one Back (#76): its own "< Back"; the help bar shows
-# no BACK (the pointer where it was lights nothing; SELECT still lights), and
-# Esc still goes back to OPTIONS.
+# Enhanced Settings has one Back, the help bar's original BACK pill (#98,
+# GD01-322; #76 had a "< Back" box and no BACK in the bar): a click where the
+# box was does nothing, a click on the pill goes back to OPTIONS, and Esc too.
 walk_enhanced_one_back() {
-  run enhanced_one_back 8000 "3000:click520_376,5000:hover490_687,5500:hover240_687,6000:hover640_200,6500:keyEscape" GD01_SKIP_BOOT=1 GD01_SCREEN=options
-  local seq
-  seq="$(grep -o "ui: highlight [a-z ]*" "$work/enhanced_one_back.log" | tr '\n' '|')"
-  result enhanced_one_back "$(( $(has enhanced_one_back "goto_screen enhanced_settings") && $(grep -c "goto_screen options" "$work/enhanced_one_back.log") >= 2 && \
-    $([ "$seq" = "ui: highlight help bar|ui: highlight menu focus|" ] && echo 1 || echo 0) ))" \
-    "no BACK in Enhanced's help bar, < Back and Esc still go back ($seq)"
+  run enhanced_one_back 10000 "3000:click520_376,5000:click150_606,6000:click490_687,7500:click520_376,9000:keyEscape" GD01_SKIP_BOOT=1 GD01_SCREEN=options
+  local n
+  n=$(grep -c "goto_screen options" "$work/enhanced_one_back.log")
+  result enhanced_one_back "$(( $(grep -c "goto_screen enhanced_settings" "$work/enhanced_one_back.log") >= 2 && n >= 2 ))" \
+    "the help bar's BACK and Esc go back, the old < Back spot does not (options entered $n times)"
 }
 
 # One highlight at a time (#76): the mouse on the help bar's BACK takes the

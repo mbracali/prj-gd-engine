@@ -214,7 +214,9 @@ private:
             v.push_back({Field::BindTo, p});
             v.push_back({Field::Customize, p});
         }
-        v.push_back({Field::Back}), v.push_back({Field::Export}), v.push_back({Field::Import});
+        // Back is the help bar's original BACK pill (red / Esc / a click), not a
+        // second "< Back" here (GD01-322, #98: two Backs on one screen).
+        v.push_back({Field::Export}), v.push_back({Field::Import});
         return v;
     }
     static void boxRect(int p, float& x0, float& y0, float& x1, float& y1) {

@@ -201,7 +201,7 @@ components: we will.
 | Controls | Enable Touch Controls | Enables touch controls, and the virtual buttons | On by default only on Steam Deck and Android |
 | Controls | Audio / Video Calibration | Opens our own calibration tool | A button that opens a new screen |
 | *(space)* | | | |
-| Performance & graphics | Graphics backend | local, SDL3, Vulkan, OpenGL3 (`graphics_backend`: `local` / `sdl3` / `vulkan` / `opengl3`; only those the platform runs) | Dropdown, default local; the **first row** of the section; applies on the next start (a change asks Restart Now / Later, see "Backends" below). Selectable on gd-game-01 only for now ([engine-backend-guidelines.md](engine-backend-guidelines.md)) |
+| Performance & graphics | Graphics backend | local, SDL3, Vulkan, OpenGL3 (`graphics_backend`: `local` / `sdl3` / `vulkan` / `opengl3`; only those the platform runs) | Dropdown, default Vulkan on Windows / Linux (Steam Deck too), local elsewhere (GDALL-050; an old settings file's local takes Vulkan once); the **first row** of the section; applies on the next start (a change asks Restart Now / Later, see "Backends" below). Selectable on gd-game-01 only for now ([engine-backend-guidelines.md](engine-backend-guidelines.md)) |
 | Performance & graphics | Audio backend | local, miniaudio, OpenAL, FAudio (`audio_backend`: `local` / `miniaudio` / `openal` / `faudio`) | Dropdown, default local; the **second row** of the section; applies on the next start (Restart Now / Later, as Graphics backend). Selectable on gd-game-01 only for now |
 | Performance & graphics | Screen mode | Windowed, full screen, or full screen without borders | Dropdown |
 | Performance & graphics | Resolution | Keep what we have today | Dropdown |
@@ -251,11 +251,15 @@ first; the others when they adopt the core):
   hovers and clicks them. The value is saved before the pop-up opens, so Later
   keeps it for the next start. Choosing the backend that is already running
   asks nothing.
-- **Restart Now** ends the game and starts it again **in the same process**
-  (in the launcher the module keeps running and gets the launcher's window
-  again, for the new graphics API): no boot screens, straight back to
-  Enhanced Settings, with the same profile. A backend that cannot start falls
-  back to local (engine-backend-guidelines.md rule 2).
+- **Restart Now** ends the game and starts it again **from its start**, with
+  the new backends (owner 11-13, GDUL-028): in the launcher the module returns
+  `GD_GAME_EXIT_RESTART` (gd_host.h) and the launcher runs it again as a new
+  Play (the controllers announced again, the window made for the game's API;
+  restarting inside the module lost the gamepads and could leave a blank
+  window); on its own the game starts again in the same process. It no longer
+  returns to Enhanced Settings (only a walk's restart does, for its checks).
+  A backend that cannot start falls back to local
+  (engine-backend-guidelines.md rule 2).
 - **Indicator:** on the Enhanced Settings screen only, the backends in use are
   shown in small white text: `Graphics: <name>` and `Audio: <name>`, one per
   line, bottom right, right of the help bar (the last line on the FPS

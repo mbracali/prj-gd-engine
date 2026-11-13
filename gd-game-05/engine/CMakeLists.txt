@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 # Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 cmake_minimum_required(VERSION 3.24)
-project(gd05 VERSION 0.0.6 LANGUAGES C CXX)
+project(gd05 VERSION 0.0.7 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,8 +42,10 @@ target_sources(gd05 PRIVATE
   src/char/char_objects.cpp
   src/char/facefx.cpp
   src/char/midi_parser.cpp
+  src/char/rb_midi_parser.cpp
   src/char/char_driver.cpp
   src/char/clip.cpp
+  src/char/deform.cpp
   src/char/skeleton.cpp
   src/char/rig.cpp
   src/char/character.cpp
@@ -55,14 +57,13 @@ target_sources(gd05 PRIVATE
   src/data/midi.cpp
   src/data/mogg.cpp
   src/data/aes128.cpp
-  src/data/random_file.cpp
-  src/data/xdvdfs.cpp
   src/devaids/menu_keys.cpp
   src/devaids/screenshot.cpp
   src/game/camera_director.cpp
   src/game/band.cpp
   src/game/rb_band.cpp
   src/ui/rb_meta.cpp
+  src/ui/rb_char_preview.cpp
   src/game/rb_bonus.cpp
   src/audio/vocal_input.cpp
   src/render/vocal_track_view.cpp
@@ -86,20 +87,18 @@ target_sources(gd05 PRIVATE
   src/platform/disc_picker.cpp
   src/platform/paths.cpp
   src/render/band_view.cpp
+  src/render/char_skin.cpp
   src/render/canvas.cpp
   src/render/core_backend.cpp
   src/render/core_device.cpp
   src/render/char_view.cpp
   src/render/crowd_view.cpp
-  src/render/gl_api.cpp
-  src/render/gl_device.cpp
   src/render/highway.cpp
   src/render/image_enhance.cpp
   src/render/hud_view.cpp
   src/render/material.cpp
   src/render/particles.cpp
   src/render/enhanced_fx.cpp
-  src/render/hdr_output.cpp
   src/render/enhanced_lights.cpp
   src/render/post_fx.cpp
   src/render/renderer.cpp
@@ -113,6 +112,9 @@ target_sources(gd05 PRIVATE
   src/render/text_layout.cpp
   src/render/track_view.cpp
   src/render/rb_track_view.cpp
+  src/render/anim_rate.cpp
+  src/render/draw_order.cpp
+  src/render/rb_hud_view.cpp
   src/render/ui_view.cpp
   src/render/ui_cloth.cpp
   src/render/venue_view.cpp

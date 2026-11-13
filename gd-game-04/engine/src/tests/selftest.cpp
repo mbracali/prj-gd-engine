@@ -6,7 +6,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <string>
@@ -20,6 +23,7 @@
 #include "render/highway2d.h"
 #include "script/globals.h"
 #include "tests/selftest_play.h"
+#include "ui/port_settings.h"
 #include "ui/song_screen.h"
 
 // The whammy's pitch shifter on a 440 Hz sine: untouched at rest, down by the
@@ -129,6 +133,33 @@ static void checkGuitarFx(const std::function<void(const std::string&)>& fail) {
     }
 }
 
+// GDALL-050: the graphics backend defaults to Vulkan on Windows / Linux (local
+// elsewhere); an enhanced.json older than version 3 has its "local" (the old
+// default) turned into it once; local saved by this version stays.
+static void checkBackendDefault(const std::function<void(const std::string&)>& fail) {
+#if !defined(__APPLE__) && !defined(__ANDROID__)
+    const std::string want = "vulkan";
+#else
+    const std::string want = "local";
+#endif
+    if (enhancedDefault("graphics_backend") != want || enhancedDefault("graphics_backend", true) != want || enhancedDefault("audio_backend") != "local")
+        fail("graphics backend default: " + enhancedDefault("graphics_backend") + ", want " + want);
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("gdall050-" + std::to_string(std::rand()));
+    std::filesystem::create_directories(dir);
+    const std::string d = dir.string() + "/";
+    std::ofstream(d + "enhanced.json") << R"({"version": 2, "settings": {"graphics_backend": "local", "audio_backend": "local"}})";
+    EnhancedStore st;
+    st.load(d);
+    if (st.get("graphics_backend") != want || st.get("audio_backend") != "local")
+        fail("an old enhanced.json's local graphics backend: " + st.get("graphics_backend") + ", want " + want);
+    st.set("graphics_backend", "local");  // the player picks local: saved as version 3
+    EnhancedStore again;
+    again.load(d);
+    if (again.get("graphics_backend") != "local") fail("local picked in a new enhanced.json became " + again.get("graphics_backend"));
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
 // --selftest <disc>: the data checks (globals, song list, every chart), then
 // every chart auto-played at every difficulty and part (selftest_play.cpp).
 // Prints "selftest: all charts fully hit" when everything passed.
@@ -148,6 +179,7 @@ int runSelfTest(const std::string& discPath) {
     checkGuitarFx(fail);
     checkWibble(fail);
     checkSongKeys(fail);
+    checkBackendDefault(fail);
 
     Globals globals;
     try {

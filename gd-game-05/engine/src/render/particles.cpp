@@ -48,6 +48,7 @@ ParticleSystem::ParticleSystem(const scene::ParticleSys& def, uint32_t seed) : d
 void ParticleSystem::reset() {
     const scene::ParticleSys& d = *def_;
     params_.life = d.life, params_.speed = d.speed, params_.emitRate = d.emitRate, params_.startSize = d.startSize;
+    params_.deltaSize = d.deltaSize;
     params_.startColorLow = d.startColorLow, params_.startColorHigh = d.startColorHigh;
     params_.endColorLow = d.endColorLow, params_.endColorHigh = d.endColorHigh;
     // SetPool(max_particles) (vtable +0x24 from the Load) [C].
@@ -192,7 +193,7 @@ void ParticleSystem::init(Particle& p, float frame) {
     p.size = random(params_.startSize);
     const float life = std::max(p.death - p.birth, 1e-4f);
     float sizeScale = 1.0f / life;
-    p.sizeVel = random(d.deltaSize);
+    p.sizeVel = random(params_.deltaSize);
     if (p.sizeVel < -p.size) p.sizeVel = -p.size;
     if (d.type == 1) {
         if (d.growRatio == 0) {
@@ -294,8 +295,22 @@ void ParticleSystem::emit(float frame, float dt) {
         free_.pop_back();
         init(pool_[i], frame);
         alive_.push_back(i);
+        ++startedTotal_;
         emitCount_ -= 1;
     }
+}
+
+int ParticleSystem::launch(int n) {
+    int started = 0;
+    const float now = def_->frameDrive ? frame_ : std::max(lastClock_, 0.0f);
+    for (; started < n && !free_.empty(); ++started) {
+        const uint32_t i = free_.back();
+        free_.pop_back();
+        init(pool_[i], now);
+        alive_.push_back(i);
+        ++startedTotal_;
+    }
+    return started;
 }
 
 // Pre-spawn (0x822146E8) [C]: over min(mean life, max / mean rate) frames
@@ -337,6 +352,21 @@ void ParticleSystem::poll(float clockFrames) {
     emit(now, dt);
 }
 
+void ParticleSystem::pollDrawn(float clockFrames, bool showing) {
+    if (!def_->preserved.empty()) return;
+    if (pollsSinceDraw_ == 0) {
+        if (showing) poll(clockFrames);
+        else lastFrame_ = frame_, lastClock_ = clockFrames;  // the time noted (+0x100)
+    }
+    ++pollsSinceDraw_;
+}
+
+void ParticleSystem::drawShowing(float clockFrames) {
+    if (!def_->preserved.empty()) return;
+    if (pollsSinceDraw_ >= 2) poll(clockFrames);  // the catch-up (move and emit)
+    pollsSinceDraw_ = 0;
+}
+
 void ParticleSystem::appendQuads(Vec3 camRight, Vec3 camUp, std::vector<float>& verts, std::vector<uint16_t>& indices) const {
     Vec3 right = camRight, up = camUp;
     if (local_) {
@@ -344,7 +374,10 @@ void ParticleSystem::appendQuads(Vec3 camRight, Vec3 camUp, std::vector<float>& 
         const scene::Xfm inv = inverse(drawSpace_);
         right = xfmDir(inv, camRight), up = xfmDir(inv, camUp);
     }
-    right = right * 0.5f, up = up * 0.5f;
+    // RB's particle draw (0x82476498) [C]: gParticleRight = the camera's
+    // right x 0.5, gParticleUp = its up x 0.5 x screen_aspect (the object's
+    // +0x1f0, read after life by Load 0x821D7870).
+    right = right * 0.5f, up = up * (0.5f * (def_->screenAspect > 0 ? def_->screenAspect : 1.0f));  // 0: as 1 [I]
     const Vec3 normal = normalize(cross(right, up));
     auto addParticle = [&](Vec3 pos, const float* color, float size, float angle) {
         if (verts.size() / 16 + 4 > 65535) return;
@@ -453,7 +486,7 @@ void ParticleSet::setFrame(float frame) {
     for (ParticleSystem& s : systems_) s.setFrame(frame);
 }
 
-void ParticleSet::update(const ScenePose& pose, const scene::Xfm& base, float clockFrames) {
+void ParticleSet::update(const ScenePose& pose, const scene::Xfm& base, float clockFrames, bool drawGated) {
     for (ParticleSystem& s : systems_) {
         const scene::ParticleSys& d = s.def();
         const scene::Xfm world = scene::compose(pose.world(&d), base);
@@ -474,7 +507,8 @@ void ParticleSet::update(const ScenePose& pose, const scene::Xfm& base, float cl
         if (!d.mesh.empty() && d.dir)
             if (const scene::Mesh* m = d.dir->resolve<scene::Mesh>(d.mesh))
                 s.setEmitterMesh(m, scene::compose(pose.world(m), base));
-        s.poll(clockFrames);
+        if (drawGated) s.pollDrawn(clockFrames, pose.showing(&d));
+        else s.poll(clockFrames);
     }
 }
 

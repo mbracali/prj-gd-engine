@@ -135,6 +135,9 @@ public:
 
     Input();
     ~Input();
+    // GD05-061 (Linux): reads what each pad's kernel device sent (the
+    // report's "Kernel device" line); poll() does it each frame.
+    void drainKernel() const;
     // Closes all controllers; must run before SDL_Quit().
     void close();
     void handle(const SDL_Event& e, std::vector<InputEvent>& out);
@@ -143,6 +146,9 @@ public:
     // In a song (the menus' one-press-from-two-devices filter is off, Enter
     // strums, Back pauses).
     void setInGame(bool on) { inGame_ = on; }
+    // A one-player song (D34): every device plays it, also one without a
+    // player (GAMEPADS' None, or a pad past the enabled players).
+    void setOnePlayerSong(bool on) { onePlayerSong_ = on; }
     bool inGame() const { return inGame_ || lanes_[0].active || lanes_[1].active; }
     // The analog whammy of player `player`'s pads (-1: any pad), 0 at rest ..
     // 1 fully pressed; the Whammy action still fires past a threshold.
@@ -261,6 +267,13 @@ public:
     // last raw button / axis / hat events, for bug reports.
     std::string reportPath() const;
     bool writeReport() const;
+    // GD05-058: every raw joystick / gamepad event and what the input path
+    // did with it (an action, or ignored and why), kept for the report (the
+    // last few hundred) and logged with GD05_INPUTLOG=1; a sink (the
+    // --inputcapture file) gets each line too.
+    void trace(const std::string& line);
+    void setTraceSink(std::function<void(const std::string&)> sink) { traceSink_ = std::move(sink); }
+    const std::vector<std::string>& traceLines() const { return trace_; }
     // Where controllers.json and the report go (default: the SDL pref dir;
     // the self-test uses its own folder). With a trailing separator.
     void setSaveDir(std::string dir) {
@@ -396,7 +409,7 @@ private:
     // Rock Band: the part a device plays chosen in GAMEPADS (by guid): Drums / Vocals.
     std::map<std::string, Instrument> rbParts_;       // chosen controller types by GUID
     std::string saveDir_;                        // "" = the SDL pref dir
-    bool loaded_ = false, capturing_ = false, inGame_ = false;
+    bool loaded_ = false, capturing_ = false, inGame_ = false, onePlayerSong_ = false;
     std::string captureId_;
     Control captureControl_ = Control::Green;
     std::array<int16_t, SDL_GAMEPAD_AXIS_COUNT> captureRest_{};
@@ -483,6 +496,21 @@ private:
         char kind;  // 'b' button, 'a' axis, 'h' hat (joystick events: the device's own numbers)
         int index, value;
     };
+    std::vector<std::string> trace_;  // the last kTraceLines (oldest first)
+    std::function<void(const std::string&)> traceSink_;
+    bool traceLog_ = false;
+    std::map<SDL_JoystickID, std::array<uint64_t, 2>> eventCounts_;  // joystick, gamepad events by device
+    // GD05-061 (Linux): each pad's kernel device read by a reader of our
+    // own beside SDL's, to tell in the report whether the controller sent
+    // anything to the system at all (events, not SYN) while SDL passed on
+    // nothing. Drained each frame (poll) and by the report.
+    struct KernelProbe {
+        int fd = -1;
+        std::string path;
+        uint64_t events = 0, dropped = 0;
+    };
+    mutable std::map<SDL_JoystickID, KernelProbe> kernel_;
+    void closeKernel(SDL_JoystickID id);
     std::vector<RawEvent> raw_;  // the last kRawEvents, oldest first (for the report)
     std::unordered_map<SDL_JoystickID, Pad> pads_;
     ControllerMode lastMode_ = ControllerMode::Guitar;

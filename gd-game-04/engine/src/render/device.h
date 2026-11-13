@@ -241,6 +241,8 @@ public:
     virtual bool queryResult(QueryId q, uint64_t& samples) = 0;
     // The counters since the last call, then cleared.
     virtual DevicePerf takePerf() = 0;
+    // GD04_PERF=2: waits until the GPU has done every command sent (glFinish).
+    virtual void finishGpu() {}
     // Draw calls since the device was made (never cleared): whether a frame drew anything.
     virtual uint64_t drawCalls() const = 0;
 };

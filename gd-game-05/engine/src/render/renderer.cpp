@@ -83,8 +83,8 @@ ProgramDesc Renderer::canvasProgramDesc() {
 
 bool Renderer::init(SDL_Window* window, std::string& error) {
     window_ = window;
-    // Local: gd05's OpenGL device; else a gd-engine-core backend (render/core_backend.h).
-    device_ = rendererBackend() == Backend::Local ? createGlDevice(window, error) : createCoreDevice(rendererBackend(), window, error);
+    // A gd-engine-core backend (render/core_backend.h).
+    device_ = createCoreDevice(rendererBackend(), window, error);
     if (!device_) return false;
     canvasProgram_ = device_->createProgram(canvasProgramDesc(), error);
     if (!canvasProgram_) {

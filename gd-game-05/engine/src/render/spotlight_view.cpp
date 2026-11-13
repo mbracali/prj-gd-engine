@@ -257,6 +257,204 @@ ProgramDesc beamCompDesc() {
     return d;
 }
 
+// Rock Band's volume beams (NgSpotlightDrawer, GD05-093, D91): ark/
+// xbox_shaders #2290 / #2291 (constants gSpotPos c25, gSpotDir c26,
+// gSpotToCam c27, gConst_u c28, gRadii c29, gCamDir c30, gCamPos c10,
+// gDepthHalf c9, gFogDensity c82, gXSectionStrength c86, gPlaneLeft c88,
+// gPlaneRight c87, gZRange c89, gFogColor c90, gFogRange c91; samplers
+// gFogDensityMap s6, gFocalBlurDepth s9, gSpotXSectionMap s11, gFogDepth
+// s12), translated by gd04's Xenos translator (the microcode as it runs: a
+// ray / cone intersection against the scene's depth, the density map
+// and the cross-section) and kept as translated; only the fetches are the
+// port's: the screen position from the clip position (the port's y-up
+// targets), the scene depth turned into RB's 1 - z, no cut-outs (s12 is
+// black8x8_keep.bmp, 0x822A9A58, unless a spotlight has cut-outs: none
+// drawn, D91). The vertex shader (#2290): world position and clip
+// position out.
+const char* kRbBeamVertex = R"(
+layout(location = 0) in vec3 aPos;
+layout(std140) uniform GdRbBeam {
+    mat4 uViewProj;
+    vec4 cP[92];
+};
+out vec4 vClip;
+out vec3 vWorld;
+void main() {
+    vec4 c = uViewProj * vec4(aPos, 1.0);
+    gl_Position = c;
+    vClip = c;
+    vWorld = aPos;
+}
+)";
+const char* kRbBeamFragment = R"GLSL(
+layout(std140) uniform GdRbBeam {
+    mat4 uViewProj;
+    vec4 cP[92];
+};
+uniform sampler2D sDepth;
+uniform sampler2D sDensity;
+uniform sampler2D sXSection;
+in vec4 vClip;
+in vec3 vWorld;
+out vec4 fragColor;
+// Shader Model 3 / Xenos: +-0 x anything (inf, NaN) = +0 in MUL, MAD, the
+// dot products (gd04's translator).
+vec4 gdMul(vec4 a, vec4 b) { return mix(a * b, vec4(0.0), bvec4(ivec4(equal(a, vec4(0.0))) | ivec4(equal(b, vec4(0.0))))); }
+float gdMulS(float a, float b) { return (a == 0.0 || b == 0.0) ? 0.0 : a * b; }
+float gdSum3(vec4 p) { return (p.x + p.y) + p.z; }
+float sclampv(float s, bool c) { return c ? clamp(s, 0.0, 1.0) : s; }
+vec4 r0 = vec4(0.0);
+vec4 r1 = vec4(0.0);
+vec4 r2 = vec4(0.0);
+vec4 r3 = vec4(0.0);
+vec4 r4 = vec4(0.0);
+vec4 r5 = vec4(0.0);
+vec4 r6 = vec4(0.0);
+vec4 r7 = vec4(0.0);
+vec4 r8 = vec4(0.0);
+vec4 r9 = vec4(0.0);
+float pv = 0.0;
+bool p0 = false;
+vec4 e0 = vec4(0.0);
+void gdRun(vec2 gdUv) {
+    { vec4 v = gdMul((-cP[26].wwww), cP[26].zzzz) + cP[25].zzzz; float s = pv; r2.z = v.z; pv = sclampv(s, false); }
+    { vec4 v = gdMul((-cP[26].wwww), cP[26].xxxy) + cP[25].xxxy; float s = pv; r3.zw = v.zw; pv = sclampv(s, false); }
+    { vec4 v = gdMul(cP[26].wwww, cP[26].xyzz) + cP[25].xyzz; float s = pv; r4.xyz = v.xyz; pv = sclampv(s, false); }
+    { vec4 v = r1.zxyy + (-cP[10].zxyy); float s = pv; r6.xyz = v.xyz; pv = sclampv(s, false); }
+    { vec4 v = cP[25].zyxx + (-cP[10].zyxx); float s = pv; r2.xyw = v.xyw; pv = sclampv(s, false); }
+    { vec4 v = vec4(gdSum3(gdMul(r2.xwyy, cP[26].zxyy))); float s = pv; r1.w = v.w; pv = sclampv(s, false); }
+    { vec4 v = vec4(gdSum3(gdMul(r6.xyzz, cP[26].zxyy))); float s = (1.0 / r0.w); r0.z = v.z; r2.x = s; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r2.xxxx, r0.yxxx); float s = pv; r0.xy = v.xy; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r0.yxxx, vec4(0.375, 0.625, 0.5, -0.5).zwww) + vec4(0.375, 0.625, 0.5, -0.5).zzzz; float s = pv; r7.xy = v.xy; pv = sclampv(s, false); }
+    { vec4 v = r1.wwww + cP[26].wwww; float s = gdMulS(cP[28].y, r0.z); r2.x = v.x; r3.y = s; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r0.zzzz, r0.zzzz); float s = (1.0 / r0.z); r0.y = v.y; r0.x = s; pv = sclampv(s, false); }
+    { vec4 v = vec4(gdSum3(gdMul(r6.xyzz, r6.xyzz))); float s = gdMulS(cP[28].x, r0.y); r5.z = v.z; r3.x = s; pv = sclampv(s, false); }
+    { vec4 v = vec4(gdSum3(gdMul(r6.xyzz, cP[27].zxyy))); float s = max(r2.x, r2.x); r5.w = v.w; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r1.wwww, r0.xxxx); float s = gdMulS(r0.x, pv); r5.y = v.y; r5.x = s; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r5.yyyy, r6.xzyy) + cP[10].zyxx; float s = pv; r2.xyw = v.xyw; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r5.xxxx, r6.zyyy) + cP[10].yxxx; float s = pv; r0.xy = v.xy; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r5.xxxx, r6.xxxx) + cP[10].zzzz; float s = pv; r0.z = v.z; pv = sclampv(s, false); }
+    { vec4 v = r0.zzzz + (-r4.zzzz); float s = (r5.x > 0.0 ? 1.0 : 0.0); r8.z = v.z; r4.z = s; pv = sclampv(s, false); }
+    { vec4 v = r2.xyww + (-cP[25].zyxx); float s = max(r0.y, r0.y); r9.xyz = v.xyz; pv = sclampv(s, false); }
+    { vec4 v = r5.zwww + (-r3.xyyy); float s = (-r4.x) + pv; r3.xy = v.xy; r8.x = s; pv = sclampv(s, false); }
+    { vec4 v = vec4(greaterThan(vec4(9.99999975e-05, 0.0, 0.0, 0.0).xxxx, abs(r3).xxxx)); float s = max(r0.x, r0.x); r1.w = v.w; pv = sclampv(s, false); }
+    { vec4 v = vec4(gdSum3(gdMul(r9.xzyy, r9.xzyy))); float s = (-r4.y) + pv; r4.x = v.x; r8.y = s; pv = sclampv(s, false); }
+    { vec4 v = vec4(gdSum3(gdMul(r8.zxyy, r8.zxyy))); float s = sqrt(abs(r4).x); r4.y = v.y; r4.x = s; pv = sclampv(s, false); }
+    { vec4 v = vec4(greaterThanEqual(cP[29].xxxx, r4.xxxx)); float s = sqrt(abs(r4).y); r4.x = v.x; r4.y = s; pv = sclampv(s, false); }
+    { vec4 v = vec4(greaterThan(cP[29].yyyy, r4.yyyy)); float s = (r5.y > 0.0 ? 1.0 : 0.0); r4.y = v.y; r4.w = s; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r4.zwww, r4.yxxx); float s = (r1.w == 0.0 ? 0.0 : 1.0); bool np = (r1.w == 0.0); r4.xy = v.xy; p0 = np; pv = sclampv(s, false); }
+    { vec4 v = mix(r2.yyww, cP[10].yyxx, vec4(equal(r4.yyyy, vec4(0.0)))); float s = pv; r2.yw = v.yw; pv = sclampv(s, false); }
+    { vec4 v = mix(r2.xxxx, cP[10].zzzz, vec4(equal(r4.yyyy, vec4(0.0)))); float s = pv; r1.w = v.w; pv = sclampv(s, false); }
+    { vec4 v = mix(r0.zzzz, r1.wwww, vec4(equal(r4.xxxx, vec4(0.0)))); float s = pv; r2.x = v.x; pv = sclampv(s, false); }
+    { vec4 v = mix(r0.xxyy, r2.yyww, vec4(equal(r4.xxxx, vec4(0.0)))); float s = pv; r5.yz = v.yz; pv = sclampv(s, false); }
+    { vec4 v = mix(r2.yyww, cP[10].yyxx, vec4(equal(r4.xxxx, vec4(0.0)))); float s = pv; r4.yw = v.yw; pv = sclampv(s, false); }
+    { vec4 v = mix(r1.wwww, cP[10].zzzz, vec4(equal(r4.xxxx, vec4(0.0)))); float s = pv; r2.y = v.y; pv = sclampv(s, false); }
+    if (p0) { float s = (1.0 / r3.x); r1.w = s; pv = sclampv(s, false); }
+    if (p0) { vec4 v = gdMul(r3.yyyy, r1.wwww); float s = pv; r0.y = v.y; pv = sclampv(s, false); }
+    if (p0) { float s = gdMulS(r0.y, r0.y); r0.x = s; pv = sclampv(s, false); }
+    if (p0) { vec4 v = gdMul((-r1.wwww), cP[28].zzzz) + r0.xxxx; float s = pv; r0.x = v.x; pv = sclampv(s, false); }
+    if (p0) {
+        if (p0) { vec4 v = vec4(greaterThanEqual(r0.xxxx, vec4(0.0, 1.0, -1.0, 2.0).xxxx)); float s = sqrt(abs(r0).x); r1.w = v.w; r0.x = s; pv = sclampv(s, false); }
+        if (p0) { vec4 v = gdMul(r1.wwww, r0.xxxx); float s = pv; r0.x = v.x; pv = sclampv(s, false); }
+        if (p0) { vec4 v = (-r0.yyyy) + r0.xxxx; float s = pv; r3.y = v.y; pv = sclampv(s, false); }
+        if (p0) { vec4 v = (-r0.yyyy) + (-r0.xxxx); float s = pv; r3.x = v.x; pv = sclampv(s, false); }
+        if (p0) { vec4 v = gdMul(r3.xxxx, r6.zyyy) + cP[10].yxxx; float s = pv; r0.xy = v.xy; pv = sclampv(s, false); }
+        if (p0) { vec4 v = mix(r3.zwww, r0.yxxx, vec4(greaterThan(r3.xxxx, vec4(0.0)))); float s = pv; r0.xy = v.xy; pv = sclampv(s, false); }
+    }
+    if (p0) { vec4 v = gdMul(r3.yyyx, r6.zyxx) + cP[10].yxzz; float s = pv; r6.xyzw = v.xyzw; pv = sclampv(s, false); }
+    if (p0) { vec4 v = mix(r3.zzzw, r6.yyyx, vec4(greaterThan(r3.yyyy, vec4(0.0)))); float s = pv; r3.zw = v.zw; pv = sclampv(s, false); }
+    if (p0) { vec4 v = mix(r2.zzzz, r6.zzzw, vec4(greaterThan(r3.yyyx, vec4(0.0)))); float s = pv; r2.zw = v.zw; pv = sclampv(s, false); }
+    if (!p0) { float s = (1.0 / r3.y); r0.x = s; pv = sclampv(s, false); }
+    if (!p0) { vec4 v = gdMul(r0.xxxx, (-cP[28].zzzz)); float s = pv; r1.w = v.w; pv = sclampv(s, false); }
+    if (!p0) { vec4 v = gdMul(r1.wwww, r6.xyzz) + r1.zxyy; float s = pv; r6.xyz = v.xyz; pv = sclampv(s, false); }
+    if (!p0) { vec4 v = mix(r3.zwww, r6.yzzz, vec4(greaterThanEqual(r1.wwww, vec4(0.0)))); float s = pv; r0.xy = v.xy; pv = sclampv(s, false); }
+    if (!p0) { vec4 v = mix(r2.zzzz, r6.xxxx, vec4(greaterThanEqual(r1.wwww, vec4(0.0)))); float s = pv; r2.w = v.w; pv = sclampv(s, false); }
+    { vec4 v = mix(r2.wwww, r0.xyyy, vec4(equal(vec4(0.0, 1.0, -1.0, 2.0).xxyy, vec4(0.0)))); float s = pv; r6.xyz = v.xyz; pv = sclampv(s, false); }
+    { vec4 v = vec4(gdSum3(gdMul(r6.xyzz, cP[26].xyzz))); float s = pv; r1.w = v.w; pv = sclampv(s, false); }
+    { vec4 v = vec4(greaterThanEqual(cP[29].wwww, r1.wwww)); float s = pv; r3.x = v.x; pv = sclampv(s, false); }
+    { vec4 v = vec4(greaterThanEqual(r1.wwww, cP[29].zzzz)); float s = pv; r1.w = v.w; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r1.wwww, r3.xxxx); float s = pv; r1.w = v.w; pv = sclampv(s, false); }
+    { float s = (r1.w != 0.0 ? 0.0 : 1.0); bool np = (r1.w != 0.0); p0 = np; pv = sclampv(s, false); }
+    if (!p0) { float s = max(r5.z, r5.z); r5.x = s; pv = sclampv(s, false); }
+    if (p0) { vec4 v = max(r2.wxxx, r2.wxxx); float s = max(r0.x, r0.x); r2.xy = v.xy; r5.x = s; pv = sclampv(s, false); }
+    if (p0) { vec4 v = max(r5.yyzz, r5.yyzz); float s = max(r0.y, r0.y); r4.yw = v.yw; r5.y = s; pv = sclampv(s, false); }
+    { vec4 v = mix(r2.zzzz, r3.zwww, vec4(equal(vec4(0.0, 1.0, -1.0, 2.0).xxyy, vec4(0.0)))); float s = pv; r6.xyz = v.xyz; pv = sclampv(s, false); }
+    { vec4 v = vec4(gdSum3(gdMul(r6.xyzz, cP[26].xyzz))); float s = pv; r1.w = v.w; pv = sclampv(s, false); }
+    { vec4 v = vec4(greaterThanEqual(r1.wwww, cP[29].zzzz)); float s = pv; r2.w = v.w; pv = sclampv(s, false); }
+    { vec4 v = vec4(greaterThanEqual(cP[29].wwww, r1.wwww)); float s = pv; r1.w = v.w; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r2.wwww, r1.wwww); float s = pv; r1.w = v.w; pv = sclampv(s, false); }
+    { float s = (r1.w != 0.0 ? 0.0 : 1.0); bool np = (r1.w != 0.0); p0 = np; pv = sclampv(s, false); }
+    if (!p0) { float s = max(r5.x, r5.x); r4.z = s; pv = sclampv(s, false); }
+    if (p0) { vec4 v = max(r2.zxxx, r2.zxxx); float s = max(r3.z, r3.z); r2.xy = v.xy; r4.z = s; pv = sclampv(s, false); }
+    if (p0) { vec4 v = max(r5.yyxx, r5.yyxx); float s = max(r3.w, r3.w); r4.yw = v.yw; r5.y = s; pv = sclampv(s, false); }
+    r3.y = 0.0;  // sT12: no cut-outs, black8x8_keep.bmp
+    r3.z = 1.0 - texture(sDepth, gdUv).x;  // sT9: the scene depth, RB's 1 - z
+    r0.y = texture(sDensity, gdUv).y;  // sT6: gFogDensityMap
+    { vec4 v = r0.wwww + (-cP[82].xxxx); float s = gdMulS(cP[89].x, cP[89].y); r0.x = v.x; r6.x = s; pv = sclampv(s, false); }
+    { vec4 v = r0.yyyy + cP[9].xxxx; float s = gdMulS(cP[82].y, r0.x); r0.z = v.z; r0.w = clamp(s, 0.0, 1.0); pv = sclampv(s, true); }
+    { float s = max(r5.y, r5.y); r4.x = s; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r4, cP[30].yyxx); float s = gdMulS(cP[30].z, r2.x); r5.xyzw = v.xyzw; r6.z = s; pv = sclampv(s, false); }
+    { vec4 v = vec4(gdSum3(gdMul(r1.zxyy, cP[88].zxyy))); float s = gdMulS(cP[30].z, r2.y); r0.y = v.y; r6.w = s; pv = sclampv(s, false); }
+    { vec4 v = vec4(gdSum3(gdMul(r1.zxyy, cP[87].zxyy))); float s = cP[88].w - r0.y; r0.x = v.x; r1.z = s; pv = sclampv(s, false); }
+    { vec4 v = r5.zwww + r5.xyyy; float s = (1.0 / r0.z); r1.xy = v.xy; r0.y = s; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r0.yyyy, cP[9].xxxx); float s = (-cP[87].w) - (-r0.x); r0.z = clamp(v, 0.0, 1.0).z; r6.y = s; pv = sclampv(s, false); }
+    { vec4 v = r1.zxyy + r6.yzww; float s = vec4(0.0, 1.0, -1.0, 2.0).y - r0.z; r1.xyz = v.xyz; r0.x = s; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r0.xxxx, cP[82].wwww) + cP[82].zzzz; float s = pv; r0.x = v.x; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r0.wwww, r0.xxxx); float s = cP[89].y - cP[89].x; r3.x = clamp(v, 0.0, 1.0).x; r0.w = s; pv = sclampv(s, false); }
+    { vec4 v = (-r3.yzxx) + vec4(0.0, 1.0, -1.0, 2.0).yyyy; float s = (1.0 / r1.x); r0.xyz = v.xyz; r3.z = s; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r0.xxxy, cP[89].zzzz) + (-cP[89].wwww); float s = pv; r2.zw = v.zw; pv = sclampv(s, false); }
+    { vec4 v = gdMul((-r2.wzzz), r0.wwww) + cP[89].yyyy; float s = pv; r0.xy = v.xy; pv = sclampv(s, false); }
+    { float s = (1.0 / r0.y); r3.y = s; pv = sclampv(s, false); }
+    { vec4 v = (-cP[86].xxxx) + vec4(0.0, 1.0, -1.0, 2.0).yyyy; float s = (1.0 / r0.x); r5.x = v.x; r3.x = s; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r6.xxyy, r3.xyzz); float s = pv; r3.xyz = v.xyz; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r3.zzzz, vec4(0.0, 1.0, -1.0, 2.0).wwww) + vec4(0.0, 1.0, -1.0, 2.0).zzzz; float s = pv; r0.w = v.w; pv = sclampv(s, false); }
+    { vec4 v = mix(vec4(0.0, 1.0, -1.0, 2.0).xxxx, abs(r0).wwww, vec4(equal(vec4(0.0, 1.0, -1.0, 2.0).xxxy, vec4(0.0)))); float s = pv; r2.zw = v.zw; pv = sclampv(s, false); }
+    r0.y = texture(sXSection, r2.zw).x;  // sT11: gSpotXSectionMap
+    { vec4 v = r2.xyyy + (-cP[25].zzzz); float s = pv; r0.xw = v.xw; pv = sclampv(s, false); }
+    { vec4 v = r4.zwxy + (-cP[25].xxyy); float s = gdMulS(cP[86].x, r0.y); r4.xyzw = v.xyzw; r2.x = s; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r4, r4); float s = gdMulS(r0.x, r0.x); r4.xyzw = v.xyzw; r2.y = s; pv = sclampv(s, false); }
+    { vec4 v = r4.xxyy + r4.zzww; float s = gdMulS(r0.w, r0.w); r5.yz = v.yz; r2.z = s; pv = sclampv(s, false); }
+    { vec4 v = r5.yxzz + r2.yxzz; float s = pv; r0.xyw = v.xyw; pv = sclampv(s, false); }
+    { vec4 v = r1.yyzz + cP[30].wwww; float s = sqrt(abs(r0).w); r1.yw = v.yw; r1.z = s; pv = sclampv(s, false); }
+    { vec4 v = min(r1.yyww, r3.xxxx); float s = sqrt(abs(r0).x); r1.yw = v.yw; r1.x = s; pv = sclampv(s, false); }
+    { vec4 v = gdMul((-r1.xzzz), cP[25].wwww) + vec4(0.0, 1.0, -1.0, 2.0).yyyy; float s = pv; r1.xz = clamp(v, 0.0, 1.0).xz; pv = sclampv(s, false); }
+    { vec4 v = min(r1.ywww, r3.yyyy); float s = r1.x + r1.z; r0.xw = v.xw; r1.z = s; pv = sclampv(s, false); }
+    { vec4 v = r0.xxxx + (-r0.wwww); float s = r1.y - r1.w; r1.x = v.x; r1.y = s; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r1.xzyy, vec4(0.375, 0.625, 0.5, -0.5).xzyy); float s = pv; r1.xyz = v.xyz; pv = sclampv(s, false); }
+    { float s = r1.z + r1.x; r1.w = s; pv = sclampv(s, false); }
+    { vec4 v = abs(r1).wwww + cP[91].yyyy; float s = pv; r1.w = v.w; pv = sclampv(s, false); }
+    { float s = (1.0 / r1.w); r0.x = s; pv = sclampv(s, false); }
+    { float s = gdMulS(cP[91].y, r0.x); r0.x = clamp(s, 0.0, 1.0); pv = sclampv(s, true); }
+    { float s = vec4(0.0, 1.0, -1.0, 2.0).y - r0.x; r1.x = s; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r1.yyyy, r1.xxxx); float s = pv; r1.x = v.x; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r1.xxxx, r0.yyyy); float s = pv; r0.w = v.w; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r0.wwww, r0.zzzz); float s = pv; r0.x = v.x; pv = sclampv(s, false); }
+    { vec4 v = gdMul(r0.xxxx, cP[90].xyzz); float s = pv; e0.xyz = v.xyz; e0.w = 0.0; pv = sclampv(s, false); }
+    return;
+}
+
+void main() {
+    r0 = vClip;
+    r1 = vec4(vWorld, 0.0);
+    gdRun(vClip.xy / vClip.w * 0.5 + 0.5);
+    fragColor = vec4(e0.xyz, 0.0);
+}
+)GLSL";
+struct RbBeamBlock {
+    float viewProj[16];
+    float c[92][4];
+};
+
+ProgramDesc rbBeamDesc() {
+    ProgramDesc d;
+    d.name = "spotlight_rb_beam";
+    d.vertex = kRbBeamVertex;
+    d.fragment = kRbBeamFragment;
+    d.uniformBlocks = {"GdRbBeam"};
+    d.samplers = {"sDepth", "sDensity", "sXSection"};
+    return d;
+}
+
 ProgramDesc flareDesc() {
     ProgramDesc d;
     d.name = "spotlight_flare";
@@ -411,6 +609,18 @@ SpotlightView::SpotlightView(World& world, SceneCache& cache) : world_(world), c
     error.clear();
     beamCompProgram_ = device_.createProgram(beamCompDesc(), error);
     if (!beamCompProgram_) SDL_Log("spotlights: %s does not compile: %s", beamCompDesc().name.c_str(), error.c_str());
+    error.clear();
+    rbBeamProgram_ = device_.createProgram(rbBeamDesc(), error);
+    if (!rbBeamProgram_) SDL_Log("spotlights: %s does not compile: %s", rbBeamDesc().name.c_str(), error.c_str());
+    {
+        // white8x8_keep.bmp (0x822A9A58): the cross-section a beam without one samples.
+        TextureDesc td;
+        td.width = td.height = 1;
+        const uint32_t white = 0xffffffffu;
+        const TexLevel lv{&white, 4};
+        error.clear();
+        white_ = device_.createTexture(td, &lv, error);
+    }
     const float tri[6] = {-1, -1, 3, -1, -1, 3};
     triangle_ = device_.createBuffer(BufferKind::Vertex, sizeof tri, tri, false);
     for (TargetId& t : vis_) {
@@ -430,9 +640,292 @@ SpotlightView::~SpotlightView() {
     if (beamCompProgram_) device_.destroyProgram(beamCompProgram_);
     if (beamTarget_) device_.destroyTarget(beamTarget_);
     if (beamVb_) device_.destroyBuffer(beamVb_);
+    if (rbBeamProgram_) device_.destroyProgram(rbBeamProgram_);
+    if (rbBeamTarget_) device_.destroyTarget(rbBeamTarget_);
+    if (densityTarget_) device_.destroyTarget(densityTarget_);
+    if (rbVb_) device_.destroyBuffer(rbVb_);
+    if (white_) device_.destroyTexture(white_);
 }
 
-std::vector<ProgramDesc> SpotlightView::allPrograms() { return {visDesc(), flareDesc(), beamDesc(), beamCompDesc()}; }
+std::vector<ProgramDesc> SpotlightView::allPrograms() { return {visDesc(), flareDesc(), beamDesc(), beamCompDesc(), rbBeamDesc()}; }
+
+bool readDrawerParams(const std::vector<unsigned char>& rec, DrawerParams& out) {
+    auto u32 = [&](size_t p) {
+        return uint32_t(rec[p]) << 24 | uint32_t(rec[p + 1]) << 16 | uint32_t(rec[p + 2]) << 8 | uint32_t(rec[p + 3]);
+    };
+    auto f32 = [&](size_t p) {
+        const uint32_t u = u32(p);
+        float f;
+        std::memcpy(&f, &u, 4);
+        return f;
+    };
+    if (rec.size() < 4 || u32(0) != 4) return false;
+    size_t pos = 4;
+    scene::Draw draw;
+    try {
+        scene::readDrawAt(rec, pos, draw);
+    } catch (const std::exception&) {
+        return false;
+    }
+    if (pos + 32 > rec.size()) return false;
+    out.total = f32(pos), out.base = f32(pos + 4), out.smoke = f32(pos + 8), out.range = f32(pos + 12);
+    for (int k = 0; k < 4; ++k) out.color[size_t(k)] = f32(pos + 16 + 4 * size_t(k));
+    pos += 32;
+    for (int k = 0; k < 2; ++k) {
+        if (pos + 4 > rec.size()) return false;
+        const uint32_t n = u32(pos);
+        if (n > rec.size() - pos - 4) return false;
+        out.proxy.assign(reinterpret_cast<const char*>(rec.data() + pos + 4), n);
+        pos += 4 + n;
+    }
+    return true;
+}
+
+void SpotlightView::setDrawer(const scene::Object* drawer, const scene::Object* proxy) {
+    drawer_ = drawer, proxy_ = proxy;
+    drawerParams_ = {};
+    if (drawer) readDrawerParams(drawer->record, drawerParams_);
+}
+
+bool SpotlightView::rbBeams() const {
+    static const bool legacy = [] {
+        const char* e = SDL_getenv("GD05_BEAMS_LEGACY");
+        return e && *e == '1';
+    }();
+    return !legacy && drawer_ && rbBeamProgram_;
+}
+
+// 0x822A9E58 [C]: with a proxy, the drawer's camera (+0x64, a copy of the
+// shot's camera, 0x822A9CC8) draws it into the beam system's density
+// texture (+0xC: a quarter of the picture each way, 0x822A9A58), with
+// the device's +0x25 flag set (what the flag changes in the particles'
+// shaders is not read: the proxy's own materials are drawn, additive, onto
+// black [I]). Its particles run because they are drawn (D86).
+bool SpotlightView::beginDensity(int viewW, int viewH) {
+    densityDrawn_ = false;
+    if (!rbBeams() || !proxy_) return false;
+    const int w = std::max(1, viewW / 4), h = std::max(1, viewH / 4);
+    if (!densityTarget_ || densW_ != w || densH_ != h) {
+        if (densityTarget_) device_.destroyTarget(densityTarget_);
+        TargetDesc d;
+        d.width = w, d.height = h, d.depth = true, d.format = TargetFormat::RGBA8;
+        std::string error;
+        densityTarget_ = device_.createTarget(d, error);
+        densW_ = w, densH_ = h;
+        if (!densityTarget_) {
+            SDL_Log("spotlights: no density map: %s", error.c_str());
+            return false;
+        }
+    }
+    device_.setTarget(densityTarget_);
+    device_.setViewport(0, 0, w, h);
+    const float black[4] = {0, 0, 0, 0};
+    device_.clear(black, true);
+    return true;
+}
+
+void SpotlightView::endDensity(TargetId worldTarget, int viewW, int viewH) {
+    densityDrawn_ = true;
+    device_.setTarget(worldTarget);
+    device_.setViewport(0, 0, viewW, viewH);
+}
+
+// 0x822ABDC0 -> 0x822ABC28 [C]: the beam buffer (+8: half the picture each
+// way, 32 bits, 0x822A9A58) cleared; per queued spotlight with a beam
+// length > 0, by its beam shape (+0x1E8): 2 -> 0x822ABA80, 3 / 4 ->
+// 0x822AB930, else 0x822AB858 -> 0x822AABE0 (every beam on the disc is
+// shape 0 or 1: this pass). Its constants (0x822AABE0, 0x822AA458,
+// 0x822ABDC0, 0x822A8EF8) as below; the beam's mesh is the camera-facing
+// sheet between the side planes 0x822AA458 builds (the beam's own mesh
+// there [I]); added (ONE / ONE) [I: the pass's blend state is not read].
+// Then gFogDensity (0x822A8E78) and gFogRange.x (0x822AB5B8) for the post.
+void SpotlightView::drawRbBeams(const Camera& camera, int viewW, int viewH, TextureId worldDepth) {
+    const int bw = std::max(1, viewW / 2), bh = std::max(1, viewH / 2);
+    if (!rbBeamTarget_ || rbW_ != bw || rbH_ != bh) {
+        if (rbBeamTarget_) device_.destroyTarget(rbBeamTarget_);
+        TargetDesc d;
+        d.width = bw, d.height = bh, d.format = TargetFormat::RGBA8;
+        std::string error;
+        rbBeamTarget_ = device_.createTarget(d, error);
+        rbW_ = bw, rbH_ = bh;
+        if (!rbBeamTarget_) {
+            SDL_Log("spotlights: no beam buffer: %s", error.c_str());
+            return;
+        }
+    }
+    device_.setTarget(rbBeamTarget_);
+    device_.setViewport(0, 0, bw, bh);
+    const float zero[4] = {0, 0, 0, 0};
+    device_.clear(zero, false);
+    const bool zeroToOne = device_.info().clipDepthZeroToOne;
+    const Vec3 cam = camera.position();
+    const Vec3 camFwd = normalize(Vec3{camera.world.m[4], camera.world.m[5], camera.world.m[6]});
+    const float n = camera.nearPlane, f = camera.farPlane, invFar = f > 0 ? 1.0f / f : 0.0f;
+    // One sheet (two triangles) per beam.
+    std::vector<float> v;
+    v.reserve(rbList_.size() * 18);
+    struct Planes {
+        float c86, c87[4], c88[4];
+    };
+    std::vector<Planes> planes;
+    for (const RbBeam& b : rbList_) {
+        // 0x822AA458: the sheet across the view, its side planes through the camera.
+        Vec3 V = b.pos - cam;
+        V = dot(V, V) > 1e-12f ? normalize(V) : camFwd;
+        Vec3 S = cross(V, b.dir);
+        S = dot(S, S) > 1e-12f ? normalize(S) : Vec3{1, 0, 0};
+        const Vec3 B = b.pos + b.dir * b.length;
+        const Vec3 P1 = b.pos + S * b.rTop, P2 = b.pos - S * b.rTop, Q1 = B + S * b.rBottom, Q2 = B - S * b.rBottom;
+        auto unit = [](Vec3 a) { return dot(a, a) > 1e-20f ? normalize(a) : a; };
+        const Vec3 N1 = unit(cross(P1 - cam, Q1 - cam)), N2 = unit(cross(P2 - cam, Q2 - cam));
+        const Vec3 M = N1 + N2;
+        const float s1 = dot(N1, M), s2 = dot(N2, M);
+        const float i1 = s1 != 0 ? 1 / s1 : 0, i2 = s2 != 0 ? 1 / s2 : 0;
+        Planes pl;
+        pl.c87[0] = N1.x * i1, pl.c87[1] = N1.y * i1, pl.c87[2] = N1.z * i1, pl.c87[3] = dot(cam, N1) * i1;
+        pl.c88[0] = N2.x * i2, pl.c88[1] = N2.y * i2, pl.c88[2] = N2.z * i2, pl.c88[3] = dot(cam, N2) * i2;
+        // 0x822A90B0 (margin 0, no length test): the camera inside the cone
+        // turns the cross-section off (gXSectionStrength 0).
+        bool inside = false;
+        {
+            const Vec3 d = cam - b.pos;
+            const float t = dot(d, b.dir);
+            if (t >= 0) {
+                Vec3 R = d - b.dir * t;
+                R = dot(R, R) > 1e-12f ? normalize(R) : S;
+                const Vec3 a0 = b.pos + R * b.rTop, a1 = B + R * b.rBottom, e = a1 - a0;
+                const Vec3 w = cam - a0;
+                const float ee = dot(e, e), k = ee > 0 ? dot(w, e) / ee : 0;
+                const Vec3 off = w - e * k;
+                inside = dot(off, R) < 0;  // on the axis side of the slanted edge (|off| < 0 never holds)
+            }
+        }
+        pl.c86 = inside ? 0.0f : 1.0f;
+        planes.push_back(pl);
+        const Vec3 q[6] = {P1, P2, Q2, P1, Q2, Q1};
+        for (const Vec3& p : q) v.insert(v.end(), {p.x, p.y, p.z});
+    }
+    const size_t bytes = v.size() * sizeof(float);
+    if (bytes > rbVbSize_) {
+        if (rbVb_) device_.destroyBuffer(rbVb_);
+        rbVbSize_ = std::max<size_t>(bytes * 2, 16 * 1024);
+        rbVb_ = device_.createBuffer(BufferKind::Vertex, rbVbSize_, nullptr, true);
+    }
+    device_.updateBuffer(rbVb_, 0, v.data(), bytes);
+    static const VertexLayout layout = [] {
+        VertexLayout l;
+        l.stride = 12;
+        l.attribs[0] = {0, 3, AttribType::Float, 0};
+        return l;
+    }();
+    const Mat4 vp = camera.viewProj(zeroToOne);
+    TextureId density = densityDrawn_ ? device_.targetTexture(densityTarget_) : TextureId{};
+    if (!density) density = white_;  // 0x822A9D88: no proxy -> the drawer's texture or black8x8 [I: none drawn]
+    auto set = [](float* c, float x, float y, float z, float w) { c[0] = x, c[1] = y, c[2] = z, c[3] = w; };
+    for (size_t i = 0; i < rbList_.size(); ++i) {
+        const RbBeam& b = rbList_[i];
+        RbBeamBlock blk{};
+        std::copy(vp.m, vp.m + 16, blk.viewProj);
+        set(blk.c[9], 0.125f, 0.125f, 0.125f, 0.125f);  // gDepthHalf (0x822ABDC0, 0x82887374)
+        set(blk.c[10], cam.x, cam.y, cam.z, 1);            // gCamPos
+        // 0x822AABE0: gSpotPos (pos, 1 / length), gSpotDir (dir, length),
+        // gSpotToCam, gCamDir (the camera's y row, -dir . pos), gRadii
+        // (top, bottom, the beam's start and end along dir), gConst_u.
+        set(blk.c[25], b.pos.x, b.pos.y, b.pos.z, 1 / b.length);
+        set(blk.c[26], b.dir.x, b.dir.y, b.dir.z, b.length);
+        const Vec3 cp = cam - b.pos;
+        set(blk.c[27], cp.x, cp.y, cp.z, 1);
+        set(blk.c[30], camFwd.x, camFwd.y, camFwd.z, -dot(camFwd, cam));
+        const float start = dot(b.dir, b.pos);
+        set(blk.c[29], b.rTop, b.rBottom, start, start + b.length);
+        const float k = (b.rBottom - b.rTop) / b.length;
+        const float apex = b.rBottom - b.rTop != 0 ? b.length / (b.rBottom - b.rTop) * b.rTop : 0;
+        const float m = dot(b.dir, cp), a = apex + m;
+        set(blk.c[28], k * k + 1, a * k * k + m, dot(cp, cp) - m * m - a * a * k * k, 1);
+        set(blk.c[82], 0, invFar, 0, 0);  // 0x822A8EF8
+        set(blk.c[86], planes[i].c86, 0, 0, 0);
+        std::copy(planes[i].c87, planes[i].c87 + 4, blk.c[87]);
+        std::copy(planes[i].c88, planes[i].c88 + 4, blk.c[88]);
+        set(blk.c[89], n, f, 1, 0);  // gZRange: near, far, the camera's z range 0..1
+        set(blk.c[90], b.color[0], b.color[1], b.color[2], 1);
+        set(blk.c[91], 0, drawerParams_.range, 0, invFar);
+        DrawCall c;
+        c.program = rbBeamProgram_;
+        c.state.blend = true;
+        c.state.src = BlendFactor::One, c.state.dst = BlendFactor::One;
+        c.layout = &layout;
+        c.vertices = rbVb_;
+        c.first = int(i * 6), c.count = 6;
+        c.textures[0] = worldDepth;
+        c.samplers[0] = {Filter::Nearest, Wrap::Clamp, 0};
+        c.textures[1] = density;
+        c.samplers[1] = {Filter::Linear, Wrap::Clamp, 0};
+        c.textures[2] = b.xsection ? b.xsection : white_;
+        c.samplers[2] = {Filter::Linear, Wrap::Clamp, 0};
+        c.uniforms[0] = device_.stageUniforms(&blk, sizeof blk);
+        device_.draw(c);
+        ++rbBeamsDrawn_;
+    }
+    // The composite's inputs (0x822A8E78: gFogDensity = (base x 0.01, smoke
+    // x 0.01 x (1 - base x 0.01)); 0x822AB5B8: gFogRange.x = total x 32; the
+    // beam buffer as s12, the density map as s6) [C].
+    float total = drawerParams_.total, base = drawerParams_.base, smoke = drawerParams_.smoke;
+    if (const World::DrawerState* st = world_.findDrawerState(drawer_)) total = st->total, base = st->base, smoke = st->smoke;
+    if (SDL_getenv("GD05_DRAWER_ZERO")) base = smoke = 0;  // the walks' check: no smoke, no beams
+    fog_.on = true;
+    fog_.beams = device_.targetTexture(rbBeamTarget_);
+    fog_.density = density;
+    fog_.c82x = base * 0.01f;
+    fog_.c82y = smoke * 0.01f * (1 - base * 0.01f);
+    fog_.c91x = total * 32.0f;
+    if (SDL_getenv("GD05_BEAM_PROBE")) probeBeams();
+    // A development aid: GD05_BEAM_DUMP=<prefix> saves the beam buffer and the density map (BMP) each frame.
+    static int dumpFrame = 0;
+    if (const char* dump0 = SDL_getenv("GD05_BEAM_DUMP"); dump0 && dumpFrame++ % 120 == 0) {
+        const std::string dump = std::string(dump0) + "_" + std::to_string(dumpFrame / 120);
+        if (SDL_Surface* bs = device_.readTarget(rbBeamTarget_, 0, 0, rbW_, rbH_)) {
+            SDL_SaveBMP(bs, (dump + "_beams.bmp").c_str());
+            SDL_DestroySurface(bs);
+        }
+        if (densityDrawn_)
+            if (SDL_Surface* ds = device_.readTarget(densityTarget_, 0, 0, densW_, densH_)) {
+                SDL_SaveBMP(ds, (dump + "_density.bmp").c_str());
+                SDL_DestroySurface(ds);
+            }
+    }
+}
+
+// The walks' measure: the pixels (of the beam buffer's size) where the
+// composite adds at least 1/255 in some channel.
+void SpotlightView::probeBeams() {
+    beamPixels_ = -1;
+    SDL_Surface* bs = device_.readTarget(rbBeamTarget_, 0, 0, rbW_, rbH_);
+    SDL_Surface* ds = densityDrawn_ ? device_.readTarget(densityTarget_, 0, 0, densW_, densH_) : nullptr;
+    if (bs) {
+        SDL_Surface* b = SDL_ConvertSurface(bs, SDL_PIXELFORMAT_RGBA32);
+        SDL_Surface* d = ds ? SDL_ConvertSurface(ds, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        long long count = 0;
+        if (b) {
+            for (int y = 0; y < b->h; ++y)
+                for (int x = 0; x < b->w; ++x) {
+                    const uint8_t* p = static_cast<const uint8_t*>(b->pixels) + size_t(y) * size_t(b->pitch) + size_t(x) * 4;
+                    float dens = 1;
+                    if (d) {
+                        const int dx = std::min(d->w - 1, x * d->w / b->w), dy = std::min(d->h - 1, y * d->h / b->h);
+                        dens = float(static_cast<const uint8_t*>(d->pixels)[size_t(dy) * size_t(d->pitch) + size_t(dx) * 4]) / 255.0f;
+                    }
+                    const float g = (fog_.c82x + fog_.c82y * dens) * fog_.c91x;
+                    const int mx = std::max({p[0], p[1], p[2]});
+                    if (float(mx) * g >= 1.0f) ++count;
+                }
+            beamPixels_ = count;
+        }
+        if (b) SDL_DestroySurface(b);
+        if (d) SDL_DestroySurface(d);
+    }
+    if (bs) SDL_DestroySurface(bs);
+    if (ds) SDL_DestroySurface(ds);
+}
 
 int SpotlightView::slotOf(const void* key) {
     auto it = slots_.find(key);
@@ -466,6 +959,15 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
     // processing on); else the old per-vertex sheet in the world (GD02-151).
     const bool perPixel = worldTarget && worldDepth && beamProgram_ && beamCompProgram_;
     beamPx_.clear();
+    // Rock Band's volume beams instead (GD05-093): NgSpotlightDrawer's beam
+    // pass (vtable +0x44) is an empty function (0x824A3138), so the beam
+    // sheets with their beam material are never drawn; the beams reach the
+    // picture only through the volume passes and the post composite.
+    const bool rbPass = rbBeams() && worldTarget && worldDepth;
+    rbList_.clear();
+    fog_ = {};
+    rbBeamsDrawn_ = 0;
+    if (!rbPass) beamPixels_ = -1;
     auto batch = [&](const scene::Mat* m) -> Batch& {
         auto [it, added] = batches.try_emplace(m);
         if (added) it->second.mat = fxMaterial(cache_, *m, pose);
@@ -581,7 +1083,22 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
                 if (auto* m = s->dir ? s->dir->resolve<scene::Mesh>(n) : nullptr; m && pose.showing(m))
                     extras.push_back({m, toMat4(pose.world(m)), Vec3{lit[0], lit[1], lit[2]}});
         // The beam: depthvolume.fx on the sheet of 0x82235F68 (0x822601D0, 0x82260B40).
-        if (s->beam.length > 0 && on('b') && beamStrip(*s, pos, fwd, dir, camera, lit, beamBatch, perPixel ? &beamPx_ : nullptr)) ++beams_;
+        if (s->beam.length > 0 && on('b') && rbPass) {
+            // 0x822AB858: gFogColor = colour x intensity x 8 (the colour
+            // owner's), 0x822AABE0: x brighten; radii 0x82297B88: x expand,
+            // a sheet's (is_cone 0) also x (1 - side border x 0.7) [C]. The
+            // beam along the light's y row (the transform's +0x10, c26).
+            RbBeam rb;
+            rb.pos = pos, rb.dir = normalize(fwd), rb.length = s->beam.length;
+            rb.rTop = s->beam.topRadius * s->beam.expand, rb.rBottom = s->beam.bottomRadius * s->beam.expand;
+            if (!s->beam.isCone) rb.rTop *= 1 - s->beam.topSideBorder * 0.7f, rb.rBottom *= 1 - s->beam.bottomSideBorder * 0.7f;
+            for (int k = 0; k < 3; ++k) rb.color[k] = lit[k] * 8.0f * s->beam.brighten;
+            if (!s->beam.xsection.empty()) rb.xsection = cache_.texture(s, s->beam.xsection);
+            rbList_.push_back(rb);
+            ++beams_;
+        } else if (s->beam.length > 0 && on('b') && beamStrip(*s, pos, fwd, dir, camera, lit, beamBatch, perPixel ? &beamPx_ : nullptr)) {
+            ++beams_;
+        }
         // The floor spot (0x82231AF0, its mesh 0x82235488: a unit quad, uv 0..1):
         // only with a target and spot_material, where the light's y axis
         // meets z = the target's z + spot_height, spot_scale wide across and
@@ -737,6 +1254,11 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
         mr.draw(g, identity, beamBatch.mat, ctx);
     }
     if (perPixel && !beamPx_.empty()) drawBeams(camera, viewW, viewH, hdr, worldTarget, worldDepth);
+    if (rbPass && !rbList_.empty()) {
+        drawRbBeams(camera, viewW, viewH, worldDepth);
+        device_.setTarget(worldTarget);
+        device_.setViewport(0, 0, viewW, viewH);
+    }
     drawFlares(camera, viewW, viewH, hdr, worldTarget, worldDepth);
 }
 

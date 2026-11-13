@@ -1,5 +1,19 @@
 # Guitar Dream Universal Launcher: changes
 
+## 1.1.15
+
+Highlights
+- Vulkan is the default graphics backend in every game on Windows and Linux.
+- Guitar Hero II: no more see-through characters, smoother character select, setlist names that fit.
+- Guitar Hero III: Max FPS above 60, Enhanced options that now apply, solid band shadows, Battle mode prompts, cheats by touch on Android.
+- Rock Band: the singers' faces, the song's intro shot, strike-line hit effects and the venues' lighting cues.
+- Restart Now in any game's Enhanced menu starts the game again from its start, with the controllers working.
+
+Details
+- gd01 1.1.13: the shop's first item, menus scrolling after Bind to, graphics memory freed, the intro video's sound, mouse and menu fixes (#100, #98, #79).
+- gd02 1.1.15, gd03 1.1.8, gd04 1.1.7, gd05 0.0.7, gd10 0.0.1: see each game's changelog.
+- The site shows the latest releases and merged changes.
+
 ## 1.1.14
 
 Highlights

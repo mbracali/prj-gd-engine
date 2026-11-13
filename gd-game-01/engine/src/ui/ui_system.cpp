@@ -409,13 +409,22 @@ public:
         if (!showing_) return;
         // [I] Port (#76): one highlight at a time; the help bar's hovered
         // pill wins over the menu's focus while the mouse is on it.
-        const bool muted = name() != "helpbar" && ui_.helpHovered();
+        const bool muted = name() != "helpbar" && ui_.menuMuted();
         if (scene_) scene_->setFocusMuted(muted);
         if (native_) native_->setFocusMuted(muted);
         if (native_) native_->drawBefore();
         if (scene_ && (!native_ || native_->drawsScene())) {
             if (name() == "helpbar") drawHelpbar();
-            else scene_->draw(view_);
+            else if (scene_->showing("tut_screen_dim.view")) {
+                // GD01-322 (#98): the lessons' end dim (tut_screen_dim, a 4:3
+                // quad on the PS2's screen) covers the whole 16:9 screen, as
+                // the port's other dims do: drawn first, widened by 16:9 / 4:3,
+                // then the panel without it.
+                scene_->draw("tut_screen_dim.view", (16.0f / 9.0f) / (4.0f / 3.0f));
+                scene_->setShowing("tut_screen_dim.view", false);
+                scene_->draw(view_);
+                scene_->setShowing("tut_screen_dim.view", true);
+            } else scene_->draw(view_);
         }
         if (native_) native_->drawAfter();
     }
@@ -2092,8 +2101,7 @@ UiSystem::UiSystem(Renderer& renderer, const GameData& data, Hooks hooks)
                 (animate_transition 0)
                 (panels meta enhanced_settings helpbar)
                 (focus enhanced_settings)
-                (own_back TRUE)
-                (helpbar (default ((fret1 help_select) (strum help_updown))))}
+                (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))}
             {new_gamepad_panel gamepads (rnd_file "")}
             {new_gh_screen gamepads
                 (animate_transition 0)
@@ -2469,9 +2477,9 @@ void UiSystem::update(float dtMs) {
 }
 
 void UiSystem::draw() {
-    if (const bool hh = helpHovered(); hh != loggedHelpHover_) {  // development aid (walk mouse_highlight)
+    if (const int hh = helpHovered() ? 1 : mouseAway_ ? 2 : 0; hh != loggedHelpHover_) {  // development aid (walk mouse_highlight)
         loggedHelpHover_ = hh;
-        if (SDL_getenv("GD01_UILOG")) SDL_Log("ui: highlight %s", hh ? "help bar" : "menu focus");
+        if (SDL_getenv("GD01_UILOG")) SDL_Log("ui: highlight %s", hh == 1 ? "help bar" : hh == 2 ? "none" : "menu focus");
     }
     if (hoverRow_ != loggedHoverRow_) {  // development aid (walk mouse_song_hover)
         loggedHoverRow_ = hoverRow_;
@@ -2690,7 +2698,7 @@ void UiSystem::buttonDown(int button, bool guitar, int player) {
     // [I] Port: every controller drives the menus, so select / back follow the
     // kind of controller just pressed (the original read player 1's only).
     guitar_ = guitar;
-    helpHover_ = false;  // a key or pad press puts the highlight back on the menu's focus (#76)
+    helpHover_ = false, mouseAway_ = false;  // a key or pad press puts the highlight back on the menu's focus (#76)
     hoverList_ = nullptr, hoverRow_ = -1;
     if (button == Up || button == Down || button == Left || button == Right) held_[size_t(player & 1)] = {button, 0, false};
     if (!logos_.empty()) {
@@ -2708,8 +2716,17 @@ void UiSystem::buttonDown(int button, bool guitar, int player) {
     route("button_down", {{"button", Value::integer(button)}, {"player_num", Value::integer(player)}});
 }
 
+int UiSystem::releasedHeldSlot(int held0, int held1, int button, int player) {
+    const int p = player & 1;
+    const int mine = p ? held1 : held0, other = p ? held0 : held1;
+    if (button < 0) return -1;
+    if (mine == button) return p;
+    if (other == button) return p ^ 1;
+    return -1;
+}
+
 void UiSystem::buttonUp(int button, int player) {
-    if (held_[size_t(player & 1)].button == button) held_[size_t(player & 1)] = {};
+    if (const int s = releasedHeldSlot(held_[0].button, held_[1].button, button, player); s >= 0) held_[size_t(s)] = {};
     if (phase_ != Phase::Idle) return;
     route("button_up", {{"button", Value::integer(button)}, {"player_num", Value::integer(player)}});
 }
@@ -2764,6 +2781,8 @@ bool UiSystem::mouse(float x, float y, bool click) {
     wheelHold_ = false;
     helpHover_ = false;
     hoverList_ = nullptr, hoverRow_ = -1;
+    // Over no item until one is found below (a click acts and shows the focus).
+    mouseAway_ = !click;
     auto inside = [&](const Panel::Hit& h, float pad) { return x >= h.x0 - pad && x <= h.x1 + pad && y >= h.y0 - pad && y <= h.y1 + pad; };
     const int select = guitar_ ? R2 : Cross;
     auto press = [&](int b) {
@@ -2787,10 +2806,34 @@ bool UiSystem::mouse(float x, float y, bool click) {
             }
     PanelObj* fp = focusPanel();
     if (!fp) return false;
-    if (fp->native_ && fp->native_->mouse(x, y, click)) return true;
+    if (fp->native_ && fp->native_->mouse(x, y, click)) return mouseAway_ = false, true;
     if (!fp->scene_) return false;
-    for (const Panel::Hit& h : fp->scene_->hits()) {
-        if (!inside(h, 6)) continue;
+    // A list's rows take the pointer over their whole pitch, gaps included, so
+    // the highlight does not drop back to the selection between two rows (#98).
+    const Panel::Hit* rowHit = nullptr;
+    {
+        const auto& hs = fp->scene_->hits();
+        float best = 1e30f;
+        for (const Panel::Hit& h : hs) {
+            const size_t hash = h.key.find('#');
+            if (hash == std::string::npos || x < h.x0 - 6 || x > h.x1 + 6) continue;
+            float pitch = 1e30f;  // to the nearest other row of the same list
+            for (const Panel::Hit& o : hs)
+                if (&o != &h && o.key.compare(0, hash + 1, h.key, 0, hash + 1) == 0)
+                    pitch = std::min(pitch, std::abs((o.y0 + o.y1) - (h.y0 + h.y1)) * 0.5f);
+            const float d = std::abs(y - (h.y0 + h.y1) * 0.5f);
+            if (pitch < 1e29f && d <= pitch * 0.5f && d < best) best = d, rowHit = &h;
+        }
+    }
+    // Overlapping items (the character portraits, tilted, overlap): the one
+    // whose middle is nearest the pointer first.
+    std::vector<const Panel::Hit*> under;
+    for (const Panel::Hit& h : fp->scene_->hits())
+        if (inside(h, 6) || &h == rowHit) under.push_back(&h);
+    auto dist = [&](const Panel::Hit* h) { return std::hypot(x - (h->x0 + h->x1) * 0.5f, y - (h->y0 + h->y1) * 0.5f); };
+    std::stable_sort(under.begin(), under.end(), [&](const Panel::Hit* a, const Panel::Hit* b) { return dist(a) < dist(b); });
+    for (const Panel::Hit* hp : under) {
+        const Panel::Hit& h = *hp;
         size_t hash = h.key.find('#');
         std::string comp = h.key.substr(0, hash);
         ComponentObj* c = fp->component(comp);
@@ -2801,6 +2844,7 @@ bool UiSystem::mouse(float x, float y, bool click) {
             // The list keeps its selection in one slot: a hover would scroll
             // it, so a hover only highlights the row (#76); a click selects it.
             int row = std::atoi(h.key.c_str() + hash + 1);
+            mouseAway_ = false;
             if (!click) {
                 hoverList_ = c, hoverRow_ = row;
                 return true;
@@ -2817,7 +2861,11 @@ bool UiSystem::mouse(float x, float y, bool click) {
             return true;
         }
         if (!navigable && fp->focus_ != comp) continue;
-        if (fp->focus_ != comp) fp->setFocus(comp);
+        mouseAway_ = false;
+        if (fp->focus_ != comp) {
+            fp->setFocus(comp);
+            if (SDL_getenv("GD01_UILOG")) SDL_Log("ui: mouse focus %s", comp.c_str());  // development aid (walk mouse_character)
+        }
         if (click) press(select);
         return true;
     }

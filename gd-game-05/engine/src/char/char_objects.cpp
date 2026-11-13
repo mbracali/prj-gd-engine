@@ -265,7 +265,6 @@ void readCharDriverBody(Rd& r, CharDriver& d, bool readVersion = true) {
     if (d.clips.empty()) d.clipsObject = r.str();
     d.realign = r.b();
     d.apply = r.u32();
-    d.unknown55 = d.apply != 0;
     d.starvedClip = r.str();
 }
 
@@ -574,6 +573,20 @@ int CharBonesSamples::typeOf(const std::string& channel) {
     for (int i = 0; i < 9; ++i)
         if (suf == kTypes[i]) return i;
     return kNone;
+}
+
+std::string clipSetProxyFile(const Object& o) {
+    try {
+        size_t pos = 0;
+        milo_order::Scope order(o.bigEndian);
+        Rd r(o.record, pos);
+        r.version({17}, "CharClipSet");
+        ObjectDirData od;
+        objectDirPre(r, od);
+        return od.proxyFile;
+    } catch (const std::exception&) {
+        return {};
+    }
 }
 
 CharClipSetData decodeClipSetDir(const Object& self, size_t clipCount) {

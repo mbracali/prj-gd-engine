@@ -73,12 +73,42 @@ struct Session {
         int padnum = 0;
         int trackType = 2;  // kTrackGuitar (0x822BD6E8)
         int controllerType = 1;  // RB kControllerGuitar (session_mgr add_local_player, set_controller_type)
-        bool participating = false;  // RB: in the session (player 0 always; the band lobby adds the others)
+        bool participating = false;  // RB: in the session (player 0 always but in a band lobby; the lobby adds the others)
+        // RB's GameConfig slot of the player (set_player_slot_num: the band
+        // lobby's kGameCoopSlot*), -1 for none.
+        int slot = -1;
+        // A character chosen (PlayerConfig has_char: set_char with one, the lobby's pick) [C data: matchmaking_band.dta].
+        bool hasChar = false;
         // gamecfg set_track: the index of the instrument played in the
         // song's (tracks ...) (song_provider get_instrument), 0 the guitar.
         int track = 0;
     };
     std::array<PlayerCfg, 4> players;  // RB: four local players (wave 02)
+    // The band lobby's session (Game joining_allowed set, until session
+    // clear): the players are those its slots added (session_mgr
+    // add_local_player), player 0 too [I: elsewhere the port's player 0 is
+    // always in, the solo menus add it anyway].
+    bool lobby = false;
+    // Whether player p is in the session (RB's session player list).
+    bool joined(int p) const {
+        if (p < 0 || p >= int(players.size())) return false;
+        return players[size_t(p)].participating || (p == 0 && !lobby);
+    }
+    int numJoined() const {
+        int n = 0;
+        for (int p = 0; p < int(players.size()); ++p) n += joined(p);
+        return n;
+    }
+    // The player in a slot (gamecfg get_player_num_from_slot_num), -1 for
+    // none; before any slot is set (the solo modes), slot n is player n [I].
+    int playerInSlot(int slot) const {
+        bool any = false;
+        for (int p = 0; p < int(players.size()); ++p) {
+            if (players[size_t(p)].slot >= 0) any = true;
+            if (players[size_t(p)].slot == slot && joined(p)) return p;
+        }
+        return any || lobby ? -1 : slot;
+    }
     bool allAccess = false;  // campaign set_all_access (the cheat): every item unlocked
     int profileSlot = -1;    // campaign profile_slot (Campaign +0x48): the band chosen
     // The guitars a tour just awarded (Campaign +0x7c, 0x822A8078), shown

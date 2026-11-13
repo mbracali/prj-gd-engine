@@ -276,6 +276,36 @@ Walk::Walk(const std::string& name) : name_(name) {
         chords.push_back(Op("key:Return"));  // FINISH ENTERING CHEAT: the keyboard's Enter is Start on the entry
         steps_.push_back({"options_enter_new_cheat_fs", chords, 20000});
         steps_.push_back({"options_cheats_fs", {"check:text:Cheat_PerformanceMode_Text!=locked"}, 20000});
+    } else if (name == "touchcheat") {
+        // GD04-117 (#85): Enter Cheat by touch. Touch on; fingers tap OPTIONS
+        // and ENTER CHEAT; Performance Mode's chords on the training
+        // guitar's fret buttons (two fingers landing together hold the chord
+        // and strum it, as Down), lifted after each; the on-screen START
+        // button finishes -> the cheat is unlocked (no longer "locked").
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"set:enhanced:touch=on", "tap:menu:main_menu_options_text"}, 10000});
+        steps_.push_back({"options_select_option_fs", {D, D, D, D, D, D, D, D, C}, 20000});  // CHEATS (options_change_index: no menu to tap)
+        steps_.push_back({"options_cheats_fs", {"check:text:Cheat_PerformanceMode_Text==locked", "tap:menu:Cheat_EnterCheat_Text"}, 20000});
+        std::vector<Op> chords{Op("wait", 1200)};  // the guitar's zoom-in and cheats_watch_buttons' 0.75 s
+        for (uint32_t pat : {0x1100u, 0x1010u, 0x1001u, 0x1010u, 0x1100u, 0x10010u, 0x1100u, 0x1010u}) {
+            std::string downs, ups;
+            int id = 10;
+            for (int k = 0; k < 5; ++k)
+                if (pat & (0x10000u >> (4 * k))) {
+                    downs += (downs.empty() ? "" : ";") + std::to_string(id) + ":" + std::to_string(506 + 67 * k) + ",543";
+                    ups += (ups.empty() ? "" : ";") + std::to_string(id++);
+                }
+            char hex[16];
+            std::snprintf(hex, sizeof hex, "%x", pat);
+            chords.push_back(Op("finger:down:" + downs, 250));
+            chords.push_back(Op(std::string("check:held=") + hex, 250));
+            chords.push_back(Op("finger:up:" + ups, 0));
+            chords.push_back(Op("check:held=0", 150));
+        }
+        chords.push_back(Op("finger:down:30:1246,472", 300));  // the on-screen START (Input::touchButtons)
+        chords.push_back(Op("finger:up:30", 100));
+        steps_.push_back({"options_enter_new_cheat_fs", chords, 20000});
+        steps_.push_back({"options_cheats_fs", {"check:text:Cheat_PerformanceMode_Text!=locked"}, 20000});
     } else if (name == "glitches") {
         // The Glitches: band slot 5, everything unlocked (ui/glitches.h): its
         // name and cash, then chosen, its career's last tier complete.
@@ -351,6 +381,22 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"song", {}, 60000});
         steps_.push_back({"song_over", {}, 900000});
         steps_.push_back({"career_newspaper_fs", {}, 60000});
+    } else if (name == "boss_keys") {
+        // GD04-120: Slash's battle (bossslash, tier 5) played on the keys as
+        // a player plays it (App::walkKeyBot: the notes on the fret keys,
+        // Require Strum off; a card fired as it comes; the Whammy key worked
+        // under a Whammy attack): the player gets power-ups from the battle
+        // phrases, Slash's attacks end and the frets play again after them.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"xpad_attach", "keyboard_p1", "keyboard_nostrum", C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {D, D, D, D, C}, 20000});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_character_hub_fs", {C}, 20000});
+        steps_.push_back({"career_select_venue_fs", {C}, 20000});
+        steps_.push_back({"career_setlist_fs", {"setlist:bossslash", C}, 20000});
+        steps_.push_back({"career_battle_help_fs", {C}, 20000});
+        steps_.push_back({"song", {}, 60000});
+        steps_.push_back({"song_over", {"check:battlekeys"}, 900000});
     } else if (name == "boss_devil") {
         // Lou's battle (bossdevil, the last tier's boss): won, GH3 restarts
         // the song mid-way for the finish (start_devil_finish: <song>_markers[37],
@@ -443,6 +489,10 @@ Walk::Walk(const std::string& name) : name_(name) {
                            "dialog:savedir", "click:row:export", "set:enhanced:max_fps=60", "set:enhanced:easy_chords=off", "click:row:load_settings",
                            "check:enhanced:max_fps=120", "check:enhanced:easy_chords=on", "click:row:load_progress", "set:enhanced:audio_offset=40", "set:enhanced:video_offset=-20", "click:row:calibrate_reset", "check:enhanced:audio_offset=0", "check:enhanced:video_offset=0",
                            "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=1", "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=2",
+                           // GD04-117 (#85): a cheat switched on here is listed in Options > Cheats (its user_options tag);
+                           // Unlocked All Songs unlocks once, as its code does (a bonus song, locked on a fresh save).
+                           "check:tag:user_options.unlock_Cheat_AirGuitar=1", "check:tag:avalancha.unlocked=0",
+                           "click:row:cheat_unlocked_all_songs", "check:tag:avalancha.unlocked=1",
                            "rclick"},
                           10000});
         steps_.push_back({"options_select_option_fs", {"click:help:BACK"}, 10000});
@@ -966,6 +1016,40 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         }
         return true;
     }
+    if (starts("finger:")) {
+        // finger:down:<id>:<x>,<y>[;<id>:<x>,<y>...] / finger:up:<id>[;<id>...]:
+        // fingers (SDL finger events, menu units of the walk's 1280 x 720
+        // window) land or lift, all in this frame (one timestamp: a chord).
+        const std::string r = rest("finger:");
+        const bool down = r.rfind("down:", 0) == 0;
+        if (!down && r.rfind("up:", 0) != 0) return fail("finger: " + r);
+        std::string list = r.substr(down ? 5 : 3);
+        const uint64_t ts = SDL_GetTicksNS();
+        while (!list.empty()) {
+            const size_t semi = list.find(';');
+            const std::string a = list.substr(0, semi);
+            list = semi == std::string::npos ? "" : list.substr(semi + 1);
+            SDL_Event e{};
+            e.type = down ? SDL_EVENT_FINGER_DOWN : SDL_EVENT_FINGER_UP;
+            e.tfinger.touchID = 1, e.tfinger.fingerID = SDL_FingerID(std::stoul(a));
+            e.tfinger.timestamp = ts;
+            e.tfinger.pressure = down ? 1.0f : 0.0f;
+            if (down) {
+                float x = 0, y = 0;
+                if (a.find(':') == std::string::npos || std::sscanf(a.c_str() + a.find(':') + 1, "%f,%f", &x, &y) != 2) return fail("finger: " + r);
+                fingers_[e.tfinger.fingerID] = {x, y};
+            }
+            const auto at = fingers_[e.tfinger.fingerID];
+            e.tfinger.x = at.first / 1280.0f, e.tfinger.y = at.second / 720.0f;
+            SDL_PushEvent(&e);
+        }
+        return true;
+    }
+    if (starts("check:held=")) {  // check:held=<hex>: the frets the menus hold now (GetHeldPattern)
+        const uint32_t want = uint32_t(std::stoul(rest("check:held="), nullptr, 16));
+        std::printf("  held pattern: %x (want %x)\n", fe.heldPattern, want);
+        return fe.heldPattern == want ? true : fail("held pattern " + std::to_string(fe.heldPattern));
+    }
     if (what == "rclick") return host.walkMouse(640, 360, 3), true;
     if (what == "probe:black") return Canvas::countBlack = true, Canvas::countBlackLit = false, Canvas::blackFrames = 0, true;
     if (what == "check:no_black") {  // no all-black frame presented since probe:black (after its first lit one)
@@ -1009,11 +1093,13 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
     }
     if (starts("check:text:")) {  // check:text:<element id>!=<text>: the element's text is not that
         const std::string kv = rest("check:text:");
-        const size_t ne = kv.find("!=");
+        // check:text:<element id>==<text>: the element's text is that
+        const size_t eqs = kv.find("==");
+        const size_t ne = eqs != std::string::npos ? eqs : kv.find("!=");
         const ui::Element* e = fe.ui().find(qbkey::key(kv.substr(0, ne).c_str()));
         const std::string got = e ? e->text : "(no element)";
         std::printf("  text: %s = \"%s\"\n", kv.substr(0, ne).c_str(), got.c_str());
-        return e && got != kv.substr(ne + 2) ? true : fail("text " + kv + ": " + got);
+        return e && ((got == kv.substr(ne + 2)) == (eqs != std::string::npos)) ? true : fail("text " + kv + ": " + got);
     }
     if (starts("frets:")) {  // frets:<hex pattern>: hold these frets (GetHeldPattern) until the next frets:
         fe.heldPattern = uint32_t(std::stoul(rest("frets:"), nullptr, 16));
@@ -1112,15 +1198,15 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         return fail("hovering did not focus " + rest("check:selected:"));
     }
     if (starts("check:tag:")) {
-        // check:tag:<tag>.<field>=<int>: a live global tag's field.
+        // check:tag:<tag>.<field>=<int>: a live global tag's field (absent: 0, as check:save).
         const std::string kv = rest("check:tag:");
         const size_t dot = kv.find('.'), eq = kv.find('=');
         const std::string tag = kv.substr(0, dot), field = kv.substr(dot + 1, eq - dot - 1);
         const int want = std::atoi(kv.c_str() + eq + 1);
         auto it = fe.vm().globalTags.find(qbkey::key(tag.c_str()));
         const qb::Value* v = it == fe.vm().globalTags.end() ? nullptr : qs::Vm::param(it->second, qbkey::key(field.c_str()));
-        const int got = v ? int(v->type == qb::Type::Float ? v->f[0] : float(v->i)) : -999;
-        std::printf("  tags: %s.%s = %d\n", tag.c_str(), field.c_str(), got);
+        const int got = v ? int(v->type == qb::Type::Float ? v->f[0] : float(v->i)) : 0;
+        std::printf("  tags: %s.%s = %d%s\n", tag.c_str(), field.c_str(), got, v ? "" : " (absent)");
         return got == want ? true : fail("tag " + kv + " is " + std::to_string(got));
     }
     if (starts("set:tag:")) {  // set:tag:<tag>.<field>=<int>: a save tag's field set (a test's shortcut)
@@ -1393,6 +1479,21 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
                                                      std::to_string(keyNotes) + " notes");
         if (keyHoldFrames == 0) return fail("no sustain was held");
         if (keyWhammyFrames < 10 || keyWhammy < 0.99f || keyRest > 0.01f) return fail("the Whammy key does not move the whammy on a held sustain");
+        return true;
+    }
+    if (what == "check:battlekeys") {
+        const int notesAfter = keyNotes - keyNotesAtRecover, hitsAfter = keyHits - keyHitsAtRecover;
+        std::printf("  battle on the keys: %d notes pressed, %d hit; power-ups got %d, fired %d; attacks received %d; frets dead %d frames, "
+                    "%d recoveries, dead at the end %s; since the last recovery %d of %d notes hit; Whammy attack %d frames, its bar drawn %llu\n",
+                    keyNotes, keyHits, keyCards, keyFired, keyReceived, keyDeadFrames, keyRecoveries, keyDeadNow ? "yes" : "no", hitsAfter,
+                    notesAfter, keyWhammyAttackFrames, keyWhammyBars);
+        if (keyCards < 1) return fail("the player got no power-up from the battle phrases");
+        if (keyFired < 1) return fail("the player fired no power-up");
+        if (keyReceived < 1) return fail("the boss fired no attack at the player");
+        if (keyDeadFrames > 0 && keyRecoveries < 1) return fail("an attack's dead frets never came back");
+        if (keyWhammyAttackFrames > 0 && keyWhammyBars == 0) return fail("a Whammy attack without its whammy bar prompt");
+        if (notesAfter < 10 || hitsAfter * 10 < notesAfter * 8)
+            return fail("after the attacks the frets hit " + std::to_string(hitsAfter) + " of " + std::to_string(notesAfter) + " notes");
         return true;
     }
     if (what == "keyboard_p2") {  // the keyboard given player 2 (the Gamepads screen's Bind to)

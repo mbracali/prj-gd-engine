@@ -96,6 +96,9 @@ struct DrawContext {
 };
 
 uint32_t standardKey(const Material& m, const LightEnv* env, const DrawContext& ctx);
+// The key a mesh is drawn with: standardKey plus gd02's NoColorInput for a
+// prelit skinned mesh (its vertices have no colour input; GD02-161).
+uint32_t meshDrawKey(bool skinned, const Material& m, const LightEnv* env, const DrawContext& ctx);
 PipelineState materialPipeline(const Material& m, const LightEnv* env);
 
 // A mesh on the GPU, in GH2's vertex layout (meshLayout).
@@ -121,6 +124,7 @@ public:
     void setFrame(const Camera& camera, const LightEnv& env, int viewportW, int viewportH, TextureId sceneDepth = {});
     // `bones`: ctx.bones transforms (one for a rigid mesh).
     void draw(const GpuMesh& mesh, const Mat4* bones, const Material& m, const DrawContext& ctx);
+    const LightEnv& env() const { return env_; }
 
 private:
     RenderDevice& device_;

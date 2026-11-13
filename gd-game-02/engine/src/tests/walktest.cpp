@@ -54,6 +54,9 @@ std::vector<std::string> whitelist() {
     return out;
 }
 
+// GD02-163: no character on Character Select below this share of the mean luma.
+constexpr double kCharLumaMin = 0.6;  // costumes differ (Axel in black): 0.72 of the mean after the fix, 0.39 before [I]
+
 bool whitelisted(const std::string& key, const std::vector<std::string>& wl) {
     for (const std::string& w : wl) {
         if (!w.empty() && w.back() == '*') {
@@ -137,6 +140,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("star_phrase");
         check("track_surface");
         check("band_shadows");
+        check("hud_after_song", 90000);
         at("endgame_screen", 90000);
         wait(600);
         press(kX);  // CONTINUE (me_continue.btn)
@@ -253,7 +257,22 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("sel_difficulty_screen");
         wait(1200);
         check("difficulty_status all");
-        expect_ = {"main_screen", "chooseprof_screen", "sel_difficulty_screen"};
+        // GD02-165: every venue's setlist, each row's drawn name against its
+        // stars and score (one line, no overlap).
+        press(kX);  // the focused difficulty (the band keeps its character)
+        at("career_screen");
+        wait(600);
+        press(kX);  // LET'S ROCK
+        at("sel_venue_screen");
+        wait(800);
+        press(kX);  // the newest venue: the setlist is the whole tour, every row drawn (the list scrolls them)
+        at("sel_song_screen");
+        wait(1500);
+        check("setlist_overlap");
+        for (int i = 0; i < 34; ++i) press(kUp), wait(120);  // up to the long names (a screenshot of them)
+        wait(1200);
+        check("setlist_overlap");
+        expect_ = {"main_screen", "chooseprof_screen", "sel_difficulty_screen", "career_screen", "sel_venue_screen", "sel_song_screen"};
     } else if (scenario == "pause") {
         quickplaySong(1);
         wait(2500);
@@ -369,8 +388,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             wait(900);
             check("confirm_on sel_guitar_new_screen");
         } else {
+        check("frame_mark");
         press(kDown);  // Punk -> Alterna (Judy Nails)
-        wait(300);
+        wait(1000);
+        check("char_switch_frames");  // GD02-162: loaded off the frame
         press(kX);  // two outfits (alterna2 bought): pick one
         wait(800);
         press(kDown);  // outfit1.btn -> outfit2.btn (alterna2)
@@ -855,6 +876,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // Forgiving Hammer-ons and Pull-offs.
         row(kX), row(kX), row(kX), row(kX);
         check("enhanced_cheats");
+        // Developer Keyboard Cheats' help, one key a line (GD02-160, #103).
+        press(kDown), wait(150);
+        check("shot_enhanced_dev_keys");
+        press(kUp), wait(150);
         // The port's cheats back off (the walk's own save; tidy).
         press(kUp), wait(120), press(kX), wait(150), press(kUp), wait(120), press(kX), wait(150);
         press(kTri);
@@ -1005,6 +1030,38 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kTri);
         at("main_screen");
         expect_ = {"main_screen", "gamepads_screen", "main_screen"};
+    } else if (scenario == "char_luma") {
+        // GD02-163: each character on Character Select, its drawn brightness
+        // (a new band: the ten characters from Punk down).
+        at("splash_screen", 30000);
+        press(kX);
+        at("startup_create_save_screen");
+        press(kX);
+        at("saving_screen");
+        at("guitar_help_screen");
+        press(kX);
+        at("main_screen");
+        press(kUp);  // CAREER
+        wait(150);
+        press(kX);
+        at("chooseprof_screen");
+        press(kX);  // NEW BAND
+        at("nameprof_screen");
+        wait(600);
+        press(kX);
+        wait(300);
+        key(SDLK_RETURN);
+        at("sel_difficulty_screen");
+        press(kX);
+        at("sel_character_new_screen");
+        wait(2500);
+        for (int i = 0; i < 8; ++i) {  // the eight unlocked (Lars is the last)
+            check("char_luma");
+            press(kDown);
+            wait(4500);  // the next character loaded and through the door
+        }
+        check("char_luma_total");
+        expect_ = {"main_screen", "chooseprof_screen", "nameprof_screen", "sel_difficulty_screen", "sel_character_new_screen"};
     } else if (scenario == "band") {
         // Band naming with real keys (universal_mechanisms.md 1.1.2): the
         // arrows change the letter (each one step: menu Up / Down and the
@@ -1188,6 +1245,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             check("sp_multi_fill", 30000);
         }
         const char* results = scenario == "coop" ? "multi_compete_coop_screen" : scenario == "faceoff" ? "multi_compete_screen" : "multi_compete_fo_screen";
+        check("hud_after_song", 90000);
         at(results, 90000);
         wait(1500);
         if (scenario == "coop") check("coop_record");
@@ -2042,6 +2100,44 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
+    if (s.screen == "frame_mark") {
+        ui.host().gameCounter(0, "frame_mark");
+        return pass();
+    }
+    if (s.screen == "char_switch_frames") {
+        // GD02-162: a character not loaded yet loads on a thread and goes up
+        // a few pictures a frame (CharsysPanel show_char): no frame of the
+        // switch over 50 ms (in the frame: 60 to 120 ms each on this PC).
+        Interp& in = ui.interp();
+        const bool loaded = in.send("char_single", "are_chars_loaded", {}).truthy();
+        const int worst = ui.host().gameCounter(0, "frame_max_ms");
+        std::printf("  character switch: loaded %d, the longest frame %d ms\n", int(loaded), worst);
+        if (!loaded) return fail("the character did not load within a second");
+        if (worst > 50) return fail("a frame of the character switch took " + std::to_string(worst) + " ms");
+        return pass();
+    }
+    if (s.screen == "hud_after_song") {
+        // GD02-164: HudPanel's on_game_over (game_won_msg / game_lost) hides
+        // the Band* displays at once (0x8268EBD8 -> set_meters_showing FALSE).
+        const bool over = ui.host().gameCounter(0, "song_over") == 1;
+        const int hidden = ui.host().gameCounter(0, "hud_displays_hidden");
+        if (!over) {
+            if (hidden == 1) return fail("the HUD's displays hidden before the song ended");
+            if (nowMs - stepStart_ > s.ms) return fail("the song did not end");
+            return;
+        }
+        if (hudOverMs_ < 0) hudOverMs_ = nowMs;
+        if (hidden == 1) {
+            std::printf("  HUD displays hidden %.0f ms after the song ended\n", nowMs - hudOverMs_);
+            hudOverMs_ = -1;
+            return pass();
+        }
+        if (nowMs - hudOverMs_ > 1000) {
+            hudOverMs_ = -1;
+            return fail("the HUD's displays still showing 1 s after the song ended");
+        }
+        return;
+    }
     if (s.screen == "game_sinks") {
         Interp& in = ui.interp();
         const bool track = in.send("game", "has_sink", {Value::symbol("track_panel")}).truthy(), hud = in.send("game", "has_sink", {Value::symbol("hud")}).truthy();
@@ -2283,8 +2379,10 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             for (const char* key : {"graphics_backend", "audio_backend"}) {
                 const std::string got = ui.host().enhancedValue(key), file = saved.has(key) ? saved[key].str() : "(unset)";
                 std::printf("  enhanced: %s %s (enhanced.json %s)\n", key, got.c_str(), file.c_str());
-                if (got != "local" || (file != "(unset)" && file != "local"))
-                    problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + " / " + file + ", not local";
+                // GDALL-050: graphics defaults to Vulkan on Windows / Linux.
+                const std::string def = std::string(key) == "graphics_backend" ? ui::defaultGraphicsBackend() : std::string("local");
+                if (got != def || (file != "(unset)" && file != def))
+                    problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + " / " + file + ", not " + def;
             }
             Json j = Json::parse(R"({"graphics_backend":"vulkan","audio_backend":"openal","bloom":"2x"})");
             ui::migrateEnhanced(j);
@@ -2309,14 +2407,15 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (w == "enhanced_backends_start") {
                 // (the file keeps what it had until the next save; the game reads local)
                 for (const char* key : {"graphics_backend", "audio_backend"})
-                    if (ui.host().enhancedValue(key) != "local") add(std::string(key) + " is " + ui.host().enhancedValue(key));
-                if (g0 != "local" || a0 != "local" || aNow != "local") add("an unknown saved backend was not dropped at start");
+                    if (ui.host().enhancedValue(key) != (std::string(key) == "graphics_backend" ? ui::defaultGraphicsBackend() : "local"))
+                        add(std::string(key) + " is " + ui.host().enhancedValue(key));
+                if (g0 != ui::defaultGraphicsBackend() || a0 != "local" || aNow != "local") add("an unknown saved backend was not dropped at start");
             } else if (w == "enhanced_backends_saved") {
                 want("graphics_backend", "vulkan"), want("audio_backend", "openal");
                 if (!saved.has("graphics_backend") || saved["graphics_backend"].str() != "vulkan" || !saved.has("audio_backend") ||
                     saved["audio_backend"].str() != "openal")
                     add("the backends were not saved");
-                if (g0 != "local" || a0 != "local" || aNow != "local") add("a backend changed before the restart");
+                if (g0 != ui::defaultGraphicsBackend() || a0 != "local" || aNow != "local") add("a backend changed before the restart");
             } else {
                 want("graphics_backend", "sdl3"), want("audio_backend", "openal");
                 if (g0 != "sdl3" || a0 != "openal") add("the restart did not start on the saved backends");
@@ -2491,6 +2590,126 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 return pass();
             }
         return fail("no The Glitches band");
+    }
+    if (s.screen == "char_luma" || s.screen == "char_luma_total") {
+        // GD02-163: each character's mean luma (Rec. 601, 0..255) on its own
+        // pixels: in the door's and its wall's box (x 0.44..0.90, y 0.15..0.95), the pixels
+        // that differ from the per-pixel median of every character's frame
+        // (the backdrop) by more than 24 on any channel.
+        static std::vector<std::pair<std::string, std::vector<uint8_t>>> frames;
+        static int fw = 0, fh = 0;
+        if (s.screen == "char_luma") {
+            ui::PanelObj* fp = ui.focusPanel();
+            const ui::ComponentObj* c = fp ? fp->focused() : nullptr;
+            const std::string who = c ? ui.interp().send(const_cast<ui::ComponentObj*>(c), "selected_sym", {}).str() : std::string("?");
+            const char* dir = SDL_getenv("GD02_WALK_SHOTS");
+            const std::string path = std::string(dir ? dir : "/tmp") + "/char_" + std::to_string(frames.size()) + ".bmp";
+            if (!ui.host().saveScreenshot(path)) return fail("no screenshot");
+            SDL_Surface* raw = SDL_LoadBMP(path.c_str());
+            SDL_Surface* img = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32) : nullptr;
+            if (raw) SDL_DestroySurface(raw);
+            if (!img) return fail("screenshot unreadable");
+            fw = img->w, fh = img->h;
+            std::vector<uint8_t> px(size_t(fw) * size_t(fh) * 4);
+            for (int y = 0; y < fh; ++y)
+                std::memcpy(px.data() + size_t(y) * size_t(fw) * 4, static_cast<const uint8_t*>(img->pixels) + size_t(y) * size_t(img->pitch), size_t(fw) * 4);
+            SDL_DestroySurface(img);
+            frames.push_back({who, std::move(px)});
+            return pass();
+        }
+        if (frames.size() < 8) return fail("fewer than 8 characters on screen");
+        const int x0 = fw * 44 / 100, x1 = fw * 90 / 100, y0 = fh * 15 / 100, y1 = fh * 95 / 100;
+        std::vector<double> sum(frames.size(), 0);
+        std::vector<long> cnt(frames.size(), 0);
+        std::vector<uint8_t> v(frames.size());
+        for (int y = y0; y < y1; ++y)
+            for (int x = x0; x < x1; ++x) {
+                const size_t o = (size_t(y) * size_t(fw) + size_t(x)) * 4;
+                uint8_t med[3];
+                for (int k = 0; k < 3; ++k) {
+                    for (size_t f = 0; f < frames.size(); ++f) v[f] = frames[f].second[o + size_t(k)];
+                    std::nth_element(v.begin(), v.begin() + long(v.size() / 2), v.end());
+                    med[k] = v[v.size() / 2];
+                }
+                for (size_t f = 0; f < frames.size(); ++f) {
+                    const uint8_t* p = &frames[f].second[o];
+                    if (std::abs(p[0] - med[0]) <= 24 && std::abs(p[1] - med[1]) <= 24 && std::abs(p[2] - med[2]) <= 24) continue;
+                    sum[f] += 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2], ++cnt[f];
+                }
+            }
+        double total = 0;
+        std::vector<double> l(frames.size());
+        for (size_t f = 0; f < frames.size(); ++f) {
+            l[f] = cnt[f] ? sum[f] / double(cnt[f]) : 0, total += l[f];
+            std::printf("  character select: %s luma %.1f (%ld pixels)\n", frames[f].first.c_str(), l[f], cnt[f]);
+        }
+        const double mean = total / double(frames.size());
+        const double lo = *std::min_element(l.begin(), l.end());
+        std::printf("  character select: %zu characters, lowest luma %.1f = %.2f of the mean %.1f (at least %.2f)\n", frames.size(), lo, lo / mean,
+                    mean, kCharLumaMin);
+        for (size_t f = 0; f < frames.size(); ++f)
+            if (l[f] < mean * kCharLumaMin) return fail(frames[f].first + " is markedly darker than the others");
+        return pass();
+    }
+    if (s.screen == "setlist_overlap") {
+        // GD02-165: the drawn extents (UiView hits, 1280x720) of each row's
+        // name (list.txt) against the same row's stars / score to its right;
+        // a name over more than one line fails too (the owner's rule).
+        ui::PanelObj* fp = ui.focusPanel();
+        if (!fp || !fp->view) return fail("no song list panel");
+        if (const char* dir = SDL_getenv("GD02_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + "/setlist_" + std::to_string(++shotN_) + ".bmp");
+        struct Row {
+            float nameX0 = 0, nameX1 = -1, otherX0 = 1e9f;
+            std::string key, other;
+        };
+        std::map<int, Row> rows;
+        std::vector<std::pair<std::string, gfx::UiView::Hit>> others;
+        for (const gfx::UiView::Hit& h : fp->view->hits()) {
+            const size_t a = h.key.find('#');
+            const size_t b = a == std::string::npos ? a : h.key.find('#', a + 1);
+            if (b == std::string::npos) continue;
+            const int row = std::atoi(h.key.c_str() + a + 1);
+            const std::string el = h.key.substr(b + 1);
+            if (el == "list.txt") rows[row].nameX0 = h.x0, rows[row].nameX1 = h.x1, rows[row].key = h.key;
+            else others.push_back({h.key.substr(0, a) + "#" + std::to_string(row) + "#" + el, h});
+        }
+        for (const auto& [k, h] : others) {
+            const size_t a = k.find('#'), b = k.find('#', a + 1);
+            Row& r = rows[std::atoi(k.c_str() + a + 1)];
+            const std::string el = k.substr(b + 1);
+            if ((el == "stars.txt" || el == "score.txt" || el == "stars_gold.mesh") && h.x0 < r.otherX0) r.otherX0 = h.x0, r.other = el;
+        }
+        auto* sp = dynamic_cast<ui::ListProvider*>(ui.interp().findObject("song_provider"));
+        std::vector<gfx::UiView::ListRow> lr;
+        int sel = 0;
+        if (sp) sp->rows(lr, 0, sel);
+        // A name clear of its stars / score by 12 px of 1280 (the stars'
+        // glyphs start inside their box) [I].
+        constexpr float kClearPx = 12.0f;
+        int bad = 0, measured = 0, twoLines = 0;
+        float worst = -1e9f;
+        std::string worstName;
+        for (const auto& [row, r] : rows) {
+            if (r.nameX1 < 0) continue;
+            const int lines = fp->view->textLines(r.key);
+            const std::string name = row < int(lr.size()) && lr[size_t(row)].texts.count("list.txt") ? lr[size_t(row)].texts.at("list.txt") : "?";
+            const float past = r.otherX0 < 1e8f ? r.nameX1 - r.otherX0 : -1e9f;
+            if (r.otherX0 < 1e8f) {
+                ++measured;
+                if (past > worst) worst = past, worstName = name;
+            }
+            twoLines += lines > 1;
+            if (past > -kClearPx || lines > 1) {
+                ++bad;
+                std::printf("  setlist row %d '%s': name %.1f..%.1f, %s from %.1f (%+.1f px), %d line(s)\n", row, name.c_str(), double(r.nameX0),
+                            double(r.nameX1), r.other.c_str(), double(r.otherX0), double(past), lines);
+            }
+        }
+        std::printf("  setlist: %zu names, %d with stars / score; %d overlapping, closer than 12 px or broken (%d over two lines); closest '%s' %+.1f px from its "
+                    "stars / score\n",
+                    rows.size(), measured, bad, twoLines, worstName.c_str(), double(worst));
+        if (!measured) return fail("no setlist row with stars or a score measured");
+        return bad ? fail("song names overlap the stars / score or break over two lines") : pass();
     }
     if (s.screen == "difficulty_status all") {
         ui::PanelObj* fp = ui.focusPanel();

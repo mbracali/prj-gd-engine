@@ -10,13 +10,17 @@
 // requirements and outfit unlocks, the hints' conditions and screens, the
 // songs' ranks (songs.dtb). The messages and what the scripts do with them
 // were listed from the scripts (docs/tour_and_shop.md).
-// [I] what the port decides (RB's TourPerformer / TourBand natives are not
-// read in the XEX): the Nth song of a solo event is the Nth song of the
-// instrument's rank order; a band event's (band N) the Nth of the band's;
-// a tier is the town of the same order in (world ...); fame is the stars
-// earned; fans grow with the venue's (buzz (venues ...)) table by stars;
-// an event is unlocked when its (fame (town N) (world M)) and buzz are met.
+// [C] the tours' rules read in the XEX (DECISIONS D75): the Solo Tour's
+// TourCharLocal (songs from SongMgr's ranked lists, open events and towns,
+// bonus unlocks), the Band World Tour's buzz and fans.
+// [I] what the port still decides (D67, D75): a tier is the town of the
+// same order in (world ...) (RB's 0x823FCED8 not re-read); fame is the
+// stars earned; a band event is unlocked when its (fame (town N) (world M))
+// and buzz are met; the band towns' own events (tour/<town>.dta) are not
+// loaded.
 #include "ui/rb_meta.h"
+#include "ui/rb_char_preview.h"
+#include "ui/rb_multifocus.h"
 
 #include <SDL3/SDL.h>
 
@@ -28,7 +32,16 @@
 #include <sstream>
 
 #include "data/dta.h"
+#include "data/game_data.h"
 #include "data/json.h"
+#include "char/char_objects.h"
+#include "char/patch.h"
+#include "scene/milo.h"
+#include "scene/world_objects.h"
+#include "render/ui_view.h"
+#include "game/camera_director.h"
+#include "char/character.h"
+#include "game/band.h"
 #include "game/song_db.h"
 #include "platform/paths.h"
 #include "ui/natives.h"
@@ -52,6 +65,14 @@ int num(const DataNode* n, size_t i = 1, int def = 0) {
     const DataNode& c = n->children[i];
     return c.type == DataNode::Type::Int ? c.i : c.type == DataNode::Type::Float ? int(c.f) : def;
 }
+// A (key TRUE|FALSE|n) flag: a number's non-zero, TRUE; `def` without one.
+bool flag(const DataNode* n, bool def) {
+    if (!n || n->children.size() < 2) return def;
+    const DataNode& c = n->children[1];
+    if (c.type == DataNode::Type::Int) return c.i != 0;
+    if (c.type == DataNode::Type::Float) return c.f != 0;
+    return c.isText() ? c.s != "FALSE" : def;
+}
 // The children lists of `n` that start with a symbol (key, node).
 std::vector<std::pair<std::string, const DataNode*>> entries(const DataNode* n) {
     std::vector<std::pair<std::string, const DataNode*>> v;
@@ -72,8 +93,20 @@ struct TourEvent {
     std::string key() const { return town + "/" + venue + "/" + name; }
 };
 
+// A venue of a solo town with its events, and its kind (TourVenue: kTourVenueNormal 0,
+// kTourVenueUnlock 1 when its events play (unlock N), kTourVenueDownload 2:
+// RB 0x823FDB20) [C].
+struct SoloVenue {
+    std::string town, venue;
+    int type = 0;
+    std::vector<size_t> events;  // indices into TourData::soloEvents
+};
+
 struct TourData {
     std::vector<std::string> soloTowns, bandTowns;
+    std::vector<SoloVenue> soloVenues;  // by town, in the data's order
+    int initialUnlocks = 1;             // tour_solo.dta num_initial_unlock_songs (RB 0x823DC120) [C]
+    int maxSong[4] = {45, 45, 45, 45};  // tour_solo.dta max_song per difficulty (RB 0x823DBED0) [C]
     std::vector<TourEvent> soloEvents, bandEvents;
     std::map<std::string, std::string> tierTown;  // band tier -> world town [I]
     const DataNode* solo = nullptr;
@@ -93,7 +126,8 @@ void loadEvents(const DataNode* towns, std::vector<std::string>& townNames, std:
 // ------------------------------------------------------------ the profile
 
 struct CharData {
-    std::string name, gender = "male", instrument = "guitar", hometown = "boston", attitude = "kGenreRocker";
+    std::string name, gender = "male", instrument = "guitar", hometown = "boston";
+    int attitude = 256;  // kGenreRocker (config/macros.dta kGenre*: the scripts compare the values)
     std::map<std::string, std::string> outfit;  // category -> piece
     std::set<std::string> owned;                // pieces bought or won
     float weight = 0.5f, height = 0.5f;
@@ -103,8 +137,21 @@ struct CharData {
     int difficulty = 1;
     std::map<std::string, int> stars;  // "<difficulty>:<event key>" -> stars
     std::set<std::string> seenHints, seenTowns;
-    std::string town, venue, event, newTown, newUnlock;
+    // Per difficulty (RB's 0x3c-byte records at TourCharLocal +0xd4): the
+    // bonus songs unlocked (+0x2c, from num_initial_unlock_songs: RB
+    // 0x823E54E8; one more for each event first completed whose song is a
+    // bonus song: RB 0x823E1178) and the unlocks already announced (+0x30).
+    int unlocks[4] = {-1, -1, -1, -1};  // -1: the data's initial count
+    std::set<std::string> seenUnlocks[4];
+    std::string town, venue, event, newTown;
     int score = 0;
+    // The patch creator's patches (GD05-084, D93): per set of ui.dta's
+    // (patch (sets (general 10) (chest 5) (arm 5))) that many patches [I:
+    // the counts read as the slots of the set], and the patch each tattoo
+    // location wears ((tattoos (patch_chest chest ...) ...)): its index in
+    // the location's set, -1 none.
+    std::map<std::string, std::vector<chr::Patch>> patchSets;
+    std::map<std::string, int> tattoos;
 };
 
 struct BandData {
@@ -113,8 +160,14 @@ struct BandData {
     int fans = 0, money = 0, buzz = 0;
     std::map<std::string, int> stars;  // event key -> best stars (fame)
     std::set<std::string> items, seenHints;
+    // The songs the band has played (RB's band record at +0x18c, RB
+    // 0x82409D00 / 0x82409F18): quick play offers them (RB 0x823D43D0) [C].
+    std::set<std::string> played;
     std::string town, venue, event, unlockedItem;
     int minDifficulty = 3;
+    // The members' characters (their names, unique in the profile:
+    // profile_mgr is_char_name_unique): the band's money is theirs.
+    std::vector<std::string> members;
 };
 
 }  // namespace
@@ -137,6 +190,7 @@ class RbBandObj : public ScriptObject {
 public:
     RbBandObj(RbMeta& m, const std::string& id) : ScriptObject(id, "TourBand"), meta_(m) {}
     BandData d;
+    int lastBuzzChange = 0, lastFansChange = 0;  // the last gig's
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override;
 
 private:
@@ -216,6 +270,28 @@ public:
     std::vector<std::string> setlist;
     size_t songIndex = 0;
     int lastStars = 0, lastScore = 0;
+    // The stars of each song of the event played so far (RB's vector at
+    // 0x8298F7D0: complete_song RB 0x823D0640 appends, num_completed is its
+    // size) [C].
+    std::vector<int> songStars;
+    // The event's reward (TourPerformer reward, RB 0x823EEAE8) [C]: the
+    // event's reward_per_star times each song's stars, summed.
+    int reward() const {
+        const int per = event && event->ev.node ? num(event->ev.node->find("reward_per_star")) : 0;
+        int sum = 0;
+        for (int st : songStars) sum += per * st;
+        return sum;
+    }
+    // The money a character is paid, up to config/tour_solo.dta's max_money [C data].
+    void pay(RbCharObj& c, int amount);
+    // The session's local players' characters (game get_player_config <p>
+    // get_char), the band's members from now on.
+    std::vector<RbCharObj*> localMembers(RbBandObj* band = nullptr);
+    RbCharObj* charNamed(const std::string& name) {
+        for (RbCharObj* c : chars)
+            if (c->d.name == name) return c;
+        return nullptr;
+    }
     bool winning = false;
 
     std::function<void()> ensure;  // the tour data, once the boot scripts are loaded
@@ -258,48 +334,149 @@ public:
     RbCharObj* soloChar() { return dynamic_cast<RbCharObj*>(performer); }
     RbBandObj* bandPerf() { return dynamic_cast<RbBandObj*>(performer); }
 
-    // The songs by an instrument's rank (the tours' order) [I].
-    std::vector<std::string> rankOrder(const std::string& inst) {
-        std::vector<std::pair<int, std::string>> v;
-        for (const SongInfo& s : ui_.host().songs()) {
-            if (s.tutorial) continue;
-            auto it = s.rank.find(inst);
-            if (it == s.rank.end()) it = s.rank.find("band");
-            if (it != s.rank.end()) v.emplace_back(it->second, s.id);
-        }
-        std::stable_sort(v.begin(), v.end());
-        std::vector<std::string> out;
-        for (auto& p : v) out.push_back(p.second);
-        return out;
+    // SongMgr's ranked lists (RB 0x82434020) [C], cached per instrument.
+    std::map<std::string, std::vector<std::string>> rankedCache[2];
+    const std::vector<std::string>& ranked(const std::string& inst, bool unlockable) {
+        auto& c = rankedCache[unlockable ? 1 : 0];
+        auto it = c.find(inst);
+        if (it == c.end()) it = c.emplace(inst, rankedSongs(ui_.host().songs(), inst, unlockable)).first;
+        return it->second;
     }
-    // An event's songs (its (songs ...) list) for the performer's instrument.
+    // One entry of an event's (songs ...) as RB resolves it (RB 0x823FE820)
+    // [C]: N (or (leader N)) the Nth song of the performer's instrument's
+    // ranked list, (unlock N) of its bonus songs, (<instrument> N) of that
+    // instrument's (band: the band's rank); N < 0 counts from the end; out
+    // of range clamps to the list. A song's name stands for itself; random
+    // and any are left to the caller. "" when the entry is none of these.
+    std::string resolveSong(const DataNode& s, const std::string& inst) {
+        int n = 0;
+        std::string listInst = inst;
+        bool unlock = false;
+        if (s.type == DataNode::Type::Int) {
+            n = s.i;
+        } else if (s.isList() && s.children.size() > 1) {
+            const std::string head = text(&s, 0);
+            n = num(&s, 1);
+            unlock = head == "unlock";
+            if (head != "leader" && head != "unlock") listInst = head;
+        } else {
+            return s.isText() ? s.s : std::string();
+        }
+        const std::vector<std::string>& l = ranked(listInst, unlock);
+        if (l.empty()) return {};
+        long idx = n < 0 ? long(l.size()) + n : long(n) - 1;
+        idx = std::clamp<long>(idx, 0, long(l.size()) - 1);
+        return l[size_t(idx)];
+    }
+    // An event's (songs ...) list for the performer's instrument.
     std::vector<std::string> eventSongs(const TourEvent& e, bool band, const std::string& inst) {
         std::vector<std::string> out;
         const DataNode* songs = e.node ? e.node->find("songs") : nullptr;
         if (!songs) return out;
-        const std::vector<std::string> order = rankOrder(band ? "band" : inst);
-        for (size_t i = 1; i < songs->children.size(); ++i) {
-            const DataNode& s = songs->children[i];
-            if (s.type == DataNode::Type::Int) {
-                if (s.i >= 1 && size_t(s.i) <= order.size()) out.push_back(order[size_t(s.i - 1)]);
-            } else if (s.isList()) {  // (band N) / (unlock N)
-                const int k = num(&s, 1, 1);
-                const std::vector<std::string> o2 = text(&s, 0) == "unlock" ? unranked() : order;
-                if (k >= 1 && size_t(k) <= o2.size()) out.push_back(o2[size_t(k - 1)]);
-                else if (!order.empty()) out.push_back(order[size_t(k) % order.size()]);
-            } else if (s.isText()) {
-                if (s.s == "random" && !order.empty()) out.push_back(order[size_t(std::rand()) % order.size()]);
-                else if (s.s == "any") out.push_back("any");
-                else out.push_back(s.s);
+        const std::string i = band ? "band" : inst;
+        for (size_t k = 1; k < songs->children.size(); ++k) {
+            const DataNode& s = songs->children[k];
+            if (s.isText() && s.s == "random") {
+                // tour_random_song: a song of the performer's ranked list [I: RB's pick].
+                const std::vector<std::string>& l = ranked(i, false);
+                if (!l.empty()) out.push_back(l[size_t(std::rand()) % l.size()]);
+            } else {
+                const std::string id = resolveSong(s, i);
+                if (!id.empty()) out.push_back(id);
             }
         }
         return out;
     }
-    std::vector<std::string> unranked() {
-        std::vector<std::string> v;
-        for (const SongInfo& s : ui_.host().songs())
-            if (!s.tutorial && s.rank.empty()) v.push_back(s.id);
-        return v;
+    // The first (songs ...) entry's number and whether it is (unlock N):
+    // what the solo tour checks an event against (RB 0x823E46B0) [C].
+    static int firstSongNumber(const TourEvent& e, bool& unlock, bool& symbol) {
+        unlock = symbol = false;
+        const DataNode* songs = e.node ? e.node->find("songs") : nullptr;
+        if (!songs || songs->children.size() < 2) return 0;
+        const DataNode& s = songs->children[1];
+        if (s.type == DataNode::Type::Int) return s.i;
+        if (s.isList()) return unlock = text(&s, 0) == "unlock", num(&s, 1);
+        symbol = true;
+        return 0;
+    }
+    // The bonus songs unlocked at a difficulty, and the most of the
+    // difficulties from `from` up (RB 0x823DE708) [C].
+    int unlocksAt(const CharData& c, int d) const { return c.unlocks[d] < 0 ? data.initialUnlocks : c.unlocks[d]; }
+    int unlockProgress(const CharData& c, int from) const {
+        int most = 0;
+        for (int d = std::clamp(from, 0, 3); d < 4; ++d) most = std::max(most, unlocksAt(c, d));
+        return most;
+    }
+    bool soloCompleted(const CharData& c, int diff, const TourEvent& e) const { return c.stars.count(std::to_string(diff) + ":" + e.key()) != 0; }
+    // A venue's open events at the character's difficulty (RB 0x823E46B0)
+    // [C]: (songs N) up to max_song of the difficulty, (unlock N) up to the
+    // bonus songs unlocked, a named song only when downloaded (none).
+    std::vector<size_t> soloOpenEvents(const CharData& c, int diff, const SoloVenue& v) const {
+        std::vector<size_t> out;
+        for (size_t i : v.events) {
+            bool unlock = false, symbol = false;
+            const int n = firstSongNumber(data.soloEvents[i], unlock, symbol);
+            if (symbol) continue;
+            if (unlock ? n <= unlockProgress(c, diff) : n <= data.maxSong[std::clamp(diff, 0, 3)]) out.push_back(i);
+        }
+        return out;
+    }
+    // The towns open at a difficulty (TourCharLocal vfunc +0x48, RB
+    // 0x823E5BB8) [C]: in the data's order, a town with a normal venue is
+    // open while the venues before it had every open event completed at
+    // that difficulty or a harder one (RB 0x823DE560: the difficulty to
+    // beat rises to the one they were completed at); unlock / download
+    // venues are open whenever they have open events.
+    std::vector<std::string> soloOpenTowns(const CharData& c, int diff) const {
+        std::vector<std::string> out;
+        int level = diff;
+        for (const SoloVenue& v : data.soloVenues) {
+            const std::vector<size_t> open = soloOpenEvents(c, diff, v);
+            if (open.empty()) continue;
+            if (v.type != 0) {
+                out.push_back(v.town);
+                continue;
+            }
+            if (level >= 4) continue;
+            out.push_back(v.town);
+            for (; level < 4; ++level) {
+                bool all = true;
+                for (size_t i : open) all = all && soloCompleted(c, level, data.soloEvents[i]);
+                if (all) break;
+            }
+        }
+        return out;
+    }
+    // Solo event_status (RB 0x823DBF80) [C]: kTourPlayed (1) once completed
+    // at the character's difficulty, else kTourNew (2); the port answers
+    // kTourLocked (0) for an event RB's lists leave out (its town not open
+    // or the event not open, RB 0x823E5BB8 / 0x823E46B0).
+    int soloStatus(const RbCharObj& c, const TourEvent& e);
+    std::string newUnlock(const CharData& c);
+    // Quick play's progress of a character (RB 0x823E0458) [C]: for the
+    // ranked songs, the most over the difficulties of the song number of the
+    // last event of the first venue of the last open town whose first venue
+    // is normal; for the bonus songs, the bonus songs unlocked at any
+    // difficulty.
+    int soloQuickplayProgress(const CharData& c, bool bonus) const {
+        if (bonus) return unlockProgress(c, 0);
+        int most = 0;
+        for (int d = 0; d < 4; ++d) {
+            const std::vector<std::string> towns = soloOpenTowns(c, d);
+            for (auto t = towns.rbegin(); t != towns.rend(); ++t) {
+                const SoloVenue* first = nullptr;
+                for (const SoloVenue& v : data.soloVenues)
+                    if (v.town == *t && !v.events.empty()) {
+                        first = &v;
+                        break;
+                    }
+                if (!first || first->type != 0) continue;
+                bool unlock = false, symbol = false;
+                most = std::max(most, firstSongNumber(data.soloEvents[first->events.back()], unlock, symbol));
+                break;
+            }
+        }
+        return most;
     }
     std::string localizeOr(const std::string& tok) {
         const std::string l = ui_.localize(tok);
@@ -309,21 +486,6 @@ public:
         for (const SongInfo& s : ui_.host().songs())
             if (s.id == id) return s.name;
         return id;
-    }
-    // Solo: an event is open once the one before it in its town is played,
-    // and a town once the town before it has every event played [I].
-    int soloStatus(const RbCharObj& c, const TourEvent& e) {
-        const std::string dk = std::to_string(c.d.difficulty) + ":";
-        if (c.d.stars.count(dk + e.key())) return 1 | (1 << (2 + c.d.difficulty));  // played / completed
-        const auto& evs = data.soloEvents;
-        for (size_t i = 0; i < evs.size(); ++i) {
-            if (&evs[i] != &e && evs[i].key() != e.key()) continue;
-            if (i == 0) return 2;  // kTourNew
-            const TourEvent& prev = evs[i - 1];
-            if (prev.town == e.town) return c.d.stars.count(dk + prev.key()) ? 2 : 0;
-            return c.d.stars.count(dk + prev.key()) ? 2 : 0;
-        }
-        return 0;
     }
     // A band's hometown plays the first tier's gigs, and the first tier's
     // town the hometown's [I: RB starts every band at home].
@@ -348,6 +510,84 @@ public:
         return 2;
     }
 
+    // ---- the Band World Tour's buzz and fans (config/tour_band.dta (buzz ...)).
+    const DataNode* buzzBlock() const { return data.band ? data.band->find("buzz") : nullptr; }
+    // Fans for a buzz (buzz_to_fans, RB 0x823EE350) [C]: the line through
+    // the (fans (<buzz> <fans>) ...) points around the buzz, from (0 0).
+    int buzzToFans(int buzz) const {
+        const DataNode* fans = buzzBlock() ? buzzBlock()->find("fans") : nullptr;
+        double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        for (size_t i = 1; fans && i < fans->children.size(); ++i) {
+            const DataNode& p = fans->children[i];
+            if (!p.isList() || p.children.size() < 2) continue;
+            x1 = p.children[0].type == DataNode::Type::Float ? p.children[0].f : p.children[0].i;
+            y1 = p.children[1].type == DataNode::Type::Float ? p.children[1].f : p.children[1].i;
+            if (buzz <= x1) break;
+            x0 = x1, y0 = y1;
+        }
+        if (x1 == x0) return int(y0);
+        const double slope = (y1 - y0) / (x1 - x0);
+        return int(float(buzz) * float(slope) + float(y0 - slope * x0));
+    }
+    // The buzz a gig earns (RB 0x823EF7D0) [C]: the venue's performance
+    // table, row (the event's stars before, or new_performance for a first
+    // gig) - 1, column max(stars, 2) - 2, both clamped to the table.
+    // [I] the row: RB reads the band's record of the event (+0x14), taken
+    // here as its best average stars.
+    int buzzChange(const std::string& venue, int before, int stars) {
+        const DataNode* b = buzzBlock();
+        int row = before;
+        if (row < 0) {
+            row = 2;
+            if (const DataNode* np = b ? b->find("new_performance") : nullptr; np && np->children.size() > 1) {
+                try {
+                    row = in_.eval(np->children[1]).integerValue();
+                } catch (const std::exception&) {
+                }
+            }
+        }
+        const DataNode* venues = b ? b->find("venues") : nullptr;
+        const DataNode* vn = venues ? venues->find(venue) : nullptr;
+        const DataNode* perf = vn ? vn->find("performance") : nullptr;
+        if (!perf || perf->children.size() < 2) return 0;
+        const size_t rows = perf->children.size() - 1;
+        const size_t r = size_t(std::clamp<long>(long(row) - 1, 0, long(rows) - 1));
+        const DataNode& line = perf->children[1 + r];
+        if (!line.isList() || line.children.empty()) return 0;
+        const size_t c = size_t(std::clamp<long>(long(std::max(stars, 2)) - 2, 0, long(line.children.size()) - 1));
+        return line.children[c].type == DataNode::Type::Int ? line.children[c].i : int(line.children[c].f);
+    }
+    int losePenalty(const std::string& venue) const {
+        const DataNode* venues = buzzBlock() ? buzzBlock()->find("venues") : nullptr;
+        const DataNode* vn = venues ? venues->find(venue) : nullptr;
+        return num(vn ? vn->find("lose_penalty") : nullptr);
+    }
+    // The buzz, 0 up to the band's cap (buzz_caps: none, van, bus, jet
+    // [I: the order of the caps]); the fans follow it.
+    void setBuzz(RbBandObj& b, int buzz);
+
+    // A creator palette as a list of its colours (skin.lst / color.lst set_colors).
+    std::map<std::string, RbList*> palettes;
+    RbList* palette(const std::string& pal) {
+        if (auto it = palettes.find(pal); it != palettes.end()) return it->second;
+        int n = 0;
+        try {
+            auto milo = scene::loadMilo(ui_.data(), "char/gen/skin.milo_xbox");
+            if (auto* p = milo->root().find<scene::ColorPalette>(pal)) n = int(p->colors.size());
+        } catch (const std::exception& e) {
+            SDL_Log("rb meta: skin.milo: %s", e.what());
+        }
+        RbList* l = own(std::make_unique<RbList>("rb_palette_" + pal));
+        l->build = [n] {
+            std::vector<std::string> v;
+            for (int i = 0; i < n; ++i) v.push_back(std::to_string(i));
+            return v;
+        };
+        l->label = [](const std::string&) { return std::string(); };
+        l->refresh();
+        return palettes[pal] = l;
+    }
+
     // ---- the save (rb_profile.json, version 1)
     std::string path() const { return prefDir() + "rb_profile.json"; }
     void save();
@@ -356,6 +596,7 @@ public:
     // The hint: the first (hints ...) entry whose cond holds and that the
     // performer has not seen (ONEOFF hints are added by add_seen_hint) [I].
     std::string hint;
+    bool advancingHint = false;
     std::string currentHint() {
         const DataNode* block = soloChar() ? data.solo : bandPerf() ? data.band : nullptr;
         const DataNode* hints = block ? block->find("hints") : nullptr;
@@ -381,6 +622,22 @@ private:
 
 // ------------------------------------------------------------ characters
 
+const DataNode* outfitCategory(UiManager& ui, const std::string& gender, const std::string& cat);
+namespace {
+// An instrument model's finishes: the category's (outfits ...) whose names
+// contain the model's (has_group_selection, RB 0x823E0700: strstr) [C].
+std::vector<std::string> modelFinishes(UiManager& ui, const std::string& gender, const std::string& cat, const std::string& model) {
+    std::vector<std::string> v;
+    const DataNode* c = model.empty() ? nullptr : outfitCategory(ui, gender, cat);
+    for (const auto& [o, n] : entries(c ? c->find("outfits") : nullptr))
+        if (o.find(model) != std::string::npos) v.push_back(o);
+    return v;
+}
+// The finish chosen in group_select_panel for a model, until the outfit
+// panel wears it (confirm_outfit).
+std::map<std::string, std::string> gChosenFinish;
+}  // namespace
+
 bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) {
     (void)in;
     r = Value::integer(0);
@@ -395,29 +652,70 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
         const std::string t = msg == "track_icon" && !sArg(args, 0).empty() ? sArg(args, 0) : d.instrument;
         return r = Value::string(t == "drum" ? "D" : t == "vocals" ? "V" : t == "bass" ? "B" : "G"), true;
     }
-    if (msg == "get_attitude") return r = Value::symbol(d.attitude), true;
-    if (msg == "set_attitude") return d.attitude = sArg(args, 0), true;
+    if (msg == "get_attitude") return r = Value::integer(d.attitude), true;
+    // The creator's setters take the CompositeCharacter being shown first
+    // ({$tour_char set_skin_color $char {skin.lst selected_pos}},
+    // charcreator.dta) [C data]: the value is the last argument.
+    const size_t last = args.empty() ? 0 : args.size() - 1;
+    if (msg == "set_attitude") return d.attitude = iArg(args, last, d.attitude), true;
     if (msg == "money") return r = Value::integer(d.money), true;
     if (msg == "cheat_add_money") return d.money += iArg(args, 0), true;
     if (msg == "set_money") return d.money = iArg(args, 0, d.money), m.save(), true;  // the shop pays (shop.dta) [C data]
     if (msg == "tour_score") return r = Value::integer(d.score), true;
     if (msg == "hometown") return r = Value::symbol(d.hometown), true;
     if (msg == "set_hometown") return d.hometown = sArg(args, 0), true;
-    if (msg == "set_weight") return d.weight = args.empty() ? d.weight : args[0].number(), true;
-    if (msg == "set_height") return d.height = args.empty() ? d.height : args[0].number(), true;
-    if (msg == "set_skin_color") return d.skin = iArg(args, 0), true;
-    if (msg == "set_eye_color") return d.eye = iArg(args, 0), true;
-    if (msg == "set_eyebrow_color") return d.eyebrow = iArg(args, 0), true;
+    if (msg == "set_weight") return d.weight = args.empty() ? d.weight : args[last].number(), true;
+    if (msg == "set_height") return d.height = args.empty() ? d.height : args[last].number(), true;
+    if (msg == "set_skin_color") return d.skin = iArg(args, last), true;
+    if (msg == "set_eye_color") return d.eye = iArg(args, last), true;
+    if (msg == "set_eyebrow_color") return d.eyebrow = iArg(args, last), true;
     if (msg == "skin_color") return r = Value::integer(d.skin), true;
+    // The tattoos (shop.dta tattoo_select_panel / facepaint_select_panel):
+    // {$tour_char tattoo_patch <location>} the patch index, -1 none;
+    // {$tour_char set_tattoo_patch $char <location> <index>} [C data: the
+    // calls; I: RB's TourCharLocal patch records].
+    if (msg == "tattoo_patch") {
+        auto it = d.tattoos.find(sArg(args, 0));
+        return r = Value::integer(it == d.tattoos.end() ? -1 : it->second), true;
+    }
+    if (msg == "set_tattoo_patch") {
+        d.tattoos[sArg(args, args.size() >= 3 ? args.size() - 2 : 0)] = iArg(args, last, -1);
+        return true;
+    }
+    if (msg == "patch") return r = Value::integer(-1), true;  // an outfit piece's patch (logos): none [I]
+    // The character's properties the creator reads ({$char get weight},
+    // skin_color_palette / _index, eye_color_palette / _index: band_objects.dta
+    // Character) [C data]; the palettes are char/gen/skin.milo's skin.pal
+    // and eyes.pal (the band's skin, game/rb_band.cpp).
+    if (msg == "get") {
+        const std::string k = sArg(args, 0);
+        if (k == "weight") return r = Value::real(d.weight), true;
+        if (k == "height") return r = Value::real(d.height), true;
+        if (k == "skin_color_index") return r = Value::integer(d.skin), true;
+        if (k == "eye_color_index") return r = Value::integer(d.eye), true;
+        if (k == "skin_color_palette") return r = Value::obj(m.palette("skin.pal")), true;
+        if (k == "eye_color_palette") return r = Value::obj(m.palette("eyes.pal")), true;
+        return false;
+    }
     if (msg == "deform" || msg == "update" || msg == "print_guid" || msg == "set_dirty") return true;
-    if (msg == "has_outfit") return r = Value::integer(d.owned.count(sArg(args, 1)) || (d.outfit.count(sArg(args, 0)) && d.outfit[sArg(args, 0)] == sArg(args, 1)) ? 1 : 0), true;
-    if (msg == "has_group_selection") return r = Value::integer(0), true;  // [I] colour groups not offered yet
+    if (msg == "has_outfit") {
+        // Owned, or worn: the piece itself, or an instrument model whose
+        // finish (<model>_<finish>, char/instruments.dta) is worn [I].
+        const std::string cat = sArg(args, 0), o = sArg(args, 1);
+        const std::string worn = d.outfit.count(cat) ? d.outfit[cat] : std::string();
+        return r = Value::integer(d.owned.count(o) || worn == o || (!o.empty() && worn.rfind(o + "_", 0) == 0) ? 1 : 0), true;
+    }
+    // More than one finish of the model in the category (RB 0x823E0700) [C].
+    if (msg == "has_group_selection") return r = Value::integer(modelFinishes(m.ui(), d.gender, sArg(args, 0), sArg(args, 1)).size() > 1 ? 1 : 0), true;
     if (msg == "outfit_list") {
         std::vector<Value> v;
         for (const auto& [k, o] : d.outfit) v.push_back(Value::list({Value::symbol(k), Value::symbol(o)}));
         return r = Value::list(std::move(v)), true;
     }
-    if (msg == "get_outfit") return r = Value::symbol(d.outfit.count(sArg(args, 0)) ? d.outfit[sArg(args, 0)] : "none"), true;
+    if (msg == "get_outfit" || msg == "selected_outfit") return r = Value::symbol(d.outfit.count(sArg(args, 0)) ? d.outfit[sArg(args, 0)] : "none"), true;
+    // select_outfit <char> <category> <outfit>: the shown character's piece
+    // (shop.dta's instrument preview) [I: no character drawn in the menus yet].
+    if (msg == "select_outfit") return true;
     if (msg == "set_outfit") return d.outfit[sArg(args, 0)] = sArg(args, 1), true;
     // The solo performer.
     if (msg == "town") return r = Value::symbol(d.town), true;
@@ -447,6 +745,7 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
         if (const TourEvent* e = m.findEvent(false, "", "", sArg(args, 0))) {
             d.event = e->name, d.town = e->town, d.venue = e->venue;
             m.event = m.eventObj(*e, false);
+            m.songStars.clear();
         }
         return true;
     }
@@ -464,6 +763,7 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "set_random_songs") {
         m.setlist = m.event ? m.eventSongs(m.event->ev, false, d.instrument) : std::vector<std::string>{};
         m.songIndex = 0;
+        m.songStars.clear();
         return true;
     }
     if (msg == "next_song") {
@@ -472,6 +772,7 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     }
     if (msg == "complete_song") {
         m.lastStars = iArg(args, 0), m.lastScore = iArg(args, 1);
+        m.songStars.push_back(m.lastStars);
         d.score += m.lastScore;
         ++m.songIndex;
         return true;
@@ -480,27 +781,36 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "first_song") return r = Value::integer(m.songIndex == 0 ? 1 : 0), true;
     if (msg == "num_completed") return r = Value::integer(int(m.songIndex)), true;
     if (msg == "is_winning") return r = Value::integer(m.winning ? 1 : 0), true;
-    if (msg == "reward") {
-        const int per = m.event ? num(m.event->ev.node->find("reward_per_star"), 1, 5) : 5;
-        return r = Value::integer(per * m.lastStars), true;
-    }
+    if (msg == "reward") return r = Value::integer(m.reward()), true;
     if (msg == "complete_event") {
+        // TourCharLocal complete_event (RB 0x823E1178) [C]: the first time
+        // at the difficulty, an event whose song is a bonus song unlocks the
+        // next bonus song; the event's outfit; paid the reward.
         if (!m.event) return true;
         const std::string key = std::to_string(d.difficulty) + ":" + m.event->ev.key();
         const bool first = !d.stars.count(key);
+        const int dd = std::clamp(d.difficulty, 0, 3);
+        const std::vector<std::string> towns0 = m.soloOpenTowns(d, dd);
+        if (first) {
+            const std::vector<std::string> songs = m.eventSongs(m.event->ev, false, d.instrument);
+            const SongInfo* si = nullptr;
+            for (const SongInfo& s : m.ui().host().songs())
+                if (!songs.empty() && s.id == songs[0]) si = &s;
+            if (si && si->unlockable) d.unlocks[dd] = m.unlocksAt(d, dd) + 1;
+        }
         d.stars[key] = std::max(d.stars[key], m.lastStars);
-        const int per = num(m.event->ev.node->find("reward_per_star"), 1, 5);
-        d.money += per * m.lastStars;
+        m.pay(*this, m.reward());
         // The event's outfit for the instrument and gender (the reward).
         if (first)
             if (const DataNode* o = m.event->ev.node->find("outfit"))
                 if (const DataNode* inst = o->find(d.instrument == "bass" ? "guitar" : d.instrument))
                     if (const DataNode* g = inst->find(d.gender)) d.owned.insert(text(g, 2));
-        // A new town: the next event is in a town not seen yet.
+        // A new town: one the event opened (RB 0x823E5BB8's list grew) and
+        // not seen yet [I: RB's new_town is not read].
         d.newTown.clear();
-        for (const TourEvent& e : m.data.soloEvents)
-            if (m.soloStatus(*this, e) == 2) {
-                if (e.town != m.event->ev.town && !d.seenTowns.count(e.town)) d.newTown = e.town;
+        for (const std::string& t : m.soloOpenTowns(d, dd))
+            if (std::find(towns0.begin(), towns0.end(), t) == towns0.end() && !d.seenTowns.count(t)) {
+                d.newTown = t;
                 break;
             }
         m.save();
@@ -509,17 +819,80 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "new_town") return r = Value::symbol(d.newTown), true;
     if (msg == "add_seen_town") return d.seenTowns.insert(sArg(args, 0)), d.newTown.clear(), true;
     if (msg == "unlock_town") return r = Value::symbol(d.newTown), true;
-    if (msg == "new_unlock") return r = Value::symbol(d.newUnlock), true;
-    if (msg == "advance_new_unlock") return d.newUnlock.clear(), true;
+    if (msg == "new_unlock") return r = Value::symbol(m.newUnlock(d)), true;
+    if (msg == "advance_new_unlock") {
+        // The announced unlock is seen (RB 0x823E6AF0's record +0x30) [I: the record written].
+        const std::string u = m.newUnlock(d);
+        if (!u.empty()) d.seenUnlocks[std::clamp(d.difficulty, 0, 3)].insert(u);
+        return m.save(), true;
+    }
     if (msg == "add_seen_hint") return d.seenHints.insert(sArg(args, 0)), true;
     if (msg == "is_venue_type_unlocked") {
-        for (const TourEvent& e : m.data.soloEvents)
-            if (e.venue == sArg(args, 0) && m.soloStatus(*this, e) != 0) return r = Value::integer(1), true;
+        // An open town has a normal venue of that kind (RB 0x823E0010) [C].
+        const int dd = std::clamp(d.difficulty, 0, 3);
+        for (const std::string& t : m.soloOpenTowns(d, dd))
+            for (const SoloVenue& v : m.data.soloVenues)
+                if (v.town == t && v.type == 0 && !v.events.empty() && v.venue == sArg(args, 0)) return r = Value::integer(1), true;
         return true;
     }
     if (msg == "is_local") return r = Value::integer(1), true;
     if (msg == "next_any_index") return r = Value::integer(-1), true;
     return false;
+}
+
+int RbMeta::soloStatus(const RbCharObj& c, const TourEvent& e) {
+    const int dd = std::clamp(c.d.difficulty, 0, 3);
+    const std::vector<std::string> towns = soloOpenTowns(c.d, dd);
+    if (std::find(towns.begin(), towns.end(), e.town) == towns.end()) return 0;
+    for (const SoloVenue& v : data.soloVenues) {
+        if (v.town != e.town || v.venue != e.venue) continue;
+        for (size_t i : soloOpenEvents(c.d, dd, v))
+            if (data.soloEvents[i].key() == e.key()) return soloCompleted(c.d, dd, e) ? 1 : 2;
+    }
+    return 0;
+}
+
+std::string RbMeta::newUnlock(const CharData& c) {
+    // new_unlock (RB 0x823DE7F8) [C]: with more bonus songs unlocked than
+    // num_initial_unlock_songs, the newest one of the instrument's bonus
+    // list (index unlocked - initial), unless already announced at the
+    // difficulty or a harder one (RB 0x823DE770).
+    const int dd = std::clamp(c.difficulty, 0, 3);
+    const int have = unlockProgress(c, dd);
+    if (have == data.initialUnlocks) return {};
+    const std::vector<std::string>& l = ranked(c.instrument, true);
+    const long k = long(have) - data.initialUnlocks;
+    if (k < 0 || k >= long(l.size())) return {};
+    for (int d = dd; d < 4; ++d)
+        if (c.seenUnlocks[d].count(l[size_t(k)])) return {};
+    return l[size_t(k)];
+}
+
+void RbMeta::pay(RbCharObj& c, int amount) {
+    const DataNode* most = data.solo ? data.solo->find("max_money") : nullptr;
+    c.d.money = int(std::min<long long>(most ? num(most) : 999999999, (long long)c.d.money + amount));
+}
+
+void RbMeta::setBuzz(RbBandObj& b, int buzz) {
+    const DataNode* caps = buzzBlock() ? buzzBlock()->find("buzz_caps") : nullptr;
+    const int k = b.d.items.count("tour_vehicle_jet") ? 4 : b.d.items.count("tour_vehicle_bus") ? 3 : b.d.items.count("tour_vehicle_van") ? 2 : 1;
+    const int cap = num(caps, size_t(k), 999999999);
+    b.d.buzz = std::clamp(buzz, 0, cap);
+    b.d.fans = buzzToFans(b.d.buzz);
+}
+
+std::vector<RbCharObj*> RbMeta::localMembers(RbBandObj* band) {
+    std::vector<RbCharObj*> v;
+    RbBandObj* b = band ? band : bandPerf();
+    for (int p = 0; p < 4; ++p) {
+        if (!ui_.session().players[size_t(p)].participating) continue;
+        const Value pc = in_.send("game", "get_player_config", {Value::integer(p)});
+        auto* c = pc.object ? dynamic_cast<RbCharObj*>(in_.send(pc.object, "get_char", {}).object) : nullptr;
+        if (!c || std::find(v.begin(), v.end(), c) != v.end()) continue;
+        v.push_back(c);
+        if (b && std::find(b->d.members.begin(), b->d.members.end(), c->d.name) == b->d.members.end()) b->d.members.push_back(c->d.name);
+    }
+    return v;
 }
 
 // ----------------------------------------------------------------- bands
@@ -534,7 +907,7 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "set_motto") return d.motto = sArg(args, 0), true;
     if (msg == "hometown") return r = Value::symbol(d.hometown), true;
     if (msg == "set_hometown") return d.hometown = sArg(args, 0), true;
-    if (msg == "init") return d.finalized = true, d.town = d.hometown, m.save(), true;
+    if (msg == "init") return d.finalized = true, d.town = d.hometown, m.localMembers(this), m.save(), true;
     if (msg == "is_finalized") return r = Value::integer(d.finalized ? 1 : 0), true;
     if (msg == "is_local") return r = Value::integer(1), true;
     if (msg == "update_members" || msg == "update_data" || msg == "set_dirty" || msg == "print_guid") return true;
@@ -542,20 +915,28 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "logo_patch" || msg == "edit_logo_patch") return true;  // no band logo yet (the patch creator, GD05-022)
     if (msg == "win_difficulty" || msg == "min_difficulty") return r = Value::integer(d.minDifficulty), true;
     if (msg == "min_difficulty_sym") return r = Value::symbol(kDiffSyms[std::clamp(d.minDifficulty, 0, 3)]), true;
+    // The band's leader's character (its first member [I]): session_mgr update_band_leader.
+    if (msg == "leader_char_name") return r = d.members.empty() ? Value::integer(0) : Value::string(d.members.front()), true;
     if (msg == "get_band_member_for_slot") {
         return r = Value::list({Value::integer(0), Value::string(""), Value::integer(0)}), true;
     }
     if (msg == "world_fame" || msg == "total_fame_stars") return r = Value::integer(m.bandFame(*this, "")), true;
     if (msg == "fans") return r = Value::integer(d.fans), true;
-    if (msg == "money") return r = Value::integer(d.money), true;
+    if (msg == "money") {
+        // The members' characters' money summed (TourBand money, RB 0x823EDAA0) [C].
+        int sum = 0;
+        for (const std::string& n : d.members)
+            if (RbCharObj* c = m.charNamed(n)) sum += c->d.money;
+        return r = Value::integer(sum), true;
+    }
     if (msg == "cheat_add_money") return d.money += iArg(args, 0), true;
     if (msg == "buzz") return r = Value::integer(d.buzz), true;
     if (msg == "buzz_achievement") {
         const DataNode* buzz = m.data.band ? m.data.band->find("buzz") : nullptr;
         return r = Value::integer(num(buzz ? buzz->find("buzz_achievement") : nullptr, 1, 1000)), true;
     }
-    if (msg == "buzz_to_fans") return r = Value::integer(iArg(args, 0) * 10), true;
-    if (msg == "adjust_buzz") return d.buzz += iArg(args, 0), true;
+    if (msg == "buzz_to_fans") return r = Value::integer(m.buzzToFans(iArg(args, 0))), true;
+    if (msg == "adjust_buzz") return m.setBuzz(*this, d.buzz + iArg(args, 0)), true;
     if (msg == "town_fame") return r = Value::integer(m.bandFame(*this, args.empty() ? d.town : sArg(args, 0))), true;
     if (msg == "total_town_fame" || msg == "total_venue_fame") {
         int n = 0;
@@ -593,6 +974,7 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
             m.setlist = m.eventSongs(*e, true, "band");
             m.songIndex = 0;
             m.lastStars = m.lastScore = 0;
+            m.songStars.clear();
             if (SDL_getenv("GD05_UILOG")) {
                 std::string l;
                 for (const std::string& x : m.setlist) l += " " + x;
@@ -620,7 +1002,9 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "set_random_songs") return true;
     if (msg == "next_song") return r = Value::symbol(m.songIndex < m.setlist.size() ? m.setlist[m.songIndex] : std::string()), true;
     if (msg == "complete_song") {
+        if (m.songIndex < m.setlist.size() && m.setlist[m.songIndex] != "any") d.played.insert(m.setlist[m.songIndex]);
         m.lastStars += iArg(args, 0), m.lastScore += iArg(args, 1);
+        m.songStars.push_back(iArg(args, 0));
         ++m.songIndex;
         return true;
     }
@@ -628,33 +1012,41 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "first_song") return r = Value::integer(m.songIndex == 0 ? 1 : 0), true;
     if (msg == "num_completed") return r = Value::integer(int(m.songIndex)), true;
     if (msg == "is_winning" || msg == "is_hardcore_winning") return r = Value::integer(m.winning ? 1 : 0), true;
-    if (msg == "reward") {
-        const int per = m.event ? num(m.event->ev.node->find("reward_per_star"), 1, 25) : 25;
-        return r = Value::integer(per * m.lastStars), true;
-    }
+    if (msg == "reward") return r = Value::integer(m.reward()), true;
     if (msg == "complete_event") {
         if (!m.event) return true;
         const int songs = std::max<int>(1, int(m.setlist.size()));
         const int stars = m.lastStars / songs;
+        // Every local member's character is paid the whole reward (pay,
+        // RB 0x823EE4A0: each member's character's own pay) [C].
+        const int reward = m.reward();
+        for (RbCharObj* c : m.localMembers()) m.pay(*c, reward);
+        // Buzz (RB 0x823EF7D0) [C]: the venue's (buzz (venues (<venue>
+        // (performance (row) ...)))): the row the event's last performance
+        // (new_performance for a first gig), the column the average stars
+        // (2 at least) - 2, each clamped to the table; fans follow the buzz
+        // (RB 0x823EE350).
+        const int before = d.stars.count(m.event->ev.key()) ? d.stars[m.event->ev.key()] / songs : -1;
+        const int change = m.buzzChange(m.event->ev.venue, before, stars), fans0 = d.fans;
+        m.setBuzz(*this, d.buzz + change);
+        lastFansChange = d.fans - fans0;
+        lastBuzzChange = change;
         d.stars[m.event->ev.key()] = std::max(d.stars[m.event->ev.key()], m.lastStars);
-        d.money += num(m.event->ev.node->find("reward_per_star"), 1, 25) * m.lastStars;
-        // Fans: the venue's (buzz (venues (<venue> (performance ...)))) by stars [I: the table's axes].
-        const DataNode* buzz = m.data.band ? m.data.band->find("buzz") : nullptr;
-        const DataNode* venues = buzz ? buzz->find("venues") : nullptr;
-        const DataNode* vn = venues ? venues->find(m.event->ev.venue) : nullptr;
-        const DataNode* perf = vn ? vn->find("performance") : nullptr;
-        int gain = stars * 5;
-        if (perf && perf->children.size() > 1 && perf->children[1].isList()) gain = num(&perf->children[1], size_t(std::clamp(stars - 1, 0, 3)), gain);
-        d.buzz += gain;
-        d.fans += gain * 10;
         const std::string award = text(m.event->ev.node->find("award_item"));
         if (!award.empty() && !d.items.count(award)) d.items.insert(award), d.unlockedItem = award;
         m.save();
         return true;
     }
-    if (msg == "lose_song") return d.buzz = std::max(0, d.buzz - 5), true;
-    if (msg == "fans_lost_on_fail") return r = Value::integer(50), true;
-    if (msg == "fans_change") return r = Value::integer(0), true;
+    // A failed song costs the venue's lose_penalty in buzz (config/tour_band.dta
+    // (buzz (venues (<venue> (lose_penalty n))))) [C data; I: when RB applies it].
+    if (msg == "lose_song") {
+        const int before = d.fans;
+        m.setBuzz(*this, d.buzz + m.losePenalty(d.venue.empty() && m.event ? m.event->ev.venue : d.venue));
+        lastFansChange = d.fans - before;
+        return m.save(), true;
+    }
+    if (msg == "fans_lost_on_fail") return r = Value::integer(m.buzzToFans(d.buzz) - m.buzzToFans(std::max(0, d.buzz + m.losePenalty(d.venue)))), true;
+    if (msg == "fans_change") return r = Value::integer(lastFansChange), true;
     if (msg == "fans_update_str") return r = Value::string(std::to_string(d.fans)), true;
     if (msg == "has_item") return r = Value::integer(d.items.count(sArg(args, 0)) ? 1 : 0), true;
     if (msg == "item_to_str") return r = Value::string("*"), true;
@@ -728,9 +1120,35 @@ void RbMeta::save() {
         j.set("name", Json::string(c->d.name)), j.set("gender", Json::string(c->d.gender)), j.set("instrument", Json::string(c->d.instrument));
         j.set("hometown", Json::string(c->d.hometown)), j.set("money", Json::number(c->d.money)), j.set("score", Json::number(c->d.score));
         j.set("difficulty", Json::number(c->d.difficulty)), j.set("skin", Json::number(c->d.skin));
+        j.set("eye", Json::number(c->d.eye)), j.set("eyebrow", Json::number(c->d.eyebrow));
+        j.set("weight", Json::number(c->d.weight)), j.set("height", Json::number(c->d.height));
+        j.set("attitude", Json::number(c->d.attitude)), j.set("town", Json::string(c->d.town)), j.set("venue", Json::string(c->d.venue));
+        Json seenTowns = Json::array();
+        for (const std::string& s : c->d.seenTowns) seenTowns.a.push_back(Json::string(s));
+        j.set("seen_towns", seenTowns);
         Json o = Json::object();
         for (const auto& [k, v] : c->d.outfit) o.set(k, Json::string(v));
         j.set("outfit", o);
+        Json ps = Json::object();
+        for (const auto& [set, patches] : c->d.patchSets) {
+            Json pa = Json::array();
+            for (const chr::Patch& patch : patches) {
+                Json la = Json::array();
+                for (const chr::PatchLayer& l : patch) {
+                    Json lj = Json::object();
+                    lj.set("category", Json::string(l.category)), lj.set("sticker", Json::number(l.sticker)), lj.set("color", Json::number(l.color));
+                    lj.set("x", Json::number(l.x)), lj.set("y", Json::number(l.y)), lj.set("sx", Json::number(l.sx)), lj.set("sy", Json::number(l.sy));
+                    lj.set("rot", Json::number(l.rot)), lj.set("flip_x", Json::number(l.flipX)), lj.set("flip_y", Json::number(l.flipY));
+                    la.a.push_back(lj);
+                }
+                pa.a.push_back(la);
+            }
+            ps.set(set, pa);
+        }
+        j.set("patches", ps);
+        Json tt = Json::object();
+        for (const auto& [loc, i] : c->d.tattoos) tt.set(loc, Json::number(i));
+        j.set("tattoos", tt);
         Json st = Json::object();
         for (const auto& [k, v] : c->d.stars) st.set(k, Json::number(v));
         j.set("stars", st);
@@ -740,6 +1158,14 @@ void RbMeta::save() {
         Json sh = Json::array();
         for (const std::string& s : c->d.seenHints) sh.a.push_back(Json::string(s));
         j.set("seen_hints", sh);
+        Json un = Json::array(), su = Json::array();
+        for (int d = 0; d < 4; ++d) {
+            un.a.push_back(Json::number(c->d.unlocks[d]));
+            Json x = Json::array();
+            for (const std::string& s : c->d.seenUnlocks[d]) x.a.push_back(Json::string(s));
+            su.a.push_back(x);
+        }
+        j.set("unlocks", un), j.set("seen_unlocks", su);
         cs.a.push_back(j);
     }
     root.set("characters", cs);
@@ -749,12 +1175,19 @@ void RbMeta::save() {
         Json j = Json::object();
         j.set("name", Json::string(b->d.name)), j.set("hometown", Json::string(b->d.hometown)), j.set("fans", Json::number(b->d.fans));
         j.set("money", Json::number(b->d.money)), j.set("buzz", Json::number(b->d.buzz)), j.set("town", Json::string(b->d.town));
+        j.set("motto", Json::string(b->d.motto)), j.set("venue", Json::string(b->d.venue)), j.set("min_difficulty", Json::number(b->d.minDifficulty));
         Json st = Json::object();
         for (const auto& [k, v] : b->d.stars) st.set(k, Json::number(v));
         j.set("stars", st);
         Json it = Json::array();
         for (const std::string& s : b->d.items) it.a.push_back(Json::string(s));
         j.set("items", it);
+        Json mem = Json::array();
+        for (const std::string& s : b->d.members) mem.a.push_back(Json::string(s));
+        j.set("members", mem);
+        Json pl = Json::array();
+        for (const std::string& s : b->d.played) pl.a.push_back(Json::string(s));
+        j.set("played", pl);
         Json sh = Json::array();
         for (const std::string& s : b->d.seenHints) sh.a.push_back(Json::string(s));
         j.set("seen_hints", sh);
@@ -786,18 +1219,42 @@ void RbMeta::load() {
         c->d.name = j["name"].str(), c->d.gender = j["gender"].str(), c->d.instrument = j["instrument"].str();
         c->d.hometown = j["hometown"].str(), c->d.money = int(j["money"].num(100)), c->d.score = int(j["score"].num());
         c->d.difficulty = int(j["difficulty"].num(1)), c->d.skin = int(j["skin"].num());
+        c->d.eye = int(j["eye"].num()), c->d.eyebrow = int(j["eyebrow"].num());
+        c->d.weight = float(j["weight"].num(0.5)), c->d.height = float(j["height"].num(0.5));
+        c->d.attitude = int(j["attitude"].num(256));
+        c->d.town = j["town"].str(), c->d.venue = j["venue"].str();
+        for (const Json& s : j["seen_towns"].a) c->d.seenTowns.insert(s.str());
         for (const auto& [k, v] : j["outfit"].o) c->d.outfit[k] = v.str();
+        for (const auto& [set, pa] : j["patches"].o)
+            for (const Json& la : pa.a) {
+                chr::Patch patch;
+                for (const Json& lj : la.a) {
+                    chr::PatchLayer l;
+                    l.category = lj["category"].str(), l.sticker = int(lj["sticker"].num(-1)), l.color = int(lj["color"].num(-1));
+                    l.x = float(lj["x"].num()), l.y = float(lj["y"].num()), l.sx = float(lj["sx"].num(1)), l.sy = float(lj["sy"].num(1));
+                    l.rot = float(lj["rot"].num()), l.flipX = lj["flip_x"].num() != 0, l.flipY = lj["flip_y"].num() != 0;
+                    patch.push_back(l);
+                }
+                c->d.patchSets[set].push_back(patch);
+            }
+        for (const auto& [loc, v] : j["tattoos"].o) c->d.tattoos[loc] = int(v.num(-1));
         for (const auto& [k, v] : j["stars"].o) c->d.stars[k] = int(v.num());
         for (const Json& s : j["owned"].a) c->d.owned.insert(s.str());
         for (const Json& s : j["seen_hints"].a) c->d.seenHints.insert(s.str());
+        for (size_t d = 0; d < 4 && d < j["unlocks"].a.size(); ++d) c->d.unlocks[d] = int(j["unlocks"].a[d].num(-1));
+        for (size_t d = 0; d < 4 && d < j["seen_unlocks"].a.size(); ++d)
+            for (const Json& s : j["seen_unlocks"].a[d].a) c->d.seenUnlocks[d].insert(s.str());
         chars.push_back(c);
     }
     for (const Json& j : root["bands"].a) {
         RbBandObj* b = newBand();
         b->d.name = j["name"].str(), b->d.hometown = j["hometown"].str(), b->d.fans = int(j["fans"].num());
         b->d.money = int(j["money"].num()), b->d.buzz = int(j["buzz"].num()), b->d.town = j["town"].str(), b->d.finalized = true;
+        b->d.motto = j["motto"].str(), b->d.venue = j["venue"].str(), b->d.minDifficulty = int(j["min_difficulty"].num(3));
         for (const auto& [k, v] : j["stars"].o) b->d.stars[k] = int(v.num());
         for (const Json& s : j["items"].a) b->d.items.insert(s.str());
+        for (const Json& s : j["members"].a) b->d.members.push_back(s.str());
+        for (const Json& s : j["played"].a) b->d.played.insert(s.str());
         for (const Json& s : j["seen_hints"].a) b->d.seenHints.insert(s.str());
         bands.push_back(b);
     }
@@ -840,6 +1297,9 @@ public:
         }
         if (msg == "event_concrete_song") return r = Value::symbol(!m_.setlist.empty() && m_.setlist[0] != "any" ? m_.setlist[0] : std::string()), true;
         if (msg == "hint") {
+            // While a hint's (advance ...) runs, {tour hint} is that hint
+            // (ONEOFF_HINT: add_seen_hint {{tour hint} get_type}, tour.dta).
+            if (m_.advancingHint) return r = Value::obj(hintObj_), true;
             m_.hint = m_.currentHint();
             if (m_.hint.empty()) return true;
             return r = Value::obj(hintObj_), true;
@@ -895,8 +1355,15 @@ public:
             // ONEOFF hints: seen once; every hint's (advance ...) script.
             if (RbCharObj* c = m_.soloChar()) c->d.seenHints.insert(m_.hint);
             if (RbBandObj* b = m_.bandPerf()) b->d.seenHints.insert(m_.hint);
-            if (const DataNode* a = h ? h->find("advance") : nullptr)
-                for (size_t i = 1; i < a->children.size(); ++i) in.eval(a->children[i]);
+            m_.advancingHint = true;
+            try {
+                if (const DataNode* a = h ? h->find("advance") : nullptr)
+                    for (size_t i = 1; i < a->children.size(); ++i) in.eval(a->children[i]);
+            } catch (...) {
+                m_.advancingHint = false;
+                throw;
+            }
+            m_.advancingHint = false;
             return true;
         }
         return false;
@@ -980,6 +1447,169 @@ public:
 
 private:
     std::set<std::string> quiet_;
+};
+
+// A tattoo location's set (ui.dta (patch (tattoos (<location> <set> <proxy>)))) [C data].
+std::string patchSetOf(UiManager& ui, const std::string& location) {
+    const DataNode* cfg = Band::rbPatchConfig(ui.data());
+    const DataNode* t = cfg ? cfg->find("tattoos") : nullptr;
+    const DataNode* e = t ? t->find(location) : nullptr;
+    return e && e->children.size() > 1 ? e->children[1].s : std::string();
+}
+
+std::map<std::string, chr::Patch> wornPatches(UiManager& ui, const CharData& d) {
+    std::map<std::string, chr::Patch> out;
+    for (const auto& [loc, i] : d.tattoos) {
+        auto it = d.patchSets.find(patchSetOf(ui, loc));
+        if (i >= 0 && it != d.patchSets.end() && size_t(i) < it->second.size()) out[loc] = it->second[size_t(i)];
+    }
+    return out;
+}
+
+// A profile character's look for its menu preview (ui/rb_char_preview.h).
+RbCharPreview::Look previewLook(const RbCharObj& c) {
+    RbCharPreview::Look l;
+    l.gender = c.d.gender.empty() ? "male" : c.d.gender;
+    l.instrument = c.d.instrument.empty() ? "guitar" : c.d.instrument;
+    l.outfit = c.d.outfit;
+    l.skin = c.d.skin, l.attitude = uint32_t(c.d.attitude), l.weight = c.d.weight, l.height = c.d.height;
+    if (gMeta) l.patches = wornPatches(gMeta->ui(), c.d);
+    return l;
+}
+
+// RB's select_cam on a menu's WorldDir panel (practice_space_panel,
+// shop_char_panel): the panel draws through its <name>.shot, a BandCamShot
+// of its milo (practice_space.milo creator / creator_heads, store.milo
+// idle / makeup / tattoo_* ...) [C data]. The camera is the shot framed by
+// CameraDirector::evaluate over the panel's objects (targets, parents,
+// path); a target naming the character's slot is the previewed
+// character's bone (its subpart), else its place [I: RB's targets on a
+// shell character]. The shot's first frame, no blend from the last [I].
+class PanelShotCamera {
+public:
+    void select(const std::string& shot) {
+        if (shot != shot_) shot_ = shot, at_ = double(SDL_GetTicks());
+    }
+    const std::string& shot() const { return shot_; }
+    // Sets (or clears) the view's camera; `slot` / `ch`: the character's slot and the preview.
+    void apply(gfx::UiView& view, const std::string& slot, chr::Character* ch) const {
+        if (legacy()) return view.clearCameraOverride();
+        const auto* cs = shot_.empty() ? nullptr : dynamic_cast<const scene::CamShot*>(view.find(shot_ + ".shot"));
+        if (!cs || cs->keyframes.empty()) return view.clearCameraOverride();
+        const Scene scene(view, slot, ch);
+        const gfx::Camera cam = CameraDirector::evaluate(scene, *cs, 0);
+        view.setCameraOverride(cam);
+        static const bool log = SDL_getenv("GD05_SHOTLOG") != nullptr;
+        if (log) {
+            static std::string last;
+            if (last != shot_) {
+                last = shot_;
+                SDL_Log("select_cam %s: camera at %.1f %.1f %.1f, forward %.2f %.2f %.2f, fov %.3f", shot_.c_str(), cam.world.m[12], cam.world.m[13],
+                        cam.world.m[14], cam.world.m[4], cam.world.m[5], cam.world.m[6], cam.yFov);
+            }
+        }
+    }
+
+    // GD05_SHOTCAM_LEGACY=1: the panels' own cameras and D83's creator.trans (the walks' "before").
+    static bool legacy() {
+        static const bool l = SDL_getenv("GD05_SHOTCAM_LEGACY") != nullptr;
+        return l;
+    }
+
+private:
+    class Scene : public ShotScene {
+    public:
+        Scene(const gfx::UiView& v, const std::string& slot, chr::Character* ch) : v_(v), slot_(slot), ch_(ch) {}
+        bool targetPoint(const scene::CamTarget& t, std::array<float, 3>& out) const override {
+            scene::Xfm x;
+            if (!parentXfm(t, x)) return false;
+            out = x.pos;
+            return true;
+        }
+        bool parentXfm(const scene::CamTarget& t, scene::Xfm& out) const override {
+            if (t.object.empty()) return false;
+            if (ch_ && t.object == slot_) {
+                if (!t.subpart.empty() && ch_->worldOf(t.subpart, out)) return true;
+                out = ch_->xfm();
+                return true;
+            }
+            return v_.worldXfm(t.object, out);
+        }
+        const scene::TransAnim* path(const std::string& name) const override { return dynamic_cast<const scene::TransAnim*>(v_.find(name)); }
+
+    private:
+        const gfx::UiView& v_;
+        std::string slot_;
+        chr::Character* ch_;
+    };
+    std::string shot_;
+    double at_ = 0;
+};
+
+// The practice space (practice_space_panel, a CharSelectPanel:
+// matchmaking.dta, practice_space.milo) [C data: the milo's objects]:
+// - the creator (charcreator.dta: set_creator_player_num <n>, then
+//   select_cam creator): the character being made stands at creator.pxy,
+//   the UIProxy RB loads it into (creator.trans is the shots' target; D83
+//   placed it at creator.trans, in the air);
+// - a screen with player slots (the lobbies' player_panels): each slot's
+//   player's character (its player config's get_char) at the slot's proxy
+//   (coop0..3.pxy for four slots, hth0..1 for two, solo0 for one [I: RB's
+//   CharSelectPanel 0x82827000.. not read]) while the slot's show_char
+//   (matchmaking.dta MATCHMAKING_LOAD_CHAR_METHODS) is true;
+// select_cam frames them (PanelShotCamera). GD05-083.
+class PracticeSpacePanelObj : public QuietPanelObj {
+public:
+    using QuietPanelObj::QuietPanelObj;
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        if (msg == "select_cam") return cam_.select(args.empty() ? std::string() : in.evalValue(args[0]).str()), r = Value::integer(0), true;
+        if (msg == "set_creator_player_num") return creator_ = args.empty() ? -1 : in.evalValue(args[0]).integerValue(), r = Value::integer(0), true;
+        return QuietPanelObj::handleNative(in, msg, args, r);
+    }
+    void poll(double dtMs) override {
+        QuietPanelObj::poll(dtMs);
+        preview_.poll(dtMs);
+        for (auto& p : slots_) p->poll(dtMs);
+    }
+    void draw() override {
+        PanelObj* cc = ui.panel("charcreator_panel");
+        auto* c = cc && cc->up ? dynamic_cast<RbCharObj*>(ui.interp().send(cc, "get_tour_char", {}).object) : nullptr;
+        scene::Xfm at;
+        const bool legacy = PanelShotCamera::legacy();
+        const bool shown = showing && view && c && view->worldXfm(legacy ? "creator.trans" : "creator.pxy", at);
+        if (shown) preview_.set(ui, previewLook(*c));
+        // The slots' characters (not while the creator shows its own).
+        struct Shown {
+            RbCharPreview* p;
+            scene::Xfm at;
+        };
+        std::vector<Shown> slotChars;
+        auto& slots = ui.playerSlots();
+        if (showing && view && !shown && !legacy && !slots.empty()) {
+            const char* kind = slots.size() >= 4 ? "coop" : slots.size() == 2 ? "hth" : "solo";
+            while (slots_.size() < slots.size()) slots_.push_back(std::make_unique<RbCharPreview>());
+            for (size_t i = 0; i < slots.size(); ++i) {
+                PlayerSlotObj* sl = slots[i].get();
+                const int pn = sl ? sl->playerNum() : -1;
+                if (pn < 0 || !sl->dispatch("show_char").truthy()) continue;
+                const Value cfg = ui.interp().send("game", "get_player_config", {Value::integer(pn)});
+                auto* pc = cfg.object ? dynamic_cast<RbCharObj*>(ui.interp().send(cfg.object, "get_char", {}).object) : nullptr;
+                scene::Xfm sat;
+                if (!pc || !view->worldXfm(std::string(kind) + std::to_string(i) + ".pxy", sat)) continue;
+                if (slots_[i]->set(ui, previewLook(*pc))) slotChars.push_back({slots_[i].get(), sat});
+            }
+        }
+        if (view) cam_.apply(*view, "creator.pxy", shown ? preview_.character() : nullptr);
+        QuietPanelObj::draw();
+        if (shown) preview_.draw(ui, *view, at);
+        for (const Shown& sc : slotChars) sc.p->draw(ui, *view, sc.at);
+    }
+
+private:
+    RbCharPreview preview_;
+    std::vector<std::unique_ptr<RbCharPreview>> slots_;
+    PanelShotCamera cam_;
+    int creator_ = -1;
 };
 
 // Rock Band's tutorial main panels (GuitarTutorialPanel, DrumTutorialPanel,
@@ -1109,9 +1739,35 @@ public:
         return RbList::handleNative(in, msg, args, r);
     }
     int cost(const std::string& o) const {
+        if (const DataNode* g = group(o)) return num(g->find("cost"));
         const DataNode* outs = cat ? cat->find("outfits") : nullptr;
         const DataNode* e = outs ? outs->find(o) : nullptr;
         return num(e ? e->find("cost") : nullptr);
+    }
+    // An instrument category's (groups (<model> (cost n) (default_outfit
+    // <finish>)) ...) (char/instruments.dta) [C data]: the shop lists and
+    // sells the models (OutfitProvider RB 0x82859E08: each group, its
+    // cost; a group without a cost only when owned) [C].
+    const DataNode* groups() const { return cat ? cat->find("groups") : nullptr; }
+    static std::string key(const DataNode& n) {
+        if (n.children.empty()) return {};
+        const DataNode& k = n.children[0];
+        return k.isText() ? k.s : k.type == DataNode::Type::Int ? std::to_string(k.i) : std::string();
+    }
+    const DataNode* group(const std::string& g) const {
+        const DataNode* gs = groups();
+        for (size_t i = 1; gs && i < gs->children.size(); ++i)
+            if (gs->children[i].isList() && key(gs->children[i]) == g) return &gs->children[i];
+        return nullptr;
+    }
+    // What a chosen symbol puts on the character: the finish chosen in
+    // group_select_panel (a model's, or a piece with finishes: the mic's
+    // mic1_silver, has_group_selection RB 0x823E0700), else a model's
+    // default finish.
+    std::string wear(const std::string& o) const {
+        if (auto it = gChosenFinish.find(o); it != gChosenFinish.end()) return it->second;
+        const DataNode* g = group(o);
+        return g && g->find("default_outfit") ? text(g->find("default_outfit")) : o;
     }
 };
 
@@ -1137,6 +1793,12 @@ public:
         const size_t d = n.rfind('.');
         return d == std::string::npos ? n : n.substr(0, d);
     }
+    // The catalog's categories (hair, torso ...); the creator's skin.lst
+    // and the sliders are the script's own (charcreator.dta set_colors).
+    bool isOutfitCategory(const std::string& cat) {
+        RbCharObj* c = tourChar();
+        return outfitCategory(ui, c ? c->d.gender : "male", cat) != nullptr;
+    }
     OutfitList* listFor(const std::string& cat) {
         RbCharObj* c = tourChar();
         const std::string gender = c ? c->d.gender : "male";
@@ -1148,13 +1810,39 @@ public:
         const Value g = getProp(ui.interp(), "genre");
         const std::string genre = g.isText() ? g.str() : std::string();
         const bool closet = getProp(ui.interp(), "closet").truthy();
+        const Value oc = getProp(ui.interp(), "outfit_char");
+        const bool creator = (oc.type == Value::Type::Object && oc.object ? oc.object->name() : oc.str()) == "charcreator_panel";
         OutfitList* raw = l;
-        l->build = [raw, genre, closet, c] {
+        l->build = [raw, genre, closet, creator, c] {
             std::vector<std::string> v;
+            if (const DataNode* gs = raw->groups()) {
+                for (size_t i = 1; i < gs->children.size(); ++i) {
+                    if (!gs->children[i].isList()) continue;
+                    const std::string g = OutfitList::key(gs->children[i]);
+                    const bool owned = c && c->d.owned.count(g);
+                    if (g.empty() || (closet && !owned) || (num(gs->children[i].find("cost")) == 0 && !owned)) continue;
+                    v.push_back(g);
+                }
+                return v;
+            }
+            // OutfitProvider's outfits (RB 0x82859E08) [C]: no (exclude TRUE)
+            // piece; none only with the category's allow_none (default
+            // TRUE); in the creator not a (creator FALSE) piece; the genre's;
+            // with (filter <category>) only the pieces named after the
+            // character's piece of that category (eyes of its head) [C];
+            // the closet's owned ones [I: the port's rule for the free ones].
             const DataNode* outs = raw->cat ? raw->cat->find("outfits") : nullptr;
+            const bool allowNone = flag(raw->cat ? raw->cat->find("allow_none") : nullptr, true);
+            std::string prefix;
+            if (const DataNode* f = raw->cat ? raw->cat->find("filter") : nullptr; f && c)
+                if (auto it = c->d.outfit.find(text(f)); it != c->d.outfit.end()) prefix = it->second;
             for (const auto& [o, n] : entries(outs)) {
+                const bool none = o == "none";
+                if (flag(n->find("exclude"), false) || (none && !allowNone)) continue;
+                if (creator && !flag(n->find("creator"), true)) continue;
                 const std::string og = text(n->find("genre"));
                 if (!genre.empty() && og != genre) continue;
+                if (!none && !prefix.empty() && o.rfind(prefix, 0) != 0) continue;
                 if (closet && c && !c->d.owned.count(o) && num(n->find("cost")) > 0) continue;
                 v.push_back(o);
             }
@@ -1175,7 +1863,7 @@ public:
                    true;
         }
         if (msg == "focus_outfit") {
-            if (focus.rfind(".lst") == std::string::npos) return r = Value::symbol(""), true;
+            if (focus.rfind(".lst") == std::string::npos || !isOutfitCategory(base(focus))) return r = Value::symbol(""), true;
             OutfitList* l = listFor(base(focus));
             ComponentObj* c = component(focus);
             if (c && c->provider != l) in.send(c, "set_provider", {Value::obj(l)});
@@ -1206,14 +1894,21 @@ public:
                     OutfitList* l = listFor(cat);
                     ComponentObj* comp = component(focus);
                     const std::string o = l->symbol(comp ? comp->selected : 0);
-                    // The script pays (set_money, shop_confirm_screen); this keeps it owned.
-                    if (!o.empty()) c->d.owned.insert(o);
-                    if (!o.empty() && (c->d.owned.count(o) || l->cost(o) == 0)) c->d.outfit[cat] = o, ++bought_;
+                    // The script pays (set_money, shop_confirm_screen); this
+                    // keeps it owned (an instrument model: with its finish).
+                    if (!o.empty()) c->d.owned.insert(o), c->d.owned.insert(l->wear(o));
+                    if (!o.empty() && (c->d.owned.count(o) || l->cost(o) == 0)) c->d.outfit[cat] = l->wear(o), ++bought_;
+                    gChosenFinish.erase(o);
                 } else if (stored_.count(cat)) {
                     c->d.outfit[cat] = stored_[cat];
                 }
                 gMeta->save();
+                // The focus back on the category's button; a panel of lists
+                // only (shop_instrument.milo: guitar / bass / drum / mic.lst)
+                // keeps none, so its screen's back works again (RB
+                // 0x8283EAD0 / 0x8283EC08 -> 0x8283E638) [I: 0x8283E638 not read].
                 if (component(cat + ".btn")) setFocus(cat + ".btn", true);
+                else setFocus("", true);
             }
             return handler(msg) == nullptr;  // the script's camera runs next when it has one
         }
@@ -1222,7 +1917,7 @@ public:
         // Lists' providers when a list gets the focus.
         if (msg == "set_focus") {
             const bool done = PanelObj::handleNative(in, msg, args, r);
-            if (focus.rfind(".lst") != std::string::npos)
+            if (focus.rfind(".lst") != std::string::npos && isOutfitCategory(base(focus)))
                 if (ComponentObj* c = component(focus)) in.send(c, "set_provider", {Value::obj(listFor(base(focus)))});
             return done;
         }
@@ -1235,7 +1930,7 @@ public:
         const std::string before = focus;
         const bool onBtn = before.size() > 4 && before.rfind(".btn") == before.size() - 4;
         const bool r = PanelObj::buttonDown(button, player);
-        if (button == kPad_X && onBtn && focus == before && component(base(before) + ".lst")) {
+        if (button == kPad_X && onBtn && focus == before && component(base(before) + ".lst") && isOutfitCategory(base(before))) {
             ComponentObj* l = component(base(before) + ".lst");
             ui.interp().send(l, "set_provider", {Value::obj(listFor(base(before)))});
             ui.interp().send(this, "store_outfit", {});
@@ -1262,16 +1957,436 @@ private:
 class CharPanelObj : public PanelObj {
 public:
     using PanelObj::PanelObj;
+    // The shopped character at the store's char0 (stores/store.milo's
+    // CompositeCharacter slot) in its look (GD05-083, ui/rb_char_preview.h).
+    void poll(double dtMs) override {
+        PanelObj::poll(dtMs);
+        preview_.poll(dtMs);
+    }
+    void draw() override {
+        auto* c = dynamic_cast<RbCharObj*>(ui.interp().send(this, "get_tour_char", {}).object);
+        scene::Xfm at;
+        const bool shown = showing && view && c && view->worldXfm("char0", at);
+        if (shown) preview_.set(ui, previewLook(*c));
+        if (view) cam_.apply(*view, "char0", shown ? preview_.character() : nullptr);
+        PanelObj::draw();
+        if (shown) preview_.draw(ui, *view, at);
+    }
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
-        if (msg == "select_cam" || msg == "update_appearance" || msg == "load_char") return r = Value::integer(0), true;
-        if (msg == "get_tour_char") {
+        if (msg == "select_cam") return cam_.select(args.empty() ? std::string() : in.evalValue(args[0]).str()), r = Value::integer(0), true;
+        if (msg == "update_appearance" || msg == "load_char") return r = Value::integer(0), true;
+        // {shop_char_panel save} (shop.dta: a patch confirmed or deleted): the profile [I: RB saves the character].
+        if (msg == "save") {
+            if (gMeta) gMeta->save();
+            return r = Value::integer(0), true;
+        }
+        // get_tour_char, or the property ({shop_char_panel get tour_char}: shop.dta's back of shop_instrument_screen).
+        if (msg == "get_tour_char" || (msg == "get" && sArg(args, 0) == "tour_char")) {
             const int pn = getProp(in, "char_player_num").integerValue();
             const Value cfg = in.send("game", "get_player_config", {Value::integer(std::max(0, pn))});
             return r = cfg.object ? in.send(cfg.object, "get_char", {}) : Value::integer(0), true;
         }
         return PanelObj::handleNative(in, msg, args, r);
     }
+
+private:
+    RbCharPreview preview_;
+    PanelShotCamera cam_;
 };
+
+// ------------------------------------------------------------ the patch creator
+class PatchPanelObj;
+//
+// GD05-084, DECISIONS D93. Rock Band's patches (char/patch.h): the shop's
+// tattoo / face paint pickers (PatchSelectPanel tattoo_select_panel /
+// facepaint_select_panel, shop.dta PATCH_SELECT_PANEL_HANDLERS) list the
+// set's patches (patch.lst: none, then the set's slots), edit_patch opens
+// the creator (PatchPanel patch_panel, patchcreator.dta) on the selected
+// one. The scripts drive the modes (on_set_mode, BUTTON_DOWN_MSG,
+// SELECT_START_MSG) [C data]; the natives below are the port's [I: RB's
+// PatchPanel / PatchSelectPanel (RB 0x8282B4E0 / 0x8282B600 ..., layer
+// records RB 0x823CB348) not read]: kLayers layers a patch, a d-pad press
+// in move / rotate / scale steps the layer once (RB moves it while held,
+// with velocities), warp does nothing, the creator's own preview of the
+// patch (patch.milo patch.rndtex) is not drawn.
+namespace {
+
+constexpr int kPatchLayers = 10;  // [I]
+
+// The stickers of a category (ui.dta (patch (stickers ...))): the milo's Tex
+// objects of type sticker, in order, with their properties [C data].
+struct StickerInfo {
+    std::string name, display;
+    float sizex = 1, sizey = 1;
+    int palette = 0;
+    bool allowColor = false;
+};
+const std::vector<StickerInfo>& stickersOf(UiManager& ui, const std::string& category) {
+    static std::map<std::string, std::vector<StickerInfo>> cache;
+    auto it = cache.find(category);
+    if (it != cache.end()) return it->second;
+    std::vector<StickerInfo>& out = cache[category];
+    const std::string path = Band::rbStickerMilo(ui.data(), category);
+    if (path.empty() || !ui.data().exists(path)) return out;
+    try {
+        auto milo = scene::loadMilo(ui.data(), path);
+        for (const auto& o : milo->root().objects) {
+            const auto* t = o->as<scene::Tex>();
+            if (!t || t->header.type != "sticker") continue;
+            StickerInfo si;
+            si.name = t->name, si.display = t->name;
+            if (t->header.hasProps)
+                for (const auto& kv : t->header.props.children) {
+                    if (kv.children.size() < 2) continue;
+                    const std::string& k = kv.children[0].str;
+                    if (k == "sizex") si.sizex = kv.children[1].asFloat();
+                    else if (k == "sizey") si.sizey = kv.children[1].asFloat();
+                    else if (k == "palette_index") si.palette = int(kv.children[1].asFloat());
+                    else if (k == "allow_color") si.allowColor = kv.children[1].asFloat() != 0;
+                    else if (k == "display_name") si.display = kv.children[1].str;
+                }
+            out.push_back(si);
+        }
+    } catch (const std::exception& e) {
+        ui.logOnce("patch: " + path + ": " + e.what());
+    }
+    return out;
+}
+
+// The categories a set offers ((stickers (<category> <milo> <preview> (sets ...)))), in the data's order.
+std::vector<std::string> patchCategories(UiManager& ui, const std::string& set) {
+    std::vector<std::string> out;
+    const DataNode* cfg = Band::rbPatchConfig(ui.data());
+    const DataNode* st = cfg ? cfg->find("stickers") : nullptr;
+    if (!st) return out;
+    for (size_t i = 1; i < st->children.size(); ++i) {
+        const DataNode& c = st->children[i];
+        if (!c.isList() || c.children.empty()) continue;
+        const DataNode* sets = c.find("sets");
+        bool in = set.empty();
+        for (size_t k = 1; sets && k < sets->children.size(); ++k) in = in || sets->children[k].s == set;
+        if (in) out.push_back(c.children[0].s);
+    }
+    return out;
+}
+
+// How many patches a set holds ((patch (sets (general 10) (chest 5) (arm 5)))) [C data; I: the meaning].
+int patchSlots(UiManager& ui, const std::string& set) {
+    const DataNode* cfg = Band::rbPatchConfig(ui.data());
+    const DataNode* sets = cfg ? cfg->find("sets") : nullptr;
+    const DataNode* e = sets ? sets->find(set) : nullptr;
+    return e && e->children.size() > 1 ? e->children[1].i : 0;
+}
+
+// One patch of a character's set (patch_dir): has_layers, clear.
+class RbPatchRef : public ScriptObject {
+public:
+    RbPatchRef(const std::string& name) : ScriptObject(name, "RbPatch") {}
+    RbCharObj* ch = nullptr;
+    std::string set;
+    int index = -1;
+    chr::Patch* patch() {
+        if (!ch || index < 0) return nullptr;
+        std::vector<chr::Patch>& v = ch->d.patchSets[set];
+        if (v.size() <= size_t(index)) v.resize(size_t(index) + 1);
+        chr::Patch& p = v[size_t(index)];
+        if (p.size() < size_t(kPatchLayers)) p.resize(size_t(kPatchLayers));
+        return &p;
+    }
+    bool handleNative(Interp&, const std::string& msg, std::vector<Value>&, Value& r) override {
+        r = Value::integer(0);
+        chr::Patch* p = patch();
+        if (msg == "has_layers") {
+            bool any = false;
+            for (const chr::PatchLayer& l : p ? *p : chr::Patch{}) any = any || !l.category.empty();
+            return r = Value::integer(any ? 1 : 0), true;
+        }
+        if (msg == "clear") {
+            if (p) *p = chr::Patch(size_t(kPatchLayers));
+            return true;
+        }
+        return false;
+    }
+};
+
+// The layer being edited ({$this edit_layer}).
+class RbLayerRef : public ScriptObject {
+public:
+    RbLayerRef(UiManager& u, PatchPanelObj& panel) : ScriptObject("patch_edit_layer", "PatchLayer"), ui_(u), panel_(panel) {}
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override;
+    Value getProp(Interp& in, const std::string& key) override;
+    void setProp(Interp& in, const std::string& key, const Value& v) override;
+
+private:
+    chr::PatchLayer* layer();
+    const StickerInfo* sticker();
+    UiManager& ui_;
+    PatchPanelObj& panel_;
+};
+
+}  // namespace
+
+// PatchSelectPanel (tattoo_select_panel, facepaint_select_panel, patch_select_panel).
+class PatchSelectPanelObj : public PanelObj {
+public:
+    using PanelObj::PanelObj;
+    // The type's (set <name>) property (PATCH_SELECT_PANEL_HANDLERS: the
+    // patch set) is not the set message: {tattoo_select_panel set location
+    // ...} (shop.dta) sets the property [C data: the scripts rely on it].
+    bool nativeFirst(const std::string& msg) const override { return msg == "set" || PanelObj::nativeFirst(msg); }
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        if (msg == "set" && args.size() >= 2) return setProp(in, args[0].str(), in.evalValue(args[1])), r = args[1], true;
+        if (msg == "patch_dir") {
+            const int pos = iArg(args, 0);
+            RbPatchRef* p = ref(in, pos - 1);
+            return r = p ? Value::obj(p) : Value::integer(0), true;
+        }
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+    void enter() override {
+        PanelObj::enter();
+        attach(ui.interp());
+    }
+
+private:
+    std::string set(Interp& in) { return getProp(in, "set").str(); }
+    RbCharObj* tourChar(Interp& in) { return dynamic_cast<RbCharObj*>(in.send("shop_char_panel", "get", {Value::symbol("tour_char")}).object); }
+    RbPatchRef* ref(Interp& in, int index) {
+        if (index < 0 || !gMeta) return nullptr;
+        if (refs_.size() <= size_t(index)) refs_.resize(size_t(index) + 1, nullptr);
+        RbPatchRef*& p = refs_[size_t(index)];
+        if (!p) p = gMeta->own(std::make_unique<RbPatchRef>(name() + "_patch" + std::to_string(index)));
+        p->ch = tourChar(in), p->set = set(in), p->index = index;
+        return p;
+    }
+    void attach(Interp& in) {
+        if (!gMeta) return;
+        if (!list_) list_ = gMeta->own(std::make_unique<RbList>(name() + "_patches"));
+        const int n = patchSlots(ui, set(in));
+        list_->build = [n] {
+            std::vector<std::string> v{"patch_none"};
+            for (int i = 0; i < n; ++i) v.push_back("patch_" + std::to_string(i + 1));
+            return v;
+        };
+        list_->label = [this, &in](const std::string& sym) {
+            if (sym == "patch_none") return std::string("None");
+            const int i = std::atoi(sym.c_str() + 6) - 1;
+            RbPatchRef* p = ref(in, i);
+            Value has = Value::integer(0);
+            std::vector<Value> none;
+            if (p) p->handleNative(in, "has_layers", none, has);
+            return std::string(has.truthy() ? "Patch " : "Empty patch ") + std::to_string(i + 1);
+        };
+        list_->refresh();
+        if (ComponentObj* c = component("patch.lst"); c && c->provider != list_) in.send(c, "set_provider", {Value::obj(list_)});
+    }
+    RbList* list_ = nullptr;
+    std::vector<RbPatchRef*> refs_;
+};
+
+// PatchPanel patch_panel (patchcreator.dta).
+class PatchPanelObj : public PanelObj {
+public:
+    using PanelObj::PanelObj;
+    chr::Patch* patch(Interp& in) {
+        auto* p = dynamic_cast<RbPatchRef*>(getProp(in, "patch").object);
+        return p ? p->patch() : nullptr;
+    }
+    chr::PatchLayer* editLayer(Interp& in) {
+        chr::Patch* p = patch(in);
+        const int i = getProp(in, "edit_layer_idx").integerValue();
+        return p && i >= 0 && size_t(i) < p->size() ? &(*p)[size_t(i)] : nullptr;
+    }
+    std::string setName(Interp& in) { return getProp(in, "set").str(); }
+    std::vector<std::string> categories;
+
+    bool nativeFirst(const std::string& msg) const override { return msg == "set" || PanelObj::nativeFirst(msg); }
+    void setProp(Interp& in, const std::string& key, const Value& v) override {
+        PanelObj::setProp(in, key, v);
+        // RB's PatchPanel runs on_set_mode when the mode changes (the script's
+        // {$this set mode ...} expects it) [I].
+        if (key == "mode") in.send(this, "on_set_mode", {}, false);
+    }
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        r = Value::integer(0);
+        if (msg == "set" && args.size() >= 2) return setProp(in, args[0].str(), in.evalValue(args[1])), r = args[1], true;
+        if (!gMeta) return PanelObj::handleNative(in, msg, args, r);
+        if (msg == "edit_layer") {
+            if (!layerRef_) layerRef_ = gMeta->own(std::make_unique<RbLayerRef>(ui, *this));
+            return r = Value::obj(layerRef_), true;
+        }
+        if (msg == "category_provider") {
+            if (!cats_) cats_ = gMeta->own(std::make_unique<RbList>("patch_categories"));
+            categories = patchCategories(ui, setName(in));
+            const std::vector<std::string> c = categories;
+            cats_->build = [c] { return c; };
+            cats_->label = [this](const std::string& sym) {
+                const std::string l = ui.localize(sym);
+                return l.empty() ? sym : l;
+            };
+            cats_->refresh();
+            return r = Value::obj(cats_), true;
+        }
+        if (msg == "sticker_provider") {
+            if (!stickers_) stickers_ = gMeta->own(std::make_unique<RbList>("patch_stickers"));
+            const int pos = iArg(args, 0);
+            const std::string cat = pos >= 0 && size_t(pos) < categories.size() ? categories[size_t(pos)] : std::string();
+            std::vector<std::string> names;
+            std::map<std::string, std::string> labels;
+            for (const StickerInfo& si : stickersOf(ui, cat)) names.push_back(si.name), labels[si.name] = si.display;
+            stickers_->build = [names] { return names; };
+            stickers_->label = [labels](const std::string& n) {
+                auto it = labels.find(n);
+                return it != labels.end() ? it->second : n;
+            };
+            stickers_->refresh();
+            return r = Value::obj(stickers_), true;
+        }
+        if (msg == "layer_provider") {
+            if (!layers_) layers_ = gMeta->own(std::make_unique<RbList>("patch_layers"));
+            layers_->build = [] {
+                std::vector<std::string> v;
+                for (int i = 0; i < kPatchLayers; ++i) v.push_back("layer_" + std::to_string(i + 1));
+                return v;
+            };
+            layers_->label = [this, &in](const std::string& sym) {
+                const int i = std::atoi(sym.c_str() + 6) - 1;
+                chr::Patch* p = patch(in);
+                const bool used = p && size_t(i) < p->size() && !(*p)[size_t(i)].category.empty();
+                return std::string(used ? "Layer " : "Empty layer ") + std::to_string(i + 1);
+            };
+            layers_->refresh();
+            return r = Value::obj(layers_), true;
+        }
+        if (msg == "cache_patch") {
+            if (chr::Patch* p = patch(in)) cached_ = *p;
+            return true;
+        }
+        if (msg == "restore_patch") {
+            if (chr::Patch* p = patch(in); p && !cached_.empty()) *p = cached_;
+            return true;
+        }
+        if (msg == "store_undo") {
+            if (chr::PatchLayer* l = editLayer(in)) undo_ = *l;
+            return true;
+        }
+        if (msg == "restore_undo") {
+            if (chr::PatchLayer* l = editLayer(in)) *l = undo_;
+            return true;
+        }
+        if (msg == "clear_layer" || msg == "dupe_layer") {
+            chr::Patch* p = patch(in);
+            const int i = iArg(args, 0);
+            if (!p || i < 0 || size_t(i) >= p->size()) return true;
+            if (msg == "clear_layer") (*p)[size_t(i)] = chr::PatchLayer{};
+            else
+                for (size_t k = 0; k < p->size(); ++k)
+                    if ((*p)[k].category.empty()) {
+                        (*p)[k] = (*p)[size_t(i)];
+                        break;
+                    }
+            return true;
+        }
+        if (msg == "swap_layers") {
+            chr::Patch* p = patch(in);
+            const int a = iArg(args, 0), b = iArg(args, 1);
+            if (!p || a < 0 || b < 0 || size_t(a) >= p->size() || size_t(b) >= p->size()) return r = Value::integer(0), true;
+            std::swap((*p)[size_t(a)], (*p)[size_t(b)]);
+            return r = Value::integer(1), true;
+        }
+        if (msg == "reset_velocities" || msg == "reset_directions") return true;
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+    // The d-pad in move / rotate / scale (flip: the script's): the script's
+    // BUTTON_DOWN_MSG takes the press, RB's panel moves the layer in its
+    // poll [I: one step a press, RB moves it while held].
+    void poll(double dtMs) override {
+        PanelObj::poll(dtMs);
+        Interp& in = ui.interp();
+        const std::string mode = up ? getProp(in, "mode").str() : std::string();
+        for (const int b : {kPad_DUp, kPad_DDown, kPad_DLeft, kPad_DRight}) {
+            const int n = ui.pressCount(b), d = n - seen_[size_t(b - kPad_DUp)];
+            seen_[size_t(b - kPad_DUp)] = n;
+            if (d <= 0 || (mode != "move" && mode != "rotate" && mode != "scale")) continue;
+            chr::PatchLayer* l = editLayer(in);
+            if (!l) continue;
+            const int dx = b == kPad_DRight ? 1 : b == kPad_DLeft ? -1 : 0, dy = b == kPad_DUp ? 1 : b == kPad_DDown ? -1 : 0;
+            for (int k = 0; k < d; ++k) {
+                if (mode == "move") l->x = std::clamp(l->x + 0.05f * float(dx), -1.0f, 1.0f), l->y = std::clamp(l->y + 0.05f * float(dy), -1.0f, 1.0f);
+                if (mode == "rotate") l->rot += 0.0872665f * float(dx ? -dx : dy);  // 5 degrees
+                if (mode == "scale") {
+                    const float f = (dx + dy) > 0 ? 1.1f : 1 / 1.1f;
+                    l->sx = std::clamp(l->sx * f, 0.1f, 8.0f), l->sy = std::clamp(l->sy * f, 0.1f, 8.0f);
+                }
+            }
+        }
+    }
+
+private:
+    RbLayerRef* layerRef_ = nullptr;
+    RbList *cats_ = nullptr, *stickers_ = nullptr, *layers_ = nullptr;
+    chr::Patch cached_;
+    chr::PatchLayer undo_;
+    std::array<int, 4> seen_{};
+};
+
+namespace {
+
+chr::PatchLayer* RbLayerRef::layer() { return panel_.editLayer(ui_.interp()); }
+
+const StickerInfo* RbLayerRef::sticker() {
+    chr::PatchLayer* l = layer();
+    if (!l || l->category.empty() || l->sticker < 0) return nullptr;
+    const std::vector<StickerInfo>& v = stickersOf(ui_, l->category);
+    return size_t(l->sticker) < v.size() ? &v[size_t(l->sticker)] : nullptr;
+}
+
+bool RbLayerRef::handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) {
+    r = Value::integer(0);
+    chr::PatchLayer* l = layer();
+    if (msg == "has_sticker") return r = Value::integer(l && !l->category.empty() && l->sticker >= 0 ? 1 : 0), true;
+    if (msg == "allow_color") {
+        const StickerInfo* s = sticker();
+        return r = Value::integer(s && s->allowColor ? 1 : 0), true;
+    }
+    if (msg == "color_palette") return true;
+    if (msg == "set_scale") {
+        if (l) l->sx = args.empty() ? 1 : in.evalValue(args[0]).number(), l->sy = args.size() > 1 ? in.evalValue(args[1]).number() : l->sx;
+        return true;
+    }
+    if (msg == "set_default_color") {
+        if (const StickerInfo* s = sticker(); s && l) l->color = s->allowColor ? s->palette : -1;
+        return true;
+    }
+    if (msg == "flip_x" || msg == "flip_y") {
+        if (l) (msg == "flip_x" ? l->flipX : l->flipY) = !(msg == "flip_x" ? l->flipX : l->flipY);
+        return true;
+    }
+    if (msg == "select_fx") return true;
+    return false;
+}
+
+Value RbLayerRef::getProp(Interp& in, const std::string& key) {
+    chr::PatchLayer* l = layer();
+    if (key == "color_idx") return Value::integer(l ? std::max(0, l->color) : 0);
+    if (key == "sticker_idx") return Value::integer(l ? l->sticker : -1);
+    if (key == "sticker_category") return Value::symbol(l ? l->category : std::string());
+    return ScriptObject::getProp(in, key);
+}
+
+void RbLayerRef::setProp(Interp& in, const std::string& key, const Value& v) {
+    chr::PatchLayer* l = layer();
+    if (!l) return ScriptObject::setProp(in, key, v);
+    if (key == "color_idx") l->color = v.integerValue();
+    else if (key == "sticker_idx") l->sticker = v.integerValue();
+    else if (key == "sticker_category") {
+        if (l->category != v.str()) l->sticker = -1;
+        l->category = v.str();
+        if (l->sticker < 0 && !stickersOf(ui_, l->category).empty()) l->sticker = 0;
+    } else ScriptObject::setProp(in, key, v);
+}
+
+}  // namespace
 
 // AudioLatencyPanel (ui/options.dta, the A/V calibration): its click track
 // [I: the port's calibration is Enhanced Options' (GDALL-038); the panel's
@@ -1290,6 +2405,68 @@ private:
     double startMs_ = 0;
 };
 
+// OutfitGroupPanel group_select_panel (ui/shop.dta): init <outfit panel>
+// lists the focused model's finishes in outfit.lst (the outfits that
+// has_group_selection counts, RB 0x823E0700 [C]; the list's order the
+// catalog's [I: RB's OutfitGroupPanel 0x8282AD38 not read]); X keeps the
+// chosen finish for the outfit panel's confirm_outfit (the script then
+// buys it through shop_confirm_screen or wears it).
+class OutfitGroupPanelObj : public PanelObj {
+public:
+    using PanelObj::PanelObj;
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        if (msg == "init") {
+            props["outfit_panel"] = args.empty() ? Value::integer(0) : args[0];
+            ScriptObject* op = args.empty() ? nullptr : args[0].object;
+            model_ = op ? in.send(op, "focus_outfit", {}).str() : std::string();
+            const std::string cat = op ? in.send(op, "focus_category", {}).str() : std::string();
+            auto* c = op ? dynamic_cast<RbCharObj*>(in.send(op, "tour_char", {}).object) : nullptr;
+            if (!list_ && gMeta) list_ = gMeta->own(std::make_unique<RbList>(name() + "_provider"));
+            if (list_) {
+                const std::vector<std::string> f = modelFinishes(ui, c ? c->d.gender : "male", cat, model_);
+                list_->build = [f] { return f; };
+                list_->label = [this](const std::string& o) {
+                    const std::string l = ui.localize(o);
+                    return l.empty() ? o : l;
+                };
+                list_->refresh();
+                attach();
+            }
+            return r = Value::integer(0), true;
+        }
+        if (msg == "selected_outfit" || msg == "focus_outfit") return r = Value::symbol(selected()), true;
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+    void enter() override {
+        PanelObj::enter();
+        attach();
+    }
+    bool buttonDown(int button, int player) override {
+        if (button == kPad_X && !model_.empty() && !selected().empty()) {
+            gChosenFinish[model_] = selected();
+            // The SELECT_MSG buys when {&& {! has_outfit} $cost}: RB's
+            // script reads the $cost the outfit panel's handlers left (its
+            // do's locals); the port's do restores them, so the model's
+            // price is set here [I: RB's do semantics].
+            const Value op = getProp(ui.interp(), "outfit_panel");
+            const Value prov = op.object ? ui.interp().send(op.object, "focus_provider", {}) : Value::integer(0);
+            ui.interp().var("cost") = prov.object ? ui.interp().send(prov.object, "cost", {Value::symbol(model_)}) : Value::integer(0);
+        }
+        return PanelObj::buttonDown(button, player);
+    }
+
+private:
+    void attach() {
+        if (ComponentObj* c = component("outfit.lst"); c && list_ && c->provider != list_) ui.interp().send(c, "set_provider", {Value::obj(list_)});
+    }
+    std::string selected() {
+        ComponentObj* c = component("outfit.lst");
+        return list_ ? list_->symbol(c ? c->selected : 0) : std::string();
+    }
+    RbList* list_ = nullptr;
+    std::string model_;
+};
+
 // OutfitConfigPanel color_select_panel (ui/shop.dta): init <outfit panel>
 // keeps the panel the confirm screen answers to [C data: the uses; I: no
 // colour choice yet].
@@ -1306,9 +2483,14 @@ public:
 std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& cls, const std::string& name) {
     if (cls == "GuitarTutorialPanel" || cls == "DrumTutorialPanel" || cls == "VocalsTutorialPanel") return std::make_unique<RbTutorialPanelObj>(ui, name, cls);
     if (cls == "OutfitConfigPanel") return std::make_unique<OutfitConfigPanelObj>(ui, name, cls);
-    if (cls == "AudioLatencyPanel" || name.rfind("calibrate_", 0) == 0) return std::make_unique<AudioLatencyPanelObj>(ui, name, cls);
+    if (cls == "OutfitGroupPanel") return std::make_unique<OutfitGroupPanelObj>(ui, name, cls);
+    // (not the calibrate_* screens: calibrate_av_chooser_screen was made a
+    // panel, so OPTIONS > CALIBRATE found no screen)
+    if (cls == "AudioLatencyPanel" || (name.rfind("calibrate_", 0) == 0 && cls != "UIScreen")) return std::make_unique<AudioLatencyPanelObj>(ui, name, cls);
     if (cls == "OutfitPanel") return std::make_unique<OutfitPanelObj>(ui, name, cls);
     if (cls == "CharPanel") return std::make_unique<CharPanelObj>(ui, name, cls);
+    if (cls == "PatchSelectPanel") return std::make_unique<PatchSelectPanelObj>(ui, name, cls);
+    if (cls == "PatchPanel") return std::make_unique<PatchPanelObj>(ui, name, cls);
     if (cls == "BandCreatePanel") return std::make_unique<BandCreatePanelObj>(ui, name, cls);
     if (cls == "DialogPanel") return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"set_player_num"});
     if (cls == "CharCreatorPanel") return std::make_unique<CharCreatorPanelObj>(ui, name, cls);
@@ -1317,8 +2499,58 @@ std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& 
         return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"in_vocal_mode", "set_in_vocal_mode", "set_pitch_shift_ratio"});
     if (cls == "PracticeBackgroundPanel") return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"select_cam", "select_camera_shot"});
     if (name == "practice_space_panel")
-        return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"select_cam", "set_creator_player_num", "play_attitude_group", "set_char_player_num"});
+        return std::make_unique<PracticeSpacePanelObj>(ui, name, cls, std::set<std::string>{"play_attitude_group", "set_char_player_num"});
     return nullptr;
+}
+
+std::vector<std::string> rbCategoryOutfits(UiManager& ui, const std::string& gender, const std::string& category) {
+    std::vector<std::string> v;
+    const DataNode* c = outfitCategory(ui, gender, category);
+    for (const auto& [o, n] : entries(c ? c->find("outfits") : nullptr)) v.push_back(o);
+    return v;
+}
+
+RbTourUnlocks rbTourUnlocks() {
+    RbTourUnlocks u;
+    if (!gMeta) return u;
+    gMeta->ensure();
+    for (const RbCharObj* c : gMeta->chars)
+        for (int i = 0; i < 3; ++i)
+            if (c->d.instrument == RbTourUnlocks::kInstruments[i]) {
+                u.ranked[i] = std::max(u.ranked[i], gMeta->soloQuickplayProgress(c->d, false));
+                u.bonus[i] = std::max(u.bonus[i], gMeta->soloQuickplayProgress(c->d, true));
+            }
+    std::set<std::string> played;
+    for (const RbBandObj* b : gMeta->bands) played.insert(b->d.played.begin(), b->d.played.end());
+    u.bandPlayed.assign(played.begin(), played.end());
+    return u;
+}
+
+std::map<std::string, chr::Patch> rbWornPatches(UiManager& ui, ScriptObject* tourChar) {
+    auto* c = dynamic_cast<RbCharObj*>(tourChar);
+    return c ? wornPatches(ui, c->d) : std::map<std::string, chr::Patch>{};
+}
+
+int rbOutfitCost(UiManager& ui, const std::string& gender, const std::string& category, const std::string& outfit) {
+    const DataNode* cat = outfitCategory(ui, gender, category);
+    OutfitList l("");
+    l.cat = cat;
+    if (const DataNode* g = l.group(outfit)) return num(g->find("cost"));  // an instrument model
+    const DataNode* outs = cat ? cat->find("outfits") : nullptr;
+    const DataNode* e = outs ? outs->find(outfit) : nullptr;
+    return e ? num(e->find("cost")) : -1;
+}
+
+RbModel rbFirstModel(UiManager& ui, const std::string& gender, const std::string& category) {
+    OutfitList l("");
+    l.cat = outfitCategory(ui, gender, category);
+    const DataNode* gs = l.groups();
+    for (size_t i = 1; gs && i < gs->children.size(); ++i)
+        if (gs->children[i].isList()) {
+            const std::string m = OutfitList::key(gs->children[i]);
+            return {m, l.wear(m), num(gs->children[i].find("cost"))};
+        }
+    return {};
 }
 
 void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<ScriptObject>>& owned) {
@@ -1336,6 +2568,31 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
             if (const DataNode* h = tour->find("default_hometown")) m.data.hometown = text(h);
             if (const DataNode* mo = tour->find("default_money")) m.data.money = num(mo);
             loadEvents(m.data.solo ? m.data.solo->find("towns") : nullptr, m.data.soloTowns, m.data.soloEvents);
+            // The solo venues and their kinds (RB 0x823FDB20) [C], max_song and
+            // num_initial_unlock_songs (tour_solo.dta) [C data].
+            for (size_t i = 0; i < m.data.soloEvents.size(); ++i) {
+                const TourEvent& e = m.data.soloEvents[i];
+                if (m.data.soloVenues.empty() || m.data.soloVenues.back().town != e.town || m.data.soloVenues.back().venue != e.venue)
+                    m.data.soloVenues.push_back({e.town, e.venue, 0, {}});
+                SoloVenue& v = m.data.soloVenues.back();
+                v.events.push_back(i);
+                const DataNode* songs = e.node ? e.node->find("songs") : nullptr;
+                const DataNode* s0 = songs && songs->children.size() > 1 ? &songs->children[1] : nullptr;
+                if (s0 && s0->isList() && text(s0, 0) == "unlock") v.type = 1;
+                if (s0 && s0->isText() && s0->s == "download") v.type = 2;
+            }
+            if (const DataNode* n = m.data.solo ? m.data.solo->find("num_initial_unlock_songs") : nullptr) m.data.initialUnlocks = num(n);
+            for (const auto& [k, n] : entries(m.data.solo ? m.data.solo->find("max_song") : nullptr)) {
+                static const char* const kSyms[] = {"kDifficultyEasy", "kDifficultyMedium", "kDifficultyHard", "kDifficultyExpert"};
+                for (int d = 0; d < 4; ++d)
+                    if (k == kSyms[d]) m.data.maxSong[d] = num(n);
+            }
+            if (const DataNode* ms = m.data.solo ? m.data.solo->find("max_song") : nullptr)  // the macros as numbers
+                for (size_t i = 1; i < ms->children.size(); ++i) {
+                    const DataNode& c = ms->children[i];
+                    if (c.isList() && c.children.size() > 1 && c.children[0].type == DataNode::Type::Int && c.children[0].i >= 0 && c.children[0].i < 4)
+                        m.data.maxSong[c.children[0].i] = num(&c);
+                }
             loadEvents(m.data.band ? m.data.band->find("tiers") : nullptr, m.data.bandTowns, m.data.bandEvents);
             // A tier is the world town of the same order [I].
             std::vector<std::pair<int, std::string>> world;
@@ -1361,9 +2618,17 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
     };
     // Solo events: every event of every town in order (the list moves the town as it scrolls).
     m.soloEvents = list("solo_event_provider");
+    // The open towns' open events (RB 0x823E5BB8 / 0x823E46B0) [C].
     m.soloEvents->build = [&m] {
         std::vector<std::string> v;
-        for (const TourEvent& e : m.data.soloEvents) v.push_back(e.name);  // unique across the towns [C data]
+        RbCharObj* c = m.soloChar();
+        if (!c) return v;
+        const int dd = std::clamp(c->d.difficulty, 0, 3);
+        for (const std::string& t : m.soloOpenTowns(c->d, dd))
+            for (const SoloVenue& sv : m.data.soloVenues)
+                if (sv.town == t)
+                    for (size_t i : m.soloOpenEvents(c->d, dd, sv)) v.push_back(m.data.soloEvents[i].name);  // unique across the towns [C data]
+        if (SDL_getenv("GD05_UILOG")) SDL_Log("tour: solo events %d (difficulty %d)", int(v.size()), dd);
         return v;
     };
     auto evOf = [&m](const std::string& sym) -> const TourEvent* { return m.findEvent(false, "", "", sym); };
@@ -1479,7 +2744,73 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
         return false;
     };
     in.addBuiltin("get_solo_char_provider", [&m](Interp&, const DataNode&) { return Value::obj(m.charList); });
-    in.addBuiltin("get_char_provider", [&m](Interp&, const DataNode&) { return Value::obj(m.charList); });
+    // The band lobby's character lists, one per player (get_char_provider
+    // <player>: RB 0x828572F0 makes four, CharProvider handler RB
+    // 0x82857878) [C]: first (Create New) when the mode's allow_create_char,
+    // then (Default) (the instrument's premade character) when its
+    // show_prefab_chars, then the profile's characters of the instrument
+    // filter (RB 0x82857660 / 0x82855BD0) that another player has not
+    // taken [I: 0x82421B68 not read]. is_create_new / is_non_prefab_char /
+    // get_char by those header rows (RB 0x828560C8, 0x82855DB8, 0x82856558).
+    for (int p = 0; p < 4; ++p) {
+        RbList* l = list("rb_band_char_provider" + std::to_string(p));
+        struct State {
+            std::string filter;
+            int saved = 0;
+        };
+        auto st = std::make_shared<State>();
+        auto header = [&m] {
+            return int(gameCfgValue(m.ui(), "allow_create_char").truthy()) + int(gameCfgValue(m.ui(), "show_prefab_chars").truthy());
+        };
+        l->build = [&m, st, p, header] {
+            std::vector<std::string> v;
+            if (gameCfgValue(m.ui(), "allow_create_char").truthy()) v.push_back("create_new");
+            if (gameCfgValue(m.ui(), "show_prefab_chars").truthy()) v.push_back("prefab");
+            const Session& s = m.ui().session();
+            for (RbCharObj* c : m.chars) {
+                if (!st->filter.empty() && st->filter != "none" && c->d.instrument != (st->filter == "bass" ? "guitar" : st->filter)) continue;
+                bool taken = false;
+                for (int q = 0; q < 4; ++q) taken |= q != p && s.joined(q) && s.players[size_t(q)].hasChar && s.players[size_t(q)].character == c->name();
+                if (!taken) v.push_back(c->name());
+            }
+            (void)header;
+            return v;
+        };
+        l->label = [&m](const std::string& sym) {
+            if (sym == "create_new") return m.localizeOr("char_provider_create_new");
+            if (sym == "prefab") return m.localizeOr("char_provider_prefab");
+            for (RbCharObj* c : m.chars)
+                if (c->name() == sym) return c->d.name;
+            return sym;
+        };
+        l->extra = [&m, l, st, p, header](Interp& in2, const std::string& msg, std::vector<Value>& a, Value& r) {
+            if (msg == "set_instrument_filter") return st->filter = a.empty() ? std::string() : a[0].str(), l->refresh(), true;
+            if (l->data.empty()) l->refresh();
+            const int pos = iArg(a, 0);
+            const bool create = gameCfgValue(m.ui(), "allow_create_char").truthy() && pos == 0;
+            if (msg == "is_create_new") return r = Value::integer(create ? 1 : 0), true;
+            if (msg == "is_char") return r = Value::integer(create ? 0 : 1), true;
+            if (msg == "is_non_prefab_char") return r = Value::integer(pos >= header() ? 1 : 0), true;
+            if (msg == "get_char") {
+                if (pos < header()) {
+                    const std::string inst = st->filter.empty() || st->filter == "none" ? std::string("guitar") : st->filter;
+                    return r = Value::obj(in2.findObject("prefab_" + inst)), true;
+                }
+                ScriptObject* o = in2.findObject(l->symbol(pos));
+                return r = o ? Value::obj(o) : Value::integer(0), true;
+            }
+            if (msg == "get_pos_from_char") return r = Value::integer(a.empty() || !a[0].object ? -1 : l->indexOf(a[0].object->name())), true;
+            if (msg == "save_relative_pos") return st->saved = pos, true;
+            if (msg == "get_saved_pos") return r = Value::integer(std::clamp(st->saved, 0, std::max(0, l->numData() - 1))), true;
+            (void)p;
+            return false;
+        };
+    }
+    in.addBuiltin("get_char_provider", [&m](Interp& in2, const DataNode& cmd) {
+        const int p = cmd.children.size() > 1 ? std::clamp(in2.eval(cmd.children[1]).integerValue(), 0, 3) : 0;
+        if (cmd.children.size() < 2) return Value::obj(m.charList);
+        return Value::obj(in2.findObject("rb_band_char_provider" + std::to_string(p)));
+    });
     m.bandList = list("rb_band_provider");
     m.bandList->build = [&m] {
         std::vector<std::string> v;
@@ -1520,15 +2851,16 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
         else if (type == 2) ui.popScreen("");
         return Value::integer(0);
     });
-    // The band lobby (matchmaking_band_screen), a stand-in [I] (DECISIONS
-    // D10): RB's lobby has each player join in a slot with a button, pick a
-    // character and a leader; the port joins every local player who has a
-    // controller (GD05_BAND_PLAYERS=<n> for the tests) with the premade
-    // character of their instrument, player 1 leading, and goes on to the
-    // mode's post_matchmaking_screen as the lobby's continue does.
+    // The band lobby (matchmaking_band_screen) runs its own scripts
+    // (GD05-082, DECISIONS D80: the slots of ui/rb_multifocus.h, session_mgr,
+    // the players' character lists). GD05_BAND_PLAYERS=<n> (the walks that
+    // test what comes after it) skips it as the stand-in did (D10): n
+    // players joined with their instrument's character, player 1 leading,
+    // straight to the mode's post_matchmaking_screen; the head to head
+    // lobby (matchmaking_hth_screen) is still the stand-in [I].
     ui.redirect = [&m, &ui](const std::string& name, bool back) -> std::string {
         const bool hth = name == "matchmaking_hth_screen";
-        if ((name != "matchmaking_band_screen" && !hth) || back || SDL_getenv("GD05_REAL_LOBBY")) return {};
+        if ((name != "matchmaking_band_screen" && !hth) || back || (!hth && !SDL_getenv("GD05_BAND_PLAYERS"))) return {};
         Session& s = ui.session();
         int want = 0;
         if (const char* e = SDL_getenv("GD05_BAND_PLAYERS")) want = std::clamp(std::atoi(e), 1, 4);
@@ -1541,6 +2873,18 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
             pc.controllerType = ui.host().controllerType(p);
             const std::string inst = pc.controllerType == 0 ? "drum" : pc.controllerType == 2 ? "vocals" : "guitar";
             pc.character = "prefab_" + inst;
+            // The band's members: each player's profile character of the
+            // instrument, when there is one (RB's lobby has the player pick
+            // or make it) [I: the stand-in picks the first one not taken].
+            if (!hth)
+                for (RbCharObj* c : m.chars) {
+                    bool taken = false;
+                    for (int q = 0; q < p; ++q) taken |= s.players[size_t(q)].character == c->name();
+                    if (!taken && c->d.instrument == inst) {
+                        pc.character = c->name();
+                        break;
+                    }
+                }
             // Two guitar players: the second plays the bass [I: RB asks in seldiff].
             pc.trackType = pc.controllerType == 0 ? 0 : pc.controllerType == 2 ? 3 : 2;
             if (pc.trackType == 2 && !hth)

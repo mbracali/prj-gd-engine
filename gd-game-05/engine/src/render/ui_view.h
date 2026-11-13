@@ -57,6 +57,11 @@ public:
     // ui camera (config/default.dta (ui (cam (fov 34.516) (y -768) (near 1)
     // (far 1000)))).
     Camera camera() const;
+    // A camera the panel's code picks in place of the PanelDir's (RB's
+    // select_cam: a WorldDir panel drawn through one of its CamShots);
+    // cleared with clearCameraOverride.
+    void setCameraOverride(const Camera& c) { camOverride_ = c, hasCamOverride_ = true; }
+    void clearCameraOverride() { hasCamOverride_ = false; }
     std::string cameraName() const;
     // GH2's ui camera (config/default.dta), for panels without one.
     static Camera defaultCamera();
@@ -105,6 +110,18 @@ public:
         if (showing) hiddenScopes_.erase(scope);
         else hiddenScopes_.insert(scope);
     }
+    // A player slot's directory keeps its components' state apart from
+    // the other slots' copies of the same names (RB's MultiFocusScreen:
+    // each slot a PanelDir of its own, its own focus): once registered, an
+    // object of the directory `scope` reads its text, state, list, focus
+    // under "<scope>/<name>" first, then under its plain name.
+    void registerScope(const std::string& scope);
+    // Whether the panel's milo has an inline directory named `scope`.
+    bool hasScope(const std::string& scope) const;
+    // The key a component of `scope` is set under ("<scope>/<name>"; the plain name without a scope).
+    static std::string scopedKey(const std::string& scope, const std::string& name) { return scope.empty() ? name : scope + "/" + name; }
+    // The focused component of a registered scope (its own focus).
+    void setScopeFocus(const std::string& scope, const std::string& component) { scopeFocus_[scope] = component; }
     bool showing(const std::string& object) const;
     // set_local_pos / set_local_scale: replace one part of the object's local transform.
     void setLocalPos(const std::string& object, float x, float y, float z);
@@ -148,7 +165,23 @@ public:
         bool header = false;
         bool disabled = false;  // the provider's IsActive is false: the type's "disabled" colours
         float slot = -1;  // its position in the list (rows after a header start one slot down; fractional while scrolling); -1: its index
+        // Space below the row on top of the list's spacing: RB's UIList lays
+        // each row out at its index x spacing + the gaps its provider gives
+        // the rows above (0x82271C58, the provider's vfunc +0x24; RB's
+        // SongProvider: band.dta's song_select_gap, 0x82400180) [C].
+        float gap = 0;
     };
+    // The selected row's highlight as last drawn (the rb_songlist_highlight
+    // walk): its quad's extent along the list in the panel's world space.
+    struct ListHighlight {
+        bool drawn = false;
+        int selected = -1;
+        float lo = 0, hi = 0;
+    };
+    ListHighlight listHighlight(const std::string& component) const {
+        auto it = listHighlights_.find(component);
+        return it == listHighlights_.end() ? ListHighlight{} : it->second;
+    }
     void setList(const std::string& component, std::vector<ListRow> rows, int selectedRow);
     // The list's selected row (as set_list gave it), -1 without rows.
     int listRow(const std::string& component) const {
@@ -249,14 +282,19 @@ public:
 
     int textsDrawn() const { return textsDrawn_; }
     int meshesDrawn() const { return meshesDrawn_; }
+    // The rb_text_colors walk: every text of the last frame as drawn.
+    void setTextProbes(bool on) { texts_.probes = on ? &textProbes_ : nullptr; }
+    const std::vector<TextProbe>& textProbes() const { return textProbes_; }
     // Components whose template, font or string could not be found.
     const std::vector<std::string>& problems() const { return problems_; }
 
 private:
     struct LabelText;
+    void setProbeStyle(const scene::BandText* band, const LabelText& lt);
     struct ListState {
         std::vector<ListRow> rows;
         int selected = 0;
+        int first = 0;  // the first row shown (a list longer than its display_num scrolls)
     };
     struct EntryState {
         std::string entered, picking;
@@ -289,6 +327,8 @@ private:
     TextDrawer texts_;
     ScenePose pose_;
     scene::Milo* milo_ = nullptr;
+    Camera camOverride_;
+    bool hasCamOverride_ = false;
     std::vector<scene::Milo*> subdirs_;
     std::map<std::string, std::string> overrides_;
     std::map<std::string, float> wrapWidths_;  // set_wrap_width
@@ -300,6 +340,7 @@ private:
     std::map<std::string, std::string> pictureTex_;
     std::map<std::string, std::string> meshMat_;  // setMeshMat
     std::map<std::string, ListState> lists_;
+    std::map<std::string, ListHighlight> listHighlights_;
     std::map<std::string, EntryState> entries_;
     std::map<std::string, float> frames_;
     std::map<const scene::Object*, std::unique_ptr<LabelText>> labels_;
@@ -307,6 +348,7 @@ private:
     std::map<std::string, std::unique_ptr<scene::Tex>> texFiles_;
     std::vector<MaskDraw> masks_;
     std::vector<Hit> hits_;
+    std::vector<TextProbe> textProbes_;
     Mat4 viewProj_;  // the frame's camera, for the hits
     TargetId renderTarget_{};
     Rendered rendered_;
@@ -316,6 +358,18 @@ private:
     void drawRoots(MaterialRenderer& r, const scene::Directory& dir);
     std::map<const scene::Object*, TargetId> rdTargets_;
     std::set<std::string> hiddenScopes_;
+    std::map<const scene::Directory*, std::string> scopeDirs_;  // registerScope
+    std::map<std::string, std::string> scopeFocus_;              // setScopeFocus
+    // The key of an object: "<scope>/<name>" in a registered scope, else its name.
+    std::string keyOf(const scene::Object& o) const;
+    // A keyed map's entry for the object: its scoped key, then its name.
+    template <class M>
+    auto findKeyed(M& m, const scene::Object& o) const -> decltype(m.find(o.name)) {
+        if (!scopeDirs_.empty())
+            if (auto it = m.find(keyOf(o)); it != m.end()) return it;
+        return m.find(o.name);
+    }
+    scene::UiState stateOf(const scene::Object& o) const;
     std::set<const scene::Directory*> texRendered_;  // the TexRenderers' panels
     // A RenderDir's swaying cloth (render/ui_cloth.h), polled once a frame.
     std::unique_ptr<UiCloth> cloth_;

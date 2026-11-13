@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
+#include <array>
 
 #include <functional>
 #include <map>
@@ -42,6 +43,10 @@ public:
               bool hdr, const std::function<void(const scene::Environ*)>& selectEnv);
     // One character on its own (the --view character viewer).
     void drawCharacter(gfx::MaterialRenderer& mr, chr::Character& c, const gfx::Camera& camera, bool hdr);
+    // Character::DrawShadow (GH2: 0x82151B98 on the 360, gd02): the shadow
+    // group's meshes, every bone flattened along `dir` onto the plane 1.5
+    // above the character, a parallel projection. GD03-107.
+    void drawShadow(gfx::MaterialRenderer& mr, chr::Character& c, const std::array<float, 3>& dir, bool hdr);
 
     // The meshes Character::DrawShowing draws now (its LOD, showing flags,
     // no shadow group), in draw order; `pose`: the world's showing.
@@ -58,6 +63,10 @@ public:
 
 private:
     void drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scene::Mesh& m);
+    scene::Xfm flattened(scene::Xfm x) const;
+    bool flatten_ = false;  // drawShadow: bones pushed onto z = flatZ_ along flatDir_
+    std::array<float, 3> flatDir_{};
+    float flatZ_ = 0;
     // The member's started WorldFx effects (game/band.h Member::fx): the
     // proxied milo's particle systems placed at the object's transform
     // under its parent bone, its anims at (now - start) x 30.

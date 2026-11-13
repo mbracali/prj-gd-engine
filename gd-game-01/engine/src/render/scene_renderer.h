@@ -17,6 +17,11 @@
 class SceneRenderer {
 public:
     SceneRenderer(Renderer& renderer, const Scene& scene);
+    // Frees the textures and meshes it made (#100, GD01-321). The Renderer
+    // must outlive it (App resets track2_, declared before renderer_, first).
+    ~SceneRenderer();
+    SceneRenderer(const SceneRenderer&) = delete;
+    SceneRenderer& operator=(const SceneRenderer&) = delete;
 
     // Draws a View (recursively, in draw-list order) or a Mesh. `model` is
     // applied after each object's own world transform.

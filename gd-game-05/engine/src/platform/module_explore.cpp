@@ -24,6 +24,7 @@
 #include "gd_host.h"
 #include "gd_module_shim.h"
 #include "render/band_view.h"
+#include "render/core_backend.h"
 #include "render/renderer.h"
 #include "render/scene_gpu.h"
 #include "scene/milo.h"
@@ -152,7 +153,10 @@ bool Explorer::open(const GdHost* host) {
         return false;
     }
     if (!SDL_Init(SDL_INIT_VIDEO)) return false;
-    gfx::prepareWindow();  // the GL attributes of gd05's context
+    // The launcher's explorer draws with OpenGL: the core's OpenGL3 backend
+    // (its GL attributes; the context is the module's, tracked by the shim).
+    gfx::setRendererBackend(gfx::Backend::OpenGL3);
+    gfx::prepareWindowFor(gfx::Backend::OpenGL3);
     std::string error;
     if (!renderer_.init(window_, error)) {
         SDL_Log("explore: cannot start the renderer: %s", error.c_str());

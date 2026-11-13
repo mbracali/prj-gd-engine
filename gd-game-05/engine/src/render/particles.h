@@ -60,7 +60,7 @@ public:
 
     // The ranges a ParticleSysAnim changes, per running copy.
     struct Params {
-        std::array<float, 2> life, speed, emitRate, startSize;
+        std::array<float, 2> life, speed, emitRate, startSize, deltaSize;
         std::array<float, 4> startColorLow, startColorHigh, endColorLow, endColorHigh;
     };
     Params& params() { return params_; }
@@ -83,10 +83,26 @@ public:
     // Poll: `clockFrames` is the task clock (seconds x 30), used by systems
     // that are not frame-driven.
     void poll(float clockFrames);
+    // Rock Band's venue rule (RndParticleSys Poll RB 0x821D94F0, DrawShowing
+    // 0x821D9408) [C]: a system moves and emits in its Poll only when it was
+    // drawn since the last one (a counter its DrawShowing zeroes) and is
+    // showing; otherwise the Poll only notes the time (when the counter is
+    // 0) and counts. A DrawShowing after two or more Polls without a draw
+    // catches up (move and emit over the time since). So a hidden or
+    // undrawn system stays still. `pollDrawn` is that Poll, `drawShowing`
+    // that DrawShowing (clock: seconds x 30).
+    void pollDrawn(float clockFrames, bool showing);
+    void drawShowing(float clockFrames);
     // Stops or resumes emitting (an effect being hidden) [I].
     void setEmitting(bool on) { emitting_ = on; }
+    // Starts `n` particles now (Rock Band's launch_part / a BandMeshLauncher's
+    // launch_particles), with the current ranges (params()); returns how many
+    // the pool took.
+    int launch(int n);
 
     int count() const { return int(alive_.size()); }
+    // Particles started since the venue's load (emitted and launched).
+    long long started() const { return startedTotal_; }
     // Removes the particles whose position (in the particles' space) matches.
     void removeIf(const std::function<bool(const Vec3&)>& pred);
     // Particles are in world space (false), or in the draw space below.
@@ -129,6 +145,8 @@ private:
     float emitCount_ = 0;
     float frame_ = 0, lastFrame_ = 0, lastClock_ = -1;
     bool started_ = false, warmUpPending_ = false, emitting_ = true;
+    long long startedTotal_ = 0;
+    int pollsSinceDraw_ = 0;  // RB +0x104
     bool local_ = false;
     scene::Xfm emission_, drawSpace_;
     Vec3 forceRows_[3];              // world force -> particle space (rows)
@@ -196,12 +214,14 @@ public:
     // a view's SetFrame).
     void setFrame(float frame);
     // Places the systems (their world under `base`, from the pose) and polls.
-    void update(const ScenePose& pose, const scene::Xfm& base, float clockFrames);
+    // drawGated: Rock Band's venue rule (ParticleSystem::pollDrawn).
+    void update(const ScenePose& pose, const scene::Xfm& base, float clockFrames, bool drawGated = false);
     void setEmitting(bool on);
     void draw(ParticleRenderer& pr, MaterialRenderer& mr, SceneCache& cache, const Camera& camera,
               const Mat4& offset = Mat4::identity(), const ScenePose* pose = nullptr);
     int count() const;
     std::vector<ParticleSystem>& systems() { return systems_; }
+    const std::vector<ParticleSystem>& systems() const { return systems_; }
 
 private:
     std::vector<ParticleSystem> systems_;

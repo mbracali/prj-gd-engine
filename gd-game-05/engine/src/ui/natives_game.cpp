@@ -52,6 +52,21 @@ int intArg(const std::vector<Value>& a, size_t i, int def = 0) { return i < a.si
 class GamePanelObj;
 GamePanelObj* gGame = nullptr;
 
+// A local pad that can play: player 1's keyboard always, a connected pad,
+// or one the tests give an instrument (GD05_INSTRUMENT's list, app.cpp
+// controllerType) [I: the port's devices].
+bool padPresent(UiManager& ui, int pad) {
+    if (pad == 0 || ui.host().padConnected(pad)) return true;
+    if (const char* e = SDL_getenv("GD05_INSTRUMENT")) {
+        int n = 1;
+        for (const char* c = e; *c; ++c) n += *c == ',';
+        return pad < n;
+    }
+    return false;
+}
+
+const char* instrumentOf(int controllerType) { return controllerType == 0 ? "drum" : controllerType == 2 ? "vocals" : "guitar"; }
+
 // {game get_player_config n}: the character, guitar, difficulty a player chose.
 class PlayerConfigObj : public ScriptObject {
 public:
@@ -95,7 +110,9 @@ public:
             if (ScriptObject* po = in.findObject("player" + std::to_string(i_))) return r = Value::obj(po), true;
             return r = Value::integer(i_), true;
         }
-        if (msg == "is_local_player" || msg == "is_participating") return r = Value::integer(i_ == 0 || p.participating ? 1 : 0), true;
+        if (msg == "is_local_player" || msg == "is_participating") return r = Value::integer(ui_.session().joined(i_) ? 1 : 0), true;
+        // has_char (matchmaking_band.dta): a character chosen for the player.
+        if (msg == "has_char") return r = Value::integer(p.hasChar ? 1 : 0), true;
         if (msg == "get_track_sym") {
             static const char* const kTracks[] = {"drum", "bass", "guitar", "vocals", "none"};
             return r = Value::symbol(kTracks[std::clamp(p.trackType, 0, 4)]), true;
@@ -112,7 +129,13 @@ public:
             if (!c) c = in.findObject(std::string("prefab_") + (p.controllerType == 0 ? "drum" : p.controllerType == 2 ? "vocals" : "guitar"));
             return r = c ? Value::obj(c) : Value::integer(0), true;
         }
-        if (msg == "set_char") return p.character = args.empty() ? p.character : nameOf(args[0]), true;
+        if (msg == "set_char") {
+            // A character object, or 0 (the lobby's release_char): none.
+            const bool none = args.empty() || (args[0].type != Value::Type::Object && (args[0].isNumber() || args[0].str().empty()));
+            p.character = none ? std::string() : nameOf(args[0]);
+            p.hasChar = !none;
+            return true;
+        }
         // RB's ui waiting state (meta_loading.dta: kUIWaitPreAutosave until the autosave) [C data].
         if (msg == "set_ui_waiting") return uiWaiting_ = args.empty() ? Value::integer(0) : args[0], true;
         if (msg == "ui_waiting") return r = uiWaiting_, true;
@@ -527,18 +550,35 @@ public:
         if (msg == "get_venue") return r = Value::symbol(s.venue), true;
         if (msg == "set_venue") return s.venue = argStr(0), true;
         if (msg == "get_player_config" || msg == "get_participant_config") return r = Value::obj(configs_[size_t(std::clamp(intArg(args, 0), 0, 3))].get()), true;
-        if (msg == "set_player_slot_num") return true;  // RB's tutorials: the player's slot is the first [I]
+        if (msg == "set_player_slot_num" || msg == "get_player_num_from_slot_num" || msg == "get_slot_num_from_player_num" ||
+            msg == "get_instrument_from_controller" || msg == "get_controller_type_from_controller")
+            return r = in.send("gamecfg", msg, args), true;
+        // can_local_player_join (the band lobby's join): not in the session
+        // yet, the lobby open and room among the mode's max_local_players [I:
+        // RB's Game::CanLocalPlayerJoin not read].
+        if (msg == "can_local_player_join") {
+            const int n = intArg(args, 0, -1);
+            const bool ok = n >= 0 && n < 4 && !s.joined(n) && props.count("joining_allowed") && props["joining_allowed"].truthy() &&
+                            s.numJoined() < std::max(1, gameCfgValue(ui, "max_local_players").integerValue());
+            return r = Value::integer(ok ? 1 : 0), true;
+        }
+        // Game joining_allowed (the band lobby's enter): its session starts
+        // empty (main_panel's session clear before it) [C data: matchmaking_band.dta].
+        if (msg == "set" && args.size() >= 2 && args[0].str() == "joining_allowed" && args[1].truthy() && !s.lobby) {
+            s.lobby = true;
+            for (Session::PlayerCfg& pc : s.players) pc.participating = false, pc.slot = -1;
+            s.cfgSet["leader_num"] = Value::integer(-1);
+        }
         // RB: one local player participates (the band modes: M7) [I].
         if (msg == "get_num_participants") return r = in.send("session", "num_players", {}), true;
         if (msg == "has_participating_guitar_controller") {
             for (int n = 0; n < 4; ++n)
-                if ((n == 0 || ui.session().players[size_t(n)].participating) && ui.session().players[size_t(n)].controllerType == 1) return r = Value::integer(1), true;
+                if (ui.session().joined(n) && ui.session().players[size_t(n)].controllerType == 1) return r = Value::integer(1), true;
             return true;
         }
         if (msg == "get_player_num_from_slot_num") return r = Value::integer(intArg(args, 0)), true;  // [I] slot n is player n
         if (msg == "is_player_participating") {
-            const int n = intArg(args, 0);
-            return r = Value::integer(n == 0 || (n > 0 && n < 4 && ui.session().players[size_t(n)].participating) ? 1 : 0), true;
+            return r = Value::integer(ui.session().joined(intArg(args, 0)) ? 1 : 0), true;
         }
         // RB's game panel queries (ui/game.dta, loading.dta) [I where noted].
         if (msg == "lost") return r = Value::integer(ui.host().songLostForUi() ? 1 : 0), true;
@@ -549,7 +589,7 @@ public:
             const Value saved = in.var(var);
             // Every player in the session (player 0, and the band's) [I: RB's order].
             for (int n = 0; n < 4; ++n) {
-                if (n > 0 && !ui.session().players[size_t(n)].participating) continue;
+                if (!ui.session().joined(n)) continue;
                 ScriptObject* who = msg == "foreach_local_player" ? in.findObject("player" + std::to_string(n)) : configs_[size_t(n)].get();
                 if (!who) continue;
                 in.var(var) = Value::obj(who);
@@ -568,7 +608,12 @@ public:
         if (msg == "is_advanced_band_name_ai_active") return r = Value::integer(0), true;
         if (msg == "get_player") return r = Value::obj(in.findObject("player" + std::to_string(std::clamp(intArg(args, 0), 0, 3)))), true;
         if (msg == "is_game_over") return r = Value::integer(props.count("game_over") && props["game_over"].truthy() ? 1 : 0), true;
-        if (msg == "load_all_chars" || msg == "load_crowd_audio" || msg == "reset_config" || msg == "unload_crowd_audio")
+        // reset_config (main_panel enter): the players' lobby state goes [I: RB's PlayerConfig reset not read].
+        if (msg == "reset_config") {
+            for (Session::PlayerCfg& pc : s.players) pc.hasChar = false, pc.slot = -1;
+            return r = Value::integer(0), true;
+        }
+        if (msg == "load_all_chars" || msg == "load_crowd_audio" || msg == "unload_crowd_audio")
             return r = Value::integer(0), true;
         // The solo modes' score to the profile: RB's saves are M7 (GD05-009).
         if (msg == "submit_solo_song_score") return in.onStub("game", msg, Value::integer(0)), r = Value::integer(0), true;
@@ -582,6 +627,12 @@ public:
         // ;, N / M, B, O: input/input.h), so two players are always
         // possible [I: the port's choice].
         if (msg == "is_multiple_controllers") return r = Value::integer(1), true;
+        // is_playing (band_objects.dta's coda, ui/game.dta): a song loaded and
+        // its clock between its start and its end [I: RB's Game::IsPlaying not read].
+        if (msg == "is_playing") {
+            const double t = ui.host().gameTimeMs();
+            return r = Value::integer(ui.host().gameLoaded() && t >= 0 && t < ui.host().songDurationMs() ? 1 : 0), true;
+        }
         // multiplayer: num_players > 1; multiplayer_vs (0x822B37F8): and the mode's competitive [C].
         if (msg == "multiplayer" || msg == "multiplayer_vs")
             return r = Value::integer(gameCfgValue(ui, "num_players").integerValue() > 1 &&
@@ -889,6 +940,11 @@ private:
         if (msg == "can_deploy") return r = Value::integer(p && p->starPowerReady() ? 1 : 0), true;
         if (msg == "is_deploying") return r = Value::integer(p && p->starPowerActive() ? 1 : 0), true;
         if (msg == "popup_help" || msg == "enable_drum_solos") return true;  // [I] RB's help popups are not drawn
+        // player.dta's enable_drum_solos (set_energy crossing 0.5 / leaving
+        // ready): the drummer's fills on (enable_solos 2400) or off
+        // (RB 0x82461540). RbBonus shows a fill only when Overdrive is ready
+        // as it starts, the same gate [I: the 2400 ms lead not applied].
+        if (msg == "enable_solos" || msg == "disable_solos") return true;
         if (msg == "enable_phrase_bonus" || msg == "set_auto_play" || msg == "set_tutorial_arrow") return true;  // RB's tutorials [I: not done]
         if (msg == "get_times_failed") return r = Value::integer(0), true;  // [I] the band's fail-outs are not counted per player yet
         if (msg == "notes_per_streak") return r = Value::integer(0), true;
@@ -1100,19 +1156,63 @@ public:
         // player until the band modes (M7)].
         if (msg == "get_player_config" || msg == "get_player") return r = in.send("game", "get_player_config", args), true;
         if (msg == "is_missing_mic") return true;  // 0: the vocals' mic check comes with the mic (M8)
-        if (msg == "is_player_participating") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
+        if (msg == "is_player_participating") return r = Value::integer(s.joined(intArg(args, 0)) ? 1 : 0), true;
         if (msg == "set_active_roster") return true;
+        // The players' slots (the band lobby, kGameCoopSlot*: Guitar0 0, Drum 1,
+        // Vocals 2, Guitar1 3) [C data: macros.dta]. In the lobby a slot
+        // gives the part: the second guitar slot the bass [I: RB asks in seldiff].
+        if (msg == "set_player_slot_num") {
+            const int n = intArg(args, 0, -1), slot = intArg(args, 1, -1);
+            if (n < 0 || n > 3) return true;
+            s.players[size_t(n)].slot = slot;
+            static const int kSlotTrack[] = {2, 0, 3, 1};
+            if (s.lobby && slot >= 0 && slot < 4) s.players[size_t(n)].trackType = kSlotTrack[slot];
+            return true;
+        }
+        if (msg == "get_player_num_from_slot_num") return r = Value::integer(s.playerInSlot(intArg(args, 0, -1))), true;
+        if (msg == "get_slot_num_from_player_num") {
+            const int n = intArg(args, 0, -1);
+            return r = Value::integer(n >= 0 && n < 4 ? s.players[size_t(n)].slot : -1), true;
+        }
+        if (msg == "foreach_player_config") return r = in.send("game", msg, args), true;
+        // is_controller_type_with_lowest_pad_num <pad> <kController*>: no
+        // lower pad has that controller and is free (the first guitar slot's
+        // allow_button_msg) [I].
+        if (msg == "is_controller_type_with_lowest_pad_num") {
+            const int n = intArg(args, 0, -1), t = intArg(args, 1, 1);
+            for (int q = 0; q < n; ++q)
+                if (!s.joined(q) && ui_.host().controllerType(q) == t && padPresent(ui_, q)) return r = Value::integer(0), true;
+            return r = Value::integer(1), true;
+        }
+        if (msg == "is_instrument_available") return r = Value::integer(1), true;
+        // get_join_state_for_instrument <slot> <slot num> <provider>: a free
+        // local pad of the slot's instrument can join, else none (local play:
+        // no sign-in, no remote) [I: kGameJoin* from macros.dta].
+        if (msg == "get_join_state_for_instrument") {
+            const std::string inst = args.empty() ? std::string() : args[0].str();
+            for (int q = 0; q < 4; ++q)
+                if (!s.joined(q) && instrumentOf(ui_.host().controllerType(q)) == inst && padPresent(ui_, q)) return r = Value::integer(0), true;  // kGameJoinCanJoin
+            return r = Value::integer(1), true;  // kGameJoinNoInstrument
+        }
         if (msg == "load_all_chars") return true;  // the band's characters load with the venue (M6, GD05-008) [I]
         // The help bar's icons (meta.dta refresh_display): a guitar (the
         // keyboard and gamepads play as one) is always there; drums and a
         // microphone are not recognised yet (M8) [I].
-        if (msg == "is_instrument_connected") return r = Value::integer(!args.empty() && args[0].str() == "guitar" ? 1 : 0), true;
-        if (msg == "get_player_num_from_slot_num") return r = Value::integer(intArg(args, 0)), true;
-        if (msg == "is_player_local") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
-        if (msg == "get_instrument_from_controller") {
-            const int ct = ui_.host().controllerType(intArg(args, 0));
-            return r = Value::symbol(ct == 0 ? "drum" : ct == 2 ? "vocals" : "guitar"), true;
+        // is_instrument_connected <instrument> <kGameController*> (All 0,
+        // Participating 1, NotParticipating 2): a present pad of that
+        // instrument, in the session or not [C data: macros.dta; I: the
+        // port's pads, the keyboard a guitar].
+        if (msg == "is_instrument_connected") {
+            const std::string inst = args.empty() ? std::string() : args[0].str() == "bass" ? "guitar" : args[0].str();
+            const int which = intArg(args, 1, 0);
+            for (int q = 0; q < 4; ++q) {
+                if (!padPresent(ui_, q) || instrumentOf(ui_.host().controllerType(q)) != inst) continue;
+                if (which == 0 || (which == 1) == s.joined(q)) return r = Value::integer(1), true;
+            }
+            return r = Value::integer(0), true;
         }
+        if (msg == "is_player_local") return r = Value::integer(s.joined(intArg(args, 0)) ? 1 : 0), true;
+        if (msg == "get_instrument_from_controller") return r = Value::symbol(instrumentOf(ui_.host().controllerType(intArg(args, 0)))), true;
         if (msg == "get_controller_type_from_controller") return r = Value::integer(ui_.host().controllerType(intArg(args, 0))), true;
         if (msg == "get_num_participants") return r = in.send("session", "num_players", {}), true;
         if (msg == "has_participating_guitar_controller") return r = in.send("game", "has_participating_guitar_controller", {}), true;

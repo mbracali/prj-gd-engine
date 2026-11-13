@@ -116,8 +116,9 @@ public:
     // Draws the band's opaque meshes with a light's engine constants into
     // the bound (shadow) target; the next draw at the same `ms` reuses the
     // skinning.
+    // `doubleSided`: the constants for the cull-none materials (null: `light`).
     void drawShadow(double ms, const gh3shader::Globals& light, const venue::Venue& v, const std::vector<venue::LightState>& lights,
-                    const venue::LightShow& show);
+                    const venue::LightShow& show, const gh3shader::Globals* doubleSided = nullptr);
 
 private:
     std::shared_ptr<band::Library> lib_;  // band::Library::shared

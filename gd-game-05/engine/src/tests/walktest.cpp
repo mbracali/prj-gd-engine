@@ -4,6 +4,16 @@
 
 #include <set>
 #include <SDL3/SDL.h>
+#if defined(__linux__)
+#include <fcntl.h>
+#include <linux/input.h>
+#include <linux/uinput.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -18,11 +28,18 @@
 #include "data/game_data.h"
 #include "data/json.h"
 #include "render/canvas.h"
+#include "render/device.h"
+#include "scene/bitmap.h"
 #include "game/player.h"
 #include "game/song_db.h"
 #include "input/input.h"
 #include "render/scene_gpu.h"
+#include "render/texture_codec.h"
+#include "char/character.h"
+#include "game/camera_director.h"  // ShotScene (rb_front_creator)
+#include "char/patch.h"  // rb_tattoo
 #include "render/ui_view.h"
+#include "char/char_objects.h"
 #include "scene/milo.h"
 #include "scene/ui_objects.h"
 #include "script/tasks.h"
@@ -31,6 +48,10 @@
 #include "app.h"
 #include "ui/enhanced_panel.h"
 #include "ui/natives.h"
+#include "platform/paths.h"
+#include "ui/rb_meta.h"
+#include "ui/rb_multifocus.h"
+#include "ui/rb_char_preview.h"
 #include "ui/ui_objects.h"
 #include "ui/ui_host.h"
 #include "ui/ui_manager.h"
@@ -68,9 +89,129 @@ bool whitelisted(const std::string& key, const std::vector<std::string>& wl) {
     return false;
 }
 
+// GD05-061: the device walks' controller as a kernel input device
+// (GD05_WALK_EVDEV): "uinput" makes one that is the owner's Harmonix Rock
+// Band Guitar as the kernel shows it (gd-game-05/tools/uinput_guitar.c:
+// name, 1bad:0002 v0103, 11 buttons, 6 axes, a hat), a /dev/input/eventN
+// path writes into that device (the real guitar's own node: evdev passes
+// written events to every reader as the device's). Either way SDL reads it
+// as the real controller (evdev, its real GUID), in the launcher too;
+// without it the walks use an SDL virtual joystick.
+struct EvdevOut {
+    int fd = -1;
+    bool created = false;
+    std::string node;  // /dev/input/eventN the game reads
+    ~EvdevOut() { close(); }
+    void close() {
+#if defined(__linux__)
+        if (fd >= 0) {
+            if (created) ioctl(fd, UI_DEV_DESTROY);
+            ::close(fd);
+        }
+#endif
+        fd = -1, created = false, node.clear();
+    }
+};
+EvdevOut g_evdev;
+
+#if defined(__linux__)
+void evdevEmit(int type, int code, int value) {
+    input_event e[2];
+    std::memset(e, 0, sizeof e);
+    e[0].type = Uint16(type), e[0].code = Uint16(code), e[0].value = value;
+    e[1].type = EV_SYN, e[1].code = SYN_REPORT;
+    if (write(g_evdev.fd, e, sizeof e) != ssize_t(sizeof e)) SDL_Log("walk: evdev write: %s", std::strerror(errno));
+}
+// SDL's evdev numbering: buttons and axes in code order.
+constexpr int kEvdevButtons[11] = {BTN_A, BTN_B, BTN_X, BTN_Y, BTN_TL, BTN_TR, BTN_SELECT, BTN_START, BTN_MODE, BTN_THUMBL, BTN_THUMBR};
+constexpr int kEvdevAxes[6] = {ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ};
+#endif
+
+// Opens GD05_WALK_EVDEV; "" when the walk is to use a virtual joystick.
+std::string evdevOpen(const std::string& spec) {
+#if defined(__linux__)
+    g_evdev.close();
+    if (spec != "uinput") {
+        g_evdev.fd = ::open(spec.c_str(), O_WRONLY | O_CLOEXEC);
+        if (g_evdev.fd < 0) return "cannot open " + spec + ": " + std::strerror(errno);
+        g_evdev.node = spec;
+    } else {
+        g_evdev.fd = ::open("/dev/uinput", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+        if (g_evdev.fd < 0) return std::string("cannot open /dev/uinput: ") + std::strerror(errno);
+        ioctl(g_evdev.fd, UI_SET_EVBIT, EV_KEY);
+        ioctl(g_evdev.fd, UI_SET_EVBIT, EV_ABS);
+        for (const int b : kEvdevButtons) ioctl(g_evdev.fd, UI_SET_KEYBIT, b);
+        // The owner's guitar's ranges and rest values (EVIOCGABS of his event9).
+        uinput_abs_setup abs[] = {
+            {ABS_X, {0, -32768, 32767, 16, 128, 0}},        {ABS_Y, {0, -32768, 32767, 16, 128, 0}},
+            {ABS_Z, {229, 0, 255, 0, 0, 0}},                {ABS_RX, {-32768, -32768, 32767, 16, 128, 0}},
+            {ABS_RY, {-32768, -32768, 32767, 16, 128, 0}},  {ABS_RZ, {0, 0, 255, 0, 0, 0}},
+            {ABS_HAT0X, {0, -1, 1, 0, 0, 0}},               {ABS_HAT0Y, {0, -1, 1, 0, 0, 0}},
+        };
+        for (const uinput_abs_setup& a : abs) ioctl(g_evdev.fd, UI_SET_ABSBIT, a.code), ioctl(g_evdev.fd, UI_ABS_SETUP, &a);
+        uinput_setup setup;
+        std::memset(&setup, 0, sizeof setup);
+        setup.id.bustype = BUS_USB, setup.id.vendor = 0x1bad, setup.id.product = 0x0002, setup.id.version = 0x0103;
+        std::snprintf(setup.name, sizeof setup.name, "Harmonix Rock Band Guitar");
+        if (ioctl(g_evdev.fd, UI_DEV_SETUP, &setup) < 0 || ioctl(g_evdev.fd, UI_DEV_CREATE) < 0) {
+            const std::string why = std::strerror(errno);
+            g_evdev.close();
+            return "uinput: " + why;
+        }
+        g_evdev.created = true;
+        char sys[64] = "";
+        ioctl(g_evdev.fd, UI_GET_SYSNAME(sizeof sys), sys);
+        std::error_code ec;
+        for (const auto& d : std::filesystem::directory_iterator(std::string("/sys/devices/virtual/input/") + sys, ec))
+            if (d.path().filename().string().rfind("event", 0) == 0) g_evdev.node = "/dev/input/" + d.path().filename().string();
+        if (g_evdev.node.empty()) return std::string("uinput: no event node under ") + sys;
+    }
+    return "";
+#else
+    (void)spec;
+    return "GD05_WALK_EVDEV is Linux only";
+#endif
+}
+
 }  // namespace
 
+// The walk's controller: the SDL virtual joystick, or the kernel device.
+static void devButton(SDL_Joystick* j, int button, bool on) {
+#if defined(__linux__)
+    if (g_evdev.fd >= 0) {
+        if (button >= 0 && button < 11) evdevEmit(EV_KEY, kEvdevButtons[button], on ? 1 : 0);
+        return;
+    }
+#endif
+    SDL_SetJoystickVirtualButton(j, button, on);
+}
+static void devHat(SDL_Joystick* j, int hat, Uint8 v) {
+#if defined(__linux__)
+    if (g_evdev.fd >= 0) {
+        evdevEmit(EV_ABS, ABS_HAT0X, (v & SDL_HAT_RIGHT) ? 1 : (v & SDL_HAT_LEFT) ? -1 : 0);
+        evdevEmit(EV_ABS, ABS_HAT0Y, (v & SDL_HAT_DOWN) ? 1 : (v & SDL_HAT_UP) ? -1 : 0);
+        return;
+    }
+#endif
+    SDL_SetJoystickVirtualHat(j, hat, v);
+}
+static void devAxis(SDL_Joystick* j, int axis, Sint16 v) {
+#if defined(__linux__)
+    if (g_evdev.fd >= 0) {
+        if (axis < 0 || axis >= 6) return;
+        const bool trigger = axis == 2 || axis == 5;  // 0..255 on this device
+        evdevEmit(EV_ABS, kEvdevAxes[axis], trigger ? (int(v) + 32768) * 255 / 65535 : int(v));
+        return;
+    }
+#endif
+    SDL_SetJoystickVirtualAxis(j, axis, v);
+}
+
+static void measureTextColors(ui::UiManager& ui, const std::string& tag, std::vector<std::string>& bad);
+static void measureRefColors(ui::UiManager& ui, const std::string& tag, std::vector<std::string>& bad);
+
 WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
+    textColors_ = scenario == "rb_text_colors" || SDL_getenv("GD05_TEXTCOLORS");
     using S = Step;
     auto screen = [&](const char* s, double timeout = 20000) { steps_.push_back({S::Screen, s, 0, timeout}); };
     auto press = [&](int b) { steps_.push_back({S::Press, "", b, 0}); };
@@ -122,6 +263,9 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     auto rbQuickplay = [&] {
         // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
+        // Every song listed (the long cheat): the walks were written against
+        // the whole list; a new profile has ten (rb_qp_locked, GD05-073).
+        check("unlock_all_songs");
         press(kX);
         at("main_screen");
         press(kX);  // SOLO (solo.btn, the focus)
@@ -159,6 +303,180 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("main_solomode_screen");
         wait(1000);
         check("no_black");  // title > main > solo > song list > back: no black frame
+    } else if (scenario == "rb_songlist_text") {
+        // GD05-063, owner report: "the list of musics have wrong sizes for
+        // the letters". Every text the song list draws (into its RenderDir's
+        // texture) against the size its label's data gives through RB's
+        // fit (songlist_text): scrolled, so headings and long names show.
+        at("splash_screen", 30000);
+        check("unlock_all_songs");  // the list longer than the ten a new profile has (rb_qp_locked)
+        wait(1500);
+        press(kX);
+        at("main_screen");
+        wait(1500);
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        wait(800);
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(2500);
+        check("songlist_text:top");
+        for (int i = 0; i < 9; ++i) press(kDown), wait(250);
+        wait(1200);
+        check("songlist_text:down9");
+        for (int i = 0; i < 20; ++i) press(kDown), wait(150);
+        wait(1200);
+        check("songlist_text:down29");
+    } else if (scenario == "rb_songlist_highlight") {
+        // GD05-073, owner (G06 6): "the song list's yellow selector
+        // highlights more than one song". At every step down the list
+        // (headings, the scroll, the end) the highlight's quad covers the
+        // selected row's name and no other row's name or heading
+        // (songlist_highlight: the drawn texts' middles against the quad).
+        // GD05_SONGLIST_LEGACY=1 (rows without RB's song_select_gap) fails.
+        at("splash_screen", 30000);
+        check("unlock_all_songs");  // the list longer than the ten a new profile has (rb_qp_locked)
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(1500);
+        check("songlist_highlight");
+        for (int i = 0; i < 24; ++i) {
+            press(kDown), wait(300);
+            check("songlist_highlight");
+        }
+        for (int i = 0; i < 6; ++i) {
+            press(kUp), wait(300);
+            check("songlist_highlight");
+        }
+    } else if (scenario == "rb_stutter") {
+        // GD05-073, owner (G06 6): "micro-stutters when a song preview
+        // starts and when a song starts". Each preview the song list asks
+        // for while it scrolls (the window of 30 frames after each) and the
+        // song's first 240 frames against the run's median frame (ratios:
+        // load on the machine moves both; the median of the previews'
+        // windows), and no texture or mesh sent to the GPU once the song has
+        // begun (each was a stall on the frame that first drew it).
+        // GD05_MUSIC_LEGACY=1 / GD05_WARM_LEGACY=1 run the code before.
+        endMs_ = 25000;
+        at("splash_screen", 30000);
+        check("unlock_all_songs");  // the list longer than the ten a new profile has (rb_qp_locked)
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(1500);
+        for (int i = 0; i < 16; ++i) press(kDown), wait(400);
+        wait(1500);
+        check("counter:frame_marks:preview:12");
+        check("counter:music_plays:8");
+        check("counter_max:frame_spike:preview:30:40");  // the previews' windows: median of their longest frame <= 4.0 x the median frame
+        press(kX);
+        at("qp_seldiff_solo_screen");
+        press(kX);  // the guitar slot's part
+        wait(1500);
+        press(kX);  // the focused difficulty: ready
+        at("game_screen", 60000);
+        wait(12000);
+        check("counter:frame_marks:song_begin:1");
+        check("counter_max:song_gpu_uploads:0");
+        check("counter_max:frame_spike:song_begin!:240:150");  // the song's first 240 frames: longest <= 15 x the median frame
+    } else if (scenario == "rb_qp_locked") {
+        // GD05-073, owner (G06 6): "Quickplay: clicking a random song selects
+        // songs that are not unlocked". The quick play list holds the songs
+        // RB's rules make available on a new profile and nothing else
+        // (qp_locked: modes.dta's unlock_song_initial_num first songs by the
+        // rank of the mode's unlock_song_instrument, no (unlockable TRUE)
+        // song), Random Song draws only from them, and the song it starts
+        // is one of them. GD05_SONGLIST_LEGACY=1 (every song listed) fails.
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(1500);
+        check("qp_locked");
+        press(kX);  // Random Song (the first row)
+        at("qp_seldiff_solo_screen");
+        press(kX);  // the guitar slot's part
+        wait(1500);
+        press(kX);  // the focused difficulty: ready
+        at("game_screen", 60000);
+        check("qp_locked_song");
+    } else if (scenario == "rb_od_keys" || scenario == "rb_od_pad" || scenario == "rb_od_guitar" || scenario == "rb_od_drums" || scenario == "rb_od_vocals") {
+        // GD05-073, owner (G06 6): "Overdrive activation may not work:
+        // double check and fix". Each way RB deploys it, through the
+        // device's own SDL events: the keyboard's Tab (the port's Select /
+        // tilt key), an Xbox pad's Back (force_mercury kPad_Select [C]), the
+        // owner's Rock Band guitar (1bad:0002) by tilt (axis 4) and by Back,
+        // the drummer by the fill's crash (crash_fill_ready_hits, RB
+        // 0x824C1530 [C]; the drummer autoplays), the singer by a shout in a
+        // gap between phrases (RB 0x82458F70 [C]). Each first with the meter
+        // at 45 % (refused: RB deploys at ready_level / deploy_threshold
+        // 0.5 [C data]), then at 60 % (deployed), then the drain against
+        // band_energy deploy_beats (32 a full meter, RB 0x82445188 [C]).
+        const std::string path = scenario.substr(6);
+        autoplay_ = path == "drums" || path == "vocals";  // the guitar paths play nothing: the input is theirs
+        if (path == "drums" || path == "vocals") SDL_setenv_unsafe("GD05_INSTRUMENT", path == "drums" ? "drum" : "vocals", 1);
+        endMs_ = path == "drums" || path == "vocals" ? 120000 : 40000;
+        auto checkS = [&](const std::string& what, double timeout = 0) { steps_.push_back({S::Check, what, 0, timeout}); };
+        if (path == "pad") checkS("dev_attach 045e:028e", 10000);
+        if (path == "guitar") checkS("dev_attach 1bad:0002:rbguitar", 10000);
+        at("splash_screen", 30000);
+        wait(500);
+        key(SDLK_RETURN);
+        at("main_screen");
+        key(SDLK_RETURN);  // SOLO
+        at("main_solomode_screen");
+        key(SDLK_RETURN);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(500);
+        key(SDLK_RETURN);  // Random Song
+        at("qp_seldiff_solo_screen");
+        if (path != "drums" && path != "vocals") key(SDLK_RETURN), wait(1500);  // the guitar part
+        else wait(1500);
+        key(SDLK_RETURN);  // the difficulty
+        at("game_screen", 60000);
+        // The intro (its shot's length: qp_solo's INTRO_VENUE runs 6.7 s,
+        // D96), then as before (the intro was 0.7 s).
+        checkS("song_clock_running", 30000);
+        wait(3300);  // the track is out
+        if (path == "drums" || path == "vocals") {
+            checkS("od_auto:" + path + ":45", 60000);  // refused under half
+            checkS("od_auto:" + path + ":60", 90000);  // deployed
+            wait(4000);
+            check("od_drain");
+        } else {
+            // The device's press (held 120 ms, as a player taps it).
+            auto deployPress = [&](const std::string& how) {
+                if (how == "keys") keyHold(SDLK_TAB, true), wait(120), keyHold(SDLK_TAB, false);
+                else if (how == "pad") checkS("dev_set b4 1"), wait(120), checkS("dev_set b4 0");  // SDL_GAMEPAD_BUTTON_BACK
+                else if (how == "tilt") checkS("dev_axis 4 32767"), wait(120), checkS("dev_axis 4 -32768");  // up, then level (its report's -32768)
+                else checkS("dev_set b6 1"), wait(120), checkS("dev_set b6 0");  // the guitar's Back (BTN_SELECT)
+            };
+            const std::vector<std::string> hows = path == "guitar" ? std::vector<std::string>{"tilt", "select"} : std::vector<std::string>{path};
+            for (const std::string& how : hows) {
+                check("od_set:45"), wait(300);
+                deployPress(how), wait(300);
+                check(("od_state:0:" + how).c_str());
+                check("od_set:60"), wait(300);
+                deployPress(how), wait(300);
+                check(("od_state:1:" + how).c_str());
+                wait(3000);
+                check("od_drain");
+                check("od_set:0"), wait(400);
+            }
+            // crowd_meter.dta's deploy / stop_deploy (band_energy_deploy.trig,
+            // the icon's deploy.trig ...) fired with each deploy and its end.
+            check("counter:rb_crowd_fx_triggers:2");
+        }
     } else if (scenario == "rb_esc3") {
         // Wave 05 (GD05-033, universal-behaviors.md): Esc three times in a
         // row on the main menu quits the game.
@@ -171,6 +489,148 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         for (int i = 0; i < 3; ++i) key(SDLK_ESCAPE), wait(250);
         wait(3000);
         check("quit_missed");
+    } else if (scenario == "rb_bright") {
+        // GD05 0.0.6 owner report: text and icons darker than RB's. The
+        // menus, options, the song list, the difficulty card, the loading
+        // screen (LOADING, the band icons) and the pause screen.
+        at("splash_screen", 30000);
+        wait(1500);
+        press(kX);
+        at("main_screen");
+        wait(1500);
+        check("bright:main");
+        press(kDown), wait(300), press(kDown), wait(300), press(kDown), wait(300);  // OPTIONS
+        press(kX);
+        at("options_screen");
+        wait(1000);
+        check("bright:options");
+        press(kX);  // AUDIO SETTINGS: the four sliders (the INSTRUMENTS and BACKGROUND MUSIC ones drew near black)
+        at("options_audio_screen");
+        wait(1000);
+        check("bright:audio");
+        press(kTri);
+        at("options_screen");
+        wait(1000);
+        // The other options screens: GAMEPLAY, CHARACTER DATA, CALIBRATE.
+        const char* subs[3][2] = {{"options_gameplay_screen", "bright:gameplay"}, {"options_savedata_screen", "bright:savedata"},
+                                  {"calibrate_av_chooser_screen", "bright:calibrate"}};
+        for (int i = 0; i < 3; ++i) {
+            press(kDown), wait(300);
+            press(kX);
+            at(subs[i][0]);
+            wait(1000);
+            check(subs[i][1]);
+            press(kTri);
+            at("options_screen");
+            wait(1000);
+        }
+        press(kTri);
+        at("main_screen");
+        wait(1500);
+        for (int i = 0; i < 3; ++i) press(kUp), wait(300);  // back to SOLO
+        press(kX);
+        at("main_solomode_screen");
+        wait(800);
+        check("bright:solo");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(1500);
+        check("bright:songlist");
+        press(kX);
+        at("qp_seldiff_solo_screen");
+        wait(800);
+        check("bright:seldiff");
+        press(kX);
+        wait(1500);
+        check("bright:seldiff2");
+        press(kX);
+        check("bright:loading:loading_panel");  // the loading screens hold their transition: wait on the panel
+        at("game_screen", 60000);
+        wait(3000);
+        key(SDLK_ESCAPE);
+        at("pause_screen", 10000);
+        wait(800);
+        check("bright:pause");
+    } else if (scenario == "rb_text_colors") {
+        // GD05 owner report (0.0.7): menu text darker than RB's. Every text
+        // of every screen on the way (measured once each has rested, plus the
+        // textcolors:<tag> states) against RB's colour from the data
+        // (measureTextColors): the main menu and its sub-menus, every
+        // options screen, the song list, the difficulty, loading, the song's
+        // pause. GD05_TEXTCOLORS=1 measures any other walk's screens the same
+        // way (band_tour: Create a Band; creator; rock_shop; credits;
+        // tutorials; rb_lose: the fail screen; quickplay: the results).
+        at("splash_screen", 30000);
+        wait(1500);
+        press(kX);
+        at("main_screen");
+        wait(1500);
+        check("textcolors:main_solo");
+        const char* subs[3][2] = {{"main_multimode_screen", "multi"}, {"training_menu_screen", "training"}, {"options_screen", "options"}};
+        for (int i = 0; i < 3; ++i) {
+            press(kDown), wait(300);
+            check((std::string("textcolors:main_") + subs[i][1]).c_str());
+        }
+        for (int i = 0; i < 3; ++i) press(kUp), wait(300);
+        for (int i = 0; i < 2; ++i) {
+            press(kDown), wait(300);
+            press(kX);
+            at(subs[i][0]);
+            wait(1000);
+            press(kDown), wait(300);
+            check((std::string("textcolors:") + subs[i][1] + "_2nd").c_str());
+            press(kTri);
+            at("main_screen");
+            wait(1000);
+        }
+        press(kDown), wait(300);  // OPTIONS
+        press(kX);
+        at("options_screen");
+        wait(1000);
+        const char* opts[5] = {"options_audio_screen", "options_gameplay_screen", "options_savedata_screen", "calibrate_av_chooser_screen", ""};
+        for (int i = 0; i < 4; ++i) {
+            if (i) press(kDown), wait(300);
+            check((std::string("textcolors:options_") + std::to_string(i)).c_str());
+            press(kX);
+            at(opts[i]);
+            wait(1000);
+            press(kDown), wait(300);
+            check((std::string("textcolors:") + opts[i] + "_2nd").c_str());
+            press(kTri);
+            at("options_screen");
+            wait(1000);
+        }
+        press(kTri);
+        at("main_screen");
+        wait(1500);
+        for (int i = 0; i < 3; ++i) press(kUp), wait(300);  // SOLO
+        press(kX);
+        at("main_solomode_screen");
+        wait(800);
+        check("refcolors:solo");  // the owner's capture of RB's screen (GD05-062)
+        press(kDown), wait(300);
+        check("textcolors:solo_2nd");
+        check("refcolors:solo_2nd");
+        press(kUp), wait(300);
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(2500);
+        check("textcolors:songlist");
+        press(kX);
+        at("qp_seldiff_solo_screen");
+        wait(800);
+        press(kX);
+        wait(1500);
+        check("textcolors:seldiff_diff");
+        press(kX);
+        check("textcolors:loading:loading_panel");
+        at("game_screen", 60000);
+        wait(3000);
+        key(SDLK_ESCAPE);
+        at("pause_screen", 10000);
+        wait(1000);
+        press(kDown), wait(300);
+        check("textcolors:pause_2nd");
     } else if (scenario == "rb_mouse") {
         // Wave 05 (GD05-036 / 037): the port's GAMEPADS button (bottom left)
         // stays on the main menu and every main menu button opens its menu
@@ -451,6 +911,846 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1500);
         check("print_focus");
         check("counter:shop_bought:1");
+    } else if (scenario == "rb_career") {
+        // GD05-072: the Solo Tour end to end through RB's own menus. A new
+        // character (the creator: skin and hair chosen), the Rock Shop (a
+        // shirt bought: the cash drops by the catalog's price, the shirt
+        // worn), a gig played on autoplay (the character on stage in the
+        // shirt; the cash rises by the event's reward_per_star x the stars,
+        // the event's outfit won), then the game restarts (runApp) and
+        // rb_career_restarted finds it all in the save.
+        endMs_ = 30000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        check("focus_to attitude.btn", 5000);
+        press(kX), wait(600);  // attitude.lst (rocker, the default)
+        press(kDown), wait(400);  // spazz
+        press(kX), wait(600);  // confirm
+        check("rb_creator_attitude");
+        check("focus_to appearance.btn", 5000);
+        press(kX);  // PHYSIQUE
+        at("charcreator_appearance_screen", 20000);
+        wait(1200);
+        check("rb_creator_before");
+        check("focus_to skin.btn", 5000);
+        press(kX), wait(500);  // skin.lst
+        press(kDown), wait(300), press(kDown), wait(300);
+        check("print_focus");
+        press(kX), wait(500);  // confirm the third skin colour
+        check("focus_to hair.btn", 5000);
+        press(kX), wait(600);  // hair.lst
+        press(kDown), wait(300), press(kDown), wait(300);
+        check("print_focus");
+        press(kX), wait(1200);  // confirm the hair
+        check("rb_creator_look");
+        check("focus_to done.btn", 5000);
+        press(kX);
+        at("charcreator_maker_screen", 20000);
+        wait(1000);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_career_cash0");
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROKK SHOPPE
+        at("shop_screen", 20000);
+        wait(1000);
+        press(kX);  // CLOTHING
+        at("shop_clothing_screen", 20000);
+        wait(1500);
+        press(kX);  // the first store (punk)
+        at("shop_clothing_genre_screen", 20000);
+        wait(1500);
+        press(kX);  // TORSO: its list
+        wait(1200);
+        for (int i = 0; i < 5; ++i) press(kDown), wait(250);  // flannelcoat_checked
+        check("print_focus");
+        press(kX);  // buy: the confirm screen
+        wait(1500);
+        press(kX);  // yes
+        wait(1500);
+        check("rb_shop_bought");
+        for (int i = 0; i < 3; ++i) press(kTri), wait(1200);  // the store, the clothing, the shop
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);  // GIG GUIDE
+        at("tour_solo_diff_screen");
+        press(kX);  // the difficulty
+        at("tour_solo_guitar_welcome_screen|tour_solo_event_screen", 20000);
+        wait(800);
+        press(kX);
+        at("tour_solo_event_screen", 20000);
+        wait(1000);
+        press(kX);  // the first event
+        at("game_screen", 60000);
+        wait(3000);
+        check("rb_band_wears");
+        at("tour_solo_endgame_screen", 120000);
+        check("rb_gig_stars");
+        wait(1000);
+        press(kX);
+        at("tour_solo_gigcomplete_screen", 20000);
+        wait(1000);
+        check("rb_gig_cash");
+        press(kX);
+        at("tour_solo_event_screen|tour_solo_hub_screen|tour_solo_newtown_screen", 40000);
+        wait(1500);
+        check("restart_app");
+    } else if (scenario == "rb_career_restarted") {
+        // rb_career's second half, after the restart: the character from
+        // the save (row 0 of the Solo Tour's list), its cash, look, clothes
+        // and the gig's stars as the first half left them.
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(1000);
+        press(kX);  // the saved character
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_career_reloaded");
+    } else if (scenario == "rb_career_band") {
+        // GD05-072: the Band World Tour pays its members' characters. A
+        // guitarist made in the Solo Tour's creator, the game restarted,
+        // then Multiplayer > Band World Tour with a drummer (the lobby
+        // stand-in takes the profile's guitarist), a new band, its first gig on
+        // autoplay: the character is paid the event's reward_per_star x the
+        // band's stars and the band's money is its members'; restarted
+        // again, the band and the money are still there.
+        // Two players (modes.dta tour_world min_num_participants 2): the
+        // guitarist made here and a drummer without a character (the lobby
+        // stand-in's premade one: not a member, not paid).
+        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,guitar", 1);
+        SDL_setenv_unsafe("GD05_BAND_PLAYERS", "2", 1);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_career_cash0");
+        check("restart_app");
+    } else if (scenario == "rb_career_band_restarted") {
+        endMs_ = 90000;  // long enough for the band's first star on autoplay
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(800);
+        press(kX);  // a new band
+        at("tour_band_create_screen", 20000);
+        wait(1200);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        for (int i = 0; i < 2; ++i) press(kDown), wait(200);
+        press(kX);  // ACCEPT
+        at("tour_band_hub_screen", 30000);
+        wait(1000);
+        check("rb_band_cash0");
+        press(kX);  // GIG GUIDE
+        for (int i = 0; i < 6; ++i) {  // the first-time hints, each continued with X
+            wait(2500);
+            press(kX);
+        }
+        at("game_screen", 60000);
+        wait(3000);
+        check("rb_band_member_on_stage");
+        at("tour_band_endgame_screen", 300000);
+        wait(1000);
+        press(kX);
+        at("tour_band_gigcomplete_screen", 20000);
+        wait(1000);
+        check("rb_band_cash");
+        check("rb_bwt_buzz");
+        press(kX);
+        at("tour_band_event_screen|tour_band_hub_screen|tour_band_firstgig_screen|tour_band_firstgig_checkmarks_screen|tour_band_newvan_screen|tour_band_newitem_screen|tour_band_firstvenue_screen", 40000);
+        wait(1500);
+        check("restart_app");
+    } else if (scenario == "rb_career_band_restarted_restarted") {
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(1000);
+        press(kX);  // the saved band (row 0)
+        at("tour_band_hub_screen", 30000);
+        wait(1000);
+        check("rb_band_reloaded");
+    } else if (scenario == "rb_band_lobby" || scenario == "rb_band_lobby_restarted") {
+        // GD05-082: RB's band lobby (matchmaking_band_screen) through its own
+        // scripts: four slots (COOP_SLOTS_ORDER guitar drum vocals guitar),
+        // each player's buttons to its slot (RB 0x8282EA48), session_mgr
+        // add_local_player / the leader (RB 0x82832788), each player's own
+        // character list (RB 0x82857660). The Band World Tour's (Band
+        // Quickplay gives everyone a premade one: modes.dta auto_choose_char):
+        // a new band, the guitarist (player 1) and the drummer (player 2)
+        // each make a character from the lobby (Create New, the creator,
+        // back to the lobby), the leader continues, both play the band's
+        // first gig in their own look; restarted, a new band again, each
+        // picks the saved one from the list. Expectations from the data in
+        // the checks.
+        const bool again = scenario == "rb_band_lobby_restarted";
+        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum", 1);
+        endMs_ = 30000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(800);
+        if (again) press(kDown), wait(300);  // after the saved band: a new one
+        press(kX);  // a new band
+        at("matchmaking_band_screen", 30000);
+        wait(1500);
+        // The slots' states from the data (ui/gen/matchmaking_band.dta
+        // current_option): a slot whose instrument no free pad has is
+        // no_instrument (no microphone here; the second guitar slot once the
+        // only guitar joined).
+        check("rb_lobby_slots join,join,no_instrument,join");
+        for (int p = 0; p < 2; ++p) {
+            auto slots = [p](const std::string& mine) {
+                return "rb_lobby_slots " + (p == 0 ? mine + ",join" : "ready_leader," + mine) + ",no_instrument,no_instrument";
+            };
+            pressP(kX, p), wait(1200);  // the player joins its instrument's slot
+            check(slots("choose_character").c_str());
+            check(("rb_lobby_rows " + std::to_string(p)).c_str());
+            if (again) {
+                pressP(kDown, p), wait(400);  // the saved character, after (Create New)
+                pressP(kX, p), wait(1500);
+            } else {
+                pressP(kX, p), wait(1500);  // (Create New)
+                check(slots("choose_gender").c_str());
+                if (p == 1) pressP(kDown, p), wait(400);  // female.btn
+                pressP(kX, p);
+                at("charcreator_maker_screen", 20000);
+                wait(1500);
+                pressP(kX, p);  // NAME (the offered name is taken)
+                wait(800);
+                check("focus_to create.btn", 5000);
+                pressP(kX, p);  // CREATE
+                at("charcreator_confirm_screen", 10000);
+                wait(1500);
+                pressP(kUp, p), wait(400), pressP(kX, p);  // yes
+                at("matchmaking_band_screen", 30000);
+                wait(1500);
+            }
+            check(slots(p == 0 ? "ready_leader" : "ready_not_leader").c_str());
+        }
+        check("rb_lobby_chars");
+        check("rb_slots_drawn");  // car9: the slots' characters in the practice space
+        pressP(kX, 0);  // CONTINUE (the leader's continue.btn)
+        at("tour_band_create_screen", 30000);
+        if (!again) {
+            wait(1200);
+            press(kX);  // NAME (the offered name is taken)
+            wait(800);
+            for (int i = 0; i < 2; ++i) press(kDown), wait(200);
+            press(kX);  // ACCEPT
+            at("tour_band_hub_screen", 30000);
+            wait(1000);
+            press(kX);  // GIG GUIDE
+            for (int i = 0; i < 4; ++i) {  // the first-time hints (welcome, the event), each continued with X; the band's difficulty
+                wait(2500);
+                press(kX);
+            }
+            at("game_screen", 60000);
+            wait(3000);
+            check("rb_lobby_stage");
+            check("restart_app");
+        }
+    } else if (scenario == "rb_tour_rules") {
+        // GD05-085 / GD05-077: the Solo Tour's rules from RB's code, through
+        // its menus. A new guitarist: the gig guide lists the open towns'
+        // open events (RB 0x823E5BB8 / 0x823E46B0: the first town and the
+        // bonus venue's (unlock 1)), each playing the instrument's ranked
+        // song (RB 0x823FE820); the bonus gig played: the next bonus song
+        // unlocked (RB 0x823E1178) and announced (new_unlock, RB 0x823DE7F8)
+        // with (unlock 2) now listed; then, restarted, quick play offers
+        // the first town's songs and the two bonus songs besides the ten
+        // first (RB 0x82431AC8 / 0x823E0458). Expectations from the data
+        // (config/tour_solo.dta, songs.dtb's ranks) in the checks.
+        // GD05_TOUR_UNLOCKS_LEGACY=1 runs quick play without the tours.
+        endMs_ = 30000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);  // GIG GUIDE
+        at("tour_solo_diff_screen");
+        press(kX);  // the difficulty
+        at("tour_solo_guitar_welcome_screen|tour_solo_event_screen", 20000);
+        wait(800);
+        press(kX);
+        at("tour_solo_event_screen", 20000);
+        wait(1000);
+        check("rb_tour_solo_events");
+        check("rb_tour_focus_bonus");  // down the list to (unlock 1)
+        check("print_focus");
+        press(kX);  // play it
+        at("game_screen", 60000);
+        at("tour_solo_endgame_screen", 120000);
+        wait(1000);
+        press(kX);
+        at("tour_solo_gigcomplete_screen", 20000);
+        wait(1000);
+        press(kX);
+        at("tour_solo_newunlock_screen", 40000);
+        wait(1000);
+        check("rb_tour_unlocked");
+        press(kX);
+        at("tour_solo_event_screen|tour_solo_hub_screen", 40000);
+        wait(1000);
+        check("rb_tour_solo_events");
+        check("restart_app");
+    } else if (scenario == "rb_tour_rules_restarted") {
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(1500);
+        check("rb_tour_qp");
+    } else if (scenario == "rb_shop_items") {
+        // GD05-072: the Rock Shop's instruments (char/instruments.dta: the
+        // models and their prices). A new guitarist (100) cannot afford the
+        // first guitar (shop_error_money_screen, the cash kept); with RB's
+        // cheat_add_money 2000 (cheats_funcs.dta) it is bought: its finishes
+        // offered (group_select_screen, has_group_selection RB 0x823E0700),
+        // the second chosen, the cash drops by the model's price, that
+        // finish is played on stage; after a restart it is still the
+        // character's (GD05-083).
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_career_cash0");
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROKK SHOPPE
+        at("shop_screen", 20000);
+        wait(1000);
+        check("focus_to instruments.btn", 5000);
+        press(kX);  // INSTRUMENTS
+        at("shop_guitarbass_screen", 20000);
+        wait(1000);
+        press(kX);  // GUITAR
+        at("shop_instrument_screen", 20000);
+        wait(1500);
+        check("print_focus");
+        press(kX);  // the first model: too dear
+        at("shop_error_money_screen", 10000);
+        check("rb_shop_too_dear");
+        press(kX);  // OK
+        at("shop_instrument_screen", 10000);
+        wait(1000);
+        check("rb_shop_cheat_money");
+        press(kX);  // the first model again: its finishes (GD05-083)
+        at("group_select_screen", 10000);
+        wait(1000);
+        check("rb_shop_finishes");
+        press(kDown), wait(400);  // the second finish
+        check("print_focus");
+        press(kX);  // the confirm screen
+        at("shop_confirm_screen", 10000);
+        wait(1000);
+        press(kX);  // yes
+        wait(1500);
+        check("rb_shop_guitar");
+        at("shop_guitarbass_screen", 10000);  // the confirm screen's pop (the port's: [I])
+        press(kTri);
+        at("shop_screen", 10000);
+        press(kTri);
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);  // GIG GUIDE
+        at("tour_solo_diff_screen");
+        press(kX);
+        at("tour_solo_guitar_welcome_screen|tour_solo_event_screen", 20000);
+        wait(800);
+        press(kX);
+        at("tour_solo_event_screen", 20000);
+        wait(1000);
+        press(kX);  // the first event
+        at("game_screen", 60000);
+        wait(3000);
+        check("rb_shop_guitar_on_stage");
+        at("tour_solo_endgame_screen", 120000);
+        wait(1000);
+        press(kX);
+        at("tour_solo_gigcomplete_screen", 20000);
+        wait(1000);
+        press(kX);
+        at("tour_solo_event_screen|tour_solo_hub_screen|tour_solo_newtown_screen", 40000);
+        wait(1500);
+        check("restart_app");
+    } else if (scenario == "rb_shop_drum" || scenario == "rb_shop_mic") {
+        // GD05-083: the Rock Shop's drum kits and microphones
+        // (char/instruments.dta (drum (outfits ...)) / (mic (outfits ...))):
+        // a new drummer / singer, RB's cheat_add_money 2000, INSTRUMENTS
+        // (shop.dta: straight to shop_instrument_screen for a drum or a
+        // mic), the first piece with a price bought (its finishes offered
+        // when the catalog has several: has_group_selection RB 0x823E0700),
+        // the cash down by its cost, worn on stage in the first gig.
+        const bool drum = scenario == "rb_shop_drum";
+        SDL_setenv_unsafe("GD05_INSTRUMENT", drum ? "drum" : "vocals", 1);
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_kit_cheat_money");
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROKK SHOPPE
+        at("shop_screen", 20000);
+        wait(1000);
+        check("focus_to instruments.btn", 5000);
+        press(kX);  // INSTRUMENTS
+        at("shop_instrument_screen", 20000);
+        wait(1500);
+        check("rb_preview_drawn");
+        check("print_focus");
+        press(kX);  // the first piece
+        at("group_select_screen|shop_confirm_screen", 10000);
+        wait(1000);
+        check("rb_kit_offer");
+        wait(1000);
+        if (!drum) press(kDown), wait(400);  // the mic's second finish (the drum's others are the venues' kits, (exclude TRUE))
+        press(kX);  // the confirm screen, or yes
+        wait(1500);
+        check("rb_kit_confirm", 10000);
+        wait(1500);
+        check("rb_kit_bought");
+        at("shop_screen|shop_instrument_screen", 10000);
+        check("print_focus");
+        check("rb_kit_back_to_hub", 15000);
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);  // GIG GUIDE
+        at("tour_solo_diff_screen");
+        press(kX);
+        at("tour_solo_drum_welcome_screen|tour_solo_vocal_welcome_screen|tour_solo_guitar_welcome_screen|tour_solo_event_screen", 20000);
+        wait(800);
+        press(kX);
+        at("tour_solo_event_screen", 20000);
+        wait(1000);
+        press(kX);  // the first event
+        at("game_screen", 60000);
+        wait(3000);
+        check("rb_kit_on_stage");
+    } else if (scenario == "rb_tattoo" || scenario == "rb_tattoo_restarted") {
+        // GD05-084 (car9): the patch creator. A new character, the Rock
+        // Shop's INK > TATTOO > chest: patch 1 edited (shop_patch_screen:
+        // a layer, the first category, its first sticker, moved right and
+        // up), saved; the torso texture shows it where torso_body.mesh maps
+        // the patch (rb_tattoo_torso); restarted, the save keeps it
+        // (rb_tattoo_torso again in the shop).
+        const bool again = scenario == "rb_tattoo_restarted";
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        if (again) {
+            press(kX);  // the saved character (row 0, rb_tattoo's own save)
+        } else {
+            press(kX), wait(800), press(kX);  // create new, male
+            at("charcreator_maker_screen", 20000);
+            wait(1500);
+            press(kX);  // NAME
+            wait(800);
+            check("focus_to create.btn", 5000);
+            press(kX);  // CREATE
+            at("charcreator_confirm_screen", 10000);
+            wait(1500);
+            press(kUp), wait(400), press(kX);  // yes
+        }
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROKK SHOPPE
+        at("shop_screen", 20000);
+        wait(1000);
+        check("focus_to ink.btn", 5000);
+        press(kX);  // INK
+        at("shop_ink_screen", 20000);
+        wait(1000);
+        check("focus_to tattoo.btn", 5000);
+        press(kX);  // TATTOO
+        at("shop_tattoo_screen", 20000);
+        wait(1500);
+        if (again) {
+            check("rb_tattoo_torso");
+            // The first gig: the character on stage wears it.
+            check("rb_tattoo_to_hub", 15000);
+            at("tour_solo_hub_screen", 30000);
+            wait(1000);
+            check("focus_up_to gigguide.btn", 5000);
+            press(kX);  // GIG GUIDE
+            at("tour_solo_diff_screen");
+            press(kX);
+            at("tour_solo_guitar_welcome_screen|tour_solo_event_screen", 20000);
+            wait(800);
+            press(kX);
+            at("tour_solo_event_screen", 20000);
+            wait(1000);
+            press(kX);  // the first event
+            at("game_screen", 60000);
+            wait(4000);
+            check("rb_tattoo_stage");
+            return;
+        }
+        check("rb_tattoo_base");
+        check("focus_to patch_chest.btn", 5000);
+        press(kX);  // the chest
+        at("tattoo_select_screen", 20000);
+        wait(1200);
+        press(kDown), wait(600);  // patch 1
+        check("print_focus");
+        press(kX);  // empty: edit it
+        at("shop_patch_help_screen|shop_patch_screen", 20000);
+        wait(1200);
+        press(kX);  // continue (the help, once)
+        at("shop_patch_screen", 20000);
+        wait(1500);
+        check("print_focus");
+        press(kX), wait(800);  // layer 1: no sticker, the categories
+        check("print_focus");
+        press(kX), wait(800);  // the first category: its stickers
+        check("print_focus");
+        press(kX), wait(800);  // the first sticker: the layer menu
+        check("print_focus");
+        press(kX), wait(800);  // EDIT: the modify menu
+        check("print_focus");
+        press(kX), wait(800);  // MOVE
+        check("print_focus");
+        for (int i = 0; i < 6; ++i) press(kRight), wait(150);
+        for (int i = 0; i < 4; ++i) press(kUp), wait(150);
+        press(kX), wait(800);  // done moving
+        check("rb_tattoo_layer");
+        press(kTri), wait(800);  // the layer menu
+        press(kTri), wait(800);  // the layers
+        press(kTri), wait(800);  // quit
+        check("print_focus");
+        check("focus_to cnf_save.btn", 5000);
+        press(kX);  // SAVE
+        at("shop_tattoo_screen", 20000);
+        wait(2500);
+        check("rb_tattoo_torso");
+        check("restart_app");
+    } else if (scenario == "rb_facepaint") {
+        // GD05-084 (car9): face paint, the patch creator on the head
+        // (shop.dta facepaint_select_panel: location patch_facepaint, set
+        // general): a sticker moved left and up, saved; the head's texture
+        // shows it where head_skin_proxy's patch mesh maps the patch
+        // (rb_tattoo_head).
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROKK SHOPPE
+        at("shop_screen", 20000);
+        wait(1000);
+        check("focus_to ink.btn", 5000);
+        press(kX);  // INK
+        at("shop_ink_screen", 20000);
+        wait(1500);
+        check("rb_tattoo_head_base");
+        check("focus_to facepaint.btn", 5000);
+        press(kX);  // FACE PAINT
+        at("facepaint_select_screen", 20000);
+        wait(1200);
+        press(kDown), wait(600);  // patch 1
+        press(kX);  // empty: edit it
+        at("shop_patch_help_screen|shop_patch_screen", 20000);
+        wait(1200);
+        press(kX);  // continue (the help, once)
+        at("shop_patch_screen", 20000);
+        wait(1500);
+        press(kX), wait(800);  // layer 1: the categories
+        press(kX), wait(800);  // the first category
+        press(kX), wait(800);  // the first sticker
+        press(kX), wait(800);  // EDIT
+        press(kX), wait(800);  // MOVE
+        for (int i = 0; i < 4; ++i) press(kLeft), wait(150);
+        for (int i = 0; i < 2; ++i) press(kUp), wait(150);
+        press(kX), wait(800);  // done moving
+        check("rb_tattoo_layer");
+        press(kTri), wait(800), press(kTri), wait(800), press(kTri), wait(800);  // quit
+        check("focus_to cnf_save.btn", 5000);
+        press(kX);  // SAVE
+        at("shop_ink_screen", 20000);
+        wait(2500);
+        check("rb_tattoo_head");
+    } else if (scenario == "rb_makeup") {
+        // GD05-022 / GD05-084: the skins rendered at run time. A new
+        // character, the Rock Shop's INK > MAKEUP, the first eye make-up
+        // bought: the head's texture (head_skin.rndtex's output) changes in
+        // makeup_eyes.mask's rect by the make-up texture blended as the data
+        // says (rb_skin_makeup), and the skin colour from skin.pal holds
+        // (rb_skin_base); worn on stage after a restart.
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME
+        wait(800);
+        check("focus_to appearance.btn", 5000);
+        press(kX);  // PHYSIQUE
+        at("charcreator_appearance_screen", 20000);
+        wait(1200);
+        check("focus_to skin.btn", 5000);
+        press(kX), wait(500);  // skin.lst
+        for (int i = 0; i < 5; ++i) press(kDown), wait(300);
+        press(kX), wait(500);  // the sixth skin colour
+        check("focus_to done.btn", 5000);
+        press(kX);
+        at("charcreator_maker_screen", 20000);
+        wait(1000);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_skin_cheat_money");
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROKK SHOPPE
+        at("shop_screen", 20000);
+        wait(1000);
+        check("focus_to ink.btn", 5000);
+        press(kX);  // INK
+        at("shop_ink_screen", 20000);
+        wait(1000);
+        check("focus_to makeup.btn", 5000);
+        press(kX);  // MAKEUP
+        at("shop_makeup_screen", 20000);
+        wait(1500);
+        check("rb_skin_base");
+        check("focus_to eyes.btn", 5000);
+        press(kX);  // EYES: the list
+        wait(1200);
+        check("print_focus");
+        press(kDown), wait(800);  // the first make-up after (none)
+        check("print_focus");
+        press(kX);  // its colours (has_group_selection: several outfits contain the name)
+        at("group_select_screen", 10000);
+        wait(1200);
+        press(kX);  // the first: a free piece (no cost in the catalog) is worn at once
+        at("shop_makeup_screen", 10000);
+        wait(2500);
+        check("print_focus");
+        check("rb_skin_makeup");
+    } else if (scenario == "rb_body_deform") {
+        // GD05-084: the creator's weight and height sliders (5 steps,
+        // charcreator.dta) both at their top (1, 1: the deform clip's sample 1,
+        // tall and fat, RB 0x82300A00), the character on stage with its bones
+        // where the clip puts them (RB 0x82355918), not at the neutral sample 0.
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        check("focus_to appearance.btn", 5000);
+        press(kX);  // PHYSIQUE
+        at("charcreator_appearance_screen", 20000);
+        wait(1200);
+        for (const char* b : {"weight", "height"}) {
+            check((std::string("focus_to ") + b + ".btn").c_str(), 5000);
+            press(kX), wait(500);  // the slider
+            press(kRight), wait(300), press(kRight), wait(300), press(kRight), wait(300);  // to its top
+            press(kX), wait(500);  // confirm
+        }
+        check("rb_deform_sliders");
+        check("rb_preview_drawn");
+        check("rb_front_creator");
+        check("focus_to done.btn", 5000);
+        press(kX);
+        at("charcreator_maker_screen", 20000);
+        wait(1000);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);  // GIG GUIDE
+        at("tour_solo_diff_screen");
+        press(kX);
+        at("tour_solo_guitar_welcome_screen|tour_solo_event_screen", 20000);
+        wait(800);
+        press(kX);
+        at("tour_solo_event_screen", 20000);
+        wait(1000);
+        press(kX);  // the first event
+        at("game_screen", 60000);
+        wait(3000);
+        check("rb_deform_stage");
+    } else if (scenario == "rb_shop_items_restarted") {
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(1000);
+        press(kX);  // the saved character
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_shop_guitar_reloaded");
     } else if (scenario == "solo_tour") {
         // RB's Solo Tour (ui/tour_solo.dta): Solo > Tour, a character (made
         // in the creator the first time), the hub, the gig guide, a
@@ -655,6 +1955,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         endMs_ = 30000;
         // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
+        check("unlock_all_songs");  // the songs the walk was written for (rb_qp_locked, GD05-073)
         press(kX);
         at("main_screen");
         press(kDown), wait(200);
@@ -673,7 +1974,23 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(3000);
         check("counter:band_players:4");
         check("counter:rb_track_frames:30");
+        // GD05-087: the first member's Overdrive ready (be_ready.trig) when
+        // the HUD probe draws its meter alone, whatever the first song gives
+        // (Wave of Mutilation's guitar had it at 15 s: the box 26..33 px off).
+        check("od_set:60");
         at("endgame_waiting_screen", 90000);
+        // GD05-058: RB's own HUD (render/rb_hud_view.h): each element drawn alone
+        // lands within 4 px of the box its milo data gives; the score, the
+        // multiplier, the Overdrive and crowd meters show the players' values.
+        check("counter:rb_hud_probes:1");
+        check("counter:rb_hud_boxes:9");
+        check("counter_max:rb_hud_box_err_px:4");
+        check("counter_max:rb_hud_value_errors:0");
+        // GD05-064: a gem in each lane at the now bar shows; the HUD covers
+        // none of it (0.0.6: the Overdrive meter and the multiplier sat
+        // across the smashers).
+        check("counter:rb_nowbar_gem_px:200");
+        check("counter_max:rb_nowbar_cover_pct:2");
         at("qp_endgame_screen", 30000);
     } else if (scenario == "quickplay_vocals" || scenario == "quickplay_drums") {
         // Rock Band's instrument per player (wave 02): the controller type
@@ -712,14 +2029,262 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("endgame_waiting_screen", 150000);
         at("qp_endgame_screen", 20000);
         wait(1000);
+    } else if (scenario == "rb_title_back") {
+        // GD05-059: Press Start -> main menu -> Back to Press Start, with
+        // screenshots at fixed moments both ways (GD05_WALK_SHOTS:
+        // title_<tag>.bmp) and the fx panel's fade / the panels' transition
+        // state printed at each.
+        at("splash_screen", 30000);
+        wait(1500);
+        check("tshot:splash_rest");
+        key(SDLK_RETURN);
+        for (const char* t : {"fwd_0033", "fwd_0100", "fwd_0250", "fwd_0500", "fwd_0750", "fwd_1000", "fwd_1500", "fwd_2500"}) {
+            static double last = 0;
+            const double ms = std::atof(t + 4);
+            wait(ms - last), last = ms;
+            steps_.push_back({S::Check, std::string("tshot:") + t, 0, 0});
+        }
+        at("main_screen");
+        wait(1500);
+        check("tshot:main_rest");
+        key(SDLK_ESCAPE);
+        for (const char* t : {"back_0033", "back_0100", "back_0250", "back_0500", "back_0750", "back_1000", "back_1500", "back_2500"}) {
+            static double last = 0;
+            const double ms = std::atof(t + 5);
+            wait(ms - last), last = ms;
+            steps_.push_back({S::Check, std::string("tshot:") + t, 0, 0});
+        }
+        at("splash_screen", 20000);
+        wait(1500);
+        check("tshot:splash_again");
+        expect_ = {"splash_screen", "main_screen", "splash_screen"};
+    } else if (scenario == "rb_band_start") {
+        // GD05-054: the song's first seconds (the band's entrance, the intro
+        // shot, the first shots and the track) draw nothing without its
+        // shader: no draw without its program or pipeline, no standard
+        // variant replaced by a simpler one, no band / venue mesh without its
+        // material, no RB shot left without a PostProc (render/device.h
+        // shaderaudit; GD05_SHADERLOG=1 names them). GD05_WALK_SHOTS: a shot
+        // every 500 ms (band_start_NN.bmp).
+        endMs_ = 20000;
+        rbQuickplay();
+        for (int i = 0; i < 30; ++i) wait(500), check("band_start_shot");
+        check("counter_max:missing_shaders:0");
+        at("endgame_waiting_screen", 90000);
+    } else if (scenario == "rb_highway") {
+        // GD05-070 (owner: "the yellow Overdrive bar flickers", "the
+        // multiplier is drawn on top of other elements", "the hit area looks
+        // wrong", "Overdrive colour on the sustains' tails"): App::rbProbes
+        // under every frame. The Overdrive meter (star_power_01) alone over
+        // magenta: its luma may jump at most once a beat and never straight
+        // back (be_ready.trig's be_color_pulse.anim loops 0..1 at k1_fpb);
+        // the track's draw order against static.grp's and the smasher
+        // plate's setup_draworder; no HUD directory draws a drawable before
+        // one of a lower draw order (RndDir's sort, RB 0x821B3A48); every
+        // star tail drawn with tail_bonus.mat, its pixels near white
+        // (chroma under 20%; the slot colours are over 90%).
+        // GD05_HWY_LEGACY=1 shows the checks failing (the code before).
+        if (!SDL_getenv("GD05_VENUE")) SDL_setenv_unsafe("GD05_VENUE", "arena_01", 1);
+        SDL_setenv_unsafe("GD05_METER_PROBE", "1", 1);
+        SDL_setenv_unsafe("GD05_TAIL_PROBE", "1", 1);
+        SDL_setenv_unsafe("GD05_TAILTEST", "1", 1);  // every gem a tail: the star ones too
+        endMs_ = 75000;
+        rbQuickplay();
+        wait(4000);
+        check("od_meter:0.6");  // be_ready: the pulse
+        wait(8000);
+        check("counter:meter_frames:200");
+        check("counter_max:meter_flickers:0");
+        check("counter:rb_track_order_parts:8");
+        check("counter_max:rb_track_order_errors:0");
+        check("counter:rb_hud_order_dirs:5");
+        check("counter_max:rb_hud_order_inversions:0");
+        wait(45000);  // into the song's Overdrive phrases
+        check("counter:rb_star_tails:1");
+        check("counter_max:rb_star_tails_wrong:0");
+        check("counter:star_tail_px:50");
+        check("counter_max:star_tail_chroma_pct:20");
+        check("counter_max:meter_flickers:0");
+        at("endgame_waiting_screen", 90000);
+    } else if (scenario == "rb_crowd") {
+        // GD05-071 (owner: "no crowd visible in any venue"): a shot with a
+        // crowd (GD05_FORCE_SHOT #crowdN, default the first), the audience
+        // alone through its camera every 30th frame (App::rbProbes): its
+        // pixels, the archetypes' clips started (crowd.dta intro_start /
+        // crowd_update -> main.drv play_group_flags). Before GD05-071 no clip
+        // played and every archetype lay on the floor in its bind pose: 0 px.
+        // GD05_VENUE picks the venue (default arena_01); GD05_CROWD_LEGACY=1
+        // shows the check failing.
+        if (!SDL_getenv("GD05_VENUE")) SDL_setenv_unsafe("GD05_VENUE", "arena_01", 1);
+        if (!SDL_getenv("GD05_FORCE_SHOT")) SDL_setenv_unsafe("GD05_FORCE_SHOT", "#crowd0", 1);
+        SDL_setenv_unsafe("GD05_CROWD_PROBE", "1", 1);
+        endMs_ = 20000;
+        rbQuickplay();
+        wait(5000);
+        check("counter:crowd_probes:3");
+        check("counter:crowd_clips:8");
+        check("counter:crowd_px_max:20000");  // 1% of the 1920 x 1080 picture
+        // ... and from the audience's characters: in the theaters (crowds
+        // hidden in the data, GD05-076) the audience-alone picture had the
+        // whole frame covered with 0 characters drawn and passed.
+        check("counter:crowd_chars_max:1");
+        at("endgame_waiting_screen", 90000);
+    } else if (scenario == "rb_look") {
+        // GD05-069 (owner: "everything is overbright", "the original is
+        // darker with a stronger film grain", "the pause background stays
+        // too bright"): the world alone (no track or HUD) in 30 fixed shots
+        // (the venue's BandCamShots by name, every 7th, 1.5 s each) from 12 s
+        // into a song, each frame's luma mean, contrast (its
+        // standard deviation), saturation and grain (the mean |luma - its 3x3
+        // box| where luma > 20) at 640x360, against the disc's own gameplay
+        // movies (videos/entersandman, tomsawyer, learntofly, gowiththeflow,
+        // wanteddeadoralive .bik, one frame every 2 s, title cards out: 289
+        // frames, through the same display curve): luma 69.3, contrast 55.4,
+        // grain 1.97; fails outside 15% (grain 40%: Bink smooths it). Then
+        // the pause: pause.milo's black_bg.mesh (black_bg.mat: black, alpha
+        // 0.7, kBlendSrcAlpha over the whole screen) leaves the world at 0.3
+        // of its luma: the outer strips, before and while paused.
+        // GD05_VENUE picks the venue (default small_club_02); the second song.
+        if (!SDL_getenv("GD05_VENUE")) SDL_setenv_unsafe("GD05_VENUE", "small_club_02", 1);
+        SDL_setenv_unsafe("GD05_TRACK", "0", 1);
+        SDL_setenv_unsafe("GD05_HUD", "0", 1);
+        endMs_ = 110000;  // the song on past the beam check (GD05-093)
+        SDL_setenv_unsafe("GD05_BEAM_PROBE", "1", 1);  // the beam pixels each frame (GD05-093)
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(500);
+        press(kDown), wait(400);  // the first song (past Random Song)
+        press(kX);
+        at("qp_seldiff_solo_screen");
+        press(kX);
+        wait(1500);
+        press(kX);
+        at("game_screen", 60000);
+        check("song_clock_running", 30000);  // past the intro (D96: INTRO_VENUE, 6.7 s)
+        wait(11300);
+        // Fixed shots: the venue's BandCamShots by name, every 7th (#0, #7,
+        // ... GD05_FORCE_SHOT), 1.5 s into each.
+        for (int i = 0; i < 30; ++i) {
+            const std::string next = "look:shot:" + std::to_string(i * 7);
+            check(next.c_str());
+            wait(1500), check("look:frame");
+        }
+        // The pause (GD05-089): the paused world is still, so the same
+        // picture with the pause screen hidden and shown (flicker and grain
+        // held, GD05_POST_FREEZE) differs only by the overlay. Three pauses
+        // 4 s apart (a pause on a blackout has no lit background to measure:
+        // skipped; at least one must be measured).
+        check("look:shot:");
+        for (int k = 0; k < 3; ++k) {
+            key(SDLK_ESCAPE);
+            at("pause_screen", 10000);
+            wait(1000);
+            check("setenv:GD05_POST_FREEZE=1");
+            check("look:pausehide");
+            wait(400);
+            check("look:prepause");
+            wait(400);
+            check("look:prepause2");
+            check("look:pauseshow");
+            wait(400);
+            check("look:pause");
+            check("look:pauserestore");
+            check("setenv:GD05_POST_FREEZE=");
+            key(SDLK_RETURN);  // RESUME
+            at("game_screen", 10000);
+            wait(4000);
+        }
+        // GD05-093: RB's spotlight beams reach the picture (the composite
+        // adds to some pixels in the shots), and with the drawer's base and
+        // smoke intensities at 0 (gFogDensity 0) they add nothing while
+        // beams are still drawn into the beam buffer.
+        // Shots 0, 7, ... until one draws beams (a blackout draws none).
+        check("setenv:GD05_DRAWER_ZERO=1");
+        for (int i = 0; i < 8; ++i) {
+            const std::string next = "look:shot:" + std::to_string(i * 7);
+            check(next.c_str());
+            wait(1000);
+            for (int k = 0; k < 3; ++k) check("look:beamzero"), wait(200);
+        }
+        check("setenv:GD05_DRAWER_ZERO=");
+        check("look:shot:");
+        check("look:eval");
+    } else if (scenario == "rb_win_sparks") {
+        // GD05-090: arena_04's win fountains (sparks_fountain_blue_WIN..07,
+        // WorldInstances of sparks_fountain_blue_win.milo in
+        // win_fx_draw_first.grp) stay idle in play: their start_hide.trig
+        // (event "start") hides shared.grp, and nothing drives their
+        // frame-driven systems; the win sequence's shots (coop_fw_*: their
+        // play_anim EventAnim, here win_drums.eventanm from coop_fw_all05)
+        // fire game_win.trig at frames 18 / 20, which shows shared.grp and
+        // plays it (0..60). Particles started by those systems: 0 in play,
+        // more than 0 after the win shot (and drawn).
+        if (!SDL_getenv("GD05_VENUE")) SDL_setenv_unsafe("GD05_VENUE", "arena_04", 1);
+        SDL_setenv_unsafe("GD05_TRACK", "0", 1);
+        SDL_setenv_unsafe("GD05_HUD", "0", 1);
+        endMs_ = 90000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(500);
+        press(kDown), wait(400);
+        press(kX);
+        at("qp_seldiff_solo_screen");
+        press(kX);
+        wait(1500);
+        press(kX);
+        at("game_screen", 60000);
+        wait(15000);
+        check("counter:parts_started:sparks_fountain_blue_win:0");  // the systems are there (-1: none)
+        check("counter_max:parts_started:sparks_fountain_blue_win:0");
+        check("counter_max:parts_drawn:sparks_fountain_blue_win:0");
+        check("setenv:GD05_FORCE_SHOT=coop_fw_all05.shot");
+        wait(5000);
+        check("counter:world_eventanim_triggers:1");
+        check("counter:parts_started:sparks_fountain_blue_win:1");
+        check("counter:parts_drawn:sparks_fountain_blue_win:1");
+        check("setenv:GD05_FORCE_SHOT=");
     } else if (scenario == "quickplay") {
         endMs_ = 30000;  // the song ends early (the walk's end time; GD05_WALK_END overrides)
         if (const char* e = SDL_getenv("GD05_WALK_END")) endMs_ = float(std::atof(e));
         rbQuickplay();
+        // GD05-098: the song's start as RB's script runs it (App::rbIntroErrors):
+        // the intro chain's shots in order with their lengths, nothing else
+        // first, the clock from minus the chain (GD05_INTRO_LEGACY=1 fails it).
+        check("song_clock_running", 30000);
+        wait(300);
+        check("counter:rb_intro_shots:1");
+        check("counter_max:rb_intro_errors:0");
         wait(3000);
         check("counter:rb_track_frames:30");
         check("counter:band_members:4");
         at("endgame_waiting_screen", 90000);  // modes.dta win_screen (the default mode)
+        // GD05-096: the hits' effects (hit flares, shockwaves, glass) drawn:
+        // particles from the smashers' effects.grp within 100 ms of each hit
+        // (GD05_SMASHFX_LEGACY=1, smasher_fx.grp hidden as before: 100 %).
+        check("counter:rb_fx_hits_seen:10");
+        check("counter_max:rb_fx_hits_unseen_pct:5");
+        // GD05-058: RB's own HUD (render/rb_hud_view.h): each element drawn alone
+        // lands within 4 px of the box its milo data gives; the score, the
+        // multiplier, the Overdrive and crowd meters show the players' values.
+        check("counter:rb_hud_probes:1");
+        check("counter:rb_hud_boxes:5");
+        check("counter_max:rb_hud_box_err_px:4");
+        check("counter_max:rb_hud_value_errors:0");
+        // GD05-064: a gem in each lane at the now bar shows; the HUD covers
+        // none of it (0.0.6: the Overdrive meter and the multiplier sat
+        // across the smashers).
+        check("counter:rb_nowbar_gem_px:200");
+        check("counter_max:rb_nowbar_cover_pct:2");
         at("qp_endgame_screen", 20000);       // the mode's endgame_screen once the stats are in
         wait(1000);
         press(kX);  // continue (SELECT_START_MSG: ui sync_screen qp_complete_screen)
@@ -797,6 +2362,104 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             check("kb_hits");
         }
         expect_ = {"main_screen", "main_solomode_screen", "qp_selsong_screen", "qp_seldiff_solo_screen", "game_screen", "pause_screen", "game_screen"};
+    } else if (scenario == "rb_guitar_play" || scenario == "rb_guitar_none" || scenario == "rb_pad_play" || scenario == "rb_owner_guitar") {
+        // GD05-056: a song played with a device's own SDL events (a virtual
+        // joystick that is the owner's Harmonix Rock Band Guitar 1bad:0002:
+        // 11 buttons, 6 axes, a hat, his SDL mapping; or a generic Xbox 360
+        // pad): frets on its buttons, strum on the hat, whammy on axis 3,
+        // Overdrive by tilt (axis 4) / the pad's Back, pause on Start.
+        // rb_guitar_play works the menus with the guitar too; rb_guitar_none
+        // is the owner's controllers.json (the keyboard player 1, the guitar
+        // None): the one-player song still takes the guitar (D34).
+        autoplay_ = false;
+        // rb_owner_guitar (GD05-058): the guitar with the owner's GUID and his
+        // controllers.json of 2026-11-11 17:36 (keyboard player 1, the guitar
+        // None, his keyboard bindings), imported as GAMEPADS' Load does.
+        const bool owner = scenario == "rb_owner_guitar";
+        const bool pad = scenario == "rb_pad_play", none = scenario == "rb_guitar_none" || owner;
+        auto checkS = [&](const std::string& what, double timeout = 0) { steps_.push_back({S::Check, what, 0, timeout}); };
+        // A button press on the device (SDL button / hat numbers of the device).
+        auto dev = [&](const std::string& what) { checkS("dev_set " + what + " 1"), wait(90), checkS("dev_set " + what + " 0"), wait(220); };
+        const std::string green = "b0", strumDown = "hat4", start = pad ? "b6" : "b7";
+        if (owner) check("dev_owner_guid");
+        checkS(pad ? "dev_attach 045e:028e" : "dev_attach 1bad:0002:rbguitar", 10000);
+        if (owner) check("dev_owner_json");
+        at("splash_screen", 30000);
+        check("unlock_all_songs");  // the songs the walk was written for (rb_qp_locked, GD05-073)
+        wait(500);  // the device settles (its first 300 ms are its rest values)
+        if (pad || none) key(SDLK_RETURN); else dev(start);
+        at("main_screen");
+        wait(1500);
+        if (none && !owner) checkS("dev_owner_players");
+        checkS("dev_players");
+        if (pad || none) {
+            key(SDLK_RETURN), at("main_solomode_screen"), key(SDLK_RETURN), at("qp_selsong_screen"), wait(500);
+            key(SDLK_DOWN), wait(300), key(SDLK_RETURN), at("qp_seldiff_solo_screen");
+            key(SDLK_RETURN), wait(1500), key(SDLK_RETURN);
+        } else {
+            dev(green), at("main_solomode_screen"), dev(green), at("qp_selsong_screen"), wait(500);
+            dev(strumDown), wait(300), dev(green), at("qp_seldiff_solo_screen");
+            dev(green), wait(1500), dev(green);  // guitar, then the difficulty
+        }
+        at("game_screen", 60000);
+        // The owner's session: the window made again for Vulkan without the
+        // keyboard focus (SDL then drops every joystick event unless
+        // background events are allowed): the song played with no focus.
+        if (owner) check("dev_unfocus");
+        checkS(pad ? "dev_play pad 30" : "dev_play guitar 30", 90000);
+        check("dev_hits");
+        if (owner) {
+            // The rest (pause, sustain, Overdrive, a miss) is rb_guitar_none's
+            // with the same controllers.json; a hidden window's song does not
+            // go on after a pause (offscreen).
+            check("dev_trace");
+            check("dev_refocus");
+            expect_ = {"main_screen", "main_solomode_screen", "qp_selsong_screen", "qp_seldiff_solo_screen", "game_screen"};
+        } else {
+        dev(start);  // pause
+        at("pause_screen", 10000);
+        wait(500);
+        if (pad) dev("b0"); else dev(green);  // RESUME (the focus)
+        at("game_screen", 10000);
+        checkS(pad ? "dev_play pad sustain" : "dev_play guitar sustain", 120000);  // held through a sustain, whammied
+        check("dev_hits");
+        checkS(pad ? "dev_play pad od" : "dev_play guitar od", 150000);  // Overdrive deployed by tilt / Back
+        check("dev_hits");
+        // GD05-045: the fret board's effects from RB's track milo: every
+        // hit launched its smashers' flames, the frets held lit their
+        // smashers, a sustain burned, the deploy showed its spotlight.
+        check("counter:rb_fx_hits:20");
+        check("counter_max:rb_fx_hits_no_flame:0");
+        // GD05-096: the hits' effects are drawn, not only launched: particles
+        // from the smashers' effects.grp within 100 ms of each hit
+        // (GD05_SMASHFX_LEGACY=1, smasher_fx.grp hidden: 100 %).
+        check("counter_max:rb_fx_hits_unseen_pct:5");
+        check("counter:rb_fx_glows:1");
+        check("counter:rb_fx_burns:1");
+        check("counter:rb_fx_deploys:1");
+        check("counter_max:rb_fx_deploys_no_visual:0");
+        // GD05-058: RB's own HUD (render/rb_hud_view.h): each element drawn alone
+        // lands within 4 px of the box its milo data gives; the score, the
+        // multiplier, the Overdrive and crowd meters show the players' values.
+        check("counter:rb_hud_probes:1");
+        check("counter:rb_hud_boxes:5");
+        check("counter_max:rb_hud_box_err_px:4");
+        check("counter_max:rb_hud_value_errors:0");
+        // GD05-064: a gem in each lane at the now bar shows; the HUD covers
+        // none of it (0.0.6: the Overdrive meter and the multiplier sat
+        // across the smashers).
+        check("counter:rb_nowbar_gem_px:200");
+        check("counter_max:rb_nowbar_cover_pct:2");
+        if (!pad) {
+            // Gems let pass and a wrong strum: the miss sound, the guitar
+            // stem muted; the next hits bring it back.
+            check("dev_play guitar miss", 60000);
+            check("dev_play guitar 8", 60000);
+            check("dev_audible");
+        }
+        if (!pad) check("dev_trace");
+        expect_ = {"main_screen", "main_solomode_screen", "qp_selsong_screen", "qp_seldiff_solo_screen", "game_screen", "pause_screen", "game_screen"};
+        }
     } else if (scenario == "rb_fuzz") {
         // GD05-052 (GD05-032): menus disappearing. Seeded random input on the
         // main menu and its sub-menus (GD05_FUZZ_SEED, GD05_FUZZ_STEPS):
@@ -1434,7 +3097,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX), wait(300);
         check("enhanced_calibration_reset");
         // PERFORMANCE & GRAPHICS -> Graphics Backend -> Audio Backend (the
-        // section's first rows, kept at local) -> Screen Mode -> Resolution;
+        // section's first rows, kept at their defaults) -> Screen Mode -> Resolution;
         // select opens its dropdown, down and select pick the next option.
         for (int i = 0; i < 5; ++i) press(kDown), wait(120);
         press(kX);
@@ -1460,8 +3123,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("enhanced_hdr_true");
         again(kRight), wait(400);
         check("enhanced_hdr_none");
-        // Graphics / Audio Backend (GDCORE-008): still local (the walk never
-        // touched them; the backends walk does).
+        // Graphics / Audio Backend (GDCORE-008): still the defaults, Vulkan and
+        // miniaudio (the walk never touched them; the backends walk does).
         check("enhanced_backends");
         row(kLeft), again(kLeft), row(kLeft), row(kRight), again(kRight), row(kX), row(kRight), row(kRight), again(kRight), row(kRight),
             row(kRight), again(kRight), row(kRight), again(kRight), row(kRight), again(kRight);
@@ -1521,11 +3184,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     } else if (scenario == "enhanced_backends") {
         // Enhanced > Graphics / Audio Backend (GDCORE-008, universal-menus.md
         // "Backends"). With GD05_WALK_ENHANCED_SEED holding unknown backends:
-        // they are dropped at start (local). The two rows are the first of
-        // PERFORMANCE & GRAPHICS; Right steps Graphics to SDL3, then Vulkan
-        // (each change asks Restart Now / Later: back is Later), the Audio
-        // dropdown picks OpenAL (Later again): saved, still local in this run.
-        // Then Graphics back to SDL3 and Restart Now: the game starts again
+        // they are dropped at start (the defaults, Vulkan and miniaudio, D71).
+        // The two rows are the first of PERFORMANCE & GRAPHICS; Right steps
+        // Graphics to SDL3, then OpenGL3 (each change asks Restart Now /
+        // Later: back is Later), the Audio dropdown picks OpenAL (Later
+        // again): saved, still the defaults in this run. Then Graphics back
+        // to SDL3 and Restart Now: the game starts again
         // (enhanced_backends_restarted).
         at("main_screen");
         for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS
@@ -1538,11 +3202,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         for (int i = 0; i < 14; ++i) press(kDown), wait(120);  // MODES > Steam Deck down to Graphics Backend
         press(kRight), wait(300);  // SDL3: the pop-up
         press(kTri), wait(300);    // Later
-        press(kRight), wait(300);  // Vulkan
+        press(kRight), wait(300);  // OpenGL3
         press(kTri), wait(300);
         press(kDown), wait(120);
         press(kX), wait(200);  // Audio Backend's dropdown
-        press(kDown), wait(120), press(kDown), wait(120);
+        press(kDown), wait(120);
         press(kX), wait(300);  // OpenAL
         press(kTri), wait(300);
         at("enhanced_options_screen");
@@ -1553,7 +3217,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         expect_ = {"main_screen", "options_screen", "enhanced_options_screen"};
     } else if (scenario == "enhanced_backends_restarted") {
         // The game started again by Restart Now: straight on Enhanced Options,
-        // on the saved backends (SDL3 falls back to local headless).
+        // on the saved backends (SDL3 hands over to the next backend where
+        // it cannot start).
         at("enhanced_options_screen");
         check("enhanced_backends_restarted");
         expect_ = {"enhanced_options_screen"};
@@ -2264,6 +3929,22 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
         if (lastScreen_ == "loading_screen") lastLoadingMs_ = nowMs - lastChangeMs_;
         lastScreen_ = ui.currentScreen(), lastChangeMs_ = nowMs;
     }
+    // rb_text_colors / GD05_TEXTCOLORS=1: each screen's texts, once, after
+    // 1.5 s out of any transition (the fx panel's fade over).
+    if (textColors_) {
+        ui::ScreenObj* sc = ui.current();
+        if (sc)
+            for (ui::PanelObj* p : sc->panels())
+                if (p->view) p->view->setTextProbes(true);
+        if (!sc || ui.inTransition() || textColorsSince_ < lastChangeMs_) textColorsSince_ = sc && !ui.inTransition() ? nowMs : -1;
+        else if (!textColorsSeen_.count(lastScreen_) && nowMs - textColorsSince_ >= 1500) {
+            textColorsSeen_.insert(lastScreen_);
+            measureTextColors(ui, lastScreen_, textColorsBad_);
+        }
+    }
+    if ((scenario_ == "rb_songlist_text" || scenario_ == "rb_songlist_highlight") && ui.current())  // the drawn texts are measured
+        for (ui::PanelObj* p : ui.current()->panels())
+            if (p->view) p->view->setTextProbes(true);
     // career: the band has bought Judy Nails' second outfit and the SG's
     // white skin in the store (M10), so both choices offer two.
     if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song" || scenario_ == "career_encore" ||
@@ -2376,9 +4057,481 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
     return true;
 }
 
+// ---- rb_text_colors (GD05 owner report: menu text darker than RB's) --------
+// Every text the current screen's panels drew last frame (UiView text
+// probes): the colour RB's shader gives its glyph cores, from the data, and
+// the colour on the screen there. Expected, per pixel where the font
+// texture's alpha is 1 over the pixel's whole footprint: (sum of the lights
+// * gDiffuse + base * gAmbient) * texel * (intensify ? 2 : 1), base the
+// vertex colour (prelit) or gDiffuse (ark/xbox_shaders: per vertex and per
+// pixel alike, the light sum tinted once), then the console's output
+// (outputCurve, D25). Drawn: the screenshot's pixel. A text whose glyph
+// cores are more than 8% darker than expected fails.
+static void measureTextColors(ui::UiManager& ui, const std::string& tag, std::vector<std::string>& bad) {
+    ui::ScreenObj* sc = ui.current();
+    if (!sc) return;
+    const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+    const std::string path = std::string(dir ? dir : SDL_GetBasePath()) + "/tc_" + tag + ".bmp";
+    if (!ui.host().saveScreenshot(path)) return;
+    SDL_Surface* raw = SDL_LoadBMP(path.c_str());
+    SDL_Surface* img = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32) : nullptr;
+    if (raw) SDL_DestroySurface(raw);
+    if (!img) return;
+    float gamma = 0.85f;
+    if (const char* e = SDL_getenv("GD05_GAMMA")) gamma = float(std::atof(e));
+    struct Tex {
+        int w = 0, h = 0;
+        std::vector<uint8_t> rgba;
+    };
+    std::map<const scene::Tex*, Tex> texs;
+    auto luma = [](const float* c) { return 0.299f * c[0] + 0.587f * c[1] + 0.114f * c[2]; };
+    std::printf("  text colours %s on %s:\n", tag.c_str(), ui.currentScreen().c_str());
+    if (SDL_getenv("GD05_TEXTCOLORS_DEBUG"))
+        if (ui::PanelObj* fx = ui.panel("fx"); fx && fx->view) std::printf("    fx up %d showing %d fade.mnm frame %.2f\n", int(fx->up), int(fx->showing), fx->view->frame("fade.mnm"));
+    for (ui::PanelObj* panel : sc->panels()) {
+        if (SDL_getenv("GD05_TEXTCOLORS_DEBUG"))
+            std::printf("    panel %s view %d up %d showing %d texts %d probes %zu\n", panel->name().c_str(), panel->view ? 1 : 0, int(panel->up),
+                        int(panel->showing), panel->view ? panel->view->textsDrawn() : -1, panel->view ? panel->view->textProbes().size() : 0);
+        if (SDL_getenv("GD05_TEXTCOLORS_DEBUG") && panel->view)
+            for (const gfx::UiView::MaskDraw& m : panel->view->masks())
+                std::printf("      mask rgba %.2f %.2f %.2f %.2f blend %d rect %.2f %.2f %.2f %.2f\n", m.rgba[0], m.rgba[1], m.rgba[2], m.rgba[3], m.blend, m.rect[0],
+                            m.rect[1], m.rect[2], m.rect[3]);
+        if (SDL_getenv("GD05_TEXTCOLORS_DEBUG") && panel->view && panel->view->milo()) {
+            std::vector<const scene::Milo*> ms{panel->view->milo()};
+            for (const scene::Milo* m : panel->view->subdirs()) ms.push_back(m);
+            for (const scene::Milo* m : ms)
+                for (const scene::Environ* e : m->root().all<scene::Environ>()) {
+                    const auto& x = e->colorXfm;
+                    std::printf("      environ %s amb %.2f %.2f %.2f lights %zu colour_adjust %d hue %.2f sat %.2f light %.2f contrast %.2f bright %.2f in %.2f..%.2f out %.2f..%.2f rot %.2f %.2f %.2f pos %.2f\n",
+                                e->name.c_str(), e->ambientColor[0], e->ambientColor[1], e->ambientColor[2], e->lights.size(), int(e->useColorAdjust), x.hue,
+                                x.saturation, x.lightness, x.contrast, x.brightness, x.inLo[0], x.inHi[0], x.outLo[0], x.outHi[0], x.xfm.rot[0], x.xfm.rot[4],
+                                x.xfm.rot[8], x.xfm.pos[0]);
+                }
+        }
+        if (!panel->view || !panel->up || !panel->showing) continue;
+        for (const gfx::TextProbe& p : panel->view->textProbes()) {
+            std::string flags = p.m.prelit ? "prelit" : "lit";
+            const int lights = p.m.useEnviron ? p.env.lightCount - p.env.projectedCount : 0;
+            if (p.m.useEnviron) flags += " env L" + std::to_string(lights);
+            if (p.m.perPixelLit) flags += " pp";
+            if (SDL_getenv("GD05_TEXTCOLORS_DEBUG")) {
+                std::printf("      %s: colour %.3f %.3f %.3f a %.2f vtx %.3f %.3f %.3f amb %.2f %.2f %.2f envamb %.2f %.2f %.2f spec %.2f blend %d intens %d\n", p.name.c_str(),
+                            p.m.color[0], p.m.color[1], p.m.color[2], p.m.alpha, p.verts.empty() ? 0.f : p.verts[0].color[0], p.verts.empty() ? 0.f : p.verts[0].color[1],
+                            p.verts.empty() ? 0.f : p.verts[0].color[2], p.env.ambient.x, p.env.ambient.y, p.env.ambient.z, p.env.envAmbient.x, p.env.envAmbient.y,
+                            p.env.envAmbient.z, p.m.specularRgb[0], int(p.m.blend), int(p.m.intensify));
+                for (int i = 0; i < lights; ++i)
+                    std::printf("        light %d colour %.2f %.2f %.2f vec %.1f %.1f %.1f range %.0f start %.0f dir %d\n", i, p.env.lights[i].color.x, p.env.lights[i].color.y,
+                                p.env.lights[i].color.z, p.env.lights[i].vec.x, p.env.lights[i].vec.y, p.env.lights[i].vec.z, p.env.lights[i].range,
+                                p.env.lights[i].falloffStart, int(p.env.directional || p.env.lights[i].directional));
+            }
+            auto skip = [&](const char* why) {
+                std::printf("    %-22s %-30s %-16s skipped: %s\n", panel->name().c_str(), p.name.c_str(), flags.c_str(), why);
+            };
+            if (p.indirect) {
+                skip("drawn into a 3D RenderDir's texture");
+                continue;
+            }
+            if (p.m.alpha < 0.95f) {
+                skip("material alpha < 0.95");
+                continue;
+            }
+            if (p.m.blend != gfx::MatBlend::SrcAlpha && p.m.blend != gfx::MatBlend::Src && p.m.blend != gfx::MatBlend::PreMultAlpha) {
+                skip("additive / other blend");
+                continue;
+            }
+            const scene::Tex* t = p.mat && p.mat->dir && !p.mat->diffuseTex.empty() ? p.mat->dir->resolve<scene::Tex>(p.mat->diffuseTex) : nullptr;
+            if (!t || t->bitmap.empty() || p.verts.empty()) {
+                skip("no font texture");
+                continue;
+            }
+            Tex& tx = texs[t];
+            if (!tx.w && scene::decodeBitmapRgba(t->bitmap, 0, tx.rgba)) tx.w = t->bitmap.width, tx.h = t->bitmap.height;
+            if (!tx.w) {
+                skip("font texture does not decode");
+                continue;
+            }
+            if (SDL_getenv("GD05_TEXTCOLORS_DEBUG")) {
+                // The texture's opaque texels: their rgb's spread.
+                std::vector<int> l;
+                for (size_t i = 0; i + 3 < tx.rgba.size(); i += 4)
+                    if (tx.rgba[i + 3] >= 250) l.push_back((299 * tx.rgba[i] + 587 * tx.rgba[i + 1] + 114 * tx.rgba[i + 2]) / 1000);
+                std::sort(l.begin(), l.end());
+                if (!l.empty())
+                    std::printf("      texture %s (%s, fmt %d, %dx%d): opaque texels %zu, luma p10 %d p50 %d p90 %d max %d\n", t->name.c_str(), p.mat->name.c_str(),
+                                int(t->bitmap.format), tx.w, tx.h, l.size(), l[l.size() / 10], l[l.size() / 2], l[l.size() * 9 / 10], l.back());
+            }
+            // RB's colour before the texture, per pixel (RB's text materials
+            // are per-pixel lit: a big title's light falls off across it).
+            gfx::Vec3 n{p.verts[0].normal[0], p.verts[0].normal[1], p.verts[0].normal[2]};
+            {
+                const gfx::Vec3 o = p.world.transformPoint({0, 0, 0}), q = p.world.transformPoint(n);
+                n = {q.x - o.x, q.y - o.y, q.z - o.z};
+                const float l = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+                if (l > 0) n = {n.x / l, n.y / l, n.z / l};
+            }
+            const float* base = p.m.prelit ? p.verts[0].color : p.m.color;
+            const gfx::Vec3 amb = p.m.useEnviron ? p.env.envAmbient : p.env.ambient;
+            auto shadeAt = [&](const gfx::Vec3& pos, float* shade) {
+                shade[0] = base[0] * amb.x, shade[1] = base[1] * amb.y, shade[2] = base[2] * amb.z;
+                for (int i = 0; i < lights; ++i) {
+                    const gfx::Light& L = p.env.lights[i];
+                    gfx::Vec3 l = L.vec;
+                    float fall = 1;
+                    if (!p.env.directional && !L.directional) {
+                        gfx::Vec3 d{L.vec.x - pos.x, L.vec.y - pos.y, L.vec.z - pos.z};
+                        const float len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+                        l = len > 1e-6f ? gfx::Vec3{d.x / len, d.y / len, d.z / len} : d;
+                        if (L.range > L.falloffStart) fall = 1 - std::clamp((len - L.falloffStart) / (L.range - L.falloffStart), 0.0f, 1.0f);
+                    }
+                    const float lam = std::max(0.0f, n.x * l.x + n.y * l.y + n.z * l.z) * fall;
+                    shade[0] += L.color.x * lam * p.m.color[0], shade[1] += L.color.y * lam * p.m.color[1], shade[2] += L.color.z * lam * p.m.color[2];
+                }
+            };
+            const float mult = p.m.intensify ? 2.0f : 1.0f;
+            // The glyph cores, triangle by triangle.
+            const float sx = float(img->w) / 1280.0f, sy = float(img->h) / 720.0f;
+            double sumE[3] = {0, 0, 0}, sumD[3] = {0, 0, 0};
+            int count = 0;
+            for (const auto& f : p.faces) {
+                float X[3], Y[3], W[3], U[3], V[3];
+                gfx::Vec3 P[3];
+                bool ok = true;
+                for (int k = 0; k < 3; ++k) {
+                    const scene::MeshVertex& v = p.verts[f[size_t(k)]];
+                    const gfx::Vec3 w = p.world.transformPoint({v.pos[0], v.pos[1], v.pos[2]});
+                    P[k] = w;
+                    const gfx::Mat4& m = p.viewProj;
+                    const float cx = m.at(0, 0) * w.x + m.at(0, 1) * w.y + m.at(0, 2) * w.z + m.at(0, 3);
+                    const float cy = m.at(1, 0) * w.x + m.at(1, 1) * w.y + m.at(1, 2) * w.z + m.at(1, 3);
+                    const float cw = m.at(3, 0) * w.x + m.at(3, 1) * w.y + m.at(3, 2) * w.z + m.at(3, 3);
+                    if (cw <= 1e-4f) ok = false;
+                    X[k] = (p.rect[0] + (cx / cw + 1) * 0.5f * (p.rect[2] - p.rect[0])) * sx;
+                    Y[k] = (p.rect[1] + (1 - cy / cw) * 0.5f * (p.rect[3] - p.rect[1])) * sy;
+                    W[k] = 1.0f / cw;
+                    const gfx::Vec3 uv = p.m.texXfm.transformPoint({v.uv[0], v.uv[1], 0});
+                    U[k] = uv.x * float(tx.w), V[k] = uv.y * float(tx.h);
+                }
+                const float area = (X[1] - X[0]) * (Y[2] - Y[0]) - (X[2] - X[0]) * (Y[1] - Y[0]);
+                if (!ok || std::fabs(area) < 0.5f) continue;
+                // Texels per pixel along the edges: the footprint's radius.
+                float k = 0;
+                for (int e = 0; e < 3; ++e) {
+                    const int a = e, b = (e + 1) % 3;
+                    const float dp = std::hypot(X[b] - X[a], Y[b] - Y[a]), dt = std::hypot(U[b] - U[a], V[b] - V[a]);
+                    if (dp > 0.5f) k = std::max(k, dt / dp);
+                }
+                const int r = int(std::ceil(0.5f * k)) + 1;
+                const int x0 = std::max(0, int(std::floor(std::min({X[0], X[1], X[2]})))), x1 = std::min(img->w - 1, int(std::ceil(std::max({X[0], X[1], X[2]}))));
+                const int y0 = std::max(0, int(std::floor(std::min({Y[0], Y[1], Y[2]})))), y1 = std::min(img->h - 1, int(std::ceil(std::max({Y[0], Y[1], Y[2]}))));
+                for (int py = y0; py <= y1; ++py)
+                    for (int px = x0; px <= x1; ++px) {
+                        const float qx = float(px) + 0.5f, qy = float(py) + 0.5f;
+                        const float b0 = ((X[1] - qx) * (Y[2] - qy) - (X[2] - qx) * (Y[1] - qy)) / area;
+                        const float b1 = ((X[2] - qx) * (Y[0] - qy) - (X[0] - qx) * (Y[2] - qy)) / area;
+                        const float b2 = 1 - b0 - b1;
+                        if (b0 < 0 || b1 < 0 || b2 < 0) continue;
+                        const float iw = b0 * W[0] + b1 * W[1] + b2 * W[2];
+                        const float u = (b0 * U[0] * W[0] + b1 * U[1] * W[1] + b2 * U[2] * W[2]) / iw;
+                        const float v = (b0 * V[0] * W[0] + b1 * V[1] * W[1] + b2 * V[2] * W[2]) / iw;
+                        const int tu = int(std::floor(u)), tv = int(std::floor(v));
+                        int minA = 255;
+                        for (int dy = -r; dy <= r && minA >= 250; ++dy)
+                            for (int dx = -r; dx <= r; ++dx) {
+                                const int xx = std::clamp(tu + dx, 0, tx.w - 1), yy = std::clamp(tv + dy, 0, tx.h - 1);
+                                minA = std::min(minA, int(tx.rgba[(size_t(yy) * size_t(tx.w) + size_t(xx)) * 4 + 3]));
+                            }
+                        if (minA < 250) continue;
+                        // The texel colour the sampler gives: the texels the pixel covers.
+                        const float rc = std::max(0.5f, 0.5f * k);
+                        float texel[3] = {0, 0, 0};
+                        int nt = 0;
+                        for (int yy = int(std::floor(v - rc)); yy <= int(std::floor(v + rc)); ++yy)
+                            for (int xx = int(std::floor(u - rc)); xx <= int(std::floor(u + rc)); ++xx) {
+                                const uint8_t* q = &tx.rgba[(size_t(std::clamp(yy, 0, tx.h - 1)) * size_t(tx.w) + size_t(std::clamp(xx, 0, tx.w - 1))) * 4];
+                                texel[0] += q[0], texel[1] += q[1], texel[2] += q[2];
+                                ++nt;
+                            }
+                        if (!nt) continue;
+                        const Uint8* d = static_cast<const Uint8*>(img->pixels) + py * img->pitch + px * 4;
+                        float shade[3];
+                        {
+                            const float a0 = b0 * W[0] / iw, a1 = b1 * W[1] / iw, a2 = b2 * W[2] / iw;
+                            shadeAt({a0 * P[0].x + a1 * P[1].x + a2 * P[2].x, a0 * P[0].y + a1 * P[1].y + a2 * P[2].y, a0 * P[0].z + a1 * P[1].z + a2 * P[2].z}, shade);
+                        }
+                        for (int ch = 0; ch < 3; ++ch) {
+                            const float e = std::clamp(shade[ch] * texel[ch] / (255.0f * float(nt)) * mult, 0.0f, 1.0f);
+                            sumE[ch] += gfx::outputCurve(e, gamma) * 255.0;
+                            sumD[ch] += d[ch];
+                        }
+                        ++count;
+                    }
+            }
+            if (count < 12) {
+                skip(count ? "under 12 glyph-core pixels" : "no glyph-core pixel on the screen");
+                continue;
+            }
+            float E[3], D[3];
+            for (int ch = 0; ch < 3; ++ch) E[ch] = float(sumE[ch] / count), D[ch] = float(sumD[ch] / count);
+            const float ratio = luma(E) > 1 ? luma(D) / luma(E) : 1;
+            const bool dark = ratio < 0.92f;
+            std::printf("    %-22s %-30s %-16s exp %3.0f %3.0f %3.0f  drawn %3.0f %3.0f %3.0f  ratio %.2f  n %d%s\n", panel->name().c_str(), p.name.c_str(),
+                        flags.c_str(), E[0], E[1], E[2], D[0], D[1], D[2], ratio, count, dark ? "  DARK" : "");
+            if (dark) {
+                char line[256];
+                std::snprintf(line, sizeof line, "%s %s/%s: drawn %.0f %.0f %.0f, expected %.0f %.0f %.0f (%.2f)", tag.c_str(), panel->name().c_str(),
+                              p.name.c_str(), D[0], D[1], D[2], E[0], E[1], E[2], ratio);
+                bad.push_back(line);
+            }
+        }
+    }
+    SDL_DestroySurface(img);
+}
+
+// ---- rb_text_colors against RB's own screen (GD05-062) -------------------
+// The owner's capture of RB's main menu with SOLO's sub-menu open
+// (QUICKPLAY focused on its orange bar, SOLO TOUR normal; 1200 x 675, kept
+// out of the repository): the 99th percentile luma of each word's box,
+// measured on that image. The port's frame is averaged down to 1200 x 675
+// and measured in the same boxes. The sub-menu labels (BandButtons with
+// custom_colors 0x707070 / 0xd7d7d7, avantgarde.mat, popup_main_test.env's
+// bottom_right.lit) must be within 10% of RB's for their state; the main
+// buttons' modelled words (button_main.milo's solo.mesh ...) are printed.
+static void measureRefColors(ui::UiManager& ui, const std::string& tag, std::vector<std::string>& bad) {
+    struct Box {
+        const char* name;
+        int x0, y0, x1, y1;
+        float focused, normal;  // RB's level in that state (0: not in the capture)
+    };
+    // Sub-menu rows by position (row 1 QUICKPLAY, row 2 SOLO TOUR): RB's
+    // focused QUICKPLAY 188, normal SOLO TOUR 102.
+    static const Box sub[2] = {{"quickplay.btn", 565, 256, 700, 284, 188, 102}, {"tour.btn", 565, 304, 700, 332, 188, 102}};
+    // Main buttons (SOLO focused in the capture, the others normal).
+    static const Box words[5] = {{"solo.btn", 340, 258, 440, 295, 203, 0},
+                                 {"multi.btn", 275, 322, 495, 362, 0, 216},
+                                 {"tutorial.btn", 310, 392, 465, 432, 0, 220},
+                                 {"options.btn", 315, 450, 465, 495, 0, 215},
+                                 {"community.btn", 265, 505, 490, 570, 0, 191}};
+    ui::PanelObj* subPanel = ui.panel("main_solomode_panel");
+    ui::PanelObj* mainPanel = ui.panel("main_panel");
+    if (ui.currentScreen() != "main_solomode_screen" || !subPanel || !mainPanel) {
+        bad.push_back("refcolors " + tag + ": not on main_solomode_screen (" + ui.currentScreen() + ")");
+        return;
+    }
+    const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+    const std::string path = std::string(dir ? dir : SDL_GetBasePath()) + "/rc_" + tag + ".bmp";
+    if (!ui.host().saveScreenshot(path)) return;
+    SDL_Surface* raw = SDL_LoadBMP(path.c_str());
+    SDL_Surface* img = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32) : nullptr;
+    if (raw) SDL_DestroySurface(raw);
+    if (!img) return;
+    // The frame averaged down to the capture's 1200 x 675 (each pixel the
+    // mean of the source pixels whose centres fall in it), as luma.
+    const int W = 1200, H = 675;
+    std::vector<double> sum(size_t(W) * H, 0.0);
+    std::vector<int> cnt(size_t(W) * H, 0);
+    for (int y = 0; y < img->h; ++y)
+        for (int x = 0; x < img->w; ++x) {
+            const int tx = std::min(W - 1, int((x + 0.5) * W / img->w)), ty = std::min(H - 1, int((y + 0.5) * H / img->h));
+            const Uint8* d = static_cast<const Uint8*>(img->pixels) + y * img->pitch + x * 4;
+            sum[size_t(ty) * W + size_t(tx)] += 0.299 * d[0] + 0.587 * d[1] + 0.114 * d[2];
+            ++cnt[size_t(ty) * W + size_t(tx)];
+        }
+    SDL_DestroySurface(img);
+    auto p99 = [&](const Box& b) {
+        std::vector<double> v;
+        for (int y = b.y0; y < b.y1; ++y)
+            for (int x = b.x0; x < b.x1; ++x)
+                if (const int n = cnt[size_t(y) * W + size_t(x)]) v.push_back(sum[size_t(y) * W + size_t(x)] / n);
+        if (v.empty()) return 0.0;
+        std::sort(v.begin(), v.end());
+        return v[size_t(double(v.size()) * 0.99)];
+    };
+    std::printf("  RB's capture vs the port, %s (99th percentile luma per word box, 1200 x 675):\n", tag.c_str());
+    for (int i = 0; i < 2; ++i) {
+        const bool focused = subPanel->focus == sub[i].name;
+        const float want = focused ? sub[i].focused : sub[i].normal;
+        const double got = p99(sub[i]);
+        const double ratio = want > 0 ? got / want : 1;
+        const bool off = ratio < 0.9 || ratio > 1.1;
+        std::printf("    sub-menu row %d %-14s %-7s RB %3.0f  drawn %3.0f  ratio %.2f%s\n", i + 1, sub[i].name, focused ? "focused" : "normal", want, got, ratio,
+                    off ? "  OFF" : "");
+        if (off) {
+            char line[200];
+            std::snprintf(line, sizeof line, "refcolors %s: sub-menu %s (%s) drawn %.0f, RB's capture %.0f (%.2f)", tag.c_str(), sub[i].name,
+                          focused ? "focused" : "normal", got, want, ratio);
+            bad.push_back(line);
+        }
+    }
+    for (const Box& b : words) {
+        const bool focused = mainPanel->focus == b.name;
+        const float want = focused ? b.focused : b.normal;
+        if (want <= 0) continue;  // not in that state in the capture
+        const double got = p99(b);
+        std::printf("    main word %-14s %-7s RB %3.0f  drawn %3.0f  ratio %.2f (printed only: GD05-062)\n", b.name, focused ? "focused" : "normal", want, got,
+                    got / want);
+    }
+}
+
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
-    auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    // GD05_WALK_KEEP_GOING=1: a failed check is printed and the walk goes
+    // on (a diagnostic run: every check of a walk against an older build;
+    // its "OK" is no verdict, the FAIL lines are).
+    static const bool keepGoing = SDL_getenv("GD05_WALK_KEEP_GOING") != nullptr;
+    auto fail = [&](const std::string& e) {
+        if (keepGoing) return (void)std::printf("  FAIL (kept going) %s\n", e.c_str()), pass();
+        error_ = e, failed_ = done_ = true;
+    };
+    if (s.screen.rfind("refcolors:", 0) == 0) {
+        // rb_text_colors: refcolors:<tag> measures main_solomode_screen's
+        // labels against the owner's capture of RB once it has rested 700 ms.
+        static double seenMs = -1;
+        if (ui.inTransition()) return;
+        if (seenMs < 0) seenMs = nowMs;
+        if (nowMs - seenMs < 700) return;
+        seenMs = -1;
+        measureRefColors(ui, s.screen.substr(10), textColorsBad_);
+        return pass();
+    }
+    if (s.screen.rfind("textcolors:", 0) == 0) {
+        // rb_text_colors: textcolors:<tag> measures the screen once it has
+        // rested 700 ms (the probes on from the first poll).
+        // textcolors:<tag>:<panel> waits for that panel instead (the loading
+        // screens hold their transition).
+        static double seenMs = -1;
+        const std::string rest = s.screen.substr(11);
+        const size_t c = rest.find(':');
+        if (ui::ScreenObj* sc = ui.current())
+            for (ui::PanelObj* p : sc->panels())
+                if (p->view) p->view->setTextProbes(true);
+        if (c == std::string::npos ? ui.inTransition() : !(ui.panel(rest.substr(c + 1)) && ui.panel(rest.substr(c + 1))->up)) return;
+        if (seenMs < 0) seenMs = nowMs;
+        if (nowMs - seenMs < 700) return;
+        seenMs = -1;
+        measureTextColors(ui, rest.substr(0, c), textColorsBad_);
+        return pass();
+    }
+    if (s.screen.rfind("bright:", 0) == 0) {
+        // rb_bright: bright:<tag>[:<panel>] waits (loading screens: until
+        // the panel is up), saves the frame, prints each hit box's 97th
+        // percentile luma.
+        const std::string rest = s.screen.substr(7);
+        const size_t c = rest.find(':');
+        const std::string tag = rest.substr(0, c), panelName = c == std::string::npos ? std::string() : rest.substr(c + 1);
+        static double seenMs = -1;
+        ui::PanelObj* p = panelName.empty() ? ui.focusPanel() : ui.panel(panelName);
+        if (!p || !p->view || !p->up) {
+            if (stepStart_ >= 0 && nowMs - stepStart_ > 30000) return fail("bright: " + panelName + " never came up");
+            return;
+        }
+        if (seenMs < 0) seenMs = nowMs;
+        if (nowMs - seenMs < 600) return;
+        seenMs = -1;
+        const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+        const std::string path = std::string(dir ? dir : SDL_GetBasePath()) + "/bright_" + tag + ".bmp";
+        if (!ui.host().saveScreenshot(path)) return fail("bright: no screenshot");
+        SDL_Surface* raw = SDL_LoadBMP(path.c_str());
+        SDL_Surface* img = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        if (raw) SDL_DestroySurface(raw);
+        if (!img) return fail("bright: the screenshot does not load");
+        auto p97 = [&](float x0, float y0, float x1, float y1) {
+            std::vector<int> v;
+            const float sx = float(img->w) / 1280.0f, sy = float(img->h) / 720.0f;
+            for (int y = std::max(0, int(y0 * sy)); y < std::min(img->h, int(y1 * sy)); ++y)
+                for (int x = std::max(0, int(x0 * sx)); x < std::min(img->w, int(x1 * sx)); ++x) {
+                    const Uint8* px = static_cast<const Uint8*>(img->pixels) + y * img->pitch + x * 4;
+                    v.push_back((299 * px[0] + 587 * px[1] + 114 * px[2]) / 1000);
+                }
+            if (v.empty()) return -1;
+            std::sort(v.begin(), v.end());
+            return v[size_t(0.97 * double(v.size() - 1))];
+        };
+        std::printf("  bright %s on %s (panel %s):\n", tag.c_str(), ui.currentScreen().c_str(), p->name().c_str());
+        std::map<std::string, int> best;  // a component's brightest box
+        for (const gfx::UiView::Hit& h : p->view->hits()) {
+            const int v = p97(h.x0, h.y0, h.x1, h.y1);
+            std::printf("    %-28s %4.0f %4.0f %4.0f %4.0f  p97 %d\n", h.key.c_str(), h.x0, h.y0, h.x1, h.y1, v);
+            best[h.key] = std::max(best.count(h.key) ? best[h.key] : -1, v);
+        }
+        if (tag == "loading") {
+            // The four band icons (128 x 128 quads in load_icon_*), boxed
+            // through the frame's camera.
+            int dimmest = 255;
+            for (const char* m : {"guitar.mesh", "vox.mesh", "drummer.mesh", "bass.mesh"}) {
+                const std::string d = std::string("load_icon_") + (m[0] == 'g' ? "guitar" : m[0] == 'v' ? "vox" : m[0] == 'd' ? "drum" : "bass");
+                const scene::Object* o = p->view->findIn(d, m);
+                if (!o) return SDL_DestroySurface(img), fail(std::string("bright: no ") + m);
+                const float lo[3] = {-64, -64, 0}, hi[3] = {64, 64, 0};
+                const size_t n = p->view->hits().size();
+                p->view->addHit("icon", lo, hi, gfx::toMat4(p->view->pose().world(o)));
+                if (p->view->hits().size() == n) return SDL_DestroySurface(img), fail(std::string("bright: ") + m + " off the screen");
+                const gfx::UiView::Hit h = p->view->hits().back();
+                const int v = p97(h.x0, h.y0, h.x1, h.y1);
+                std::printf("    icon %-23s %4.0f %4.0f %4.0f %4.0f  p97 %d\n", m, h.x0, h.y0, h.x1, h.y1, v);
+                dimmest = std::min(dimmest, v);
+            }
+            best["band_icons"] = dimmest;
+            // The lit pixels' (luma over 100) mean luma and blue / red: the
+            // word and the icons graded alike (GD05-065, D49).
+            auto grade = [&](float x0, float y0, float x1, float y1, double& luma, double& br) {
+                const float sx = float(img->w) / 1280.0f, sy = float(img->h) / 720.0f;
+                double l = 0, r = 0, b = 0;
+                long n = 0;
+                for (int y = std::max(0, int(y0 * sy)); y < std::min(img->h, int(y1 * sy)); ++y)
+                    for (int x = std::max(0, int(x0 * sx)); x < std::min(img->w, int(x1 * sx)); ++x) {
+                        const Uint8* px = static_cast<const Uint8*>(img->pixels) + y * img->pitch + x * 4;
+                        const int v = (299 * px[0] + 587 * px[1] + 114 * px[2]) / 1000;
+                        if (v <= 100) continue;
+                        l += v, r += px[0], b += px[2], ++n;
+                    }
+                luma = n ? l / double(n) : 0, br = r > 0 ? b / r : 0;
+                return n;
+            };
+            float ix0 = 1e9f, iy0 = 1e9f, ix1 = -1e9f, iy1 = -1e9f;
+            for (const gfx::UiView::Hit& h : p->view->hits())
+                if (h.key == "icon") ix0 = std::min(ix0, h.x0), iy0 = std::min(iy0, h.y0), ix1 = std::max(ix1, h.x1), iy1 = std::max(iy1, h.y1);
+            double iconLuma = 0, iconBr = 0;
+            grade(ix0, iy0, ix1, iy1, iconLuma, iconBr);
+            // LOADING: its box's top 60% (the gold trim runs under its foot).
+            for (const gfx::UiView::Hit& h : p->view->hits())
+                if (h.key == "loading.lbl") {
+                    best["loading_word"] = p97(h.x0, h.y0, h.x1, h.y0 + 0.6f * (h.y1 - h.y0));
+                    double luma = 0, br = 0;
+                    const long n = grade(h.x0, h.y0, h.x1, h.y0 + 0.6f * (h.y1 - h.y0), luma, br);
+                    std::printf("    loading word                 p97 %d, lit px %ld luma %.0f blue/red %.2f; icons luma %.0f blue/red %.2f\n", best["loading_word"], n, luma,
+                                br, iconLuma, iconBr);
+                    // 0.0.6 (D44): flat white, blue / red 1.00 against the icons' 0.66.
+                    if (n < 100 || std::fabs(br - iconBr) > 0.10 || std::fabs(luma - iconLuma) > 40)
+                        return SDL_DestroySurface(img), fail("bright loading: LOADING not graded as the band icons");
+                }
+        }
+        SDL_DestroySurface(img);
+        // The floors: 0.0.6's dark spots measured after the fix, less a
+        // margin (the loading icons were 44, lit by the wrong environ; 215
+        // with intruments.env).
+        static const std::map<std::string, std::vector<std::pair<std::string, int>>> floors = {
+            {"main", {{"solo.btn", 190}, {"multi.btn", 190}, {"tutorial.btn", 190}, {"options.btn", 190}, {"community.btn", 190}}},
+            // The audio sliders were edge-on (2-3 px, 10..118; slider.grp's turn
+            // left out); the LOADING word bright from the start, graded as the
+            // band icons (D49, replacing D44's flat white; it was 25, unlit
+            // until loading.tnm's glint reached it).
+            {"audio", {{"instruments.sld", 120}, {"background.sld", 120}, {"crowd.sld", 120}, {"sfx.sld", 120}}},
+            {"options", {{"audio.btn", 170}, {"gameplay.btn", 80}, {"characterdata.btn", 80}, {"calibrate_av.btn", 80}, {"port_enhanced.btn", 75}}},
+            {"solo", {{"quickplay.btn", 150}, {"tour.btn", 80}}},
+            {"songlist", {{"ss_song.lst#0#list.lbl", 120}, {"ss_song.lst#2#list.lbl", 95}}},
+            {"seldiff", {{"player.lbl", 190}, {"guitar.lbl", 180}, {"choose_diff.lbl", 150}}},
+            {"seldiff2", {{"easy.btn", 115}, {"medium.btn", 125}, {"hard.btn", 120}, {"expert.btn", 120}}},
+            {"loading", {{"tip.lbl", 190}, {"band_icons", 150}, {"loading_word", 200}}},
+            {"pause", {{"pause_title.lbl", 220}, {"0.btn", 160}, {"4.btn", 110}}},
+        };
+        if (auto it = floors.find(tag); it != floors.end())
+            for (const auto& [key, floor] : it->second) {
+                auto b = best.find(key);
+                if (b == best.end()) return fail("bright " + tag + ": " + key + " was not drawn");
+                if (b->second < floor) return fail("bright " + tag + ": " + key + " p97 " + std::to_string(b->second) + " < " + std::to_string(floor));
+            }
+        return pass();
+    }
     if (s.screen.rfind("freebird ", 0) == 0) {
         // endgame_encore_panel: freebird set by {campaign encore_newly_unlocked
         // $freebird} (its $var by name), the focus on yes.btn, then
@@ -2402,6 +4555,1049 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         const std::string hair = c.object ? ui.interp().send(c.object, "get_outfit", {Value::symbol("hair")}).str() : std::string();
         std::printf("  creator: hair %s\n", hair.c_str());
         if (hair.empty() || hair == "none") return fail("no hair chosen");
+        return pass();
+    }
+    // rb_band_lobby (GD05-082): the lobby's slots, each player's character
+    // list, the players' characters on stage.
+    if (s.screen.rfind("rb_lobby_", 0) == 0) {
+        Interp& in = ui.interp();
+        if (s.screen.rfind("rb_lobby_slots ", 0) == 0) {
+            // Expected: the slots' states in order (COOP_SLOTS_ORDER, from the data).
+            const std::string want = s.screen.substr(15);
+            std::string got;
+            for (auto& sl : ui.playerSlots()) {
+                const Value st = ui.callScript(sl.get(), "current_option");
+                got += (got.empty() ? "" : ",") + (st.isUnhandled() ? std::string("?") : st.str());
+            }
+            static std::string lastLine;
+            char line[512];
+            std::snprintf(line, sizeof line, "  lobby slots: expected %s; measured %s (num_players %d, leader %d)\n", want.c_str(), got.c_str(),
+                          in.send("session", "num_players", {}).integerValue(), in.send("gamecfg", "get", {Value::symbol("leader_num")}).integerValue());
+            if (line != lastLine) std::fputs(line, stdout), lastLine = line;
+            if (got != want) {
+                if (nowMs - (stepStart_ < 0 ? (stepStart_ = nowMs) : stepStart_) < 3000) return;  // the lobby may still be updating
+                return fail("lobby slots " + got + ", expected " + want);
+            }
+            return pass();
+        }
+        if (s.screen.rfind("rb_lobby_rows ", 0) == 0) {
+            // Expected (RB 0x82857660): (Create New) when the mode's
+            // allow_create_char, (Default) when its show_prefab_chars, then
+            // the profile's characters of the player's instrument.
+            const int p = std::atoi(s.screen.c_str() + 14);
+            const int slot = in.send("gamecfg", "get_slot_num_from_player_num", {Value::integer(p)}).integerValue();
+            const std::string inst = in.send("gamecfg", "get_instrument_from_controller", {Value::integer(p)}).str();
+            std::vector<std::string> want;
+            if (ui::gameCfgValue(ui, "allow_create_char").truthy()) want.push_back("create_new");
+            if (ui::gameCfgValue(ui, "show_prefab_chars").truthy()) want.push_back("prefab");
+            if (auto* all = dynamic_cast<ui::ListProvider*>(in.findObject("char_data_provider"))) {
+                all->initData();
+                for (int i = 0; i < all->numData(); ++i)
+                    if (ScriptObject* c = in.findObject(all->symbol(i)); c && in.send(c, "get_instrument", {}).str() == inst) want.push_back(c->name());
+            }
+            std::vector<std::string> got;
+            if (slot >= 0 && size_t(slot) < ui.playerSlots().size())
+                if (auto* l = ui.playerSlots()[size_t(slot)]->panel().scopedComponent(ui.playerSlots()[size_t(slot)]->scope(), "char.lst"))
+                    if (auto* pr = dynamic_cast<ui::ListProvider*>(l->provider))
+                        for (int i = 0; i < pr->numData(); ++i) got.push_back(pr->symbol(i));
+            auto join = [](const std::vector<std::string>& v) {
+                std::string o;
+                for (const std::string& x : v) o += (o.empty() ? "" : " ") + x;
+                return o;
+            };
+            std::printf("  player %d (%s, slot %d) char.lst: expected [%s]; measured [%s]\n", p, inst.c_str(), slot, join(want).c_str(), join(got).c_str());
+            if (got != want) return fail("player " + std::to_string(p) + "'s character list [" + join(got) + "], expected [" + join(want) + "]");
+            return pass();
+        }
+        if (s.screen == "rb_lobby_chars") {
+            // Each joined player's character: made in the lobby (part 1,
+            // recorded), the same one picked from the list after the restart.
+            std::string got;
+            for (int p = 0; p < 4; ++p) {
+                if (!in.send("gamecfg", "is_player_participating", {Value::integer(p)}).truthy()) continue;
+                const Value pc = in.send("game", "get_player_config", {Value::integer(p)});
+                ScriptObject* ch = pc.object && in.send(pc.object, "has_char", {}).truthy() ? in.send(pc.object, "get_char", {}).object : nullptr;
+                got += (got.empty() ? "" : " ") + std::to_string(p) + "=" + (ch ? in.send(ch, "get_char_name", {}).str() : std::string("none"));
+            }
+            const char* before = SDL_getenv("GD05_WALK_LOBBY");
+            std::printf("  lobby characters: %s; before the restart: %s\n", got.c_str(), before ? before : "-");
+            if (got.find("none") != std::string::npos || got.find(' ') == std::string::npos) return fail("lobby characters " + got);
+            if (before && got != before) return fail("picked " + got + ", expected the saved " + before);
+            SDL_setenv_unsafe("GD05_WALK_LOBBY", got.c_str(), 1);
+            return pass();
+        }
+        if (s.screen == "rb_lobby_stage") {
+            // Each joined player's own character: the band member of its
+            // part (the slot's track) built with its torso; two players, two
+            // different characters.
+            static const char* const kType[] = {"drum", "bass", "guitar", "vocals"};
+            std::set<std::string> chars;
+            std::string bad;
+            int players = 0;
+            for (int p = 0; p < 4; ++p) {
+                if (!in.send("gamecfg", "is_player_participating", {Value::integer(p)}).truthy()) continue;
+                ++players;
+                const Value pc = in.send("game", "get_player_config", {Value::integer(p)});
+                ScriptObject* ch = pc.object ? in.send(pc.object, "get_char", {}).object : nullptr;
+                const int tt = pc.object ? in.send(pc.object, "get_track_type", {}).integerValue() : -1;
+                if (!ch || ch->className() != "TourCharLocal" || tt < 0 || tt > 3) return fail("player " + std::to_string(p) + " has no character of its own");
+                chars.insert(ch->name());
+                const std::string torso = in.send(ch, "get_outfit", {Value::symbol("torso")}).str();
+                const int n = ui.host().gameCounter(0, std::string("band_slot_piece:player_") + kType[tt] + "0:" + torso);
+                std::printf("  player %d: %s (%s, %s); expected the %s in %s; measured %d (any member: %d)\n", p, in.send(ch, "get_char_name", {}).str().c_str(),
+                            ch->name().c_str(), in.send(ch, "get_gender", {}).str().c_str(), kType[tt], torso.c_str(), n,
+                            ui.host().gameCounter(0, "band_piece:" + torso));
+                if (n != 1) bad += std::string(bad.empty() ? "" : "; ") + "the " + kType[tt] + " is not player " + std::to_string(p) + "'s character";
+            }
+            if (!bad.empty()) return fail(bad);
+            if (players != 2 || chars.size() != 2) return fail("expected two players with two characters, measured " + std::to_string(players) + " / " + std::to_string(chars.size()));
+            return pass();
+        }
+        return fail("unknown check " + s.screen);
+    }
+    // rb_career_band (GD05-072): the band (tour performer) and player 0's
+    // character (its member); the event's reward_per_star from
+    // config/tour_band.dta's (tiers (<tier> (<venue> (<event> ...)))).
+    if (s.screen.rfind("rb_band_", 0) == 0 && s.screen != "rb_band_wears") {
+        Interp& in = ui.interp();
+        auto send = [&](ScriptObject* o, const char* msg, std::vector<Value> a = {}) { return o ? in.send(o, msg, a) : Value::integer(0); };
+        ScriptObject* band = in.send("tour", "performer", {}).object;
+        const Value pc = in.send("game", "get_player_config", {Value::integer(0)});
+        ScriptObject* ch = send(pc.object, "get_char").object;
+        if (!band || !ch || ch->className() != "TourCharLocal") return fail(s.screen + ": no band or no member character");
+        const int bandMoney = send(band, "money").integerValue(), charMoney = send(ch, "money").integerValue();
+        const int fame = send(band, "world_fame").integerValue();
+        const std::string torso = send(ch, "get_outfit", {Value::symbol("torso")}).str();
+        std::printf("  %s: band %s money %d fame %d; member %s money %d torso %s\n", s.screen.c_str(), send(band, "band_name").str().c_str(), bandMoney,
+                    fame, send(ch, "get_char_name").str().c_str(), charMoney, torso.c_str());
+        if (s.screen == "rb_band_cash0") {
+            std::printf("  expected: the band's money is its member's %d; measured %d\n", charMoney, bandMoney);
+            if (bandMoney != charMoney) return fail("the band's money is not its member's");
+            careerCash_ = charMoney;
+            return pass();
+        }
+        if (s.screen == "rb_band_member_on_stage") {
+            const int n = ui.host().gameCounter(0, "band_piece:" + torso);
+            std::printf("  expected: the guitarist in %s; measured %d member(s)\n", torso.c_str(), n);
+            if (n < 1) return fail("the band's guitarist is not the player's character");
+            return pass();
+        }
+        if (s.screen == "rb_band_cash") {
+            ScriptObject* ev = in.send("tour", "event", {}).object;
+            const std::string venue = send(ev, "get", {Value::symbol("venue")}).str(), name = send(ev, "get", {Value::symbol("event_name")}).str();
+            const DataNode* tour = ui.bootTree() ? ui.bootTree()->find("tour") : nullptr;
+            const DataNode* tiers = tour && tour->find("band") ? tour->find("band")->find("tiers") : nullptr;
+            int per = -1;
+            for (size_t i = 1; tiers && i < tiers->children.size() && per < 0; ++i)
+                if (const DataNode* v = tiers->children[i].isList() ? tiers->children[i].find(venue) : nullptr)
+                    if (const DataNode* e = v->find(name))
+                        if (const DataNode* rp = e->find("reward_per_star")) per = rp->intAt(1);
+            const int want = careerCash_ + per * fame;
+            std::printf("  expected: member %d + %d x %d stars = %d, the band's money the same; measured: member %d, band %d (event %s/%s)\n",
+                        careerCash_, per, fame, want, charMoney, bandMoney, venue.c_str(), name.c_str());
+            if (per < 0) return fail("no event " + venue + "/" + name + " in config/tour_band.dta");
+            if (fame < 1) return fail("the gig earned no star");
+            if (charMoney != want) return fail("the member was paid " + std::to_string(charMoney - careerCash_));
+            if (bandMoney != charMoney) return fail("the band's money is not its member's");
+            SDL_setenv_unsafe("GD05_WALK_CAREER", (std::to_string(bandMoney) + " " + std::to_string(fame)).c_str(), 1);
+            return pass();
+        }
+        if (s.screen == "rb_band_reloaded") {
+            int wMoney = -1, wFame = -1;
+            std::istringstream is(SDL_getenv("GD05_WALK_CAREER") ? SDL_getenv("GD05_WALK_CAREER") : "");
+            is >> wMoney >> wFame;
+            std::printf("  expected (before the restart): money %d, fame %d; measured: band %d, member %d, fame %d\n", wMoney, wFame, bandMoney, charMoney,
+                        fame);
+            if (wMoney < 0) return fail("no expectations from before the restart");
+            if (bandMoney != wMoney || charMoney != wMoney || fame != wFame) return fail("the band changed through the save");
+            return pass();
+        }
+        return fail("unknown check " + s.screen);
+    }
+    // rb_career (GD05-072): expectations from the data, values measured
+    // through the scripts' own objects (tour performer, charcreator_panel).
+    if (s.screen.rfind("rb_creator_", 0) == 0 || s.screen.rfind("rb_career_", 0) == 0 || s.screen == "rb_shop_bought" ||
+        s.screen == "rb_band_wears" || s.screen.rfind("rb_gig_", 0) == 0) {
+        Interp& in = ui.interp();
+        const DataNode* tour = ui.bootTree() ? ui.bootTree()->find("tour") : nullptr;
+        auto send = [&](ScriptObject* o, const char* msg, std::vector<Value> a = {}) { return o ? in.send(o, msg, a) : Value::integer(0); };
+        ScriptObject* creating = in.send("charcreator_panel", "get_tour_char", {}).object;
+        ScriptObject* perf = in.send("tour", "performer", {}).object;
+        ScriptObject* c = s.screen.rfind("rb_creator_", 0) == 0 ? creating : perf;
+        if (!c) return fail(s.screen + ": no character");
+        const int money = send(c, "money").integerValue();
+        const std::string gender = send(c, "get_gender").str(), inst = send(c, "get_instrument").str();
+        const std::string hair = send(c, "get_outfit", {Value::symbol("hair")}).str(), torso = send(c, "get_outfit", {Value::symbol("torso")}).str();
+        const int skin = send(c, "skin_color").integerValue();
+        auto owns = [&](const std::string& cat, const std::string& o) { return send(c, "has_outfit", {Value::symbol(cat), Value::symbol(o)}).truthy(); };
+        std::printf("  %s: %s %s, money %d, skin %d, hair %s, torso %s\n", s.screen.c_str(), gender.c_str(), inst.c_str(), money, skin, hair.c_str(),
+                    torso.c_str());
+        if (s.screen == "rb_creator_attitude") {
+            // attitude.lst's data (attitude_banger attitude_dramatic
+            // attitude_rocker attitude_spazz), on kGenreRocker's row: one down
+            // is attitude_spazz, kGenreSpazz (charcreator.dta sym_to_attitude).
+            const int a = send(c, "get_attitude").integerValue();
+            std::printf("  expected: attitude kGenreSpazz (2048); measured %d\n", a);
+            if (a != 2048) return fail("the attitude chosen in the creator is " + std::to_string(a));
+            return pass();
+        }
+        if (s.screen == "rb_creator_before") {
+            careerHair0_ = hair;
+            return pass();
+        }
+        if (s.screen == "rb_creator_look") {
+            // Two downs on skin.lst from the first colour: the third (index 2).
+            ScriptObject* sl = ui.panel("charcreator_appearance_panel") ? ui.panel("charcreator_appearance_panel")->component("skin.lst") : nullptr;
+            std::printf("  skin.lst: %d colours, at %d\n", send(sl, "num_data").integerValue(), send(sl, "selected_pos").integerValue());
+            std::printf("  expected: skin 2, hair not %s; measured: skin %d, hair %s\n", careerHair0_.c_str(), skin, hair.c_str());
+            if (skin != 2) return fail("the skin colour chosen in the creator is " + std::to_string(skin) + ", not 2");
+            if (hair.empty() || hair == "none" || hair == careerHair0_) return fail("no hair chosen in the creator (" + hair + ")");
+            return pass();
+        }
+        if (s.screen == "rb_career_cash0") {
+            const int want = tour && tour->find("default_money") ? tour->find("default_money")->intAt(1) : -1;
+            std::printf("  expected cash (config/tour.dta default_money) %d, measured %d\n", want, money);
+            if (money != want) return fail("a new character has " + std::to_string(money) + ", not " + std::to_string(want));
+            careerCash_ = money;
+            return pass();
+        }
+        if (s.screen == "rb_shop_bought") {
+            const int price = ui::rbOutfitCost(ui, gender, "torso", "flannelcoat_checked");
+            std::printf("  expected: torso flannelcoat_checked, cash %d - %d = %d; measured: torso %s, cash %d, owned %d\n", careerCash_, price,
+                        careerCash_ - price, torso.c_str(), money, int(owns("torso", "flannelcoat_checked")));
+            if (price <= 0) return fail("flannelcoat_checked has no price in the catalog");
+            if (torso != "flannelcoat_checked") return fail("the bought shirt is not worn (torso " + torso + ")");
+            if (money != careerCash_ - price) return fail("the cash after the purchase is " + std::to_string(money));
+            careerCash_ = money;
+            return pass();
+        }
+        if (s.screen == "rb_band_wears") {
+            const int t = ui.host().gameCounter(0, "band_piece:" + torso), h = ui.host().gameCounter(0, "band_piece:" + hair);
+            const int att = send(c, "get_attitude").integerValue(), a = ui.host().gameCounter(0, "band_flags:" + std::to_string(att));
+            std::printf("  expected: the guitarist built with %s and %s, playing with attitude %d; measured: %d / %d / %d member(s)\n", torso.c_str(),
+                        hair.c_str(), att, t, h, a);
+            if (t < 1 || h < 1) return fail("the character on stage does not wear its own clothes");
+            if (a < 1) return fail("no member plays with the character's attitude");
+            return pass();
+        }
+        if (s.screen == "rb_gig_stars") {
+            // As the scripts read them after the song (endgame.dta complete_song {main_performer num_stars}).
+            const UiHost::SongResult res = ui.host().lastResult(0);
+            careerStars_ = res.valid ? res.stars : ui.host().gameCounter(0, "stars");
+            std::printf("  the gig's stars: %d\n", careerStars_);
+            if (careerStars_ < 1) return fail("the gig earned no star");
+            return pass();
+        }
+        // The event in config/tour_solo.dta (towns (<town> (<venue> (<event> ...)))).
+        ScriptObject* ev = in.send("tour", "event", {}).object;
+        const std::string town = send(ev, "get", {Value::symbol("town")}).str(), venue = send(ev, "get", {Value::symbol("venue")}).str(),
+                          name = send(ev, "get", {Value::symbol("event_name")}).str();
+        const DataNode* solo = tour ? tour->find("solo") : nullptr;
+        const DataNode* towns = solo ? solo->find("towns") : nullptr;
+        const DataNode* tn = towns ? towns->find(town) : nullptr;
+        const DataNode* vn = tn ? tn->find(venue) : nullptr;
+        const DataNode* en = vn ? vn->find(name) : nullptr;
+        std::string rcat, rout;  // the event's outfit for the instrument and gender
+        if (const DataNode* o = en ? en->find("outfit") : nullptr)
+            if (const DataNode* i = o->find(inst == "bass" ? "guitar" : inst))
+                if (const DataNode* g = i->find(gender)) rcat = g->textAt(1), rout = g->textAt(2);
+        if (s.screen == "rb_gig_cash") {
+            if (!en) return fail("no event " + town + "/" + venue + "/" + name + " in the data");
+            const int per = en->find("reward_per_star") ? en->find("reward_per_star")->intAt(1) : 0;
+            const int most = solo->find("max_money") ? solo->find("max_money")->intAt(1) : 999999999;
+            const int want = std::min(most, careerCash_ + per * careerStars_);
+            const bool won = rcat.empty() || owns(rcat, rout);
+            std::printf("  expected: cash %d + %d x %d stars = %d, %s %s owned; measured: cash %d, owned %d (event %s/%s/%s)\n", careerCash_, per,
+                        careerStars_, want, rcat.c_str(), rout.c_str(), money, int(won), town.c_str(), venue.c_str(), name.c_str());
+            if (money != want) return fail("the gig paid " + std::to_string(money - careerCash_) + ", not " + std::to_string(want - careerCash_));
+            if (!won) return fail("the event's outfit " + rout + " was not won");
+            const std::string keep = std::to_string(money) + " " + std::to_string(skin) + " " + hair + " " + torso + " " + std::to_string(send(c, "get_attitude").integerValue()) +
+                                     " " + rcat + " " + rout;
+            SDL_setenv_unsafe("GD05_WALK_CAREER", keep.c_str(), 1);
+            return pass();
+        }
+        if (s.screen == "rb_career_reloaded") {
+            std::istringstream is(SDL_getenv("GD05_WALK_CAREER") ? SDL_getenv("GD05_WALK_CAREER") : "");
+            int wMoney = -1, wSkin = -1;
+            std::string wHair, wTorso, wAtt, wCat, wOut;
+            is >> wMoney >> wSkin >> wHair >> wTorso >> wAtt >> wCat >> wOut;
+            const std::string att = std::to_string(send(c, "get_attitude").integerValue());
+            // The hints seen, as the save holds them: the guitarist's
+            // welcome only (config/tour_solo.dta: welcome_guitar's cond).
+            std::string hints;
+            try {
+                std::ifstream f(prefDir() + "rb_profile.json");
+                std::stringstream ss;
+                ss << f.rdbuf();
+                const Json root = Json::parse(ss.str());
+                for (const Json& ch : root["characters"].a)
+                    for (const Json& h : ch["seen_hints"].a) hints += (hints.empty() ? "" : ",") + h.str();
+            } catch (const std::exception& e) {
+                hints = std::string("(") + e.what() + ")";
+            }
+            std::printf("  expected: attitude %s, seen hints welcome_guitar; measured: attitude %s, seen hints %s\n", wAtt.c_str(), att.c_str(),
+                        hints.c_str());
+            if (att != wAtt) return fail("the attitude changed through the save");
+            if (hints != "welcome_guitar") return fail("the seen hints are " + hints);
+            const int fame = send(c, "world_fame").integerValue();
+            const bool won = wCat.empty() || owns(wCat, wOut), bought = owns("torso", "flannelcoat_checked");
+            std::printf("  expected (before the restart): cash %d, skin %d, hair %s, torso %s, %s owned, 1+ event played; measured: cash %d, skin %d, "
+                        "hair %s, torso %s, owned %d / %d, events played %d\n",
+                        wMoney, wSkin, wHair.c_str(), wTorso.c_str(), wOut.c_str(), money, skin, hair.c_str(), torso.c_str(), int(won), int(bought), fame);
+            if (wMoney < 0) return fail("rb_career's first half left no expectations (GD05_WALK_CAREER)");
+            if (money != wMoney || skin != wSkin || hair != wHair || torso != wTorso) return fail("the character changed through the save");
+            if (!won || !bought) return fail("the owned clothes were lost through the save");
+            if (fame < 1) return fail("the played event was lost through the save");
+            return pass();
+        }
+        return fail("unknown check " + s.screen);
+    }
+    // rb_skin_* (GD05-022 / GD05-084): the menu preview's head texture,
+    // rendered from head_skin_proxy (render/char_skin.h), against the data.
+    if (s.screen == "rb_skin_cheat_money") {
+        ScriptObject* c = ui.interp().send("tour", "performer", {}).object;
+        if (!c) return fail("no character");
+        ui.interp().send(c, "cheat_add_money", {Value::integer(2000)});
+        return pass();
+    }
+    if (s.screen == "rb_skin_base" || s.screen == "rb_skin_makeup") {
+        static std::vector<uint8_t> base;
+        static int bw = 0, bh = 0;
+        ui::RbCharPreview* p = ui::RbCharPreview::drawnLast();
+        chr::Character* ch = p ? p->character() : nullptr;
+        if (!ch) return fail(s.screen + ": no character preview drawn");
+        std::string out;
+        ch->forEachObject([&](scene::Object& o) {
+            if (const auto* t = o.as<scene::TexRenderer>(); t && o.name == "head_skin.rndtex") out = t->outputTexture;
+        });
+        const scene::Directory* proxy = ch->proxyDir("head_skin_proxy");
+        if (out.empty() || !proxy) return fail("the head has no head_skin.rndtex / head_skin_proxy");
+        SDL_Surface* sf = p->readSkin(out);
+        if (!sf) return fail("the head's texture " + out + " was not rendered (GD05-022)");
+        std::vector<uint8_t> px(size_t(sf->w) * size_t(sf->h) * 4);
+        for (int y = 0; y < sf->h; ++y) std::memcpy(&px[size_t(y) * size_t(sf->w) * 4], static_cast<uint8_t*>(sf->pixels) + y * sf->pitch, size_t(sf->w) * 4);
+        const int w = sf->w, h = sf->h;
+        SDL_DestroySurface(sf);
+        auto texRgba = [](const scene::Tex& t, std::vector<uint8_t>& rgba) {
+            const scene::Bitmap& b = t.bitmap;
+            gfx::TexFormat f = gfx::TexFormat::RGBA8;
+            switch (b.format) {
+            case scene::Bitmap::Format::DXT1: f = gfx::TexFormat::BC1; break;
+            case scene::Bitmap::Format::DXT5: f = gfx::TexFormat::BC3; break;
+            case scene::Bitmap::Format::RGBA8: break;
+            default: return false;
+            }
+            return !b.empty() && gfx::decodeToRgba8(f, b.level(0), b.levels[0].size, b.width, b.height, rgba);
+        };
+        // A ScreenMask's rect in the target's pixels.
+        auto rectOf = [&](const scene::ScreenMask& m, int& x0, int& y0, int& x1, int& y1) {
+            x0 = int(m.screenRect[0] * w), y0 = int(m.screenRect[1] * h);
+            x1 = int((m.screenRect[0] + m.screenRect[2]) * w), y1 = int((m.screenRect[1] + m.screenRect[3]) * h);
+        };
+        const auto* eyes = proxy->find<scene::ScreenMask>("makeup_eyes.mask");
+        if (!eyes) return fail("no makeup_eyes.mask in head_skin_proxy");
+        int x0, y0, x1, y1;
+        rectOf(*eyes, x0, y0, x1, y1);
+        if (s.screen == "rb_skin_base") {
+            // The skin: skin.mask draws the proxy's texture times skin.mat's
+            // colour, skin.pal's entry (rbSkin); overlay.mask then lays the
+            // same texture's alpha-marked parts untinted. A pixel where the
+            // texture's alpha is 0: texture x colour exactly.
+            base = px, bw = w, bh = h;
+            const auto* sm = proxy->find<scene::ScreenMask>("skin.mask");
+            const scene::Mat* mat = sm ? proxy->find<scene::Mat>(sm->mat) : nullptr;
+            const scene::Tex* tex = mat ? proxy->find<scene::Tex>(mat->diffuseTex) : nullptr;
+            std::vector<uint8_t> t;
+            if (!tex || !texRgba(*tex, t) || tex->bitmap.width != w || tex->bitmap.height != h) return fail("skin.mask's texture is not the target's size");
+            // The colour: char/gen/skin.milo skin.pal at the character's skin_color (RB 0x822E5110).
+            ScriptObject* perf = ui.interp().send("tour", "performer", {}).object;
+            const int idx = perf ? ui.interp().send(perf, "skin_color", {}).integerValue() : -1;
+            std::array<float, 4> want{-1, -1, -1, -1};
+            try {
+                auto skinMilo = scene::loadMilo(ui.data(), "char/gen/skin.milo_xbox");
+                if (auto* pal = skinMilo->root().find<scene::ColorPalette>("skin.pal"); pal && idx >= 0 && size_t(idx) < pal->colors.size()) want = pal->colors[size_t(idx)];
+            } catch (const std::exception&) {
+            }
+            std::printf("  skin: expected skin.pal[%d] = %.3f %.3f %.3f\n", idx, want[0], want[1], want[2]);
+            for (int k = 0; k < 3; ++k)
+                if (std::fabs(want[size_t(k)] - mat->color[size_t(k)]) > 1e-4f) return fail("skin.mat's colour is not skin.pal's entry");
+            if (idx != 5) return fail("the creator's sixth skin colour was not chosen");
+            double err = 0, n = 0;
+            for (size_t i = 0; i < size_t(w) * size_t(h); i += 97)
+                if (t[i * 4 + 3] == 0)
+                    for (int k = 0; k < 3; ++k) err += std::fabs(px[i * 4 + size_t(k)] - t[i * 4 + size_t(k)] * mat->color[size_t(k)]), n += 1;
+            std::printf("  head skin %s %dx%d: skin.mat colour %.3f %.3f %.3f; expected texture x colour where its alpha is 0: mean error %.2f over %.0f "
+                        "channels\n", out.c_str(), w, h, mat->color[0], mat->color[1], mat->color[2], n ? err / n : -1.0, n);
+            if (n < 100 || err / n > 3) return fail("the head's skin is not the proxy's texture times the skin colour");
+            return pass();
+        }
+        if (base.empty() || bw != w || bh != h) return fail("rb_skin_base did not run");
+        // makeup_eyes.mask then makeup_eyes_overlay.mask (head1.grp's order),
+        // both over the rect with makeup_eyes.tex: alpha blends (Mat blend 3)
+        // of the texture times mask colour x mat colour [C data].
+        struct Layer {
+            const scene::ScreenMask* mask;
+            const scene::Mat* mat;
+            std::vector<uint8_t> rgba;
+            int tw = 0, th = 0;
+        };
+        std::vector<Layer> layers;
+        for (const char* n : {"makeup_eyes.mask", "makeup_eyes_overlay.mask"}) {
+            const auto* m = proxy->find<scene::ScreenMask>(n);
+            const scene::Mat* mat = m ? proxy->find<scene::Mat>(m->mat) : nullptr;
+            const scene::Tex* tex = mat && mat->dir ? mat->dir->resolve<scene::Tex>(mat->diffuseTex) : nullptr;
+            if (!m || !m->draw.showing || !mat || !tex) return fail(std::string(n) + " is not showing the eyes' make-up (RB 0x822E94B8)");
+            Layer l{m, mat, {}, tex->bitmap.width, tex->bitmap.height};
+            if (!texRgba(*tex, l.rgba)) return fail("cannot decode " + tex->name);
+            std::printf("  %s: %s (%dx%d), mat %s colour %.2f %.2f %.2f %.2f, rect %.4f %.4f %.4f %.4f\n", n, tex->name.c_str(), l.tw, l.th, mat->name.c_str(),
+                        mat->color[0], mat->color[1], mat->color[2], mat->color[3], m->screenRect[0], m->screenRect[1], m->screenRect[2], m->screenRect[3]);
+            layers.push_back(std::move(l));
+        }
+        auto sample = [](const Layer& l, float u, float v, float c[4]) {
+            const float fx = std::clamp(u * l.tw - 0.5f, 0.0f, float(l.tw - 1)), fy = std::clamp(v * l.th - 0.5f, 0.0f, float(l.th - 1));
+            const int ix = int(fx), iy = int(fy), jx = std::min(ix + 1, l.tw - 1), jy = std::min(iy + 1, l.th - 1);
+            const float ax = fx - ix, ay = fy - iy;
+            for (int k = 0; k < 4; ++k) {
+                auto at = [&](int x, int y) { return float(l.rgba[(size_t(y) * size_t(l.tw) + size_t(x)) * 4 + size_t(k)]); };
+                c[k] = ((at(ix, iy) * (1 - ax) + at(jx, iy) * ax) * (1 - ay) + (at(ix, jy) * (1 - ax) + at(jx, jy) * ax) * ay) / 255.0f;
+            }
+        };
+        double err = 0, n = 0;
+        long wantPx = 0, gotPx = 0;  // pixels the make-up changes by more than 8 levels: expected, measured
+        for (int y = y0 + 2; y < y1 - 2; ++y)
+            for (int x = x0 + 2; x < x1 - 2; ++x) {
+                const size_t i = (size_t(y) * size_t(w) + size_t(x)) * 4;
+                float e[3] = {base[i] / 255.0f, base[i + 1] / 255.0f, base[i + 2] / 255.0f};
+                for (const Layer& l : layers) {
+                    const float u = ((x + 0.5f) / w - l.mask->screenRect[0]) / l.mask->screenRect[2];
+                    const float v = ((y + 0.5f) / h - l.mask->screenRect[1]) / l.mask->screenRect[3];
+                    float c[4];
+                    sample(l, u, v, c);
+                    const float a = c[3] * l.mat->color[3] * l.mask->color[3];
+                    for (int k = 0; k < 3; ++k) e[k] = e[k] * (1 - a) + c[k] * l.mat->color[size_t(k)] * l.mask->color[size_t(k)] * a;
+                }
+                float dw = 0, dg = 0;
+                for (int k = 0; k < 3; ++k) {
+                    err += std::fabs(e[k] * 255.0f - px[i + size_t(k)]);
+                    dw = std::max(dw, std::fabs(e[k] * 255.0f - base[i + size_t(k)]));
+                    dg = std::max(dg, std::fabs(float(px[i + size_t(k)]) - float(base[i + size_t(k)])));
+                    n += 1;
+                }
+                wantPx += dw > 8, gotPx += dg > 8;
+            }
+        const double merr = n ? err / n : -1;
+        std::printf("  head texture in makeup_eyes.mask's rect (%d,%d)-(%d,%d): expected the make-up over the bare skin (mean error <= 3), %ld pixels "
+                    "changed by > 8 levels; measured mean error %.2f, %ld pixels changed\n", x0, y0, x1, y1, wantPx, merr, gotPx);
+        if (n == 0 || merr > 3 || wantPx < 200 || std::labs(gotPx - wantPx) > wantPx / 10) return fail("the eyes' make-up is not in the head's texture as the data says");
+        return pass();
+    }
+    // rb_tattoo_* (GD05-084, car9): the patch creator's tattoo in the
+    // shop preview's torso texture (render/char_skin.h).
+    // rb_tattoo_head_base / rb_tattoo_head (rb_facepaint): the head's texture
+    // where the face paint's centre lands (the patch mesh of
+    // head_skin_proxy whose material samples patch_facepaint's output).
+    if (s.screen == "rb_tattoo_head_base" || s.screen == "rb_tattoo_head") {
+        static std::vector<uint8_t> base;
+        ui::RbCharPreview* p = ui::RbCharPreview::drawnLast();
+        chr::Character* ch = p ? p->character() : nullptr;
+        if (!ch) return fail("no character preview drawn");
+        std::string out;
+        ch->forEachObject([&](scene::Object& o) {
+            if (const auto* t = o.as<scene::TexRenderer>(); t && o.name == "head_skin.rndtex") out = t->outputTexture;
+        });
+        SDL_Surface* sf = out.empty() ? nullptr : p->readSkin(out);
+        if (!sf) return fail("the head's texture was not rendered");
+        std::vector<uint8_t> px(size_t(sf->w) * size_t(sf->h) * 4);
+        for (int y = 0; y < sf->h; ++y) std::memcpy(&px[size_t(y) * size_t(sf->w) * 4], static_cast<uint8_t*>(sf->pixels) + y * sf->pitch, size_t(sf->w) * 4);
+        const int w = sf->w, h = sf->h;
+        SDL_DestroySurface(sf);
+        if (s.screen == "rb_tattoo_head_base") return base = px, pass();
+        ScriptObject* perf = ui.interp().send("tour", "performer", {}).object;
+        const std::map<std::string, chr::Patch> worn = ui::rbWornPatches(ui, perf);
+        const chr::PatchLayer* layer = nullptr;
+        if (auto it = worn.find("patch_facepaint"); it != worn.end())
+            for (const chr::PatchLayer& l : it->second)
+                if (!layer && !l.category.empty()) layer = &l;
+        if (!layer) return fail("no face paint worn");
+        if (base.size() != px.size()) return fail("rb_tattoo_head_base did not run");
+        const scene::Directory* proxy = ch->proxyDir("head_skin_proxy");
+        const auto* pr = proxy ? proxy->find<scene::PatchRenderer>("patch_facepaint.patch") : nullptr;
+        const scene::Mesh* mesh = nullptr;
+        if (proxy && pr)
+            for (const auto& o : proxy->objects)
+                if (const auto* m = o->as<scene::Mesh>())
+                    if (const auto* mat = proxy->find<scene::Mat>(m->mat); mat && mat->diffuseTex == pr->outputTexture) mesh = m;
+        if (!mesh) return fail("no patch mesh in head_skin_proxy");
+        const float u = (layer->x + 1) * 0.5f, v = (1 - layer->y) * 0.5f;
+        bool found = false;
+        float wx = 0, wz = 0;
+        for (const auto& f : mesh->faces) {
+            if (f[0] >= mesh->verts.size() || f[1] >= mesh->verts.size() || f[2] >= mesh->verts.size()) continue;
+            const scene::MeshVertex &a = mesh->verts[f[0]], &b = mesh->verts[f[1]], &c = mesh->verts[f[2]];
+            const float d = (b.uv[1] - c.uv[1]) * (a.uv[0] - c.uv[0]) + (c.uv[0] - b.uv[0]) * (a.uv[1] - c.uv[1]);
+            if (std::fabs(d) < 1e-9f) continue;
+            const float l0 = ((b.uv[1] - c.uv[1]) * (u - c.uv[0]) + (c.uv[0] - b.uv[0]) * (v - c.uv[1])) / d;
+            const float l1 = ((c.uv[1] - a.uv[1]) * (u - c.uv[0]) + (a.uv[0] - c.uv[0]) * (v - c.uv[1])) / d;
+            if (l0 < 0 || l1 < 0 || 1 - l0 - l1 < 0) continue;
+            const float l2 = 1 - l0 - l1;
+            wx = l0 * a.pos[0] + l1 * b.pos[0] + l2 * c.pos[0], wz = l0 * a.pos[2] + l1 * b.pos[2] + l2 * c.pos[2];
+            found = true;
+            break;
+        }
+        if (!found) return fail("the face paint's centre is outside the patch mesh's uvs");
+        const int ex = int((wx + 1) * 0.5f * w), ey = int((1 - wz * float(w) / float(h)) * 0.5f * h);
+        int changed = 0, total = 0;
+        for (int y = ey - 4; y <= ey + 4; ++y)
+            for (int x = ex - 4; x <= ex + 4; ++x) {
+                if (x < 0 || y < 0 || x >= w || y >= h) continue;
+                const size_t i = (size_t(y) * size_t(w) + size_t(x)) * 4;
+                ++total;
+                changed += std::max({std::abs(int(px[i]) - int(base[i])), std::abs(int(px[i + 1]) - int(base[i + 1])), std::abs(int(px[i + 2]) - int(base[i + 2]))}) > 8;
+            }
+        std::printf("  face paint layer: %s sticker %d at (%.2f, %.2f): expected in the head texture at (%d, %d) (%s's uvs, the parallel Cam.cam); "
+                    "measured %d of %d pixels there changed from the bare face (>= 50%% expected)\n", layer->category.c_str(), layer->sticker, layer->x,
+                    layer->y, ex, ey, mesh->name.c_str(), changed, total);
+        if (total == 0 || changed * 2 < total) return fail("the face paint is not in the head's texture where the patch maps it");
+        return pass();
+    }
+    if (s.screen == "rb_tattoo_base" || s.screen == "rb_tattoo_torso" || s.screen == "rb_tattoo_layer" || s.screen == "rb_tattoo_stage" || s.screen == "rb_tattoo_to_hub") {
+        static std::vector<uint8_t> base;
+        static std::array<int, 4> gTattooAt{-1, -1, 0, 0};  // the tattoo's centre in the torso texture, its rgb, the bare skin's (rb_tattoo_torso)
+        static int bw = 0, bh = 0;
+        ScriptObject* perf = ui.interp().send("tour", "performer", {}).object;
+        const std::map<std::string, chr::Patch> worn = ui::rbWornPatches(ui, perf);
+        const chr::PatchLayer* layer = nullptr;
+        if (auto it = worn.find("patch_chest"); it != worn.end())
+            for (const chr::PatchLayer& l : it->second)
+                if (!layer && !l.category.empty()) layer = &l;
+        if (s.screen == "rb_tattoo_to_hub") {  // back out of the shop (Triangle until the hub)
+            if (ui.inTransition()) return;
+            if (ui.currentScreen() == "tour_solo_hub_screen") return pass();
+            ui.buttonDown(kTri, 0), ui.buttonUp(kTri, 0);
+            return;
+        }
+        if (s.screen == "rb_tattoo_stage") {
+            // The guitarist on stage (player_guitar0) wears the patch, its
+            // torso texture as the shop's preview rendered it from the same
+            // data: the pixel at the tattoo's centre (rb_tattoo_torso's).
+            const int layers = ui.host().gameCounter(0, "band_patch:player_guitar0:patch_chest");
+            const int rgb = ui.host().gameCounter(0, "band_patch:player_guitar0:torso_naked.tex:" + std::to_string(gTattooAt[0]) + ":" + std::to_string(gTattooAt[1]));
+            std::printf("  on stage: expected 1 chest layer and the torso texture's pixel at (%d, %d) = the shop preview's #%06x (bare skin #%06x); "
+                        "measured %d layer(s), #%06x\n", gTattooAt[0], gTattooAt[1], gTattooAt[2], gTattooAt[3], layers, rgb < 0 ? 0 : rgb);
+            if (layers != 1) return fail("the guitarist on stage has no chest tattoo");
+            if (rgb < 0) return fail("the guitarist's torso texture was not rendered on stage");
+            const int dr = std::abs(((rgb >> 16) & 255) - ((gTattooAt[2] >> 16) & 255)), dg = std::abs(((rgb >> 8) & 255) - ((gTattooAt[2] >> 8) & 255)),
+                      db = std::abs((rgb & 255) - (gTattooAt[2] & 255));
+            if (std::max({dr, dg, db}) > 2) return fail("the tattoo's pixel on stage differs from the shop's");
+            return pass();
+        }
+        if (s.screen == "rb_tattoo_layer") {
+            ui::PanelObj* pp = ui.panel("patch_panel");
+            const Value e = pp ? ui.interp().send(pp, "edit_layer", {}) : Value::integer(0);
+            std::printf("  the edited layer: category %s, sticker %d, mode %s\n", e.object ? ui.interp().send(e.object, "get", {Value::symbol("sticker_category")}).str().c_str() : "-",
+                        e.object ? ui.interp().send(e.object, "get", {Value::symbol("sticker_idx")}).integerValue() : -1,
+                        pp ? ui.interp().send(pp, "get", {Value::symbol("mode")}).str().c_str() : "-");
+            if (!e.object || ui.interp().send(e.object, "has_sticker", {}).integerValue() == 0) return fail("the layer has no sticker");
+            return pass();
+        }
+        ui::RbCharPreview* p = ui::RbCharPreview::drawnLast();
+        chr::Character* ch = p ? p->character() : nullptr;
+        if (!ch) return fail("no character preview drawn");
+        SDL_Surface* sf = p->readSkin("torso_naked.tex");
+        if (!sf) return fail("the torso's texture was not rendered");
+        std::vector<uint8_t> px(size_t(sf->w) * size_t(sf->h) * 4);
+        for (int y = 0; y < sf->h; ++y) std::memcpy(&px[size_t(y) * size_t(sf->w) * 4], static_cast<uint8_t*>(sf->pixels) + y * sf->pitch, size_t(sf->w) * 4);
+        const int w = sf->w, h = sf->h;
+        SDL_DestroySurface(sf);
+        if (s.screen == "rb_tattoo_base") {
+            base = px, bw = w, bh = h;
+            std::printf("  torso texture %dx%d kept (no tattoo: %d layer(s) worn on the chest)\n", w, h, layer ? 1 : 0);
+            return layer ? fail("a tattoo before the patch was made") : pass();
+        }
+        if (!layer)
+            return fail("no chest tattoo worn (tattoo_patch patch_chest " +
+                        std::to_string(perf ? ui.interp().send(perf, "tattoo_patch", {Value::symbol("patch_chest")}).integerValue() : -9) + ")");
+        if (base.empty() || bw != w || bh != h) return fail("rb_tattoo_base did not run");
+        // Where the layer's centre lands in the torso texture: the patch's
+        // uv (u = (x + 1) / 2, v = (1 - y) / 2) found in torso_body.mesh's
+        // uvs (patch_chest.mat samples patch_chest.tex), the triangle's
+        // position through the proxy's parallel Cam.cam [C data].
+        const scene::Directory* proxy = ch->proxyDir("torso_skin_proxy");
+        const auto* mesh = proxy ? proxy->find<scene::Mesh>("torso_body.mesh") : nullptr;
+        const auto* cam = proxy ? proxy->find<scene::Cam>("Cam.cam") : nullptr;
+        if (!mesh || !cam) return fail("no torso_body.mesh / Cam.cam in torso_skin_proxy");
+        const float u = (layer->x + 1) * 0.5f, v = (1 - layer->y) * 0.5f;
+        bool found = false;
+        float wx = 0, wz = 0;
+        for (const auto& f : mesh->faces) {
+            if (f[0] >= mesh->verts.size() || f[1] >= mesh->verts.size() || f[2] >= mesh->verts.size()) continue;
+            const scene::MeshVertex &a = mesh->verts[f[0]], &b = mesh->verts[f[1]], &c = mesh->verts[f[2]];
+            const float d = (b.uv[1] - c.uv[1]) * (a.uv[0] - c.uv[0]) + (c.uv[0] - b.uv[0]) * (a.uv[1] - c.uv[1]);
+            if (std::fabs(d) < 1e-9f) continue;
+            const float l0 = ((b.uv[1] - c.uv[1]) * (u - c.uv[0]) + (c.uv[0] - b.uv[0]) * (v - c.uv[1])) / d;
+            const float l1 = ((c.uv[1] - a.uv[1]) * (u - c.uv[0]) + (a.uv[0] - c.uv[0]) * (v - c.uv[1])) / d;
+            const float l2 = 1 - l0 - l1;
+            if (l0 < 0 || l1 < 0 || l2 < 0) continue;
+            wx = l0 * a.pos[0] + l1 * b.pos[0] + l2 * c.pos[0], wz = l0 * a.pos[2] + l1 * b.pos[2] + l2 * c.pos[2];
+            found = true;
+            break;
+        }
+        if (!found) return fail("the layer's centre is outside torso_body.mesh's uvs");
+        // The parallel camera (RB 0x8218CAE0): x across, z up x the aspect;
+        // Cam.cam sits at the origin unturned in the data [C data] (its
+        // own transform is added below).
+        const float ndcX = wx - cam->trans.local.pos[0], ndcY = (wz - cam->trans.local.pos[2]) * float(w) / float(h);
+        const int ex = int((ndcX + 1) * 0.5f * w), ey = int((1 - ndcY) * 0.5f * h);
+        int changed = 0, total = 0;
+        for (int y = ey - 4; y <= ey + 4; ++y)
+            for (int x = ex - 4; x <= ex + 4; ++x) {
+                if (x < 0 || y < 0 || x >= w || y >= h) continue;
+                const size_t i = (size_t(y) * size_t(w) + size_t(x)) * 4;
+                ++total;
+                changed += std::max({std::abs(int(px[i]) - int(base[i])), std::abs(int(px[i + 1]) - int(base[i + 1])), std::abs(int(px[i + 2]) - int(base[i + 2]))}) > 8;
+            }
+        // Far from it (the other side of the texture): unchanged.
+        long elsewhere = 0, n = 0;
+        for (int y = 0; y < h; y += 7)
+            for (int x = 0; x < w; x += 7) {
+                if (std::abs(x - ex) < w / 4 && std::abs(y - ey) < h / 3) continue;
+                const size_t i = (size_t(y) * size_t(w) + size_t(x)) * 4;
+                ++n;
+                elsewhere += std::max({std::abs(int(px[i]) - int(base[i])), std::abs(int(px[i + 1]) - int(base[i + 1])), std::abs(int(px[i + 2]) - int(base[i + 2]))}) > 8;
+            }
+        std::printf("  tattoo layer: %s sticker %d at (%.2f, %.2f) scale %.2f x %.2f: expected in the torso texture at (%d, %d) (torso_body.mesh's "
+                    "uvs, Cam.cam); measured %d of %d pixels there changed from the bare skin (>= 50%% expected), %ld of %ld far from it (<= 2%%)\n",
+                    layer->category.c_str(), layer->sticker, layer->x, layer->y, layer->sx, layer->sy, ex, ey, changed, total, elsewhere, n);
+        {
+            const size_t i = (size_t(ey) * size_t(w) + size_t(ex)) * 4;
+            gTattooAt = {ex, ey, (px[i] << 16) | (px[i + 1] << 8) | px[i + 2], (base[i] << 16) | (base[i + 1] << 8) | base[i + 2]};
+        }
+        if (total == 0 || changed * 2 < total) return fail("the tattoo is not in the torso's texture where the patch maps it");
+        if (elsewhere * 50 > n) return fail("the torso's texture changed away from the tattoo");
+        return pass();
+    }
+    // rb_slots_drawn (GD05-083, car9): the band lobby's players'
+    // characters, each at its slot's proxy in practice_space.milo (coop<N>.pxy,
+    // N the slot) through the screen's shot (select_cam coop_enter).
+    // Expected: the box from the proxy up the creator's framing height
+    // (creator.trans above creator.pxy), 30 units wide, projected through the
+    // shot; measured: the frame with and without the previews differs in
+    // >= 10% of that box for every slot with a player.
+    if (s.screen == "rb_slots_drawn") {
+        static int phase = 0;
+        static double at = 0;
+        const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+        const std::string base = std::string(dir ? dir : SDL_GetBasePath()) + "/slots_";
+        if (phase == 0) {
+            if (!ui.host().saveScreenshot(base + "on.bmp")) return fail("no screenshot");
+            ui::RbCharPreview::hidden = true;
+            at = nowMs, phase = 1;
+            return;
+        }
+        if (nowMs - at < 300) return;
+        const bool saved = ui.host().saveScreenshot(base + "off.bmp");
+        ui::RbCharPreview::hidden = false;
+        phase = 0;
+        if (!saved) return fail("no screenshot");
+        ui::PanelObj* ps = ui.panel("practice_space_panel");
+        gfx::UiView* v = ps ? ps->view.get() : nullptr;
+        const auto* shot = v ? dynamic_cast<const scene::CamShot*>(v->find("coop_enter.shot")) : nullptr;
+        scene::Xfm cp, ct;
+        if (!v || !shot || !v->worldXfm("creator.pxy", cp) || !v->worldXfm("creator.trans", ct)) return fail("no practice space or coop_enter.shot");
+        const float height = ct.pos[2] - cp.pos[2];
+        struct Scene : ShotScene {
+            const gfx::UiView& v;
+            explicit Scene(const gfx::UiView& view) : v(view) {}
+            bool targetPoint(const scene::CamTarget& t, std::array<float, 3>& out) const override {
+                scene::Xfm x;
+                if (!v.worldXfm(t.object, x)) return false;
+                out = x.pos;
+                return true;
+            }
+            bool parentXfm(const scene::CamTarget& t, scene::Xfm& out) const override { return v.worldXfm(t.object, out); }
+            const scene::TransAnim* path(const std::string&) const override { return nullptr; }
+        } scene(*v);
+        gfx::Camera cam = CameraDirector::evaluate(scene, *shot, 0);
+        const gfx::Mat4 vp = cam.viewProj(false);
+        SDL_Surface* a = SDL_LoadBMP((base + "on.bmp").c_str());
+        SDL_Surface* b = SDL_LoadBMP((base + "off.bmp").c_str());
+        SDL_Surface* ca = a ? SDL_ConvertSurface(a, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        SDL_Surface* cb = b ? SDL_ConvertSurface(b, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        std::string bad;
+        int players = 0;
+        for (auto& sl : ui.playerSlots()) {
+            const int pn = sl ? sl->playerNum() : -1;
+            if (pn < 0) continue;
+            ++players;
+            int slotNum = 0;
+            for (size_t i = 0; i < ui.playerSlots().size(); ++i)
+                if (ui.playerSlots()[i].get() == sl.get()) slotNum = int(i);
+            scene::Xfm px;
+            const std::string proxy = "coop" + std::to_string(slotNum) + ".pxy";
+            if (!v->worldXfm(proxy, px) || !ca || !cb || ca->w != cb->w) {
+                bad += " no " + proxy;
+                continue;
+            }
+            int x0 = ca->w, y0 = ca->h, x1 = 0, y1 = 0;
+            for (const float dz : {0.0f, height})
+                for (const float dx : {-15.0f, 15.0f}) {
+                    const float x = px.pos[0] + dx, y = px.pos[1], z = px.pos[2] + dz;
+                    float c[4];
+                    for (int r = 0; r < 4; ++r) c[r] = vp.m[r] * x + vp.m[4 + r] * y + vp.m[8 + r] * z + vp.m[12 + r];
+                    if (c[3] <= 0) continue;
+                    const int sx = int((c[0] / c[3] + 1) * 0.5f * ca->w), sy = int((1 - c[1] / c[3]) * 0.5f * ca->h);
+                    x0 = std::min(x0, sx), x1 = std::max(x1, sx), y0 = std::min(y0, sy), y1 = std::max(y1, sy);
+                }
+            x0 = std::max(x0, 0), y0 = std::max(y0, 0), x1 = std::min(x1, ca->w - 1), y1 = std::min(y1, ca->h - 1);
+            long changed = 0, total = 0;
+            for (int yy = y0; yy <= y1; ++yy)
+                for (int xx = x0; xx <= x1; ++xx) {
+                    const uint8_t* pa = static_cast<const uint8_t*>(ca->pixels) + yy * ca->pitch + xx * 4;
+                    const uint8_t* pb = static_cast<const uint8_t*>(cb->pixels) + yy * cb->pitch + xx * 4;
+                    ++total;
+                    changed += std::abs(int(pa[0]) - int(pb[0])) + std::abs(int(pa[1]) - int(pb[1])) + std::abs(int(pa[2]) - int(pb[2])) > 24;
+                }
+            std::printf("  slot %d (player %d) at %s: expected the character in (%d,%d)-(%d,%d) through coop_enter.shot; measured %ld of %ld pixels "
+                        "drawn by it (>= 10%% expected: a seated drummer fills less of the box)\n", slotNum, pn, proxy.c_str(), x0, y0, x1, y1, changed, total);
+            if (total == 0 || changed * 100 < total * 10) bad += " slot " + std::to_string(slotNum) + " not drawn";
+        }
+        for (SDL_Surface* x : {a, b, ca, cb})
+            if (x) SDL_DestroySurface(x);
+        if (players == 0) bad += " no player in a slot";
+        if (!bad.empty()) return fail("the lobby's characters:" + bad);
+        return pass();
+    }
+    // rb_front_creator (GD05-083, car9): the creator's character through
+    // practice_space.milo's creator.shot (select_cam creator), standing at
+    // creator.pxy. Expected: its head and chest where the shot puts them
+    // (CameraDirector::evaluate over the milo's objects: the keyframe, its
+    // target creator.trans, its screen offset), the character's own pose
+    // moved to creator.pxy; measured: the frame with and without the
+    // preview differs at those points (the character in front, not behind
+    // the menu).
+    if (s.screen == "rb_front_creator") {
+        static int phase = 0;
+        static double at = 0;
+        const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+        const std::string base = std::string(dir ? dir : SDL_GetBasePath()) + "/front_";
+        if (phase == 0) {
+            if (!ui.host().saveScreenshot(base + "on.bmp")) return fail("no screenshot");
+            ui::RbCharPreview::hidden = true;
+            at = nowMs, phase = 1;
+            return;
+        }
+        if (nowMs - at < 300) return;
+        const bool saved = ui.host().saveScreenshot(base + "off.bmp");
+        ui::RbCharPreview::hidden = false;
+        phase = 0;
+        if (!saved) return fail("no screenshot");
+        ui::PanelObj* ps = ui.panel("practice_space_panel");
+        gfx::UiView* v = ps ? ps->view.get() : nullptr;
+        ui::RbCharPreview* p = ui::RbCharPreview::drawnLast();
+        chr::Character* ch = p ? p->character() : nullptr;
+        const auto* shot = v ? dynamic_cast<const scene::CamShot*>(v->find("creator.shot")) : nullptr;
+        scene::Xfm pxy;
+        if (!v || !ch || !shot || !v->worldXfm("creator.pxy", pxy)) return fail("no practice space, preview, creator.shot or creator.pxy");
+        struct Scene : ShotScene {
+            const gfx::UiView& v;
+            explicit Scene(const gfx::UiView& view) : v(view) {}
+            bool targetPoint(const scene::CamTarget& t, std::array<float, 3>& out) const override {
+                scene::Xfm x;
+                if (!v.worldXfm(t.object, x)) return false;
+                out = x.pos;
+                return true;
+            }
+            bool parentXfm(const scene::CamTarget& t, scene::Xfm& out) const override { return v.worldXfm(t.object, out); }
+            const scene::TransAnim* path(const std::string&) const override { return nullptr; }
+        } scene(*v);
+        gfx::Camera cam = CameraDirector::evaluate(scene, *shot, 0);
+        cam.aspect = gfx::kLogicalW / gfx::kLogicalH;
+        const gfx::Mat4 vp = cam.viewProj(false);
+        SDL_Surface* a = SDL_LoadBMP((base + "on.bmp").c_str());
+        SDL_Surface* b = SDL_LoadBMP((base + "off.bmp").c_str());
+        SDL_Surface* ca = a ? SDL_ConvertSurface(a, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        SDL_Surface* cb = b ? SDL_ConvertSurface(b, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        std::string bad;
+        // The body between its feet (creator.pxy) and the shot's target
+        // above them (creator.trans, the framing point): at 1/2 and 3/4 of the
+        // way up.
+        scene::Xfm aim;
+        if (!v->worldXfm("creator.trans", aim)) return fail("no creator.trans");
+        for (const float f : {0.5f, 0.75f}) {
+            const float x = pxy.pos[0] + (aim.pos[0] - pxy.pos[0]) * f, y = pxy.pos[1] + (aim.pos[1] - pxy.pos[1]) * f, z = pxy.pos[2] + (aim.pos[2] - pxy.pos[2]) * f;
+            float c[4];
+            for (int r = 0; r < 4; ++r) c[r] = vp.m[r] * x + vp.m[4 + r] * y + vp.m[8 + r] * z + vp.m[12 + r];
+            if (!ca || !cb || ca->w != cb->w || c[3] <= 0) {
+                bad += " the body is not in front of the camera";
+                continue;
+            }
+            const int px = int((c[0] / c[3] + 1) * 0.5f * ca->w), py = int((1 - c[1] / c[3]) * 0.5f * ca->h);
+            const int r = ca->h / 40;
+            int changed = 0, total = 0;
+            for (int yy = py - r; yy <= py + r; ++yy)
+                for (int xx = px - r; xx <= px + r; ++xx) {
+                    if (xx < 0 || yy < 0 || xx >= ca->w || yy >= ca->h) continue;
+                    const uint8_t* pa = static_cast<const uint8_t*>(ca->pixels) + yy * ca->pitch + xx * 4;
+                    const uint8_t* pb = static_cast<const uint8_t*>(cb->pixels) + yy * cb->pitch + xx * 4;
+                    ++total;
+                    changed += std::abs(int(pa[0]) - int(pb[0])) + std::abs(int(pa[1]) - int(pb[1])) + std::abs(int(pa[2]) - int(pb[2])) > 24;
+                }
+            std::printf("  the body at %.0f%% of creator.pxy -> creator.trans: expected on screen at (%d, %d) of %dx%d through creator.shot; measured %d of "
+                        "%d pixels there drawn by the preview (>= 50%% expected)\n", f * 100, px, py, ca->w, ca->h, changed, total);
+            if (px < 0 || py < 0 || px >= ca->w || py >= ca->h) bad += " the body is off screen";
+            else if (changed * 2 < total) bad += " the body is hidden at " + std::to_string(int(f * 100)) + "%";
+        }
+        for (SDL_Surface* x : {a, b, ca, cb})
+            if (x) SDL_DestroySurface(x);
+        if (!bad.empty()) return fail("the creator's character is not where creator.shot shows it:" + bad);
+        return pass();
+    }
+    // rb_preview_drawn (GD05-083): the menu's character preview
+    // (ui/rb_char_preview.h) drew meshes, and the frame with it differs from
+    // the frame without it (RbCharPreview::hidden) in more than 500 pixels.
+    if (s.screen == "rb_preview_drawn") {
+        static int phase = 0, meshes0 = 0;
+        static double at = 0;
+        const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+        const std::string base = std::string(dir ? dir : SDL_GetBasePath()) + "/preview_";
+        if (phase == 0) {
+            meshes0 = ui::RbCharPreview::totalMeshes();
+            at = nowMs, phase = 1;
+            return;
+        }
+        if (phase == 1) {
+            if (nowMs - at < 300) return;
+            if (!ui.host().saveScreenshot(base + "on.bmp")) return fail("no screenshot");
+            ui::RbCharPreview::hidden = true;
+            at = nowMs, phase = 2;
+            return;
+        }
+        if (nowMs - at < 300) return;
+        const bool saved = ui.host().saveScreenshot(base + "off.bmp");
+        ui::RbCharPreview::hidden = false;
+        phase = 0;
+        const int meshes = ui::RbCharPreview::totalMeshes() - meshes0;
+        if (!saved) return fail("no screenshot");
+        SDL_Surface* a = SDL_LoadBMP((base + "on.bmp").c_str());
+        SDL_Surface* b = SDL_LoadBMP((base + "off.bmp").c_str());
+        SDL_Surface* ca = a ? SDL_ConvertSurface(a, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        SDL_Surface* cb = b ? SDL_ConvertSurface(b, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        long diff = 0;
+        if (ca && cb && ca->w == cb->w && ca->h == cb->h)
+            for (int y = 0; y < ca->h; ++y) {
+                const uint8_t* pa = static_cast<const uint8_t*>(ca->pixels) + y * ca->pitch;
+                const uint8_t* pb = static_cast<const uint8_t*>(cb->pixels) + y * cb->pitch;
+                for (int x = 0; x < ca->w; ++x)
+                    diff += std::abs(int(pa[x * 4]) - int(pb[x * 4])) + std::abs(int(pa[x * 4 + 1]) - int(pb[x * 4 + 1])) +
+                                std::abs(int(pa[x * 4 + 2]) - int(pb[x * 4 + 2])) > 24;
+            }
+        for (SDL_Surface* x : {a, b, ca, cb})
+            if (x) SDL_DestroySurface(x);
+        std::printf("  character preview on %s: expected meshes drawn > 0 and > 500 pixels changed by it; measured %d meshes, %ld pixels\n",
+                    ui.currentScreen().c_str(), meshes, diff);
+        if (meshes <= 0 || diff <= 500) return fail("the character is not drawn in the menu");
+        return pass();
+    }
+    // rb_body_deform (GD05-084): the sliders' values, then the guitarist's
+    // bones against char/male/gen/male_guitar.milo's deform clip.
+    if (s.screen == "rb_deform_sliders" || s.screen == "rb_deform_stage") {
+        Interp& in = ui.interp();
+        ScriptObject* c = s.screen == "rb_deform_sliders" ? in.send("charcreator_panel", "get_tour_char", {}).object : in.send("tour", "performer", {}).object;
+        if (!c) return fail(s.screen + ": no character");
+        const float w = in.send(c, "get", {Value::symbol("weight")}).number(), h = in.send(c, "get", {Value::symbol("height")}).number();
+        if (s.screen == "rb_deform_sliders") {
+            std::printf("  expected: weight 1, height 1 (the sliders' top); measured: weight %.2f, height %.2f\n", w, h);
+            if (w != 1.0f || h != 1.0f) return fail("the sliders did not set the character's weight and height");
+            return pass();
+        }
+        // The data: the clip's samples 0 (neutral) and 1 (tall and fat).
+        std::unique_ptr<scene::Milo> milo;
+        try {
+            milo = scene::loadMilo(ui.data(), "char/" + in.send(c, "get_gender", {}).str() + "/gen/" + in.send(c, "get_gender", {}).str() + "_guitar.milo_xbox");
+        } catch (const std::exception& e) {
+            return fail(std::string("the character milo: ") + e.what());
+        }
+        const scene::CharClipSamples* clip = nullptr;
+        milo->root().forEach([&](scene::Object& o) {
+            if (!clip && o.name == "deform") clip = o.as<scene::CharClipSamples>();
+        });
+        if (!clip) return fail("no deform clip in the character milo");
+        std::string bad;
+        // Not the pelvis: the clips animate its position, scaled by RB's
+        // CharIKScale (pelvis.ikscale, capture_before / after) [I: not in the port].
+        for (const char* bone : {"bone_spine1", "bone_L-foreArm", "bone_R-knee", "bone_neck"}) {
+            const scene::CharBonesSamples& set = clip->full;
+            int k = -1;
+            for (size_t i = 0; i < set.bones.size(); ++i)
+                if (set.bones[i].name == std::string(bone) + ".pos") k = int(i);
+            if (k < 0 || set.count < 2) {
+                bad += std::string(bad.empty() ? "" : "; ") + bone + ".pos not in the clip";
+                continue;
+            }
+            const float* s0 = set.sample(0) + set.offset[size_t(k)];
+            const float* s1 = set.sample(1) + set.offset[size_t(k)];
+            float got[3];
+            for (int a = 0; a < 3; ++a) got[a] = float(ui.host().gameCounter(0, std::string("band_bone:player_guitar0:") + bone + ":" + std::to_string(a))) / 1000.0f;
+            float err = 0, moved = 0;
+            for (int a = 0; a < 3; ++a) err = std::max(err, std::fabs(got[a] - s1[a])), moved = std::max(moved, std::fabs(s1[a] - s0[a]));
+            std::printf("  %s: expected (sample 1) %.3f %.3f %.3f, neutral %.3f %.3f %.3f; measured %.3f %.3f %.3f (error %.3f)\n", bone, s1[0], s1[1], s1[2],
+                        s0[0], s0[1], s0[2], got[0], got[1], got[2], err);
+            if (err > 0.01f) bad += std::string(bad.empty() ? "" : "; ") + bone + " off by " + std::to_string(err);
+        }
+        if (!bad.empty()) return fail(bad);
+        return pass();
+    }
+    // rb_shop_drum / rb_shop_mic (GD05-083): the drum and mic shops against
+    // char/instruments.dta: the first piece with a cost, its finishes (the
+    // category's outfits containing its name, RB 0x823E0700).
+    if (s.screen.rfind("rb_kit_", 0) == 0) {
+        Interp& in = ui.interp();
+        ScriptObject* c = in.send("tour", "performer", {}).object;
+        if (!c) return fail(s.screen + ": no character");
+        auto send = [&](const char* msg, std::vector<Value> a = {}) { return in.send(c, msg, a); };
+        const std::string inst = send("get_instrument").str();
+        const std::string cat = inst == "vocals" ? "mic" : inst, gender = send("get_gender").str();
+        std::string piece;
+        int cost = -1;
+        for (const std::string& o : ui::rbCategoryOutfits(ui, gender, cat))
+            if (const int k = ui::rbOutfitCost(ui, gender, cat, o); k > 0) {
+                piece = o, cost = k;
+                break;
+            }
+        std::vector<std::string> finishes;
+        for (const std::string& o : ui::rbCategoryOutfits(ui, gender, cat))
+            if (!piece.empty() && o.find(piece) != std::string::npos) finishes.push_back(o);
+        const int money = send("money").integerValue();
+        const std::string worn = send("get_outfit", {Value::symbol(cat)}).str();
+        if (piece.empty()) return fail("no " + cat + " piece with a cost in char/instruments.dta");
+        // The walk's pick: the mic's second finish, the drum's first.
+        const std::string pick = finishes.size() > 1 && inst == "vocals" ? finishes[1] : piece;
+        static bool ownedBefore = false;
+        if (s.screen == "rb_kit_cheat_money") {
+            ownedBefore = send("has_outfit", {Value::symbol(cat), Value::symbol(piece)}).truthy();
+            send("cheat_add_money", {Value::integer(2000)});
+            careerCash_ = send("money").integerValue();
+            std::printf("  cheat_add_money 2000: cash %d; data: the first %s with a cost: %s at %d (%d finish(es))\n", careerCash_, cat.c_str(), piece.c_str(),
+                        cost, int(finishes.size()));
+            return pass();
+        }
+        if (s.screen == "rb_kit_offer") {
+            const std::string want = finishes.size() > 1 ? "group_select_screen" : "shop_confirm_screen";
+            std::printf("  expected: %s (%d outfits contain %s); measured: %s\n", want.c_str(), int(finishes.size()), piece.c_str(), ui.currentScreen().c_str());
+            if (ui.currentScreen() != want) return fail("the shop offered " + ui.currentScreen() + ", expected " + want);
+            return pass();
+        }
+        if (s.screen == "rb_kit_confirm") {
+            // After group_select_screen's X, the confirm screen: yes.
+            if (ui.currentScreen() == "shop_confirm_screen") return ui.buttonDown(kX, 0), ui.buttonUp(kX, 0), pass();
+            if (ui.inTransition()) return;
+            return pass();
+        }
+        if (s.screen == "rb_kit_back_to_hub") {
+            if (ui.inTransition()) return;
+            if (ui.currentScreen() == "tour_solo_hub_screen") return pass();
+            ui.buttonDown(kTri, 0), ui.buttonUp(kTri, 0);
+            return;
+        }
+        if (s.screen == "rb_kit_bought") {
+            // A model the character owns: its finishes worn free (D76).
+            const int price = ownedBefore ? 0 : cost;
+            const bool owned = send("has_outfit", {Value::symbol(cat), Value::symbol(piece)}).truthy();
+            std::printf("  expected: cash %d - %d = %d (%s %s before), %s %s worn, owned; measured: cash %d, %s %s, owned %d\n", careerCash_, price,
+                        careerCash_ - price, piece.c_str(), ownedBefore ? "owned" : "not owned", cat.c_str(), pick.c_str(), money, cat.c_str(),
+                        worn.c_str(), int(owned));
+            if (money != careerCash_ - price) return fail("the " + cat + " cost " + std::to_string(careerCash_ - money));
+            if (worn != pick || !owned) return fail("the bought " + cat + " is not the character's (" + worn + ")");
+            return pass();
+        }
+        if (s.screen == "rb_kit_on_stage") {
+            // The drummer plays the venue's kit of the finish (rb_band.cpp:
+            // char/instruments/drum/gen/<venue kind>_drums_<finish>.milo [C data]).
+            const std::string key = inst == "drum" ? "band_piece_suffix:_drums_" + pick : "band_piece:" + pick;
+            const int n = ui.host().gameCounter(0, key);
+            std::printf("  expected: the %s's %s on stage (%s); measured %d member(s)\n", inst.c_str(), pick.c_str(), key.c_str(), n);
+            if (n < 1) return fail("the bought " + cat + " is not on stage");
+            return pass();
+        }
+        return fail("unknown check " + s.screen);
+    }
+    // rb_shop_items (GD05-072): the instrument shop against char/instruments.dta.
+    if (s.screen.rfind("rb_shop_", 0) == 0 && s.screen != "rb_shop_bought") {
+        Interp& in = ui.interp();
+        ScriptObject* c = in.send("tour", "performer", {}).object;
+        if (!c) return fail(s.screen + ": no character");
+        auto send = [&](const char* msg, std::vector<Value> a = {}) { return in.send(c, msg, a); };
+        const int money = send("money").integerValue();
+        const std::string gender = send("get_gender").str(), guitar = send("get_outfit", {Value::symbol("guitar")}).str();
+        // The first model of (guitar (groups ...)) and its price, from the data.
+        {
+            const ui::RbModel probe = ui::rbFirstModel(ui, gender, "guitar");
+            const int price = probe.cost;
+            const std::string model = probe.model;
+            // The model's finishes: the category's outfits whose names contain
+            // the model's (RB 0x823E0700); the walk picks the second.
+            std::vector<std::string> finishes;
+            for (const std::string& o : ui::rbCategoryOutfits(ui, gender, "guitar"))
+                if (o.find(model) != std::string::npos) finishes.push_back(o);
+            const std::string finish = finishes.size() > 1 ? finishes[1] : probe.finish;
+            std::printf("  %s: money %d, guitar %s; data: first guitar %s (%s) at %d\n", s.screen.c_str(), money, guitar.c_str(), model.c_str(),
+                        finish.c_str(), price);
+            if (model.empty() || price <= 0) return fail("no guitar model with a price in char/instruments.dta");
+            if (s.screen == "rb_shop_too_dear") {
+                std::printf("  expected: shop_error_money_screen, cash %d kept (%d < %d); measured: %s, cash %d\n", careerCash_, careerCash_, price,
+                            ui.currentScreen().c_str(), money);
+                if (money != careerCash_) return fail("the cash changed on a refused purchase");
+                return pass();
+            }
+            if (s.screen == "rb_shop_finishes") {
+                auto* gp = dynamic_cast<ui::ListProvider*>(in.findObject("group_select_panel_provider"));
+                std::vector<std::string> got;
+                for (int i = 0; gp && i < gp->numData(); ++i) got.push_back(gp->symbol(i));
+                std::string w, g;
+                for (const std::string& x : finishes) w += " " + x;
+                for (const std::string& x : got) g += " " + x;
+                std::printf("  expected finishes of %s:%s; measured:%s\n", model.c_str(), w.c_str(), g.c_str());
+                if (finishes.size() < 2) return fail("the data gives " + model + " fewer than two finishes");
+                if (got != finishes) return fail("group_select_screen does not list the model's finishes");
+                return pass();
+            }
+            if (s.screen == "rb_shop_cheat_money") {
+                send("cheat_add_money", {Value::integer(2000)});
+                careerCash_ = send("money").integerValue();
+                std::printf("  cheat_add_money 2000: cash %d\n", careerCash_);
+                return pass();
+            }
+            if (s.screen == "rb_shop_guitar") {
+                const bool owned = send("has_outfit", {Value::symbol("guitar"), Value::symbol(model)}).truthy();
+                std::printf("  expected: cash %d - %d = %d, guitar %s, owned; measured: cash %d, guitar %s, owned %d\n", careerCash_, price,
+                            careerCash_ - price, finish.c_str(), money, guitar.c_str(), int(owned));
+                if (money != careerCash_ - price) return fail("the guitar cost " + std::to_string(careerCash_ - money));
+                if (guitar != finish || !owned) return fail("the bought guitar is not the character's (" + guitar + ")");
+                SDL_setenv_unsafe("GD05_WALK_CAREER", (std::to_string(money) + " " + finish).c_str(), 1);
+                return pass();
+            }
+            if (s.screen == "rb_shop_guitar_on_stage") {
+                const int n = ui.host().gameCounter(0, "band_piece:" + finish);
+                std::printf("  expected: the guitarist plays %s; measured %d member(s)\n", finish.c_str(), n);
+                if (n < 1) return fail("the bought guitar is not on stage");
+                return pass();
+            }
+            if (s.screen == "rb_shop_guitar_reloaded") {
+                int wMoney = -1;
+                std::string wGuitar;
+                std::istringstream is(SDL_getenv("GD05_WALK_CAREER") ? SDL_getenv("GD05_WALK_CAREER") : "");
+                is >> wMoney >> wGuitar;
+                const bool owned = send("has_outfit", {Value::symbol("guitar"), Value::symbol(model)}).truthy();
+                std::printf("  expected (before the restart): cash >= %d, guitar %s owned; measured: cash %d, guitar %s, owned %d\n", wMoney,
+                            wGuitar.c_str(), money, guitar.c_str(), int(owned));
+                if (wMoney < 0 || money < wMoney || guitar != wGuitar || !owned) return fail("the guitar was lost through the save");
+                return pass();
+            }
+        }
+        return fail("unknown check " + s.screen);
+    }
+    if (s.screen == "restart_app") {  // the game starts again in the same process (runApp): the walk goes on as <walk>_restarted
+        ui.host().setEnhancedValue("restart_now", "1");
         return pass();
     }
     if (s.screen == "print_focus") {
@@ -2563,6 +5759,534 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 if (std::fabs(xs[i] - xs[j]) < 20) return fail("two band icons stand on each other");
         return pass();
     }
+    if (s.screen.rfind("dev_axis ", 0) == 0) {  // "dev_axis <n> <value>": an axis of the walk's device
+        SDL_Joystick* j = SDL_GetJoystickFromID(adapter_);
+        if (!j) return fail("the virtual device is not open");
+        int axisN = 0, value = 0;
+        std::sscanf(s.screen.c_str() + 9, "%d %d", &axisN, &value);
+        devAxis(j, axisN, Sint16(std::clamp(value, -32768, 32767)));
+        return pass();
+    }
+    // GD05-073's Overdrive walks (rb_od_*).
+    if (s.screen.rfind("od_set:", 0) == 0) {
+        const float v = float(std::atoi(s.screen.c_str() + 7)) / 100.0f;
+        ui.host().setPlayerStarPower(0, "meter", v);
+        return pass();
+    }
+    if (s.screen.rfind("od_state:", 0) == 0) {
+        const Player* pl = ui.host().gamePlayer(0);
+        if (!pl) return fail("no player");
+        const bool want = s.screen[9] == '1';
+        const std::string how = s.screen.size() > 11 ? s.screen.substr(11) : "";
+        const bool active = pl->starPowerActive();
+        std::printf("  Overdrive by %s with the meter at %s: %s (meter now %.3f)\n", how.c_str(), want ? "60 %" : "45 %", active ? "deployed" : "not deployed",
+                    double(pl->starMeter()));
+        ++odChecks_;
+        if (active != want) return fail("Overdrive by " + how + (want ? " did not deploy at 60 %" : " deployed under 50 %"));
+        if (active) odStartMeter_ = pl->starMeter(), odStartBeat_ = ui.host().gameBeat(), odVocal_ = false;
+        return pass();
+    }
+    if (s.screen.rfind("od_auto:", 0) == 0) {
+        // The drummer's fill / the singer's shout with the meter at n %:
+        // under half nothing deploys by the end of a fill / a gap; at 60 %
+        // the next fill's crash / gap's shout deploys.
+        const bool vocals = s.screen.rfind("od_auto:vocals", 0) == 0;
+        const int pct = std::atoi(s.screen.c_str() + s.screen.rfind(':') + 1);
+        const Player* pl = ui.host().gamePlayer(0);
+        if (!ui.host().gameLoaded() || (!vocals && !pl)) return fail("no song");
+        if (odPhase_ == 0) {  // first poll: the meter set
+            ui.host().setPlayerStarPower(0, vocals ? "vocal_meter" : "meter", float(pct) / 100.0f);
+            odPhase_ = 1, odFills_ = ui.host().gameCounter(0, "fills_deployed"), odFreestyleSeen_ = false;
+            return;
+        }
+        const bool active = vocals ? ui.host().gameCounter(0, "vocal_od_active") > 0 : pl->starPowerActive();
+        const int meterPct = vocals ? ui.host().gameCounter(0, "vocal_od_meter_pct") : int(std::lround(pl->starMeter() * 100));
+        if (vocals) {
+            // A shout (1.5 s) once in each gap.
+            const bool gap = ui.host().gameCounter(0, "vocal_freestyle") > 0;
+            if (gap && !odFreestyleSeen_) ui.host().setPlayerStarPower(0, "vocal_shout", 1500), odFreestyleSeen_ = true, ++odGaps_;
+            if (!gap && odFreestyleSeen_ && pct < 50) {  // a whole gap shouted through under half
+                odFreestyleSeen_ = false;
+                std::printf("  Overdrive by a shout at %d %%: %s\n", pct, active ? "deployed" : "not deployed");
+                odPhase_ = 0;
+                return active ? fail("the singer deployed under 50 %") : pass();
+            }
+            if (!gap) odFreestyleSeen_ = false;
+        } else if (pct < 50) {
+            ui.host().setPlayerStarPower(0, "meter", float(pct) / 100.0f);  // held under half while the fills pass
+            if (nowMs - stepStart_ > 15000) {
+                std::printf("  Overdrive by the drum fill at %d %%: %s (fills deployed %d)\n", pct, active ? "deployed" : "not deployed", ui.host().gameCounter(0, "fills_deployed"));
+                odPhase_ = 0;
+                return active || ui.host().gameCounter(0, "fills_deployed") > odFills_ ? fail("the drummer deployed under 50 %") : pass();
+            }
+        }
+        if (pct >= 50 && active) {
+            std::printf("  Overdrive by %s at %d %%: deployed (meter now %d %%, %d gap(s) shouted, fills deployed %d)\n", vocals ? "a shout" : "the drum fill", pct, meterPct,
+                        odGaps_, ui.host().gameCounter(0, "fills_deployed"));
+            odPhase_ = 0, ++odChecks_;
+            odStartMeter_ = float(meterPct) / 100.0f, odStartBeat_ = ui.host().gameBeat(), odVocal_ = vocals;
+            if (vocals) odStartMs_ = ui.host().gameTimeMs();
+            return pass();
+        }
+        if (nowMs - stepStart_ > s.ms) {
+            odPhase_ = 0;
+            return fail(std::string("Overdrive by ") + (vocals ? "a shout" : "the drum fill") + " never deployed at " + std::to_string(pct) + " %");
+        }
+        return;
+    }
+    if (s.screen == "od_drain") {
+        // RB drains a full meter over band_energy deploy_beats beats (32):
+        // the meter lost since the deploy against the beats gone by / 32.
+        // The singer's drains over 32 beats at the song's mean beat [I].
+        const Player* pl = ui.host().gamePlayer(0);
+        const float now = odVocal_ ? float(ui.host().gameCounter(0, "vocal_od_meter_pct")) / 100.0f : pl ? pl->starMeter() : 0.0f;
+        const double beats = ui.host().gameBeat() - odStartBeat_;
+        const double lost = double(odStartMeter_ - now), want = beats / 32.0;
+        std::printf("  Overdrive drain: %.2f beats, meter %.3f -> %.3f: lost %.3f, want %.3f (beats / 32)\n", beats, double(odStartMeter_), double(now), lost, want);
+        odDrainErrPct_ = std::max(odDrainErrPct_, want > 0 ? int(std::lround(std::fabs(lost - want) / want * 100)) : 100);
+        if (beats < 2 || std::fabs(lost - want) > 0.12 * want + (odVocal_ ? 0.015 : 0.006)) return fail("the Overdrive drain is off");
+        return pass();
+    }
+    if (s.screen == "unlock_all_songs") {  // long_cheats.dta's code: every song listed (walks that scroll a long list)
+        ui.interp().send("profile_mgr", "unlock_all_songs", {});
+        return pass();
+    }
+    // rb_tour_rules / rb_bwt_buzz (GD05-085 / GD05-077): the tours' rules
+    // recomputed here from the data alone (config/tour_solo.dta,
+    // config/tour_band.dta, songs.dtb's ranks), against what the game's
+    // own objects (tour performer, its event lists, song_provider) hold.
+    if (s.screen.rfind("rb_tour_", 0) == 0 || s.screen == "rb_bwt_buzz") {
+        Interp& in = ui.interp();
+        const DataNode* tour = ui.bootTree() ? ui.bootTree()->find("tour") : nullptr;
+        auto send = [&](ScriptObject* o, const char* msg, std::vector<Value> a = {}) { return o ? in.send(o, msg, a) : Value::integer(0); };
+        auto rankedList = [&](const std::string& inst, bool bonus) {
+            std::vector<const SongInfo*> v;
+            for (const SongInfo& si : ui.host().songs())
+                if (!si.tutorial && si.unlockable == bonus && si.rank.count(inst)) v.push_back(&si);
+            std::stable_sort(v.begin(), v.end(), [&](const SongInfo* a, const SongInfo* b) { return a->rank.at(inst) < b->rank.at(inst); });
+            std::vector<std::string> out;
+            for (const SongInfo* si : v) out.push_back(si->id);
+            return out;
+        };
+        auto intOf = [](const DataNode& n) { return n.type == DataNode::Type::Int ? n.i : n.type == DataNode::Type::Float ? int(n.f) : 0; };
+        if (s.screen == "rb_bwt_buzz") {
+            // Buzz: (buzz (venues (<venue> (performance <rows>)))), row
+            // new_performance - 1 for a first gig, column max(average stars, 2) - 2;
+            // fans: the line through (fans ...)'s points around the buzz.
+            ScriptObject* band = in.send("tour", "performer", {}).object;
+            ScriptObject* ev = in.send("tour", "event", {}).object;
+            const DataNode* buzz = tour && tour->find("band") ? tour->find("band")->find("buzz") : nullptr;
+            if (!band || !ev || !buzz) return fail("rb_bwt_buzz: no band, event or (buzz ...) data");
+            const std::string venue = send(ev, "get", {Value::symbol("venue")}).str();
+            const int stars = send(band, "world_fame").integerValue(), songs = std::max(1, send(ev, "num_songs").integerValue());
+            int newPerf = 2;
+            if (const DataNode* np = buzz->find("new_performance"); np && np->children.size() > 1) newPerf = in.eval(np->children[1]).integerValue();
+            const DataNode* perf = buzz->find("venues") && buzz->find("venues")->find(venue) ? buzz->find("venues")->find(venue)->find("performance") : nullptr;
+            if (!perf) return fail("no performance table for " + venue);
+            const DataNode& row = perf->children[size_t(std::clamp(newPerf - 1, 0, int(perf->children.size()) - 2)) + 1];
+            const int avg = stars / songs, col = std::clamp(std::max(avg, 2) - 2, 0, int(row.children.size()) - 1);
+            const int wantBuzz = std::max(0, intOf(row.children[size_t(col)]));
+            double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+            const DataNode* fans = buzz->find("fans");
+            for (size_t i = 1; fans && i < fans->children.size(); ++i) {
+                x1 = intOf(fans->children[i].children[0]), y1 = intOf(fans->children[i].children[1]);
+                if (wantBuzz <= x1) break;
+                x0 = x1, y0 = y1;
+            }
+            const double slope = x1 == x0 ? 0 : (y1 - y0) / (x1 - x0);
+            const int wantFans = x1 == x0 ? int(y0) : int(float(wantBuzz) * float(slope) + float(y0 - slope * x0));
+            const int gotBuzz = send(band, "buzz").integerValue(), gotFans = send(band, "fans").integerValue();
+            std::set<std::string> played;
+            for (const std::string& id : ui::rbTourUnlocks().bandPlayed) played.insert(id);
+            auto* sl = dynamic_cast<ui::ListProvider*>(in.findObject("tour_event_song_provider"));
+            if (sl) in.send(sl, "refresh", {});
+            int missing = 0, setSongs = 0;
+            for (int i = 0; sl && i < sl->numData(); ++i) setSongs += 1, missing += !played.count(sl->symbol(i));
+            std::printf("  expected (venue %s, %d stars over %d songs, new_performance %d): buzz %d, fans %d, the %d set songs offered in quick play; "
+                        "measured: buzz %d, fans %d, %d missing\n",
+                        venue.c_str(), stars, songs, newPerf, wantBuzz, wantFans, setSongs, gotBuzz, gotFans, missing);
+            if (gotBuzz != wantBuzz || gotFans != wantFans) return fail("the band's buzz / fans do not follow config/tour_band.dta");
+            if (!setSongs || missing) return fail("the band's played songs are not offered in quick play");
+            return pass();
+        }
+        // The Solo Tour's towns, venues and events in the data's order.
+        struct Ev {
+            std::string town, venue, name;
+            const DataNode* n;
+            bool unlock;
+            int number;
+        };
+        std::vector<std::vector<Ev>> venues;  // one per (town, venue)
+        const DataNode* solo = tour ? tour->find("solo") : nullptr;
+        const DataNode* towns = solo ? solo->find("towns") : nullptr;
+        for (size_t t = 1; towns && t < towns->children.size(); ++t) {
+            const DataNode& tn = towns->children[t];
+            if (!tn.isList() || tn.children.empty()) continue;
+            for (size_t v = 1; v < tn.children.size(); ++v) {
+                const DataNode& vn = tn.children[v];
+                if (!vn.isList() || vn.children.empty()) continue;
+                venues.emplace_back();
+                for (size_t e = 1; e < vn.children.size(); ++e) {
+                    const DataNode& en = vn.children[e];
+                    const DataNode* sg = en.isList() ? en.find("songs") : nullptr;
+                    if (!sg || sg->children.size() < 2) continue;
+                    const DataNode& f = sg->children[1];
+                    const bool unlock = f.isList() && f.textAt(0) == "unlock";
+                    venues.back().push_back({tn.textAt(0), vn.textAt(0), en.textAt(0), &en, unlock, f.isList() ? f.intAt(1) : intOf(f)});
+                }
+            }
+        }
+        const int initial = solo && solo->find("num_initial_unlock_songs") ? solo->find("num_initial_unlock_songs")->intAt(1) : 1;
+        ScriptObject* perf = in.send("tour", "performer", {}).object;
+        const int diff = send(perf, "solo_difficulty").integerValue();
+        int maxSong = 1 << 30;
+        if (const DataNode* ms = solo ? solo->find("max_song") : nullptr)
+            for (size_t i = 1; i < ms->children.size(); ++i) {
+                const DataNode& c = ms->children[i];
+                static const char* const kSyms[] = {"kDifficultyEasy", "kDifficultyMedium", "kDifficultyHard", "kDifficultyExpert"};
+                const int d = c.children[0].type == DataNode::Type::Int ? c.children[0].i : int(std::find(kSyms, kSyms + 4, c.textAt(0)) - kSyms);
+                if (d == diff) maxSong = c.intAt(1);
+            }
+        const int unlocked = initial + tourBonusPlayed_;
+        // The open towns' open events: a bonus venue whenever it has open
+        // events, the normal venues up to the first not completed (this walk
+        // completes only bonus gigs).
+        std::vector<const Ev*> expected;
+        bool blocked = false;
+        for (const std::vector<Ev>& v : venues) {
+            std::vector<const Ev*> open;
+            for (const Ev& e : v)
+                if (e.unlock ? e.number <= unlocked : e.number <= maxSong) open.push_back(&e);
+            if (open.empty()) continue;
+            if (open[0]->unlock) {
+                expected.insert(expected.end(), open.begin(), open.end());
+                continue;
+            }
+            if (blocked) continue;
+            expected.insert(expected.end(), open.begin(), open.end());
+            blocked = true;
+        }
+        const std::string inst = send(perf, "get_instrument").str();
+        const std::vector<std::string> ranked = rankedList(inst, false), bonus = rankedList(inst, true);
+        auto songOf = [&](const Ev& e) {
+            const std::vector<std::string>& l = e.unlock ? bonus : ranked;
+            return e.number >= 1 && size_t(e.number) <= l.size() ? l[size_t(e.number - 1)] : std::string("?");
+        };
+        auto* sp = dynamic_cast<ui::ListProvider*>(in.findObject("solo_event_provider"));
+        if (s.screen == "rb_tour_focus_bonus") {
+            // Down the event list until its selection is the first (unlock N) event.
+            const Ev* target = nullptr;
+            for (const Ev* e : expected)
+                if (e->unlock) target = target ? target : e;
+            ui::PanelObj* fp = ui.focusPanel();
+            ScriptObject* lst = fp ? fp->component(fp->focus) : nullptr;
+            const int at = send(lst, "selected_pos").integerValue();
+            const int want = sp && target ? sp->indexOf(target->name) : -1;
+            if (want < 0) return fail("no (unlock N) event in the gig guide");
+            if (at == want) return pass();
+            if (nowMs - stepStart_ > 15000) return fail("could not reach " + target->name + " in the list (at " + std::to_string(at) + ")");
+            if (!ui.inTransition() && nowMs - lastNavMs_ > 250) ui.buttonDown(kDown, 0), ui.buttonUp(kDown, 0), lastNavMs_ = nowMs;
+            return;
+        }
+        if (s.screen == "rb_tour_solo_events") {
+            if (!sp) return fail("no solo_event_provider");
+            in.send(sp, "refresh", {});
+            std::vector<std::string> got, want;
+            for (int i = 0; i < sp->numData(); ++i) got.push_back(sp->symbol(i));
+            int wrongSongs = 0;
+            std::string list;
+            for (const Ev* e : expected) {
+                want.push_back(e->name);
+                const int i = sp->indexOf(e->name);
+                const std::string song = i >= 0 ? in.send(sp, "event_song", {Value::integer(i)}).str() : std::string();
+                wrongSongs += song != songOf(*e);
+                list += " " + e->name + "=" + songOf(*e) + (song == songOf(*e) ? "" : "(measured " + song + ")");
+            }
+            std::printf("  solo gig guide (%s, difficulty %d, max_song %d, bonus songs unlocked %d): expected %zu events:%s; measured %zu events\n",
+                        inst.c_str(), diff, maxSong, unlocked, want.size(), list.c_str(), got.size());
+            if (got != want) return fail("the gig guide lists " + std::to_string(got.size()) + " events, not the " + std::to_string(want.size()) + " open ones");
+            if (wrongSongs) return fail(std::to_string(wrongSongs) + " events play another song than the data's");
+            return pass();
+        }
+        if (s.screen == "rb_tour_unlocked") {
+            const std::string got = send(perf, "new_unlock").str();
+            const std::string want = size_t(initial) < bonus.size() ? bonus[size_t(initial)] : std::string();
+            std::printf("  expected: the bonus gig unlocks %s (%s's bonus song %d); measured new_unlock %s\n", want.c_str(), inst.c_str(), initial + 1,
+                        got.c_str());
+            if (got != want) return fail("the bonus gig unlocked " + got);
+            ++tourBonusPlayed_;
+            SDL_setenv_unsafe("GD05_WALK_TOUR", std::to_string(tourBonusPlayed_).c_str(), 1);
+            return pass();
+        }
+        if (s.screen == "rb_tour_qp") {
+            // modes.dta's initial songs, the guitarist's first open town's
+            // songs (its last event's number), its unlocked bonus songs.
+            const char* env = SDL_getenv("GD05_WALK_TOUR");
+            const int bonusPlayed = env ? std::atoi(env) : 0;
+            const std::string qpInst = ui::gameCfgValue(ui, "unlock_song_instrument").str();
+            const int qpInitial = ui::gameCfgValue(ui, "unlock_song_initial_num").integerValue();
+            int townSongs = 0;
+            for (const std::vector<Ev>& v : venues)
+                if (!v.empty() && !v[0].unlock) {
+                    townSongs = v.back().number;
+                    break;
+                }
+            std::set<std::string> want;
+            const std::vector<std::string> first = rankedList(qpInst, false), g = rankedList("guitar", false), gb = rankedList("guitar", true);
+            for (int i = 0; i < qpInitial && size_t(i) < first.size(); ++i) want.insert(first[size_t(i)]);
+            for (int i = 0; i < townSongs && size_t(i) < g.size(); ++i) want.insert(g[size_t(i)]);
+            for (int i = 0; i < initial + bonusPlayed && size_t(i) < gb.size(); ++i) want.insert(gb[size_t(i)]);
+            auto* qp = dynamic_cast<ui::ListProvider*>(in.findObject("song_provider"));
+            if (!qp) return fail("no song_provider");
+            std::set<std::string> got;
+            for (int i = 0; i < qp->numData(); ++i)
+                if (qp->symbol(i) != "random_song") got.insert(qp->symbol(i));
+            int extra = 0, missing = 0;
+            for (const std::string& id : got) extra += !want.count(id);
+            for (const std::string& id : want) missing += !got.count(id);
+            std::printf("  expected quick play: %d first by %s + the first town's %d guitar songs + %d guitar bonus songs = %zu songs; measured %zu "
+                        "(%d not expected, %d missing)\n",
+                        qpInitial, qpInst.c_str(), townSongs, initial + bonusPlayed, want.size(), got.size(), extra, missing);
+            if (got != want) return fail("quick play does not offer the tour's unlocks");
+            return pass();
+        }
+        return fail("unknown check " + s.screen);
+    }
+    if (s.screen == "qp_locked" || s.screen == "qp_locked_song") {
+        // rb_qp_locked (GD05-073): the songs RB's SongMgr (0x82431AC8) makes
+        // available on a new profile, from the data alone.
+        const std::string inst = ui::gameCfgValue(ui, "unlock_song_instrument").str();
+        const int initial = ui::gameCfgValue(ui, "unlock_song_initial_num").integerValue();
+        std::vector<const SongInfo*> ranked;
+        int disc = 0, bonus = 0;
+        for (const SongInfo& si : ui.host().songs()) {
+            if (si.tutorial) continue;
+            ++disc, bonus += si.unlockable;
+            if (!si.unlockable && si.rank.count(inst)) ranked.push_back(&si);
+        }
+        std::stable_sort(ranked.begin(), ranked.end(), [&](const SongInfo* a, const SongInfo* b) { return a->rank.at(inst) < b->rank.at(inst); });
+        std::set<std::string> expected;
+        for (size_t i = 0; i < ranked.size() && int(i) < initial; ++i) expected.insert(ranked[i]->id);
+        if (s.screen == "qp_locked_song") {
+            const std::string song = ui.session().song;
+            std::printf("  quick play song started: %s (%s)\n", song.c_str(), expected.count(song) ? "available" : "LOCKED");
+            return expected.count(song) ? pass() : fail("the random song " + song + " is locked");
+        }
+        auto* sp = dynamic_cast<ui::ListProvider*>(ui.interp().findObject("song_provider"));
+        if (!sp) return fail("no song_provider");
+        std::set<std::string> listed;
+        for (int i = 0; i < sp->numData(); ++i)
+            if (sp->symbol(i) != "random_song") listed.insert(sp->symbol(i));
+        int lockedListed = 0, randomLocked = 0;
+        for (const std::string& id : listed) lockedListed += !expected.count(id);
+        for (int k = 0; k < 300; ++k) {
+            const std::string pick = ui.interp().send("song_provider", "get_song_to_set", {Value::integer(0)}).str();
+            randomLocked += !expected.count(pick);
+        }
+        qpLockedListed_ = lockedListed, qpRandomLocked_ = randomLocked;
+        std::printf("  quick play: unlock instrument '%s', initial %d; %d disc songs (%d bonus); expected available %zu, listed %zu, locked listed %d, "
+                    "random picks of locked songs %d of 300\n", inst.c_str(), initial, disc, bonus, expected.size(), listed.size(), lockedListed, randomLocked);
+        if (inst.empty() || expected.empty()) return fail("no unlock instrument / no available song from the data");
+        if (lockedListed || randomLocked || listed.size() != expected.size())
+            return fail(std::to_string(lockedListed) + " locked songs listed, " + std::to_string(randomLocked) + " random picks locked");
+        return pass();
+    }
+    if (s.screen == "songlist_highlight") {
+        // rb_songlist_highlight (GD05-073): the song list's names and
+        // headings as drawn (their glyphs' middle along the list, in the
+        // panel's space) against the highlight's quad as drawn: exactly one
+        // inside, the selected row's.
+        ui::PanelObj* p = ui.panel("qp_selsong_panel");
+        if (!p || !p->view) return fail("no qp_selsong_panel view");
+        const std::string list = "ss_song.lst";
+        const gfx::UiView::ListHighlight h = p->view->listHighlight(list);
+        if (!h.drawn) return fail("the song list drew no highlight");
+        int inside = 0, insideSelected = 0, rows = 0;
+        std::string which;
+        for (const gfx::TextProbe& t : p->view->textProbes()) {
+            if (t.name.rfind(list + "#", 0) != 0 || t.verts.empty()) continue;
+            const size_t a = list.size() + 1, b = t.name.find('#', a);
+            if (b == std::string::npos) continue;
+            const std::string element = t.name.substr(b + 1);
+            if (element != "list.lbl" && element != "heading.lbl") continue;
+            const int row = std::atoi(t.name.c_str() + a);
+            float lo = 1e30f, hi = -1e30f;
+            for (const scene::MeshVertex& v : t.verts) {
+                const gfx::Vec3 q = t.world.transformPoint({v.pos[0], v.pos[1], v.pos[2]});
+                lo = std::min(lo, q.z), hi = std::max(hi, q.z);
+            }
+            const float mid = (lo + hi) / 2;
+            ++rows;
+            if (mid >= h.lo && mid <= h.hi) {
+                ++inside;
+                insideSelected += row == h.selected && element == "list.lbl";
+                which += " " + std::to_string(row) + ":" + element;
+            }
+        }
+        ++songlistHlChecks_;
+        songlistHlMax_ = std::max(songlistHlMax_, inside);
+        std::printf("  songlist highlight: selected row %d, quad %.1f..%.1f, %d of %d drawn names inside:%s\n", h.selected, double(h.lo), double(h.hi),
+                    inside, rows, which.c_str());
+        if (rows == 0) return fail("no song names drawn");
+        if (inside != 1 || insideSelected != 1)
+            return fail("the highlight covers " + std::to_string(inside) + " names (" + which + " ), want only the selected row's");
+        return pass();
+    }
+    if (s.screen.rfind("songlist_text:", 0) == 0) {
+        // rb_songlist_text (GD05-063): every label text the song list drew
+        // into its RenderDir's texture against the size RB gives it. RB's
+        // UILabel update (RB 0x8226E0A0) lays the label's text out with
+        // the font's kerning plus the label's (the font's +0x1044 raised by
+        // the label's kerning while it lays out, then put back), wraps at
+        // the label's width (RB 0x82215EE8: Text +0xF4 = width), and for
+        // kFitJust (RB 0x8226DDA8) takes the text size down 0.2 at a time
+        // from text_size while the text is wider than the box, higher than
+        // it (height in the font's cell aspect, RB 0x82214FE8) or a line
+        // splits a word. Expected: that size's cell height (size * cell_h /
+        // cell_w) and the line's width, through the texture's camera, in
+        // texture pixels; drawn: the glyph quads as drawn. > 5% fails.
+        const std::string tag = s.screen.substr(14);
+        ui::PanelObj* p = ui.panel("qp_selsong_panel");
+        if (!p || !p->view) return fail("no qp_selsong_panel view");
+        if (const char* dir = SDL_getenv("GD05_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + "/songlist_" + tag + ".bmp");
+        if (SDL_getenv("GD05_SONGLIST_DUMP") && p->view->milo()) {
+            std::function<void(const scene::Directory&, int)> dump = [&](const scene::Directory& d, int depth) {
+                std::printf("  %*sdir %s (%s)\n", depth * 2, "", d.name.c_str(), d.cls.c_str());
+                for (const auto& o : d.objects) {
+                    const auto* l = o->as<scene::UILabel>();
+                    if (!l && !o->as<scene::UIList>() && !o->as<scene::Mesh>() && !o->as<scene::Cam>()) continue;
+                    if (const auto* c = o->as<scene::Cam>()) std::printf("  %*scam %s yfov %.4f near %.1f far %.1f\n", depth * 2 + 2, "", o->name.c_str(), double(c->yFov), double(c->nearPlane), double(c->farPlane));
+                    const scene::Xfm w = p->view->pose().world(o.get());
+                    std::printf("  %*s%s %s show %d at %.0f %.0f %.0f", depth * 2 + 2, "", o->cls.c_str(), o->name.c_str(), int(p->view->showing(o.get())),
+                                double(w.pos[0]), double(w.pos[1]), double(w.pos[2]));
+                    {
+                        const scene::Xfm lo = p->view->pose().local(o.get());
+                        std::printf(" local rot [%.3f %.3f %.3f | %.3f %.3f %.3f | %.3f %.3f %.3f] pos %.1f %.1f %.1f world rot0 %.3f %.3f %.3f",
+                                    double(lo.rot[0]), double(lo.rot[1]), double(lo.rot[2]), double(lo.rot[3]), double(lo.rot[4]), double(lo.rot[5]),
+                                    double(lo.rot[6]), double(lo.rot[7]), double(lo.rot[8]), double(lo.pos[0]), double(lo.pos[1]), double(lo.pos[2]),
+                                    double(w.rot[0]), double(w.rot[1]), double(w.rot[2]));
+                    }
+                    if (l) std::printf(" type %s text '%s' token %s size %.1f fit %u box %.0fx%.0f lead %.2f k %.2f",
+                                       l->header.type.c_str(), l->text.c_str(), l->textToken.c_str(), double(l->style.textSize), l->style.fitText,
+                                       double(l->style.width), double(l->style.height), double(l->style.leading), double(l->style.kerning));
+                    if (const auto* m = o->as<scene::Mesh>(); m && depth > 0 && !p->view->textProbes().empty()) {
+                        const gfx::TextProbe& q0 = p->view->textProbes().front();
+                        float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
+                        const gfx::Mat4 wm = gfx::toMat4(w);
+                        for (const scene::MeshVertex& v : m->verts) {
+                            const gfx::Vec3 ww = wm.transformPoint({v.pos[0], v.pos[1], v.pos[2]});
+                            const gfx::Mat4& mm = q0.drawViewProj;
+                            const float cx = mm.at(0, 0) * ww.x + mm.at(0, 1) * ww.y + mm.at(0, 2) * ww.z + mm.at(0, 3);
+                            const float cy = mm.at(1, 0) * ww.x + mm.at(1, 1) * ww.y + mm.at(1, 2) * ww.z + mm.at(1, 3);
+                            const float cw = mm.at(3, 0) * ww.x + mm.at(3, 1) * ww.y + mm.at(3, 2) * ww.z + mm.at(3, 3);
+                            const float px = (cx / cw + 1) * 0.5f * float(q0.targetW), py = (1 - cy / cw) * 0.5f * float(q0.targetH);
+                            x0 = std::min(x0, px), x1 = std::max(x1, px), y0 = std::min(y0, py), y1 = std::max(y1, py);
+                        }
+                        std::printf(" | in the texture (%dx%d): x %.0f..%.0f y %.0f..%.0f", q0.targetW, q0.targetH, double(x0), double(x1), double(y0), double(y1));
+                    }
+                    std::printf("\n");
+                }
+                for (const auto& [owner, sub] : d.subdirs)
+                    if (sub) dump(*sub, depth + 1);
+            };
+            dump(p->view->milo()->root(), 0);
+        }
+        float cx0 = 0, cy0 = 0, cx1 = 0, cy1 = 0;
+        const bool cloth = p->view->clothRect(cx0, cy0, cx1, cy1);
+        auto project = [](const gfx::TextProbe& q, gfx::Vec3 local, float& px, float& py) {
+            const gfx::Vec3 w = q.world.transformPoint(local);
+            const gfx::Mat4& m = q.drawViewProj;
+            const float cx = m.at(0, 0) * w.x + m.at(0, 1) * w.y + m.at(0, 2) * w.z + m.at(0, 3);
+            const float cy = m.at(1, 0) * w.x + m.at(1, 1) * w.y + m.at(1, 2) * w.z + m.at(1, 3);
+            const float cw = m.at(3, 0) * w.x + m.at(3, 1) * w.y + m.at(3, 2) * w.z + m.at(3, 3);
+            px = (cx / cw + 1) * 0.5f * float(q.targetW), py = (1 - cy / cw) * 0.5f * float(q.targetH);
+        };
+        int measured = 0, bad = 0;
+        for (const gfx::TextProbe& q : p->view->textProbes()) {
+            if (!q.hasStyle || !q.font || q.verts.size() < 4 || q.targetW <= 0) continue;
+            gfx::FontMetrics fm(*q.font);
+            const float aspect = fm.lineHeight(1.0f);
+            gfx::TextStyle st;
+            st.leading = q.leading, st.align = q.align, st.capsMode = q.capsMode, st.wrapWidth = q.boxW;
+            st.overrideKerning = true, st.kerning = fm.kerning() + q.kerning;
+            float size = q.dataSize;
+            gfx::TextLayout lay;
+            for (;;) {
+                st.size = size;
+                lay = gfx::layoutText(&fm, q.text, st);
+                if (q.fitType != 2) break;
+                float top, bottom;
+                lay.extent(st, top, bottom);
+                const float h = std::fabs(top - bottom) * aspect, w = lay.maxWidth();
+                bool shrink = (q.boxW > 0 && q.boxW < w) || (q.boxH > 0 && q.boxH < h);
+                for (size_t li = 0; !shrink && li + 1 < lay.lines.size(); ++li) {
+                    const size_t e = lay.lines[li].end;
+                    const char a = e > 0 ? lay.text[e - 1] : ' ', b = e < lay.text.size() ? lay.text[e] : ' ';
+                    if (a != ' ' && a != '\n' && b != ' ' && b != '\n') shrink = true;
+                }
+                if (!shrink || size - 0.2f < 0) break;
+                size -= 0.2f;
+            }
+            // Expected: the cell's height and the widest line's width at that
+            // size, in the label's own space (its world before the fit scale).
+            const float wantH = size * aspect, wantW = lay.maxWidth();
+            float ax, ay, bx, by;
+            project(q, {0, 0, 0}, ax, ay);
+            project(q, {0, 0, wantH / q.fitZ}, bx, by);
+            (void)wantW;
+            const float expH = std::hypot(bx - ax, by - ay);
+            // Drawn: the first glyph quad's height; the quads' x extent.
+            float t0x, t0y, t1x, t1y;
+            project(q, {q.verts[0].pos[0], 0, q.verts[0].pos[2]}, t0x, t0y);
+            project(q, {q.verts[0].pos[0], 0, q.verts[1].pos[2]}, t1x, t1y);
+            const float gotH = std::hypot(t1x - t0x, t1y - t0y);
+            float minX = 1e30f, maxX = -1e30f;
+            for (const scene::MeshVertex& v : q.verts) minX = std::min(minX, v.pos[0]), maxX = std::max(maxX, v.pos[0]);
+            // The size the port laid the text out at (a quad is one cell high).
+            const float drawnSize = (q.verts[0].pos[2] - q.verts[1].pos[2]) / aspect;
+            // The glyphs' span: the first quad's left to the last's right.
+            float l0x, l0y, l1x, l1y;
+            project(q, {0, 0, 0}, l0x, l0y);
+            project(q, {maxX - minX, 0, 0}, l1x, l1y);
+            const float gotSpan = std::hypot(l1x - l0x, l1y - l0y);
+            // The same span RB's layout gives (first glyph's left to the last glyph's right).
+            float wantSpanL = 1e30f, wantSpanR = -1e30f;
+            for (const scene::MeshVertex& v : lay.verts) wantSpanL = std::min(wantSpanL, v.pos[0]), wantSpanR = std::max(wantSpanR, v.pos[0]);
+            float s0x, s0y, s1x, s1y;
+            project(q, {0, 0, 0}, s0x, s0y);
+            project(q, {(wantSpanR - wantSpanL) / q.fitX, 0, 0}, s1x, s1y);
+            const float wantSpan = std::hypot(s1x - s0x, s1y - s0y);
+            const float dh = expH > 0 ? gotH / expH - 1 : 0, dw = wantSpan > 0 ? gotSpan / wantSpan - 1 : 0;
+            const float toScreen = cloth && q.targetH > 0 ? (cy1 - cy0) / float(q.targetH) : 1;
+            const bool off = std::fabs(dh) > 0.05f || std::fabs(dw) > 0.05f;
+            ++measured, bad += off;
+            std::printf("  %-34s %-24.24s font %-22s size %5.2f -> RB %5.2f (port %5.2f) fit %u box %5.1fx%4.1f k %5.3f+%5.3f | cell h px want %5.1f got %5.1f (%+.1f%%) | span px want %6.1f got %6.1f (%+.1f%%) | screen h ~%4.1f px%s\n",
+                        q.name.c_str(), q.text.c_str(), q.font->name.c_str(), double(q.dataSize), double(size), double(drawnSize * q.fitZ), q.fitType,
+                        double(q.boxW), double(q.boxH), double(fm.kerning()), double(q.kerning), double(expH), double(gotH), double(dh * 100), double(wantSpan),
+                        double(gotSpan), double(dw * 100), double(gotH * toScreen), off ? "  <-- off" : "");
+        }
+        if (SDL_getenv("GD05_SONGLIST_DUMP"))
+            for (const gfx::TextProbe& q : p->view->textProbes()) {
+                const gfx::Vec3 o = q.world.transformPoint({0, 0, 0});
+                float zt = -1e9f, zb = 1e9f;
+                for (const scene::MeshVertex& v : q.verts) zt = std::max(zt, v.pos[2]), zb = std::min(zb, v.pos[2]);
+                const gfx::Vec3 ox = q.world.transformPoint({1, 0, 0}), oz = q.world.transformPoint({0, 0, 1});
+                float px0, py0;
+                {
+                    const gfx::Mat4& m = q.drawViewProj;
+                    const float cx = m.at(0, 0) * o.x + m.at(0, 1) * o.y + m.at(0, 2) * o.z + m.at(0, 3);
+                    const float cy = m.at(1, 0) * o.x + m.at(1, 1) * o.y + m.at(1, 2) * o.z + m.at(1, 3);
+                    const float cw = m.at(3, 0) * o.x + m.at(3, 1) * o.y + m.at(3, 2) * o.z + m.at(3, 3);
+                    px0 = (cx / cw + 1) * 0.5f * float(q.targetW), py0 = (1 - cy / cw) * 0.5f * float(q.targetH);
+                }
+                std::printf("  probe %s align 0x%x lead %.3f origin %.1f %.1f %.1f (texture %.0f %.0f) scale x %.3f z %.3f quads z %.1f..%.1f\n", q.name.c_str(), q.align, double(q.leading),
+                            double(o.x), double(o.y), double(o.z), double(px0), double(py0), double(std::hypot(ox.x - o.x, ox.z - o.z)), double(std::hypot(oz.x - o.x, oz.z - o.z)), double(zb), double(zt));
+            }
+        std::printf("  songlist_text %s: %d texts measured, %d off by more than 5%%\n", tag.c_str(), measured, bad);
+        if (measured < 5) return fail("too few song list texts measured");
+        if (bad) return fail(std::to_string(bad) + " song list text(s) off their data size by more than 5%");
+        return pass();
+    }
     if (s.screen == "song_list_layout") {
         // RB's song list (qp_selsong.milo, wave 03): drawn through its
         // texture onto the screen; its rows (names, headings) do not run
@@ -2591,7 +6315,222 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         return pass();
     }
+    if (s.screen.rfind("tshot:", 0) == 0) {  // rb_title_back: a named shot and the transition state
+        const std::string tag = s.screen.substr(6);
+        if (const char* dir = SDL_getenv("GD05_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + "/title_" + tag + ".bmp");
+        std::string panels;
+        if (ui::ScreenObj* sc = ui.screen(ui.currentScreen()))
+            for (ui::PanelObj* p : sc->panels()) panels += " " + p->name() + (p->up ? "" : "(down)");
+        std::printf("  %-12s %s:%s%s\n", tag.c_str(), ui.currentScreen().c_str(), panels.c_str(), ui.inTransition() ? " [transition]" : "");
+        return pass();
+    }
+    if (s.screen.rfind("look:", 0) == 0) {
+        // rb_look: the frame (saved as look_NN.bmp / look_pause.bmp under
+        // GD05_WALK_SHOTS) at 640x360 (2x2 boxes of the 1280x720 picture).
+        const std::string what = s.screen.substr(5);
+        if (what.rfind("shot:", 0) == 0) {  // the next fixed shot (empty: the director's again)
+            const std::string n = what.substr(5);
+            if (n.empty()) SDL_unsetenv_unsafe("GD05_FORCE_SHOT");
+            else SDL_setenv_unsafe("GD05_FORCE_SHOT", ("#" + n).c_str(), 1);
+            return pass();
+        }
+        if (what == "pausehide" || what == "pauseshow" || what == "pauserestore") {
+            // The pause screen's panels (pause.dta: pause_panel, helpbar):
+            // hidden; shown with every mesh of pause.milo but black_bg.mesh
+            // left out (its art, the octopus, arms, trim and the rest, is
+            // placed differently each pause and reaches into the measured
+            // strips) so black_bg.mesh alone is over the world; then as it was.
+            static std::vector<const scene::Object*> artHidden;
+            const bool hide = what == "pausehide", art = what == "pauserestore";
+            ui.interp().send("pause_panel", "set_showing", {Value::integer(hide ? 0 : 1)});
+            ui.interp().send("helpbar", "set_showing", {Value::integer(art ? 1 : 0)});
+            if (ui::ScreenObj* sc = ui.screen(ui.currentScreen()))
+                for (ui::PanelObj* p : sc->panels())
+                    if (p->name() == "pause_panel" && p->view && p->view->milo()) {
+                        if (what == "pauseshow") {
+                            artHidden.clear();
+                            p->view->milo()->root().forEach([&](const scene::Object& o) {
+                                if (o.as<scene::Mesh>() && o.name != "black_bg.mesh" && p->view->showing(&o)) artHidden.push_back(&o);
+                            });
+                            for (const scene::Object* o : artHidden) p->view->setShowing(o, false);
+                        } else if (art) {
+                            for (const scene::Object* o : artHidden) p->view->setShowing(o, true);
+                            artHidden.clear();
+                        }
+                    }
+            return pass();
+        }
+        if (what == "beamzero") {
+            // Counted only on a frame that drew beams into the buffer.
+            const int drawn = ui.host().gameCounter(0, "rb_beams_drawn"), px = ui.host().gameCounter(0, "rb_beam_pixels");
+            if (drawn > 0 && px >= 0) lookBeamZero_ = std::max(lookBeamZero_, (long long)px);
+            std::printf("  look: base / smoke 0: %d beams drawn, %d beam pixels\n", drawn, px);
+            return pass();
+        }
+        const int draws = ui.host().gameCounter(0, "world_draws"), holds = ui.host().gameCounter(0, "world_holds");
+        if (what == "frame") {
+            const int px = ui.host().gameCounter(0, "rb_beam_pixels");
+            lookBeamPx_ = std::max(lookBeamPx_, (long long)px);
+            if (px > 0) ++lookBeamFrames_;
+        }
+        if (what == "frame" && lookPace_[0] < 0) lookPace_ = {nowMs, double(draws), double(draws + holds)};
+        if (what == "eval") {
+            if (lookFrames_.empty()) return fail("look: no frames");
+            // Rnd's pacing (RB 0x8218EF80): the world at the PostProc's
+            // emulate_fps (ProFilm: 24), the frames around it at the display's.
+            const double secs = std::max(1.0, (nowMs - lookPace_[0]) / 1000), fps = ui.host().gameCounter(0, "world_emulate_fps");
+            const double drawn = (draws - lookPace_[1]) / secs, shown = (draws + holds - lookPace_[2]) / secs;
+            std::printf("  look: the world drawn %.1f times a second (emulate_fps %.0f), frames %.1f a second\n", drawn, fps, shown);
+            if (fps > 0 && fps < 40 && shown > 1.2 * fps && std::fabs(drawn / fps - 1) > 0.15)
+                return fail("look: the world drawn " + std::to_string(drawn) + " times a second, not the PostProc's " + std::to_string(fps));
+            std::array<double, 4> m{};
+            for (const auto& f : lookFrames_)
+                for (size_t k = 0; k < 4; ++k) m[k] += f[k] / double(lookFrames_.size());
+            // The movies' numbers (the header of this walk).
+            constexpr double kLuma = 69.3, kContrast = 55.4, kSat = 0.397, kGrain = 1.97;
+            std::printf("  look: %zu frames: luma %.1f (movies %.1f, %+.0f%%), contrast %.1f (%.1f, %+.0f%%), saturation %.3f (%.3f), grain %.2f (%.2f, %+.0f%%)\n",
+                        lookFrames_.size(), m[0], kLuma, 100 * (m[0] / kLuma - 1), m[1], kContrast, 100 * (m[1] / kContrast - 1), m[2], kSat, m[3],
+                        kGrain, 100 * (m[3] / kGrain - 1));
+            std::printf("  look: pauses measured %d, on a dark world %d\n", lookPauseOk_, lookPauseDark_);
+            if (!lookPauseError_.empty()) return fail(lookPauseError_);
+            if (lookPauseOk_ == 0) return fail("look: no pause on a lit world to measure (" + std::to_string(lookPauseDark_) + " dark)");
+            // GD05-069: a SpotlightDrawer's proxy (every venue type's stage
+            // fog / smoke group) is its draw child, never drawn (RB
+            // 0x82299DD0 / 0x821B3A48, D79).
+            const int sdProxies = ui.host().gameCounter(0, "venue_sd_proxies"), sdListed = ui.host().gameCounter(0, "venue_sd_proxies_listed");
+            std::printf("  look: SpotlightDrawer proxies %d, in the draw list %d (RB: 0)\n", sdProxies, sdListed);
+            if (sdProxies < 1 || sdListed != 0) return fail("look: SpotlightDrawer proxies " + std::to_string(sdProxies) + ", drawn " + std::to_string(sdListed));
+            // GD05-093 (D91): RB's beams through the post composite.
+            std::printf("  look: beam pixels: most %lld in a frame, %d of %zu frames with some; with base / smoke 0: %lld\n", lookBeamPx_, lookBeamFrames_,
+                        lookFrames_.size(), lookBeamZero_);
+            if (lookBeamPx_ <= 0) return fail("look: no spotlight beam pixels in any frame");
+            if (lookBeamZero_ != 0) return fail("look: beam pixels with the drawer's base / smoke at 0: " + std::to_string(lookBeamZero_));
+            if (std::fabs(m[0] / kLuma - 1) > 0.15) return fail("look: luma " + std::to_string(m[0]) + " not within 15% of the movies'");
+            if (std::fabs(m[1] / kContrast - 1) > 0.15) return fail("look: contrast " + std::to_string(m[1]) + " not within 15% of the movies'");
+            if (std::fabs(m[3] / kGrain - 1) > 0.40) return fail("look: grain " + std::to_string(m[3]) + " not within 40% of the movies'");
+            return pass();
+        }
+        const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+        char name[48];
+        // The pause's pictures by attempt (look_pause_<n>.bmp, look_prepause_<n>.bmp).
+        const std::string tag = what == "frame" ? std::to_string(lookFrames_.size())
+                                : what.rfind("prepause", 0) == 0 || what == "pause" ? what + "_" + std::to_string(lookPauseOk_ + lookPauseDark_ + (lookPauseError_.empty() ? 0 : 1))
+                                                                               : what;
+        std::snprintf(name, sizeof name, "/look_%s.bmp", tag.c_str());
+        const std::string path = std::string(dir ? dir : SDL_GetBasePath()) + name;
+        if (!ui.host().saveScreenshot(path)) return fail("look: no screenshot");
+        SDL_Surface* raw = SDL_LoadBMP(path.c_str());
+        SDL_Surface* img = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        if (raw) SDL_DestroySurface(raw);
+        if (!img) return fail("look: the screenshot does not load");
+        if (!dir) SDL_RemovePath(path.c_str());
+        const int w = img->w / 2, h = img->h / 2;
+        std::vector<float> y(size_t(w) * size_t(h));
+        double sum = 0, sum2 = 0, sat = 0;
+        for (int j = 0; j < h; ++j)
+            for (int i = 0; i < w; ++i) {
+                float c[3] = {0, 0, 0};
+                for (int dy = 0; dy < 2; ++dy)
+                    for (int dx = 0; dx < 2; ++dx) {
+                        const Uint8* px = static_cast<const Uint8*>(img->pixels) + (2 * j + dy) * img->pitch + (2 * i + dx) * 4;
+                        for (int k = 0; k < 3; ++k) c[k] += 0.25f * px[k];
+                    }
+                const float l = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+                y[size_t(j) * size_t(w) + size_t(i)] = l;
+                sum += l, sum2 += double(l) * l;
+                const float mx = std::max({c[0], c[1], c[2]}), mn = std::min({c[0], c[1], c[2]});
+                if (mx > 8) sat += (mx - mn) / mx;
+            }
+        const double n = double(w) * double(h), mean = sum / n;
+        SDL_DestroySurface(img);
+        if (what == "prepause") {
+            lookPrePause_ = y;
+            std::printf("  look: paused, the pause screen hidden: luma %.1f\n", mean);
+            return pass();
+        }
+        if (what == "prepause2") {  // the paused world is still: the same picture again
+            double d = 0;
+            for (size_t k = 0; k < y.size() && k < lookPrePause_.size(); ++k) d += std::fabs(y[k] - lookPrePause_[k]);
+            d /= std::max<size_t>(1, y.size());
+            std::printf("  look: the paused world hidden again: mean |difference| %.2f of 255\n", d);
+            if (d > 2) lookPauseError_ = "look: the paused world moves (" + std::to_string(d) + " of 255 between two frames)";
+            return pass();
+        }
+        if (what == "pause") {
+            // The screen's outer strips (x < 90, x >= 1190 at 1280x720, out of
+            // the menu's text; the art is hidden for this frame), the pixels
+            // lit with the pause screen hidden (luma > 25): the median of paused over
+            // the rule's value, 0.3 x the colour before the display curve
+            // (D25: the screen shows outputCurve(c)), back through it.
+            float gamma = 0.85f;
+            if (const char* e = SDL_getenv("GD05_GAMMA")) gamma = float(std::atof(e));
+            auto inverse = [&](float v) {  // outputCurve is increasing
+                float lo = 0, hi = 1;
+                for (int k = 0; k < 24; ++k) {
+                    const float m = 0.5f * (lo + hi);
+                    (gamma > 0 ? gfx::outputCurve(m, gamma) : m) < v ? lo = m : hi = m;
+                }
+                return 0.5f * (lo + hi);
+            };
+            auto rule = [&](float before) {
+                const float c = 0.3f * inverse(before / 255);
+                return 255 * (gamma > 0 ? gfx::outputCurve(c, gamma) : c);
+            };
+            std::vector<double> r;
+            if (lookPrePause_.size() == y.size())
+                for (int j = 0; j < h; ++j)
+                    for (int i = 0; i < w; ++i)
+                        if (i < 45 || i >= 595)
+                            if (const float b = lookPrePause_[size_t(j) * size_t(w) + size_t(i)]; b > 25)
+                                r.push_back(y[size_t(j) * size_t(w) + size_t(i)] / std::max(1.0f, rule(b)));
+            // A failure here is reported by look:eval (both measured in one run).
+            if (r.size() < 500) {
+                ++lookPauseDark_;
+                std::printf("  look: paused on a dark world (%zu lit pixels): not measured\n", r.size());
+                return pass();
+            }
+            std::nth_element(r.begin(), r.begin() + long(r.size() / 2), r.end());
+            const double ratio = r[r.size() / 2];
+            std::printf("  look: paused, the background at %.2f of black_bg.mat's rule (0.3 of the colour; median of %zu pixels)\n", ratio, r.size());
+            // The same still picture (flicker and grain held): only the overlay
+            // and 8-bit rounding move it.
+            if (std::fabs(ratio - 1) > 0.1) lookPauseError_ = "look: the pause background is " + std::to_string(ratio) + " of black_bg.mat's rule";
+            else ++lookPauseOk_;
+            return pass();
+        }
+        double grain = 0;
+        int gn = 0;
+        for (int j = 1; j + 1 < h; ++j)
+            for (int i = 1; i + 1 < w; ++i) {
+                const float l = y[size_t(j) * size_t(w) + size_t(i)];
+                if (l <= 20) continue;
+                float b = 0;
+                for (int dy = -1; dy <= 1; ++dy)
+                    for (int dx = -1; dx <= 1; ++dx) b += y[size_t(j + dy) * size_t(w) + size_t(i + dx)];
+                grain += std::fabs(l - b / 9), ++gn;
+            }
+        lookFrames_.push_back({mean, std::sqrt(std::max(0.0, sum2 / n - mean * mean)), sat / n, gn ? grain / gn : 0});
+        const auto& f = lookFrames_.back();
+        std::printf("  look %2zu: luma %.1f contrast %.1f saturation %.3f grain %.2f\n", lookFrames_.size() - 1, f[0], f[1], f[2], f[3]);
+        return pass();
+    }
+    if (s.screen == "band_start_shot") {  // rb_band_start's screenshots (GD05_WALK_SHOTS)
+        static int n = 0;
+        char name[32];
+        std::snprintf(name, sizeof name, "/band_start_%02d.bmp", n++);
+        if (const char* dir = SDL_getenv("GD05_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + name);
+        return pass();
+    }
     // counter_max:<key>:<max>: the game's counter stays at or under max.
+    if (s.screen.rfind("setenv:", 0) == 0) {  // setenv:NAME=VALUE (empty: unset)
+        const std::string kv = s.screen.substr(7);
+        const size_t e = kv.find('=');
+        const std::string k = kv.substr(0, e), v = e == std::string::npos ? std::string() : kv.substr(e + 1);
+        if (v.empty()) SDL_unsetenv_unsafe(k.c_str());
+        else SDL_setenv_unsafe(k.c_str(), v.c_str(), 1);
+        std::printf("  env %s=%s\n", k.c_str(), v.c_str());
+        return pass();
+    }
     if (s.screen.rfind("counter_max:", 0) == 0) {
         const std::string rest = s.screen.substr(12);
         const size_t c = rest.rfind(':');
@@ -2600,6 +6539,10 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         const int got = ui.host().gameCounter(0, key);
         std::printf("  counter %s: %d (want at most %d)\n", key.c_str(), got, most);
         if (got > most) return fail(key + " is " + std::to_string(got));
+        return pass();
+    }
+    if (s.screen.rfind("od_meter:", 0) == 0) {  // rb_highway: player 1's Overdrive meter set
+        ui.host().setPlayerStarPower(0, "meter", float(std::atof(s.screen.c_str() + 9)));
         return pass();
     }
     if (s.screen.rfind("counter:", 0) == 0) {
@@ -2952,12 +6895,273 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (nowMs - stepStart_ > s.ms) return fail(od ? "Overdrive was never deployed with the keyboard" : "the song ended before the keyboard played its gems");
         return;
     }
+    if (s.screen.rfind("dev_attach ", 0) == 0 && SDL_getenv("GD05_WALK_EVDEV") && *SDL_getenv("GD05_WALK_EVDEV") &&
+        s.screen.find("rbguitar") != std::string::npos) {
+        // The guitar as a kernel device (GD05-061): the game's own Input opens
+        // it when SDL announces it; this step waits for that.
+        if (g_evdev.fd < 0) {
+            const std::string why = evdevOpen(SDL_getenv("GD05_WALK_EVDEV"));
+            if (!why.empty()) return fail(why);
+            std::printf("  device: kernel input device %s (%s)\n", g_evdev.node.c_str(), g_evdev.created ? "uinput, the owner's guitar" : "written into");
+            for (int b = 0; b < 11; ++b) devButton(nullptr, b, false);
+            devHat(nullptr, 0, SDL_HAT_CENTERED);
+        }
+        int n = 0;
+        if (SDL_JoystickID* ids = SDL_GetGamepads(&n)) {
+            for (int i = 0; i < n && !adapter_; ++i) {
+                const char* path = SDL_GetGamepadPathForID(ids[i]);
+                if (path && g_evdev.node == path && SDL_GetJoystickFromID(ids[i])) adapter_ = ids[i];
+            }
+            SDL_free(ids);
+        }
+        if (adapter_) {
+            char guid[64];
+            SDL_GUIDToString(SDL_GetGamepadGUIDForID(adapter_), guid, sizeof guid);
+            std::printf("  device: SDL gamepad %u, %s, GUID %s, opened by the game\n", unsigned(adapter_), SDL_GetGamepadNameForID(adapter_), guid);
+            return pass();
+        }
+        return nowMs - stepStart_ > s.ms ? fail("SDL never opened " + g_evdev.node) : void();
+    }
+    if (s.screen.rfind("dev_attach ", 0) == 0) {
+        adapter_ = Input::attachVirtualPad(s.screen.substr(11));
+        // A pad's triggers rest at the axis' bottom (SDL maps -32768..32767 to 0..32767).
+        if (SDL_Joystick* j = adapter_ && s.screen.find("rbguitar") == std::string::npos ? SDL_OpenJoystick(adapter_) : nullptr) {
+            devAxis(j, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, -32768);
+            devAxis(j, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, -32768);
+            SDL_UpdateJoysticks();
+        }
+        return adapter_ ? pass() : fail("no virtual device");
+    }
+    if (s.screen.rfind("dev_set ", 0) == 0) {
+        // "dev_set b<n> <0|1>": a button; "dev_set hat<v> <0|1>": the hat at v or centred.
+        SDL_Joystick* j = SDL_GetJoystickFromID(adapter_);
+        if (!j) return fail("the virtual device is not open");
+        const std::string what = s.screen.substr(8, s.screen.rfind(' ') - 8);
+        const bool on = s.screen.back() == '1';
+        if (what.rfind("hat", 0) == 0) devHat(j, 0, on ? Uint8(std::atoi(what.c_str() + 3)) : SDL_HAT_CENTERED);
+        else devButton(j, std::atoi(what.c_str() + 1), on);
+        return pass();
+    }
+    const std::string devId = "pad:" + std::to_string(adapter_);
+    if (s.screen == "dev_unfocus") {
+        SDL_Window* w = SDL_GetKeyboardFocus();
+        if (w) SDL_HideWindow(w);
+        SDL_PumpEvents();
+        std::printf("  keyboard focus: %s (background events %s)\n", SDL_GetKeyboardFocus() ? "on a window" : "none",
+                    SDL_GetHintBoolean(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, false) ? "on" : "off");
+        return SDL_GetKeyboardFocus() ? fail("the window kept the keyboard focus") : pass();
+    }
+    if (s.screen == "dev_refocus") {
+        int n = 0;
+        if (SDL_Window** ws = SDL_GetWindows(&n)) {
+            for (int i = 0; i < n; ++i) SDL_ShowWindow(ws[i]);
+            SDL_free(ws);
+        }
+        return pass();
+    }
+    if (s.screen == "dev_owner_guid") {
+        SDL_setenv_unsafe("GD05_TEST_PAD_GUID", "03006f16ad1b00000200000003010000", 1);
+        return pass();
+    }
+    if (s.screen == "dev_owner_json") {
+        const char* dir = SDL_getenv("GD05_SAVE_DIR");
+        const std::string file = std::string(dir ? dir : "") + "owner-controllers.json";
+        auto keys = [](std::initializer_list<long long> k) {
+            std::string a = "[";
+            for (long long v : k) a += std::string(a.size() > 1 ? "," : "") + "{\"index\":" + std::to_string(v) + ",\"kind\":\"key\"}";
+            return a + "]";
+        };
+        std::ofstream(file) << "{\"devices\":{\"03006f16ad1b00000200000003010000\":{\"name\":\"Harmonix Rock Band Guitar\",\"player\":-1},"
+                               "\"keyboard\":{\"bindings\":{"
+                            << "\"blue\":" << keys({52, 1073741885}) << ",\"green\":" << keys({49, 1073741882})
+                            << ",\"guitar_select\":" << keys({9}) << ",\"guitar_start\":" << keys({13}) << ",\"gyro\":" << keys({9})
+                            << ",\"menu_down\":" << keys({1073741905}) << ",\"menu_up\":" << keys({1073741906})
+                            << ",\"orange\":" << keys({53, 1073741886}) << ",\"red\":" << keys({50, 1073741883}) << ",\"select\":" << keys({9})
+                            << ",\"start\":" << keys({13}) << ",\"strum_down\":" << keys({1073741905}) << ",\"strum_up\":" << keys({1073741906})
+                            << ",\"whammy\":" << keys({1073742049, 1073742053}) << ",\"yellow\":" << keys({51, 1073741884})
+                            << "},\"player\":0}},\"player2\":false,\"touch\":{\"buttons\":0,\"pause_corner\":0,\"swipe_down\":1,\"swipe_up\":0},\"version\":2}\n";
+        return ui.input().importFrom(file) ? pass() : fail("the owner's controllers.json did not load");
+    }
+    if (s.screen == "dev_owner_players") {
+        // The owner's controllers.json: the keyboard player 1, the guitar None.
+        ui.input().setPlayer("keyboard", 0);
+        ui.input().setPlayer(devId, -1);
+        return pass();
+    }
+    if (s.screen == "dev_players") {
+        int slot = -2;
+        std::string profile;
+        for (const Input::Device& d : ui.input().devices()) {
+            std::printf("  device %s \"%s\" (%s): player %d\n", d.id.c_str(), d.name.c_str(), d.profile.c_str(), d.player + 1);
+            if (d.id == devId) slot = d.player, profile = d.profile;
+        }
+        if (slot == -2) return fail("the virtual device is not a gamepad");
+        if (scenario_ == "rb_guitar_none" || scenario_ == "rb_owner_guitar") return slot == -1 ? pass() : fail("the guitar is not None");
+        if (scenario_ == "rb_guitar_play" && profile != "Xbox 360 guitar") return fail("the Rock Band guitar is not typed an Xbox 360 guitar");
+        return slot == 0 ? pass() : fail("the device is not player 1");
+    }
+    if (s.screen.rfind("dev_play ", 0) == 0) {
+        // Plays player 1's gems with the device: frets held from 70 ms before
+        // a gem and a strum (the hat down for a frame) at it; a pad presses
+        // its frets at the gem (every press strums) and lets go after it or
+        // its sustain. "sustain": until a sustain was held 0.5 s with the
+        // whammy moved; "od": until Overdrive was deployed (tilt / Back).
+        const Player* pl = ui.host().gamePlayer(0);
+        if (!pl || !ui.host().gameLoaded() || ui.currentScreen() != "game_screen") return nowMs - stepStart_ > s.ms ? fail("no song to play") : void();
+        SDL_Joystick* j = SDL_GetJoystickFromID(adapter_);
+        if (!j) return fail("the virtual device is not open");
+        const bool pad = s.screen.rfind("dev_play pad", 0) == 0;
+        const std::string goal = s.screen.substr(s.screen.rfind(' ') + 1);
+        const bool od = goal == "od", sus = goal == "sustain", miss = goal == "miss";
+        if (miss) {
+            // No frets; one strum on the first gem (a wrong fret: a miss) and
+            // then nothing until three gems passed with the guitar muted.
+            if (devTarget_ < 0) devTarget_ = pl->passes() + 3, devReleaseMs_ = -1, devSustainSince_ = ui.host().gameTimeMs();
+            if (devStrumDown_) devHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
+            const double t = ui.host().gameTimeMs();
+            const auto& gems = pl->chart().gems;
+            while (devGem_ < gems.size() && (gems[devGem_].ms < t - 60 || !gems[devGem_].ownedBy(0))) ++devGem_;
+            // A wrong fret (not the second gem's) held, then a strum at that gem.
+            const unsigned wrong = devGem_ < gems.size() ? ((gems[devGem_].frets & 1) ? 2u : 1u) : 1u;
+            for (const int f : {0, 1, 2, 3, 4}) {
+                static const int kGuitar[5] = {0, 1, 3, 2, 4};
+                devButton(j, kGuitar[f], devReleaseMs_ < 0 && ((wrong >> f) & 1));
+            }
+            devHeld_ = 0;
+            if (devReleaseMs_ < 0 && nowMs - stepStart_ > 150 && devGem_ < gems.size() && t >= gems[devGem_].ms - 8)  // the hat let go frames ago
+                devHat(j, 0, SDL_HAT_DOWN), devStrumDown_ = true, devReleaseMs_ = t;
+            if (pl->passes() >= devTarget_ && !pl->guitarAudible()) {
+                int sounds = 0;
+                for (const auto& [name, at] : ui.host().gameSfx())
+                    if (name.rfind("miss_", 0) == 0 && at >= devSustainSince_) ++sounds;  // miss_gtr.cue (config/player.dta)
+                std::printf("  device: %d gems passed, %d penalties, guitar stem muted, %d miss sound(s), rock meter %.2f, streak %d\n", pl->passes(), pl->penalties(), sounds,
+                            pl->rockMeter(), pl->streak());
+                if (devStrumDown_) devHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
+                if (!sounds) {
+                    std::string heard;
+                    for (const auto& [name, at] : ui.host().gameSfx())
+                        if (at >= devSustainSince_ - 2000) heard += " " + name + "@" + std::to_string(int(at));
+                    std::printf("  sounds since:%s\n", heard.c_str());
+                }
+                devTarget_ = -1, devReleaseMs_ = -1, devSustainSince_ = -1;
+                return sounds > 0 ? pass() : fail("the wrong strum played no miss sound");
+            }
+            if (nowMs - stepStart_ > s.ms) return fail("missed gems did not mute the guitar stem");
+            return;
+        }
+        if (devTarget_ < 0) devTarget_ = devPlayed_ + std::atoi(goal.c_str()), devOdAsked_ = devWhammied_ = false, devSustainSince_ = -1;
+        const double t = ui.host().gameTimeMs();
+        // Last frame's strum and tilt end.
+        // (A hat let go and pressed again in one frame would be no event: the next strum waits a frame.)
+        const bool strumWait = devStrumDown_;
+        if (devStrumDown_) devHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
+        if (devTilt_) devAxis(j, pad ? 0 : 4, 0), devButton(j, SDL_GAMEPAD_BUTTON_BACK, false), devTilt_ = false;
+        auto hold = [&](unsigned mask) {
+            for (int f = 0; f < 5; ++f) {
+                const bool on = (mask >> f) & 1;
+                if (on == bool((devHeld_ >> f) & 1)) continue;
+                if (!pad) {
+                    static const int kGuitar[5] = {0, 1, 3, 2, 4};  // A B Y X LB (the report's mapping)
+                    devButton(j, kGuitar[f], on);
+                } else if (f == 0 || f == 3) {  // LT / RT (the virtual pad's axes 4 / 5)
+                    devAxis(j, f == 0 ? SDL_GAMEPAD_AXIS_LEFT_TRIGGER : SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, on ? 32767 : -32768);
+                } else {
+                    static const int kPad[5] = {0, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, 0, SDL_GAMEPAD_BUTTON_SOUTH};
+                    devButton(j, kPad[f], on);
+                }
+            }
+            devHeld_ = mask;
+        };
+        const auto& gems = pl->chart().gems;
+        while (devGem_ < gems.size() && (gems[devGem_].ms < t - 60 || !gems[devGem_].ownedBy(0))) ++devGem_;
+        if (pad && devReleaseMs_ >= 0 && t >= devReleaseMs_) hold(0), devReleaseMs_ = -1;
+        if (devGem_ < gems.size()) {
+            const Gem& g = gems[devGem_];
+            const bool sustain = !g.noSustain && g.durationMs > 0;
+            if (!pad) {
+                if (t >= g.ms - 70 && devHeld_ != g.frets) hold(g.frets);
+                if (t >= g.ms - 8 && !strumWait) {
+                    devHat(j, 0, SDL_HAT_DOWN), devStrumDown_ = true;
+                    ++devGem_, ++devPlayed_;
+                }
+            } else if (t >= g.ms - 8) {
+                if (devHeld_) {
+                    hold(0);  // let go first: the next frame presses
+                } else {
+                    hold(g.frets);
+                    devReleaseMs_ = sustain ? g.ms + g.durationMs - 30 : g.ms + 40;
+                    ++devGem_, ++devPlayed_;
+                }
+            }
+        }
+        // The whammy while a sustain is held: right stick X (a guitar's bar from -32768; a pad's left stick).
+        const bool sustaining = pl->sustainGem() >= 0;
+        devAxis(j, pad ? SDL_GAMEPAD_AXIS_LEFTX : 3, sustaining ? 20000 : pad ? 0 : -32768);
+        if (sustaining) {
+            if (devSustainSince_ < 0) devSustainSince_ = t;
+            devWhammied_ = devWhammied_ || pl->whammying();
+        } else {
+            devSustainSince_ = -1;
+        }
+        if (od && pl->starPowerReady() && !devOdAsked_) {
+            if (pad) devButton(j, SDL_GAMEPAD_BUTTON_BACK, true);
+            else devAxis(j, 4, 32767);  // tilt
+            devTilt_ = devOdAsked_ = true;
+        }
+        auto done = [&] {
+            hold(0), devTarget_ = -1, devReleaseMs_ = -1;
+            if (devStrumDown_) devHat(j, 0, SDL_HAT_CENTERED), devStrumDown_ = false;
+            devAxis(j, pad ? SDL_GAMEPAD_AXIS_LEFTX : 3, pad ? 0 : -32768);
+            return pass();
+        };
+        if (od && pl->starPowerActive()) return std::printf("  device: Overdrive deployed at %.0f ms\n", t), done();
+        if (sus && devSustainSince_ >= 0 && t - devSustainSince_ > 500 && devWhammied_)
+            return std::printf("  device: sustain held from %.0f ms, whammy %.2f\n", devSustainSince_, pl->whammyBar()), done();
+        if (!od && !sus && devPlayed_ >= devTarget_) return done();
+        if (nowMs - stepStart_ > s.ms)
+            return fail(od ? "Overdrive was never deployed with the device" : sus ? "no sustain held with the whammy" : "the song ended before the device played its gems");
+        return;
+    }
+    if (s.screen == "dev_trace") {
+        // The input lines: the hat's raw events, each strum down reaching the song as Strum, none ignored.
+        int hats = 0, strums = 0, ignored = 0;
+        bool afterHat = false;
+        for (const std::string& l : ui.input().traceLines()) {
+            if (l.find(" hat 0 = 4 (down)") != std::string::npos) ++hats, afterHat = true;
+            else if (afterHat && l.find("-> Strum down") != std::string::npos && l.find("in a song") != std::string::npos) ++strums, afterHat = false;
+            if (l.find("ignored") != std::string::npos) ++ignored;
+        }
+        for (const std::string& l : ui.input().traceLines())
+            if (l.find(" hat 0 = 4") != std::string::npos) {
+                std::printf("  trace: %s\n", l.c_str());
+                break;
+            }
+        std::printf("  input trace: %d hat strums down, %d reached the song as Strum, %d ignored lines\n", hats, strums, ignored);
+        return hats > 10 && strums * 10 >= hats * 9 ? pass() : fail("hat strums did not reach the song");
+    }
+    if (s.screen == "dev_audible") {
+        const Player* pl = ui.host().gamePlayer(0);
+        return pl && pl->guitarAudible() ? pass() : fail("the guitar stem stayed muted after hits");
+    }
+    if (s.screen == "dev_hits") {
+        const Player* pl = ui.host().gamePlayer(0);
+        const int hit = pl ? pl->notesHit() : 0;
+        std::printf("  device: %d gems played, %d notes hit, score %d, x%d, streak %d, rock meter %.2f (player 1: %s)\n", devPlayed_, hit,
+                    pl ? pl->score() : 0, pl ? pl->multiplier() : 0, pl ? pl->streak() : 0, pl ? pl->rockMeter() : 0.0f,
+                    ui.input().playerDevice(0).c_str());
+        if (devPlayed_ < 10) return fail("the device played too few gems");
+        // 80%: a frame of a busy test machine can take a press out of the window.
+        return hit * 10 >= devPlayed_ * 8 ? pass() : fail("the device's frets and strums did not hit the notes");
+    }
     if (s.screen == "kb_hits") {
         const Player* pl = ui.host().gamePlayer(0);
         const int hit = pl ? pl->notesHit() : 0;
         std::printf("  keyboard: %d gems strummed, %d notes hit (player 1: %s)\n", kbPlayed_, hit, ui.input().playerDevice(0).c_str());
         if (kbPlayed_ < 10) return fail("the keyboard played too few gems");
-        return hit * 10 >= kbPlayed_ * 9 ? pass() : fail("the keyboard's frets and strums did not hit the notes");
+        // 80%, as the device walks: with walks run in parallel a late frame
+        // takes presses out of the window (26 of 30 seen with eight at
+        // once); a lost key (Q not green) misses far more.
+        return hit * 10 >= kbPlayed_ * 8 ? pass() : fail("the keyboard's frets and strums did not hit the notes");
     }
     if (s.screen == "gp_p1_keyboard") {
         ui.input().setPlayer("keyboard", 0);
@@ -3229,6 +7433,11 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
+    if (s.screen == "song_clock_running") {
+        // Held until the song's clock reaches 0 (the intro shot over).
+        if (ui.host().gameLoaded() && ui.host().gameTimeMs() >= 0) ++step_, stepStart_ = -1;
+        return;
+    }
     if (s.screen == "task_clock_song") {
         // In a game the TaskMgr's kTaskSeconds is the song's time (0x822CDEB8),
         // not the time spent in the menus: the faces' lip sync and the venue's
@@ -3403,13 +7612,14 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 problems += std::string(problems.empty() ? "" : "; ") + "GD05-user-settings.json does not parse";
             }
         } else if (w == "enhanced_backends") {
-            // Local, nothing saved (no mode sets them); a saved backend the
-            // build offers is kept, an unknown one dropped.
-            for (const char* key : {"graphics_backend", "audio_backend"}) {
+            // The defaults (Vulkan, miniaudio: D71), nothing saved (no mode
+            // sets them); a saved backend the build offers is kept, an unknown
+            // one (or the removed "local") dropped.
+            for (auto [key, def] : {std::pair<const char*, const char*>{"graphics_backend", "vulkan"}, {"audio_backend", "miniaudio"}}) {
                 const std::string got = ui.host().enhancedValue(key), file = saved.has(key) ? saved[key].str() : "(unset)";
                 std::printf("  enhanced: %s %s (enhanced.json %s)\n", key, got.c_str(), file.c_str());
-                if (got != "local" || (file != "(unset)" && file != "local"))
-                    problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + " / " + file + ", not local";
+                if (got != def || (file != "(unset)" && file != def))
+                    problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + " / " + file + ", not " + def;
             }
             Json j = Json::parse(R"({"graphics_backend":"vulkan","audio_backend":"openal","bloom":"2x"})");
             ui::migrateEnhanced(j);
@@ -3419,6 +7629,9 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             ui::migrateEnhanced(j);
             if (j.has("graphics_backend") || j.has("audio_backend") || !j.has("bloom"))
                 problems += std::string(problems.empty() ? "" : "; ") + "an unknown backend was kept";
+            j = Json::parse(R"({"graphics_backend":"local","audio_backend":"local"})");
+            ui::migrateEnhanced(j);
+            if (j.has("graphics_backend") || j.has("audio_backend")) problems += std::string(problems.empty() ? "" : "; ") + "local was kept";
 #ifdef __APPLE__
             j = Json::parse(R"({"graphics_backend":"opengl3"})");
             ui::migrateEnhanced(j);
@@ -3432,20 +7645,19 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                         gNow.c_str(), aNow.c_str());
             auto add = [&](const std::string& p) { problems += std::string(problems.empty() ? "" : "; ") + p; };
             if (w == "enhanced_backends_start") {
-                // (the file keeps what it had until the next save; the game reads local)
-                for (const char* key : {"graphics_backend", "audio_backend"})
-                    if (ui.host().enhancedValue(key) != "local") add(std::string(key) + " is " + ui.host().enhancedValue(key));
-                if (g0 != "local" || a0 != "local" || aNow != "local") add("an unknown saved backend was not dropped at start");
+                // (the file keeps what it had until the next save; the game reads the defaults)
+                want("graphics_backend", "vulkan"), want("audio_backend", "miniaudio");
+                if (g0 != "vulkan" || a0 != "miniaudio" || aNow != "miniaudio") add("an unknown saved backend was not dropped at start");
             } else if (w == "enhanced_backends_saved") {
-                want("graphics_backend", "vulkan"), want("audio_backend", "openal");
-                if (!saved.has("graphics_backend") || saved["graphics_backend"].str() != "vulkan" || !saved.has("audio_backend") ||
+                want("graphics_backend", "opengl3"), want("audio_backend", "openal");
+                if (!saved.has("graphics_backend") || saved["graphics_backend"].str() != "opengl3" || !saved.has("audio_backend") ||
                     saved["audio_backend"].str() != "openal")
                     add("the backends were not saved");
-                if (g0 != "local" || a0 != "local" || aNow != "local") add("a backend changed before the restart");
+                if (g0 != "vulkan" || a0 != "miniaudio" || aNow != "miniaudio") add("a backend changed before the restart");
             } else {
                 want("graphics_backend", "sdl3"), want("audio_backend", "openal");
                 if (g0 != "sdl3" || a0 != "openal") add("the restart did not start on the saved backends");
-                if (aNow != "openal" && aNow != "local") add("audio plays on " + aNow);
+                if (aNow != "openal" && aNow != "miniaudio") add("audio plays on " + aNow);
             }
         } else if (w == "enhanced_settings_loaded") {
             status("Settings loaded");
@@ -3996,12 +8208,15 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (!band || !gtr || !sfx) return fail("a volume slider moved without its sound");
         return pass();
     }
-    if (s.screen.rfind("focus_to ", 0) == 0) {
-        // Down until the focus panel's focus is the component.
+    if (s.screen.rfind("focus_to ", 0) == 0 || s.screen.rfind("focus_up_to ", 0) == 0) {
+        // Down (focus_up_to: up) until the focus panel's focus is the component.
+        const bool up = s.screen[6] == 'u';
+        const std::string want = s.screen.substr(up ? 12 : 9);
         ui::PanelObj* fp = ui.focusPanel();
-        if (fp && fp->focus == s.screen.substr(9)) return pass();
-        if (nowMs - stepStart_ > s.ms) return fail("no focus on " + s.screen.substr(9) + " (on " + (fp ? fp->focus : std::string("-")) + ")");
-        if (!ui.inTransition() && nowMs - lastNavMs_ > 200) ui.buttonDown(kDown, 0), ui.buttonUp(kDown, 0), lastNavMs_ = nowMs;
+        if (fp && fp->focus == want) return pass();
+        if (nowMs - stepStart_ > s.ms) return fail("no focus on " + want + " (on " + (fp ? fp->focus : std::string("-")) + ")");
+        const int b = up ? kUp : kDown;
+        if (!ui.inTransition() && nowMs - lastNavMs_ > 200) ui.buttonDown(b, 0), ui.buttonUp(b, 0), lastNavMs_ = nowMs;
         return;
     }
     if (s.screen == "lag_strike") {
@@ -4111,6 +8326,11 @@ int WalkDriver::finish(ui::UiManager& ui) {
     std::string seq;
     for (const std::string& s : ui.history()) seq += (seq.empty() ? "" : " > ") + s;
     std::printf("  screens: %s\n", seq.c_str());
+    if (textColors_ || !textColorsBad_.empty()) {
+        std::printf("  text colours: %zu screens measured, %zu texts too dark\n", textColorsSeen_.size(), textColorsBad_.size());
+        for (const std::string& b : textColorsBad_) std::printf("  FAIL text too dark: %s\n", b.c_str());
+        if (!textColorsBad_.empty()) ok = false;
+    }
     size_t k = 0;
     for (const std::string& s : ui.history())
         if (k < expect_.size() && s == expect_[k]) ++k;
@@ -4274,5 +8494,6 @@ int WalkDriver::finish(ui::UiManager& ui) {
     }
     for (const std::string& e : in.errors()) std::printf("  FAIL script error: %s\n", e.c_str()), ok = false;
     std::printf("walktest %s: %s\n", scenario_.c_str(), ok ? "OK" : "FAILED");
+    if (SDL_getenv("GD05_WALK_KEEP_GOING")) return 0;  // a diagnostic run goes on (a restart's second half) whatever failed
     return ok ? 0 : 1;
 }

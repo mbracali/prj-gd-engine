@@ -129,6 +129,34 @@ private:
 class SceneCache;
 class MaterialRenderer;
 
+// One text as TextDrawer drew it (the rb_text_colors walk, GD05 text
+// brightness): its quads, the first pass's material and the lights.
+struct TextProbe {
+    std::string name;
+    const scene::Mat* mat = nullptr;
+    Mat4 world;
+    std::vector<scene::MeshVertex> verts;  // as drawn (prelit: the state colour in them)
+    std::vector<std::array<uint16_t, 3>> faces;
+    Material m;   // pass 0 as drawn
+    LightEnv env;
+    // Set by its UiView: the camera, where its target shows on the
+    // 1280 x 720 screen, and whether it went through a 3D RenderDir.
+    Mat4 viewProj;
+    float rect[4] = {0, 0, 1280, 720};
+    bool indirect = false;
+    // As drawn: the camera's view-projection and the target's size (a
+    // RenderDir's texture for the song list's texts).
+    Mat4 drawViewProj;
+    int targetW = 0, targetH = 0;
+    // The label's own text fields (UILabel rev 8) when it has them, and the
+    // fit scale the port gave it (the songlist_text walk).
+    bool hasStyle = false;
+    std::string text;
+    const scene::Font* font = nullptr;
+    float dataSize = 0, leading = 1, boxW = 0, boxH = 0, kerning = 0, fitX = 1, fitZ = 1;
+    uint32_t fitType = 0, align = 0, capsMode = 0;
+};
+
 // Draws laid-out texts through the renderer: the quads go to a vertex
 // buffer per text (rebuilt when the text changes) and draw with the font's
 // material (and its next passes), like any milo mesh.
@@ -147,6 +175,10 @@ public:
               const float* matColor = nullptr, const float* tint = nullptr);
     // Forgets the buffers of texts not drawn since the last call.
     void collect();
+    // When set, each draw appends a TextProbe named probeName.
+    std::vector<TextProbe>* probes = nullptr;
+    std::string probeName;
+    TextProbe probeStyle;  // the next draw's label fields (hasStyle ... capsMode)
 
 private:
     struct Entry;

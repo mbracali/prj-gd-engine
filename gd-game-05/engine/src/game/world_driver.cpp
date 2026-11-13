@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "game/world_driver.h"
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <string>
 
@@ -32,7 +34,7 @@ int WorldDriver::excitement(float rating, float warningLevel) {
 void WorldDriver::reset(float startMs) {
     lastMs_ = startMs;
     introSent_ = introEndSent_ = overSent_ = false;
-    beat_ = note_ = lookNote_ = event_ = lookEvent_ = 0;
+    beat_ = note_ = lookNote_ = event_ = lookEvent_ = venueEvent_ = lookVenueEvent_ = 0;
     drumsDue_.clear();
     excitement_ = -1;
     peak_ = false;
@@ -108,6 +110,40 @@ void WorldDriver::update(World& world, const Song& song, float ms, const Player*
         if (!isSection(e.text)) continue;
         world.interp().var("upcoming_section") = Value::symbol(e.text);
         world.message("one_bar_to");
+    }
+    // RB's VENUE track text (midi_parsers.dta) [C data]: world_event_parser
+    // sends [verse] / [chorus] on time (and [bonusfx] / [bonusfx_optional]);
+    // world_lighting_one_bar_to (start_offset -4) sends one_bar_to verse /
+    // chorus (worldbase.dta: set_lighting (VERSE VERSECHORUS) / (CHORUS
+    // VERSECHORUS)) and [lighting (x)] as set_lighting () x a bar early.
+    // The port read them from the EVENTS track only, so the lighting
+    // category stayed the intro shot's (INTRO_VENUE, D96) all song (GD05-098).
+    // GD05_VENUE_TEXT_LEGACY=1: not sent.
+    static const bool venueTextLegacy = SDL_getenv("GD05_VENUE_TEXT_LEGACY") != nullptr;
+    if (!venueTextLegacy) {
+        auto bare = [](std::string t) {
+            while (!t.empty() && (t.front() == '[' || t.front() == ' ')) t.erase(t.begin());
+            while (!t.empty() && (t.back() == ']' || t.back() == ' ')) t.pop_back();
+            return t;
+        };
+        for (; venueEvent_ < song.venueEvents.size() && song.venueEvents[venueEvent_].ms <= ms; ++venueEvent_) {
+            const std::string t = bare(song.venueEvents[venueEvent_].text);
+            if (t == "verse" || t == "chorus") world.message(t);  // [I: bonusfx / bonusfx_optional: WorldDir's natives, not done]
+        }
+        for (; lookVenueEvent_ < song.venueEvents.size(); ++lookVenueEvent_) {
+            const SongEvent& e = song.venueEvents[lookVenueEvent_];
+            if (song.tempo.tickToMs(std::max(0, e.tick - 4 * division)) > ms) break;
+            const std::string t = bare(e.text);
+            std::vector<std::string> adj;
+            if (t == "verse" || t == "chorus") {
+                world.interp().var("upcoming_section") = Value::symbol(t);
+                world.message("one_bar_to", {Value::symbol(t)});
+            } else if (lighting::parseEvent(e.text, adj)) {
+                std::vector<Value> list;
+                for (auto& a : adj) list.push_back(Value::symbol(a));
+                world.message("set_lighting", {Value::list({}), Value::list(std::move(list))});
+            }
+        }
     }
     // The players.
     playerEvents(world, 0, p0, e0);

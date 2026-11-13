@@ -265,6 +265,7 @@ World::~World() {
     for (auto& [o, v] : objs_) interp_->tasks().killFor(v.get());
     interp_->unregisterName("world", world_.get());
     if (prevWorld_) interp_->registerAs("world", prevWorld_);
+    if (Value& w = interp_->var("world"); w.type == Value::Type::Object && w.object == world_.get()) w = prevWorldVar_;
     interp_->resolver = prevResolver_;
 }
 
@@ -304,6 +305,11 @@ void World::attach() {
     }
     prevWorld_ = interp_->findObject("world");
     interp_->registerObject(world_.get());
+    // $world: the world entered (WorldDir; band_objects.dta's start_shot
+    // finds ProFilm_a.pp / override_blender.pp through it: unset, every shot
+    // notified "postproc missing" and drew without them) [C data].
+    prevWorldVar_ = interp_->var("world");
+    interp_->var("world") = Value::obj(world_.get());
     prevResolver_ = interp_->resolver;
     interp_->resolver = [this](const std::string& name) -> ScriptObject* {
         if (prevResolver_)
@@ -457,6 +463,7 @@ int World::rateOf(const scene::Object* o) const {
     if (auto* a = o->as<scene::Group>()) return int(a->anim.rate);
     if (auto* a = o->as<scene::ParticleSys>()) return int(a->anim.rate);
     if (auto* a = o->as<scene::ParticleSysAnim>()) return int(a->anim.rate);
+    if (auto* a = o->as<scene::EventAnim>()) return int(a->anim.rate);
     if (auto* a = o->as<scene::MeshAnim>()) return int(a->anim.rate);
     if (auto* a = o->as<scene::LightAnim>()) return int(a->anim.rate);
     if (auto* a = o->as<scene::EnvAnim>()) return int(a->anim.rate);
@@ -494,6 +501,7 @@ float World::endFrameOf(const scene::Object* o) const {
         return e;
     }
     if (o->as<scene::ParticleSys>()) return kHuge;  // [I] runs while shown
+    if (auto* e = o->as<scene::EventAnim>()) return e->keys.empty() ? 0.0f : e->keys.back().frame;  // RB 0x822CE390 [C]
     if (auto* d = o->as<scene::DirObj>())
         if (const Venue::Proxy* p = venue_.proxyOf(d)) {
             float e = 0;
@@ -508,6 +516,7 @@ float World::endFrameOf(const scene::Object* o) const {
 void World::setFrame(const scene::Object* anim, float frame) {
     if (!anim) return;
     frames_[anim] = frame;
+    if (auto* e = anim->as<scene::EventAnim>()) return eventAnimFrame(*e, frame);
     if (auto* f = anim->as<scene::AnimFilter>()) {
         if (const scene::Object* a = f->dir ? f->dir->resolve(f->anim) : nullptr; a && a != f) setFrame(a, f->filter(frame, framesPerUnit(int(f->animatable.rate))));
         return;
@@ -530,6 +539,30 @@ void World::setFrame(const scene::Object* anim, float frame) {
         return;
     }
     pose_.setFrame(anim, frame);
+}
+
+// EventAnim::SetFrame (RB 0x822CE3A0) [C]: the keys from the last frame set
+// (inclusive) up to `frame` fire their triggers, each the named trigger of
+// the named WorldInstance (proxy); the last frame becomes `frame`. Nothing
+// resets it on a new start (no StartAnim of its own) [C: the vtable's
+// StartAnim / EndAnim are the empty defaults]; it starts at 0 [I: the
+// constructor not read].
+void World::eventAnimFrame(const scene::EventAnim& e, float frame) {
+    auto [it, fresh] = eventAnimLast_.emplace(&e, 0.0f);
+    const float last = it->second;
+    for (const auto& k : e.keys) {
+        if (k.frame > frame) break;
+        if (k.frame < last) continue;
+        for (const auto& [proxy, trig] : k.events) {
+            const scene::Object* o = venue_.find(proxy);
+            const Venue::Proxy* p = o ? venue_.proxyOf(o) : nullptr;
+            const scene::EventTrigger* t = p ? p->milo->root().resolve<scene::EventTrigger>(trig) : nullptr;
+            if (log) SDL_Log("world: %s at %g: %s %s%s", e.name.c_str(), double(k.frame), proxy.c_str(), trig.c_str(), t ? "" : " (not found)");
+            ++stats_.eventAnimTriggers;
+            if (t) trigger(t);
+        }
+    }
+    it->second = frame;
 }
 
 float World::currentFrame(const scene::Object* anim) const {
@@ -588,9 +621,22 @@ bool World::animating(const scene::Object* anim) const {
 // ---- EventTriggers ----------------------------------------------------------
 
 void World::registerTriggers() {
-    // The chain's triggers answer world events; a proxy's answer its proxy calls.
-    for (const auto& p : venue_.parts())
-        p.milo->root().forEach([&](scene::Object& o) {
+    // The chain's triggers answer world events, and so do the WorldInstances'
+    // (proxies'): EventTrigger RegisterEvents (RB 0x8220C770) [C] adds the
+    // trigger as a sink of its own directory (dynamic_cast<MsgSource*>(Dir()))
+    // for its trigger / enable / disable / wait_for events, and the shared
+    // fx milos' triggers listen for world events (24 on "start": the win
+    // fountains' start_hide.trig hides their shared.grp; game_won, bonusfx,
+    // bre_success, intro_end) [C data]; the path from the WorldDir's events
+    // to an instance directory is [I]. A proxy's triggers also answer its
+    // proxy calls (proxyCall). One registration per milo (instances of one
+    // file share it here).
+    std::vector<scene::Milo*> milos;
+    for (const auto& p : venue_.parts()) milos.push_back(p.milo);
+    for (const auto& p : venue_.proxies())
+        if (std::find(milos.begin(), milos.end(), p.milo) == milos.end()) milos.push_back(p.milo);
+    for (scene::Milo* m : milos)
+        m->root().forEach([&](scene::Object& o) {
             auto* t = o.as<scene::EventTrigger>();
             if (!t || !t->decoded) return;
             triggers_[t] = {};
@@ -670,8 +716,19 @@ void World::trigger(const scene::EventTrigger* t) {
         }
         animate(o, args);
     }
+    // A WorldInstance's trigger naming a sound neither its milo nor the
+    // venue has (the shared fx milos' mushroom_burst.cue, in
+    // world/shared/gen/venuesfx_bank.milo, which no venue loads): no sound,
+    // not a gap [I: RB keeps the names as object pointers resolved in the
+    // trigger's directory, an unresolved one plays nothing].
+    const bool inProxy = std::any_of(venue_.proxies().begin(), venue_.proxies().end(),
+                                     [&](const Venue::Proxy& p) { return &p.milo->root() == &d; });
     for (const auto& s : t->sounds) {
         if (log) SDL_Log("world: %s: sound %s", t->name.c_str(), s.c_str());
+        if (inProxy && !d.resolve(s) && !venue_.find(s)) {
+            ++stats_.unresolvedSounds;
+            continue;
+        }
         playSound(s, &d);
     }
     for (const auto& s : t->shows)
@@ -799,7 +856,9 @@ Value World::native(const std::string& msg, std::vector<Value>& args, bool& hand
     // has nothing for yet: the beat (sinks get it), the camera's random seed
     // and categories (App::rbShots picks the shots), the crowd's VENUE moods
     // (the crowd keeps the game's excitement) [I].
-    if (msg == "downbeat" || msg == "camera_random_seed" || msg == "resync_categories" || msg.rfind("crowd_", 0) == 0)
+    // clear_lighting (worldbase.dta game_over, reached since $world is set,
+    // GD05-054): the song is over; the port keeps the last preset's lights [I].
+    if (msg == "downbeat" || msg == "camera_random_seed" || msg == "resync_categories" || msg.rfind("crowd_", 0) == 0 || msg == "clear_lighting")
         return Value::integer(0);
     // {world iterate <Class> $var body...}: the body per venue object of the class [C data].
     if (msg == "iterate" && args.size() >= 2) {

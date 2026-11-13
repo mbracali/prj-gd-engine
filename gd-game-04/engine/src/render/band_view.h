@@ -50,8 +50,28 @@ public:
     // The target's aspect (width / height) and whether alpha is written
     // (the crowd's imposters: render/crowd.h).
     // A shadow pass: GH3's shaders with these engine constants (the light's
-    // view and projection) instead of the camera's; null: off.
-    void setShadowPass(const gh3shader::Globals* g) { shadowPass_ = g; }
+    // view and projection) instead of the camera's; null: off. `doubleSided`:
+    // the constants for casters drawn cull none (every band mesh), which
+    // GH3 biases by GetShadowMapBias's double_sided values
+    // (VenueStage::shadowPass); null: `g` for them too.
+    void setShadowPass(const gh3shader::Globals* g, const gh3shader::Globals* doubleSided = nullptr) {
+        shadowPass_ = g, shadowPassDouble_ = doubleSided;
+    }
+    // The self-shadowing ("acne") probe of a shadow pass (GD04-119): over the
+    // casters' triangles facing the light, the share whose depth changes by
+    // more than the caster's bias across one texel of the map (the receiver
+    // shader's four taps half a texel around the pixel): there the surface
+    // shadows itself in stripes. `area`: their size in texels; `prone`: the
+    // part over the bias applied; `proneOld`: over `oldBias` (64 x 2^-24, the
+    // single_sided value gd04 applied to every caster before GD04-119).
+    struct AcneProbe {
+        gfx::Mat4 vp;          // world -> the map's clip space (Direct3D depth)
+        float size = 1;        // the map's texels
+        float bias[2] = {};    // single_sided, double_sided (depth units)
+        float oldBias = 0;
+        double area = 0, prone = 0, proneOld = 0;
+    };
+    void setAcneProbe(AcneProbe* p) { acne_ = p; }
     // The venue's dynamic shadow map this frame (VenueView::setShadow's):
     // opaque meshes draw with their templates' DynamicShadowReciever
     // technique where they have one. An empty texture: none.
@@ -109,10 +129,12 @@ private:
     };
     struct Member {
         std::vector<SrcVertex> src;
+        std::vector<uint32_t> idx;  // the index buffer's copy (the acne probe)
         std::vector<Mesh> meshes;
         gfx::BufferId vb, ib;
         std::vector<gfx::TextureId> textures;
     };
+    void probeAcne(const Member& m, const void* skinned);
     gfx::RenderDevice* dev_ = nullptr;
     gfx::ProgramId program_;
     std::shared_ptr<const matlib::Library> lib_;
@@ -123,6 +145,8 @@ private:
     float aspect_ = 16.0f / 9.0f;
     bool writeAlpha_ = false, flipY_ = false, reuseSkin_ = false;
     const gh3shader::Globals* shadowPass_ = nullptr;
+    const gh3shader::Globals* shadowPassDouble_ = nullptr;
+    AcneProbe* acne_ = nullptr;
     std::vector<Member> members_;
     std::vector<float> scratch_;
     Stats stats_;

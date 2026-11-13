@@ -11,6 +11,7 @@
 
 #include "data/bytes.h"
 #include "data/game_data.h"
+#include "render/draw_order.h"
 #include "render/ui_cloth.h"
 #include "scene/bitmap.h"
 #include "scene/milo.h"
@@ -74,20 +75,7 @@ UiView::~UiView() {
 }
 
 namespace {
-// The length-prefixed names in a raw record (a class the port keeps raw).
-std::vector<std::string> recordNames(const Bytes& rec) {
-    std::vector<std::string> out;
-    for (size_t i = 0; i + 4 < rec.size(); ++i) {
-        const uint32_t n = uint32_t(rec[i]) << 24 | uint32_t(rec[i + 1]) << 16 | uint32_t(rec[i + 2]) << 8 | uint32_t(rec[i + 3]);
-        if (n < 3 || n > 64 || i + 4 + n > rec.size()) continue;
-        bool printable = true;
-        for (size_t k = 0; k < n && printable; ++k) printable = rec[i + 4 + k] >= 0x20 && rec[i + 4 + k] < 0x7f;
-        if (!printable) continue;
-        out.emplace_back(reinterpret_cast<const char*>(rec.data() + i + 4), n);
-        i += 3 + n;
-    }
-    return out;
-}
+using scene::recordNames;
 // A RenderDir record's RndTransformable (rev 9: local then world 3x4
 // matrices, both with unit rows): the first such block in the record [I:
 // found by its shape; the RenderDir class is not decoded].
@@ -236,11 +224,7 @@ void UiView::drawRoots(MaterialRenderer& r, const scene::Directory& root) {
     std::vector<const scene::Object*> roots;
     for (const auto& o : root.objects)
         if (!held.count(o->name) && (drawOf(o.get()) || o->as<scene::Text>())) roots.push_back(o.get());
-    std::stable_sort(roots.begin(), roots.end(), [](const scene::Object* a, const scene::Object* b) {
-        const scene::Draw* da = drawOf(a);
-        const scene::Draw* db = drawOf(b);
-        return (da ? da->order : 0) < (db ? db->order : 0);
-    });
+    gfx::sortDraws(roots);
     for (const scene::Object* o : roots) drawObject(r, *o, 0);
 }
 
@@ -446,6 +430,7 @@ Camera UiView::defaultCamera() {
 }
 
 Camera UiView::camera() const {
+    if (hasCamOverride_) return camOverride_;
     const auto* own = milo_ && milo_->root().self ? milo_->root().self->as<scene::DirObj>() : nullptr;
     // A RenderDir (RB's song list): the inline PanelDir its TexRenderer
     // draws into a texture (draw()) takes that panel's own camera.
@@ -499,7 +484,7 @@ void UiView::setWrapWidth(const std::string& component, float width) {
 }
 
 std::string UiView::labelString(const scene::UILabel& l) const {
-    if (auto it = overrides_.find(l.name); it != overrides_.end()) return it->second;
+    if (auto it = findKeyed(overrides_, l); it != overrides_.end()) return it->second;
     if (l.localize) return l.textToken.empty() ? std::string() : locale_.text(l.textToken);
     return l.text;
 }
@@ -541,6 +526,27 @@ scene::Object* UiView::findIn(const std::string& scope, const std::string& name)
     if (!milo_) return nullptr;
     const scene::Directory* d = subdirNamed(milo_->root(), scope, 0);
     return d ? d->find(name) : nullptr;
+}
+
+void UiView::registerScope(const std::string& scope) {
+    if (!milo_) return;
+    if (const scene::Directory* d = subdirNamed(milo_->root(), scope, 0)) scopeDirs_[d] = scope;
+}
+
+bool UiView::hasScope(const std::string& scope) const { return milo_ && subdirNamed(milo_->root(), scope, 0); }
+
+std::string UiView::keyOf(const scene::Object& o) const {
+    auto it = scopeDirs_.find(o.dir);
+    return it == scopeDirs_.end() ? o.name : scopedKey(it->second, o.name);
+}
+
+scene::UiState UiView::stateOf(const scene::Object& o) const {
+    if (auto it = findKeyed(states_, o); it != states_.end()) return it->second;
+    if (auto sd = scopeDirs_.find(o.dir); sd != scopeDirs_.end()) {
+        auto f = scopeFocus_.find(sd->second);
+        return f != scopeFocus_.end() && f->second == o.name ? scene::UiState::Focused : scene::UiState::Normal;
+    }
+    return o.name == focus_ ? scene::UiState::Focused : scene::UiState::Normal;
 }
 
 std::vector<scene::Object*> UiView::byClassIn(const std::string& scope, const std::string& cls) const {
@@ -654,6 +660,7 @@ void UiView::draw(MaterialRenderer& r) {
     textsDrawn_ = meshesDrawn_ = 0;
     masks_.clear();
     hits_.clear();
+    textProbes_.clear();
     if (!milo_) return;
     viewProj_ = camera().viewProj(false);
     const scene::Directory* drawRoot = &milo_->root();
@@ -677,6 +684,7 @@ void UiView::draw(MaterialRenderer& r) {
         // GD05_SONGLIST_FLAT=1 shows the texture flat as wave 03 did.
         if (const char* e = SDL_getenv("GD05_SONGLIST_FLAT"); !e || *e != '1') cloth = false;
         if (!cloth && drawRenderDir3d(r)) {
+            for (TextProbe& p : textProbes_) p.indirect = true;  // into a texture on a 3D banner
             texts_.collect();
             return;
         }
@@ -742,11 +750,7 @@ void UiView::draw(MaterialRenderer& r) {
     std::vector<const scene::Object*> roots;
     for (const auto& o : root.objects)
         if (!held.count(o->name) && (drawOf(o.get()) || o->as<scene::Text>())) roots.push_back(o.get());
-    std::stable_sort(roots.begin(), roots.end(), [](const scene::Object* a, const scene::Object* b) {
-        const scene::Draw* da = drawOf(a);
-        const scene::Draw* db = drawOf(b);
-        return (da ? da->order : 0) < (db ? db->order : 0);
-    });
+    gfx::sortDraws(roots);
     const size_t firstHit = hits_.size();
     for (const scene::Object* o : roots) drawObject(r, *o, 0);
     if (rendered_.texture.id) {
@@ -765,6 +769,10 @@ void UiView::draw(MaterialRenderer& r) {
         for (scene::ScreenMask* sm : m->root().all<scene::ScreenMask>())
             if (pose_.showing(sm)) addMask(*sm);
     if (overlay) overlay(r);
+    for (TextProbe& p : textProbes_) {
+        p.viewProj = viewProj_;
+        if (rendered_.texture.id) p.rect[0] = rendered_.x0, p.rect[1] = rendered_.y0, p.rect[2] = rendered_.x1, p.rect[3] = rendered_.y1;
+    }
     texts_.collect();
 }
 
@@ -852,7 +860,20 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
             if (sub && owner == o.name) {
                 if (texRendered_.count(sub.get())) return;
                 pose_.setDirBase(sub.get(), &o);
+                // A RndDir with an environ draws its objects in it (RndDir's
+                // `environ`, SyncProperty RB 0x821B3438) [C]: loading.milo's
+                // four band icons (load_icon_*: intruments.env, a warm white
+                // point light) were drawn in ornate_leader.grp's dim one.
+                const auto* own = o.as<scene::DirObj>();
+                const scene::Environ* env = nullptr;
+                if (own->hasRnd && !own->rnd.environment.empty()) {
+                    env = sub->find<scene::Environ>(own->rnd.environment);
+                    if (!env) env = o.dir->resolve<scene::Environ>(own->rnd.environment);
+                }
+                const LightEnv saved = env ? r.lightEnv() : LightEnv{};
+                if (env) r.setLightEnv(cache_.lightEnv(*env, &pose_));
                 drawRoots(r, *sub);
+                if (env) r.setLightEnv(saved);
                 return;
             }
         return;
@@ -888,9 +909,56 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
     }
     if (const auto* t = o.as<scene::Text>()) return drawText(r, *t);
     if (const auto* l = o.as<scene::BandLabel>()) {
+        // LOADING (loading.milo's loading.lbl) is graded as the band icons
+        // beside it (owner, 11-12, from the original; D49, replaces D44's
+        // flat white): its focus colour (custom_colors 0xfdfdfd, white as the
+        // icons' materials) lit as the icons are lit: intruments.env's
+        // instruments.lit (warm 1 1 0.68, range 500, falloff from 200;
+        // parented to ornate_leader.grp, the label's group) where the four
+        // icons stand relative to it, so the word takes the light the icons
+        // take; with loading.tnm's sweep light loading.lit (range 35, keys 0
+        // / 25 / 50 across the word, from the label's own ornate_leader.env)
+        // [C data: the lights, colours and the sweep; I: that RB lights the
+        // word so]. Lit at its own place the word stayed grey (p97 44).
+        if (l->bigEndian && l->name == "loading.lbl" && l->textStyle == "custom_colors" && l->dir && l->dir->find<scene::TransAnim>("loading.tnm")) {
+            std::array<float, 3> c{};
+            const scene::Environ* icons = l->dir->resolve<scene::Environ>("intruments.env");
+            if (icons && styles_.textStyleColor(l->textStyle, l->customColors, scene::UiState::Focused, c)) {
+                LightEnv le = cache_.lightEnv(*icons, &pose_);
+                // The icons' middle (load_icon_*) and the word's place.
+                float mid[3] = {0, 0, 0};
+                int n = 0;
+                for (const auto& [d, m] : {std::pair{"load_icon_guitar", "guitar.mesh"}, std::pair{"load_icon_vox", "vox.mesh"},
+                                           std::pair{"load_icon_drum", "drummer.mesh"}, std::pair{"load_icon_bass", "bass.mesh"}})
+                    if (const scene::Object* o = findIn(d, m)) {
+                        const scene::Xfm w = pose_.world(o);
+                        for (int k = 0; k < 3; ++k) mid[k] += w.pos[size_t(k)];
+                        ++n;
+                    }
+                const scene::Xfm lw = componentWorld(*l);
+                for (int i = 0; n && i < le.lightCount; ++i)
+                    if (!le.lights[i].directional && !le.directional) {
+                        le.lights[i].vec.x += lw.pos[0] - mid[0] / float(n);
+                        le.lights[i].vec.y += lw.pos[1] - mid[1] / float(n);
+                        le.lights[i].vec.z += lw.pos[2] - mid[2] / float(n);
+                    }
+                if (const scene::Environ* own = l->dir->resolve<scene::Environ>("ornate_leader.env")) {
+                    scene::Environ sweep = *own;
+                    sweep.lights.clear();
+                    if (l->dir->resolve<scene::Light>("loading.lit")) sweep.lights.push_back("loading.lit");
+                    const LightEnv se = cache_.lightEnv(sweep, &pose_);
+                    for (int i = 0; i < se.lightCount && le.lightCount < 4; ++i) le.lights[le.lightCount++] = se.lights[i];
+                }
+                const LightEnv saved = r.lightEnv();
+                r.setLightEnv(le);
+                drawLabel(r, *l, &l->band, c.data());
+                r.setLightEnv(saved);
+                return;
+            }
+        }
         // Rock Band: the text style's preset colour (BandTextComp) [C].
         std::array<float, 3> c{};
-        if (l->bigEndian && styles_.textStyleColor(l->textStyle, l->customColors, state(l->name) == scene::UiState::Disabled ? scene::UiState::Disabled : scene::UiState::Normal, c))
+        if (l->bigEndian && styles_.textStyleColor(l->textStyle, l->customColors, stateOf(*l) == scene::UiState::Disabled ? scene::UiState::Disabled : scene::UiState::Normal, c))
             return drawLabel(r, *l, &l->band, c.data());
         return drawLabel(r, *l, &l->band, l->color.data());
     }
@@ -943,7 +1011,12 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
 // resource/highlight.milo, its Draw showing flag].
 void UiView::drawHighlight(MaterialRenderer& r, const scene::Object& o) {
     const scene::Object* target = nullptr;
-    if (!focus_.empty() && o.dir) target = o.dir->resolve(focus_);
+    std::string focus = focus_;
+    if (auto sd = scopeDirs_.find(o.dir); sd != scopeDirs_.end()) {
+        auto f = scopeFocus_.find(sd->second);
+        focus = f != scopeFocus_.end() ? f->second : std::string();
+    }
+    if (!focus.empty() && o.dir) target = o.dir->resolve(focus);
     if (!target || target == &o || !transOf(target)) return;
     const scene::UiStyle style = styles_.style(o.cls, o.header.type);
     scene::Milo* res = resource(style.resourceFile.empty() ? style.classResourceFile : style.resourceFile);
@@ -975,7 +1048,7 @@ void UiView::drawText(MaterialRenderer& r, const scene::Text& t) {
     if (!font) return;
     // A plain Text component's string can be replaced too (set_text on a .txt).
     std::string str = t.text;
-    if (auto it = overrides_.find(t.name); it != overrides_.end()) str = it->second;
+    if (auto it = findKeyed(overrides_, t); it != overrides_.end()) str = it->second;
     if (str.empty()) return;
     auto& lt = labels_[&t];
     if (!lt || lt->str != str) {
@@ -988,6 +1061,7 @@ void UiView::drawText(MaterialRenderer& r, const scene::Text& t) {
         lt->layout = layoutText(&fm, str, st);
         lt->font = font;
     }
+    texts_.probeName = t.name;
     texts_.draw(r, &t, *font, lt->layout, toMat4(pose_.world(&t)));
     ++textsDrawn_;
 }
@@ -1000,7 +1074,7 @@ scene::Xfm UiView::componentWorld(const scene::Object& o) const {
     // BandButton selecting (RB 0x822D4848) [C]: its type's selecting_anim
     // (button_main.milo's selecting.tnm) sampled at endFrame x (select_frames
     // - left) / select_frames, its translation added to the button's.
-    if (o.as<scene::BandButton>() && state(o.name) == scene::UiState::Selecting)
+    if (o.as<scene::BandButton>() && stateOf(o) == scene::UiState::Selecting)
         if (const ::DataNode* a = styles_.typeProperty(o.cls, o.header.type, "selecting_anim"); a && a->children.size() > 1 && a->children[1].isText()) {
             const scene::UiStyle style = styles_.style(o.cls, o.header.type);
             if (scene::Milo* res = const_cast<UiView*>(this)->resource(style.resourceFile.empty() ? style.classResourceFile : style.resourceFile))
@@ -1050,7 +1124,10 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
             if (band->fitText == 2 && band->width > 0 && band->height >= 1.8f * band->textSize * std::max(band->leading, 0.5f))
                 st.wrapWidth = band->width;
             st.align = band->alignment, st.capsMode = band->allCaps ? 2 : 0;
-            st.overrideKerning = true, st.kerning = band->kerning;
+            // RB's UILabel update (RB 0x8226E0A0) raises the font's kerning
+            // (+0x1044) by the label's while it lays the text out, then puts
+            // it back: the label's kerning adds to the font's [C].
+            st.overrideKerning = true, st.kerning = fm.kerning() + band->kerning;
         } else {
             st.size = tmpl->size, st.leading = tmpl->leading, st.wrapWidth = tmpl->wrapWidth;
             st.align = tmpl->align, st.capsMode = tmpl->capsMode;
@@ -1071,7 +1148,7 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
     const float* matColor = labelColor;
     const scene::Object* panel = milo_->root().self.get();
     if (const auto* b = l.as<scene::BandButton>(); b && panel) {
-        const scene::UiState st = state(l.name);
+        const scene::UiState st = stateOf(l);
         // Rock Band: the text style's preset colour for the state
         // (BandTextComp 0x822FFDF0, ui/color_presets.dta) [C].
         std::array<float, 3> c{};
@@ -1092,10 +1169,23 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
     }
     world = scene::compose(scaleXfm(lt->fit[0], 1, lt->fit[1]), world);
     const Mat4 wm = toMat4(world);
+    texts_.probeName = l.name;
+    setProbeStyle(band, *lt);
     texts_.draw(r, &l, *lt->font, lt->layout, wm, matColor);
     // Buttons, and RB's labels too (the help bar's actions take clicks).
     if (l.as<scene::BandButton>() || l.cls == "UIButton" || l.bigEndian) addLayoutHit(l.name, lt->layout, wm);
     ++textsDrawn_;
+}
+
+// The label's text fields for the next text probe (the songlist_text walk).
+void UiView::setProbeStyle(const scene::BandText* band, const LabelText& lt) {
+    TextProbe& p = texts_.probeStyle;
+    p = TextProbe{};
+    if (!texts_.probes || !band) return;
+    p.hasStyle = true, p.text = lt.str, p.font = lt.font;
+    p.dataSize = band->textSize, p.leading = band->leading, p.boxW = band->width, p.boxH = band->height, p.kerning = band->kerning;
+    p.fitType = band->fitText, p.align = band->alignment, p.capsMode = band->allCaps ? 2 : 0;
+    p.fitX = lt.fit[0], p.fitZ = lt.fit[1];
 }
 
 float UiView::templateWidth(const scene::Text& tmpl, const std::string& str) {
@@ -1126,13 +1216,15 @@ float UiView::drawTemplate(MaterialRenderer& r, const std::string& key, const sc
         if (style) {
             st.size = style->textSize, st.leading = style->leading, st.wrapWidth = style->wrapWidth;
             st.align = align >= 0 ? align : int(style->alignment), st.capsMode = style->allCaps ? 2 : tmpl.capsMode;
-            st.overrideKerning = true, st.kerning = style->kerning;
+            st.overrideKerning = true, st.kerning = fm.kerning() + style->kerning;  // RB 0x8226E0A0: added to the font's [C]
         }
         lt->layout = layoutText(&fm, str, st);
         lt->fit = style ? fitScale(lt->layout, st, style->fitText, style->width, style->height) : std::array<float, 2>{1, 1};
     }
     const float tint[4] = {1, 1, 1, alpha};
     const Mat4 wm = toMat4(scene::compose(scaleXfm(lt->fit[0], 1, lt->fit[1]), world));
+    texts_.probeName = key;
+    setProbeStyle(style, *lt);
     texts_.draw(r, lt.get(), *font, lt->layout, wm, rgb, alpha < 1 ? tint : nullptr);
     addLayoutHit(key, lt->layout, wm);
     ++textsDrawn_;
@@ -1167,8 +1259,9 @@ void UiView::drawStyleMeshes(MaterialRenderer& r, const scene::Object& c) {
     std::string file = style.resourceFile.empty() ? style.classResourceFile : style.resourceFile;
     scene::Milo* res = resource(file);
     if (!res || !style.node) return;
-    const scene::UiState st = state(c.name);
-    const bool checked = checks_.count(c.name) && checks_[c.name];
+    const scene::UiState st = stateOf(c);
+    const auto chk = findKeyed(checks_, c);
+    const bool checked = chk != checks_.end() && chk->second;
     // (mesh "x.mesh") with (mat_on ...) / (mat_off ...) for a check box;
     // (meshes ("x.mesh" (normal "x.mat") (focused ...) ...) ...) for a slider.
     std::vector<std::pair<std::string, std::string>> meshes;
@@ -1198,7 +1291,7 @@ void UiView::drawStyleMeshes(MaterialRenderer& r, const scene::Object& c) {
     ScenePose podPose;
     const auto* slider = c.as<scene::BandSlider>();
     if (slider) {
-        auto it = sliders_.find(c.name);
+        auto it = findKeyed(sliders_, c);
         const float frac = it != sliders_.end() && it->second.second > 1 ? float(it->second.first) / float(it->second.second - 1) : 0.0f;
         for (scene::TransAnim* ta : res->root().all<scene::TransAnim>()) podPose.setFrame(ta, frac * ScenePose::endFrame(ta));
     }
@@ -1211,8 +1304,10 @@ void UiView::drawStyleMeshes(MaterialRenderer& r, const scene::Object& c) {
         // A check box's / picture's mesh takes the component's place (the
         // component carries the same facing rotation the resource mesh has,
         // e.g. the video settings' lefty boxes) [I]; a slider's pod moves by
-        // its TransAnim under the slider.
-        const scene::Xfm world = slider ? scene::compose(podPose.local(m), cw) : cw;
+        // its TransAnim under the slider, through its resource parents
+        // (slider_audio.milo: slider.grp turns the XY quads to face the
+        // camera; the audio sliders have no turn of their own) [C data].
+        const scene::Xfm world = slider ? scene::compose(podPose.world(m), cw) : cw;
         drawMesh(r, cache_, *m, toMat4(world), tex ? &texPose : nullptr, mat);
         if (!m->verts.empty()) {
             float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
@@ -1232,7 +1327,7 @@ void UiView::drawStyleMeshes(MaterialRenderer& r, const scene::Object& c) {
 
 void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
     const auto* list = o.as<scene::UIList>();
-    auto ls = lists_.find(o.name);
+    auto ls = findKeyed(lists_, o);
     if (!list || ls == lists_.end() || ls->second.rows.empty()) {
         problem(o.name + ": a list with no rows (no provider set)");
         return;
@@ -1261,15 +1356,38 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
         const ::DataNode& c = v->children[1];
         vertical = !((c.type == ::DataNode::Type::Int && c.i == 0) || (c.isText() && c.s == "FALSE"));
     }
-    const scene::UiState st = state(o.name);
+    const scene::UiState st = stateOf(o);
     const scene::Xfm lw = componentWorld(o);
-    const ListState& s = ls->second;
+    ListState& s = ls->second;
     const int shown = list->displayNum > 0 ? list->displayNum : int(s.rows.size());
+    // A list with more rows than its display_num shows display_num of them
+    // from `first`, moved to keep the selected row in view (RB's song list:
+    // display_num 7 of 60-odd rows; it only ever drew the first 7 and the
+    // highlight left the list) [I: the window moves by the rows it must].
+    if (int(s.rows.size()) > shown) {
+        if (s.selected >= 0 && s.selected < s.first) s.first = s.selected;
+        if (s.selected >= s.first + shown) s.first = s.selected - shown + 1;
+        s.first = std::clamp(s.first, 0, int(s.rows.size()) - shown);
+    } else {
+        s.first = 0;
+    }
+    auto slotOf = [&](int row) { return s.rows[size_t(row)].slot > -1 ? s.rows[size_t(row)].slot : float(row); };
+    const float firstSlot = s.first > 0 ? slotOf(s.first) : 0.0f;
+    // Each shown row's place: its slot x spacing, plus the gaps of the shown
+    // rows above it (RB's UIList layout, 0x82271C58 [C]); the highlight
+    // takes its row's place (0x82271F80: the selected position x spacing +
+    // the gaps above it) [C].
+    auto offOf = [&](int row) {
+        float gaps = 0;
+        for (int r = s.first; r < row; ++r) gaps += s.rows[size_t(r)].gap;
+        return (slotOf(row) - firstSlot) * list->spacing + gaps;
+    };
+    listHighlights_[o.name] = ListHighlight{};
     // The selected row's highlight: (highlight "highlight.mesh" (colors
     // (normal r g b) (selecting ...) (disabled ...))) [C data], the mesh at
     // its own place in the row, tinted by the list's state.
     if (const ::DataNode* hl = style.node->find("highlight"); hl && hl->children.size() > 1 && hl->children[1].isText() &&
-                                                               s.selected >= 0 && s.selected < int(s.rows.size()) && s.selected < shown)
+                                                               s.selected >= s.first && s.selected < int(s.rows.size()) && s.selected < s.first + shown)
         if (const scene::Mesh* hm = res->find<scene::Mesh>(hl->children[1].s)) {
             float tint[4] = {1, 1, 1, 1};
             if (const ::DataNode* hc = hl->find("colors")) {
@@ -1277,17 +1395,26 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
                 if (c && c->children.size() >= 4)
                     for (int k = 0; k < 3; ++k) tint[k] = c->floatAt(size_t(k + 1));
             }
-            const ListRow& sr = s.rows[size_t(s.selected)];
-            const float off = (sr.slot > -1 ? sr.slot : float(s.selected)) * list->spacing;
+            const float off = offOf(s.selected);
             const scene::Xfm at = scene::compose(hm->trans.local, scene::compose(vertical ? moveXfm(0, 0, -off) : moveXfm(off, 0, 0), lw));
+            if (!hm->verts.empty()) {
+                ListHighlight& h = listHighlights_[o.name];
+                h.drawn = true, h.selected = s.selected, h.lo = 1e30f, h.hi = -1e30f;
+                const Mat4 m = toMat4(at);
+                for (const scene::MeshVertex& v : hm->verts) {
+                    const Vec3 p = m.transformPoint({v.pos[0], v.pos[1], v.pos[2]});
+                    const float along = vertical ? p.z : p.x;
+                    h.lo = std::min(h.lo, along), h.hi = std::max(h.hi, along);
+                }
+            }
             if (cache_.mesh(hm)) {
                 drawMesh(r, cache_, *hm, toMat4(at), &pose_, findMat(*hm, hm->mat), tint);
                 ++meshesDrawn_;
             }
         }
-    for (int row = 0; row < int(s.rows.size()) && row < shown; ++row) {
+    for (int row = s.first; row < int(s.rows.size()) && row < s.first + shown; ++row) {
         const ListRow& lr = s.rows[size_t(row)];
-        const float off = (lr.slot > -1 ? lr.slot : float(row)) * list->spacing;
+        const float off = offOf(row);
         const scene::Xfm rowWorld = scene::compose(vertical ? moveXfm(0, 0, -off) : moveXfm(off, 0, 0), lw);
         const char* kind = lr.disabled ? "disabled" : row == s.selected ? "highlight" : "normal";
         for (size_t e = 0; e < elements.size(); ++e) {
@@ -1342,7 +1469,7 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
 }
 
 void UiView::drawTextEntry(MaterialRenderer& r, const scene::Object& o) {
-    auto es = entries_.find(o.name);
+    auto es = findKeyed(entries_, o);
     if (es == entries_.end()) return;
     const scene::UiStyle style = styles_.style(o.cls, o.header.type);
     scene::Milo* res = resource(style.resourceFile.empty() ? style.classResourceFile : style.resourceFile);

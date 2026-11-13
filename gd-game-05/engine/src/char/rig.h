@@ -42,6 +42,7 @@ struct RigContext {
     std::function<void(const std::string& driver)> pollDriver;
     std::function<void()> pollDrivers;  // main.drv and the hand drivers, into the servo's bones
     std::function<void()> pollServo;    // CharServoBone: the bones posed, root motion
+    std::function<void(const std::string& blender)> pollBlender;  // CharBonesBlender: into its dest, cleared
     std::function<void(const std::string& servo)> pollFace;  // FaceFxLipSyncServo
     std::function<void(const std::string& walk)> pollWalk;   // CharWalk (queues the walk's clips)
     // The face's clocks (FaceFxLipSyncServo Poll): TaskMgr kTaskSeconds
@@ -61,6 +62,13 @@ public:
     float weightOf(const std::string& name) const;
     void setWeight(const std::string& name, float w);
 
+    // A CharWeightSetter's base_weight / beats_per_weight / offset / scale
+    // (scripts: {left_hand.weight set beats_per_weight 0.5}); false when
+    // `name` is not a setter or the key is not one of those.
+    bool setSetter(const std::string& name, const std::string& key, float v);
+    // Rock Band's CharIKMidi new_spot (RB 0x82340CB0): the bone blends to
+    // `spot` over `beats` (the parser's appended length).
+    bool newSpot(const std::string& ik, const std::string& spot, double beats);
     // CharIKMidi (fret.ik): {midi_parser <spot> <start> <end>} / new_spot.
     bool ikMidi(const std::string& ik, const std::string& spot, double start, double end, double now);
     // Hair back to rest (teleports: reset_hair).
@@ -71,6 +79,8 @@ public:
     std::vector<std::string> order() const;
 
     struct Impl;
+    // GD05_BAND_LEGACY=1: GH2's weight setters (weight = the flag weight).
+    static bool legacySetters;
 
 private:
     std::unique_ptr<Impl> impl_;

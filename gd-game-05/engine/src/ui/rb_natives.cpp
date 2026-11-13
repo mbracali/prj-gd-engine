@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <functional>
 #include <map>
@@ -75,6 +76,11 @@ protected:
 };
 
 
+// profile_mgr unlock_all_songs (long_cheats.dta's ten-fret code on the
+// title): every song in the lists from now on (SongMgr's flag at
+// RB 0x8298F9C5, read by 0x82431AC8) [C]; true when it was not yet [I].
+bool g_unlockAllSongs = false;
+
 // song_provider, Rock Band's (ui/selsong.dta): the songs of the disc that
 // have a rank (songs.dtb), shown by the display RB's song select cycles
 // (rank first: band_ui / song_groupings in band.dtb), each group under a
@@ -87,6 +93,7 @@ public:
     explicit RbSongProvider(UiManager& ui) : ListProvider("song_provider", "SongProvider"), ui_(ui) {}
 
     void initData() override { build(); }
+    void rebuild() { built_ = false; }
     int numData() override {
         build();
         return int(data_.size());
@@ -101,27 +108,48 @@ public:
         out.clear();
         selectedRow = 0;
         int headersSoFar = 0;
+        // Every row, heading or song, has band.dta's song_select_gap below
+        // it (SongProvider's gap, RB 0x82400180, set from the config at
+        // 0x824053C8) [C]: the selected row's highlight (list_song.milo's
+        // highlight.mesh, 65 units: the name and the details line) then
+        // covers its row alone. Without it (33 units a row) it covered the
+        // next row too (owner, G06 6). GD05_SONGLIST_LEGACY=1: as before.
+        const bool legacy = SDL_getenv("GD05_SONGLIST_LEGACY") != nullptr;
+        float gap = 0;
+        if (!legacy && ui_.bootTree())
+            if (const DataNode* g = ui_.bootTree()->find("song_select_gap"); g && g->children.size() > 1) gap = g->floatAt(1);
         for (int i = 0; i < int(data_.size()); ++i) {
             // A heading is a row of its own, the slot above its first song
             // (list_song.milo's heading.lbl sits 17 units lower in its row
             // than list.lbl: drawn in the song's row it overlapped the song).
-            for (const auto& [idx, text] : headers_)
-                if (idx == i) {
+            for (size_t hi = 0; hi < headers_.size(); ++hi)
+                if (headers_[hi].first == i) {
                     gfx::UiView::ListRow h;
                     h.header = true;
-                    h.texts["heading.lbl"] = text;
+                    // RB 0x82400A68 column 1: "<group> (<n> Songs)", song_select_song for one [C].
+                    const int end = hi + 1 < headers_.size() ? headers_[hi + 1].first : int(data_.size());
+                    const int n = end - i;
+                    char buf[256];
+                    std::snprintf(buf, sizeof buf, ui_.localize(n == 1 ? "song_select_song" : "song_select_songs").c_str(), headers_[hi].second.c_str(), n);
+                    h.texts["heading.lbl"] = legacy ? headers_[hi].second : std::string(buf);
                     h.slot = float(i + headersSoFar);
+                    h.gap = gap;
                     ++headersSoFar;
                     out.push_back(std::move(h));
                 }
             gfx::UiView::ListRow r;
             r.slot = float(i + headersSoFar);
+            r.gap = gap;
             const std::string& sym = data_[size_t(i)];
+            // Column 3, details.lbl (drawn on every row): the artist, the
+            // random entry's by-line (RB 0x82400A68) [C].
             if (sym == "random_song") {
                 r.texts["list.lbl"] = ui_.localize("random_song");
+                if (!legacy) r.texts["details.lbl"] = ui_.localize("random_song_by_line");
             } else {
                 const int info = songInfoIndex(ui_, sym);
                 r.texts["list.lbl"] = info >= 0 ? ui_.host().songs()[size_t(info)].name : sym;
+                if (!legacy && info >= 0) r.texts["details.lbl"] = ui_.host().songs()[size_t(info)].artist;
             }
             if (i == selected) selectedRow = int(out.size());
             out.push_back(std::move(r));
@@ -156,14 +184,56 @@ public:
     }
 
 private:
+    // RB's SongMgr (0x82432C60 -> 0x82431AC8) [C]: a song a mode other
+    // than leaderboards lists only once it is available: downloaded (none
+    // on the disc), or every song unlocked (the cheat), or one of the mode's
+    // unlock_song_initial_num (modes.dta: 10) first songs by the rank of its
+    // unlock_song_instrument (qp_solo: the leader's instrument; band quick
+    // play: band; none: no song at all) among the songs that are not
+    // (unlockable TRUE) (the ranked lists of 0x82434020), or a song a band
+    // of the profile has played (0x823D43D0), or within the tours' progress
+    // on guitar, vocals or drums: its place in that instrument's ranked list
+    // (the bonus list for a bonus song) under the progress of the profile's
+    // characters of the instrument (0x823D4738 / 0x823E0458, ui/rb_meta.cpp
+    // rbTourUnlocks) (GD05-077). GD05_SONGLIST_LEGACY=1: every song, as before.
+    std::set<std::string> availableSongs() {
+        std::set<std::string> out;
+        const std::string inst = gameCfgValue(ui_, "unlock_song_instrument").str();
+        const int initial = gameCfgValue(ui_, "unlock_song_initial_num").integerValue();
+        if (inst.empty() || inst == "0") return out;
+        const std::vector<SongInfo>& songs = ui_.host().songs();
+        const std::vector<std::string> first = rankedSongs(songs, inst, false);
+        for (size_t i = 0; i < first.size() && int(i) < initial; ++i) out.insert(first[i]);
+        lockInstrument_ = inst;
+        if (SDL_getenv("GD05_TOUR_UNLOCKS_LEGACY")) return out;  // GD05-077's walk against the code before
+        const RbTourUnlocks t = rbTourUnlocks();
+        out.insert(t.bandPlayed.begin(), t.bandPlayed.end());
+        for (int i = 0; i < 3; ++i)
+            for (int bonus = 0; bonus < 2; ++bonus) {
+                const std::vector<std::string> l = rankedSongs(songs, RbTourUnlocks::kInstruments[i], bonus != 0);
+                const int n = bonus ? t.bonus[i] : t.ranked[i];
+                for (size_t k = 0; k < l.size() && int(k) < n; ++k) out.insert(l[k]);
+            }
+        return out;
+    }
+
     void build() {
         if (built_) return;
         built_ = true;
         data_ = {"random_song"};
         headers_.clear();
+        const bool everySong = mode_ == "leaderboards" || g_unlockAllSongs || SDL_getenv("GD05_SONGLIST_LEGACY");
+        const std::set<std::string> available = everySong ? std::set<std::string>{} : availableSongs();
+        locked_ = 0;
         std::vector<const SongInfo*> songs;
-        for (const SongInfo& s : ui_.host().songs())
-            if (!s.tutorial) songs.push_back(&s);
+        for (const SongInfo& s : ui_.host().songs()) {
+            if (s.tutorial) continue;
+            if (!everySong && !available.count(s.id)) {
+                ++locked_;
+                continue;
+            }
+            songs.push_back(&s);
+        }
         const std::string inst = "band";
         std::stable_sort(songs.begin(), songs.end(), [&](const SongInfo* a, const SongInfo* b) {
             auto ra = a->rank.count(inst) ? a->rank.at(inst) : 0, rb = b->rank.count(inst) ? b->rank.at(inst) : 0;
@@ -178,6 +248,11 @@ private:
         }
     }
 
+public:
+    int locked_ = 0;              // songs left out of the list as locked (the walks)
+    std::string lockInstrument_;  // the instrument the unlock rank was read for
+
+private:
     UiManager& ui_;
     std::string mode_ = "game";
     int display_ = 0;
@@ -235,6 +310,10 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     gamemode->on("get", [modeValue](std::vector<Value>& a) { return modeValue(strArg(a, 0)); });
     // {gamemode intro_category}: the mode's (intro_category ...) (modes.dta) [C data].
     gamemode->on("intro_category", [modeValue](std::vector<Value>&) { return modeValue("intro_category"); });
+    // {gamemode win_camera} / {gamemode outro_camera}: the mode's shot
+    // categories for worldbase.dta's game_won / next_outro_camera [C data].
+    gamemode->on("win_camera", [modeValue](std::vector<Value>&) { return modeValue("win_camera"); });
+    gamemode->on("outro_camera", [modeValue](std::vector<Value>&) { return modeValue("outro_camera"); });
     gamemode->on("is_solo", [modeValue](std::vector<Value>&) { return Value::integer(modeValue("max_players").integerValue() == 1 ? 1 : 0); });
     gamemode->on("is_hth_arrangement", [modeValue](std::vector<Value>&) { return Value::integer(modeValue("player_arrangement").integerValue() == 1 ? 1 : 0); });
     gamemode->on("is_band_arrangement", [modeValue](std::vector<Value>&) { return Value::integer(modeValue("player_arrangement").integerValue() == 0 ? 1 : 0); });
@@ -246,19 +325,20 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     RbHost* session = add(std::make_unique<RbHost>(ui, "session"));
     session->on("mode", no);  // kNetLocal
     // The local players in the session: player 0 and the band lobby's (wave 02).
-    session->on("num_players", [&ui](std::vector<Value>&) {
-        int n = 1;
-        for (size_t k = 1; k < ui.session().players.size(); ++k) n += ui.session().players[k].participating;
-        return Value::integer(n);
-    });
+    session->on("num_players", [&ui](std::vector<Value>&) { return Value::integer(ui.session().numJoined()); });
     session->on("is_busy", no);
     session->on("disabled", no);
     // {session state}: kNetInGame (the .dtb's 2) while a song is loaded
     // (ui/game.dta on_pause) [C data], else 0 [I: the other states' values].
     // {session has_player n}: the one local player [I].
-    session->on("has_player", [&ui](std::vector<Value>& a) {
-        const int n = a.empty() ? -1 : a[0].integerValue();
-        return Value::integer(n == 0 || (n > 0 && n < 4 && ui.session().players[size_t(n)].participating) ? 1 : 0);
+    session->on("has_player", [&ui](std::vector<Value>& a) { return Value::integer(ui.session().joined(a.empty() ? -1 : a[0].integerValue()) ? 1 : 0); });
+    // session clear (main_panel enter): no player, no lobby, no leader [I: RB's Session::Clear not read].
+    session->on("clear", [&ui](std::vector<Value>&) {
+        Session& s = ui.session();
+        s.lobby = false;
+        for (Session::PlayerCfg& pc : s.players) pc.participating = false, pc.slot = -1;
+        s.cfgSet["leader_num"] = Value::integer(-1);
+        return Value::integer(0);
     });
     session->on("state", [&ui](std::vector<Value>&) { return Value::integer(ui.host().gameLoaded() ? 2 : 0); });
     session->on("num_open_slots", no);
@@ -280,7 +360,7 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         for (ScriptObject* o : sinks) ui.callScript(o, "start_loading_msg");
         return Value::integer(0);
     });
-    session->quiet({"clear", "send_to_all", "send_to_player", "set_all_local_ready_status", "set_invites_allowed", "ignore_remote_messages", "done_loading"});
+    session->quiet({"update_game_data", "send_to_all", "send_to_player", "set_all_local_ready_status", "set_invites_allowed", "ignore_remote_messages", "done_loading"});
     RbHost* platform = add(std::make_unique<RbHost>(ui, "platform_mgr"));
     // Signed in: every local player has the port's profile (rb_profile.json,
     // ui/rb_meta.cpp), never a guest; the Xbox save screens stay skipped
@@ -294,6 +374,12 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     RbHost* profiles = add(std::make_unique<RbHost>(ui, "profile_mgr"));
     // The profiles' save data: RB's saves are M7 (GD05-009; DECISIONS D4).
     profiles->on("get_save_data_from_player", no);
+    profiles->on("unlock_all_songs", [&in](std::vector<Value>&) {
+        const bool was = g_unlockAllSongs;
+        g_unlockAllSongs = true;
+        if (auto* sp = dynamic_cast<RbSongProvider*>(in.findObject("song_provider"))) sp->rebuild();
+        return Value::integer(was ? 0 : 1);
+    });
     // A player's options (the tutorials' lessons done, tutorial_lesson_menu.dta) [I: kept for the session].
     {
         RbHost* po = add(std::make_unique<RbHost>(ui, "player_options"));
@@ -324,6 +410,19 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
             applyVolumes();
             return Value::integer(0);
         });
+    }
+    // The pad that owns the system options (options.dta
+    // goto_system_option_screen): set_global_options_pad keeps the pad and
+    // sets a flag, global_options_pad_set returns the flag (ProfileMgr
+    // handler RB 0x823D6280: +0x18 pad, +0x14 flag) [C].
+    {
+        static bool padSet = false;
+        profiles->on("set_global_options_pad", [](std::vector<Value>& a) {
+            if (!a.empty()) opts["global_options_pad"] = a.back().integerValue();
+            padSet = true;
+            return Value::integer(0);
+        });
+        profiles->on("global_options_pad_set", [](std::vector<Value>&) { return Value::integer(padSet ? 1 : 0); });
     }
     profiles->on("get_default_song_to_taskmgr_ms", no);
     profiles->on("get_max_bands_per_char", [](std::vector<Value>&) { return Value::integer(10); });
@@ -473,7 +572,7 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     RbHost* charCache = add(std::make_unique<RbHost>(ui, "char_cache"));
     // The characters' cache: the band's loading is M6's (GD05-008) [I].
     charCache->quiet({"cache_update", "cache_enable", "cache_clear", "iterate", "light_characters", "load_instruments",
-                      "world_configure_characters", "reclaim_characters"});
+                      "world_configure_characters", "reclaim_characters", "request", "check_outside_refs"});
     charCache->on("loaded", yes);
     charCache->on("meta_configure_done", yes);  // meta_loading.dta waits on it [I: nothing to configure]
     // content_mgr: the Music Store / downloads are not in the port (GD05-013):
@@ -481,15 +580,81 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     RbHost* content = add(std::make_unique<RbHost>(ui, "content_mgr"));
     content->on("refresh_done", yes);
     content->quiet({"start_refresh"});
-    // session_mgr add_local_player: the local session is ready at once; the
-    // panel that asked (wait_for_session_ready) gets session_ready_complete_msg
-    // [I: the original's SessionMgr completes asynchronously].
+    // session_mgr (RB SessionMgr, handler 0x82834798): the local session is
+    // ready at once [I: RB's completes asynchronously].
+    // add_local_player <player> <controller type> (RB 0x82832788) [C]: the
+    // player joins with its controller; the first one of a band lobby
+    // leads unless the mode is the Band World Tour (whose leader
+    // update_band_leader picks); the sinks registered for new_local_player
+    // hear it (the band lobby's joining slot), the panel that asked
+    // (wait_for_session_ready) session_ready_complete_msg.
     RbHost* sessionMgr = add(std::make_unique<RbHost>(ui, "session_mgr"));
-    sessionMgr->on("add_local_player", [&ui](std::vector<Value>& a) {
-        // add_local_player <player> <controller type> (main.dta) [C data].
-        if (a.size() > 1) {
-            const int n = a[0].integerValue();
-            if (n >= 0 && size_t(n) < ui.session().players.size()) ui.session().players[size_t(n)].controllerType = a[1].integerValue();
+    static std::vector<std::pair<ScriptObject*, std::string>> mgrSinks;
+    mgrSinks.clear();
+    sessionMgr->on("add_sink", [](std::vector<Value>& a) {
+        if (a.empty() || !a[0].object) return Value::integer(0);
+        const std::string m = a.size() > 1 ? a[1].str() : std::string();
+        for (const auto& [o, msg] : mgrSinks)
+            if (o == a[0].object && msg == m) return Value::integer(0);
+        mgrSinks.emplace_back(a[0].object, m);
+        return Value::integer(0);
+    });
+    sessionMgr->on("remove_sink", [](std::vector<Value>& a) {
+        if (a.empty()) return Value::integer(0);
+        const std::string m = a.size() > 1 ? a[1].str() : std::string();
+        mgrSinks.erase(std::remove_if(mgrSinks.begin(), mgrSinks.end(),
+                                      [&](const auto& e) { return e.first == a[0].object && (m.empty() || e.second == m); }),
+                       mgrSinks.end());
+        return Value::integer(0);
+    });
+    // The sinks for `msg` still alive (a player slot goes with its screen).
+    auto notify = [&ui](const std::string& msg, std::vector<Value> args) {
+        mgrSinks.erase(std::remove_if(mgrSinks.begin(), mgrSinks.end(),
+                                      [&](const auto& e) { return ui.interp().findObject(e.first->name()) != e.first; }),
+                       mgrSinks.end());
+        const auto sinks = mgrSinks;
+        for (const auto& [o, m] : sinks)
+            if (m.empty() || m == msg) ui.callScript(o, msg, args);
+    };
+    // update_band_leader (RB 0x82831238) [C]: only in the Band World Tour
+    // with choose_leader_from_band; a known local band's leader is the
+    // player playing its leader (the first member [I]), otherwise the
+    // leader stays while in the session, else the first player in it [I:
+    // 0x82616DD8 not read].
+    auto updateLeader = [&ui]() {
+        Session& s = ui.session();
+        if (s.mode != "tour_world_local" || !gameCfgValue(ui, "choose_leader_from_band").truthy()) return;
+        int leader = gameCfgValue(ui, "leader_num").integerValue();
+        if (ui.interp().send("tour", "bwtmode", {}).integerValue() == 2) {
+            leader = -1;
+            ScriptObject* band = ui.interp().send("tour", "performer", {}).object;
+            const Value first = band ? ui.interp().send(band, "leader_char_name", {}) : Value::integer(0);
+            for (int p = 0; p < 4 && leader < 0; ++p) {
+                if (!s.joined(p) || !s.players[size_t(p)].hasChar) continue;
+                ScriptObject* c = ui.interp().findObject(s.players[size_t(p)].character);
+                if (c && first.isText() && ui.interp().send(c, "get_char_name", {}).str() == first.str()) leader = p;
+            }
+        } else if (leader < 0 || !s.joined(leader)) {
+            leader = -1;
+            for (int p = 0; p < 4 && leader < 0; ++p)
+                if (s.joined(p)) leader = p;
+        }
+        s.cfgSet["leader_num"] = Value::integer(leader);
+    };
+    sessionMgr->on("add_local_player", [&ui, notify, updateLeader](std::vector<Value>& a) {
+        Session& s = ui.session();
+        const int n = a.empty() ? -1 : a[0].integerValue();
+        if (n >= 0 && size_t(n) < s.players.size()) {
+            const bool first = s.numJoined() == 0;
+            if (a.size() > 1) s.players[size_t(n)].controllerType = a[1].integerValue();
+            // Outside a band lobby the port's game has its one player as
+            // player 0, whichever pad joined (the solo menus) [I].
+            if (s.lobby) {
+                s.players[size_t(n)].participating = true;
+                if (first && s.mode != "tour_world_local") s.cfgSet["leader_num"] = Value::integer(n);
+                else updateLeader();
+                notify("new_local_player", {Value::integer(n)});
+            }
         }
         if (ScriptObject* w = ui.sessionWaiter()) {
             ui.setSessionWaiter(nullptr);
@@ -497,8 +662,30 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         }
         return Value::integer(0);
     });
+    // remove_local_player <player> (RB 0x82834138) [C]: the player leaves;
+    // when it led, the first player left leads [I: RB's order of the
+    // session's players].
+    sessionMgr->on("remove_local_player", [&ui](std::vector<Value>& a) {
+        Session& s = ui.session();
+        const int n = a.empty() ? -1 : a[0].integerValue();
+        if (n < 0 || size_t(n) >= s.players.size()) return Value::integer(0);
+        s.players[size_t(n)].participating = false;
+        s.players[size_t(n)].hasChar = false;
+        if (gameCfgValue(ui, "leader_num").integerValue() == n) {
+            int leader = -1;
+            for (int p = 0; p < 4 && leader < 0; ++p)
+                if (s.joined(p)) leader = p;
+            s.cfgSet["leader_num"] = Value::integer(leader);
+        }
+        return Value::integer(0);
+    });
+    // get_gamertag_provider <slot> <slot num> <hth> <local network>: the
+    // signed-in gamertags a slot can join with (Xbox Live) [I: none in the
+    // port, whose players are its local pads: the script keeps the list's own].
+    in.addBuiltin("get_gamertag_provider", [](Interp&, const DataNode&) { return Value::integer(0); });
+    sessionMgr->on("update_band_leader", [updateLeader](std::vector<Value>&) { return updateLeader(), Value::integer(0); });
     sessionMgr->on("is_finding", no);
-    sessionMgr->quiet({"remove_local_player", "cancel_find", "update_band_leader", "send_to_all"});
+    sessionMgr->quiet({"cancel_find", "send_to_all"});
     {
         auto sp = std::make_unique<RbSongProvider>(ui);
         in.registerObject(sp.get());
@@ -522,6 +709,14 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         const int i = songInfoIndex(ui, strArg(a, 0));
         const std::string g = i >= 0 ? ui.host().songs()[size_t(i)].vocalGender : std::string();
         return Value::symbol(g.empty() ? "male" : g);
+    });
+    // song_mgr anim_tempo <song>: songs.dtb's (anim_tempo kTempoSlow |
+    // kTempoMedium | kTempoFast), the macros' 16 / 32 / 64 [C data]; the
+    // crowd's clip flags (world/crowd.dta intro_start, GD05-071).
+    songMgr->on("anim_tempo", [&ui](std::vector<Value>& a) {
+        const int i = songInfoIndex(ui, strArg(a, 0));
+        const int t = i >= 0 ? ui.host().songs()[size_t(i)].animTempo : 1;
+        return Value::integer(t >= 16 ? t : 16 << std::clamp(t, 0, 2));
     });
     songMgr->on("by_line", [&ui](std::vector<Value>& a) {
         const int i = songInfoIndex(ui, strArg(a, 0));

@@ -56,6 +56,17 @@ class PostProc;
 // own plane so they sit at screen_offset (0x82227440); field of view
 // lerped, zoom_fov added; depth of field from the focal targets; the shake
 // spring (0x82224D18); near / far. See frameShot / keyframeXfm.
+// What a shot is framed against: its targets' points, its parents' world
+// transforms and its path (the venue's world and band, CameraDirector; a
+// menu's WorldDir, the creator's practice space). Empty when absent.
+class ShotScene {
+public:
+    virtual ~ShotScene() = default;
+    virtual bool targetPoint(const scene::CamTarget& t, std::array<float, 3>& out) const = 0;
+    virtual bool parentXfm(const scene::CamTarget& t, scene::Xfm& out) const = 0;
+    virtual const scene::TransAnim* path(const std::string& name) const = 0;
+};
+
 class CameraDirector {
 public:
     explicit CameraDirector(World& world, uint32_t seed = 0x43414d31u);
@@ -87,6 +98,10 @@ public:
     bool hasCamera() const { return hasCamera_; }
     // The PostProc the shot selected (nullptr: reset_postproc).
     const scene::PostProc* postProc() const { return postProc_; }
+    // pp_blend_task's blend: the PostProc it blends from (nullptr: none) and
+    // how far (0 from, 1 postProc()).
+    const scene::PostProc* postProcFrom() const { return postProcBlend() < 1.0f ? blendFrom_ : nullptr; }
+    float postProcBlend() const;
     // Depth of field this frame (on: a focal target).
     struct Dof {
         bool on = false;
@@ -102,6 +117,10 @@ public:
     // by the INTRO shot it picks this way [C].
     const scene::CamShot* drawShot(const std::vector<std::string>& categories, const std::vector<std::pair<std::string, Value>>& filter = {});
     void forceShot(const scene::CamShot* shot);
+    // A chain of shots, each after the one before ends (RB's BandCamShot
+    // next_shot, 0x822D6560; play_camera_sequence); a forceShot drops the rest.
+    void playSequence(const std::vector<const scene::CamShot*>& shots);
+    size_t sequenceLeft() const { return sequence_.size(); }
     bool camShotOk(const scene::CamShot& shot);
     bool camCheckShot(const scene::CamShot& shot);
 
@@ -115,6 +134,10 @@ public:
     // The shot's camera at `frame` with its targets' current places, without
     // the filter and the shake (the viewer, --venuetest's camera checks).
     static gfx::Camera evaluate(const World& world, const scene::CamShot& shot, float frame);
+    static gfx::Camera evaluate(const ShotScene& scene, const scene::CamShot& shot, float frame);
+    // A target's point in the venue's world: a band member's bone, else a
+    // venue object (a character slot: its bone's height above it).
+    static bool worldTargetPoint(const World& world, const scene::CamTarget& t, std::array<float, 3>& out);
 
 private:
     struct ShotState {
@@ -147,13 +170,15 @@ private:
     bool objectNative(Interp& in, scene::Object& o, const std::string& msg, std::vector<Value>& args, Value& r);
     void startShot(const scene::CamShot* shot);
     void endShot();
+    void showShotCrowd(const scene::CamShot& shot);
+    void applyShowLists(const scene::CamShot& shot);
+    void restoreShowLists();
     Value prop(const scene::CamShot& shot, const std::string& key);
     bool passes(const scene::CamShot& shot, const std::vector<std::pair<std::string, Value>>& filter);
     void play(const scene::CamShot& shot, ShotState& st, float frame, float dt);
-    static bool targetPoint(const World& world, const scene::CamTarget& t, std::array<float, 3>& out);
-    static void keyframeXfm(const World& world, const scene::CamShot& shot, ShotState* st, size_t k, float frame, const Framing* prev,
+    static void keyframeXfm(const ShotScene& world, const scene::CamShot& shot, ShotState* st, size_t k, float frame, const Framing* prev,
                             float dt, bool look, KeyframeCam& out);
-    static void frameShot(const World& world, const scene::CamShot& shot, ShotState* st, float frame, const Framing* prev, float dt,
+    static void frameShot(const ShotScene& world, const scene::CamShot& shot, ShotState* st, float frame, const Framing* prev, float dt,
                           Framing& out, Dof* dof);
     double now(const scene::CamShot& shot) const;
     float random01();
@@ -164,7 +189,14 @@ private:
     std::vector<const scene::CamShot*> shots_;  // the world directory's, in order
     std::unordered_map<const scene::CamShot*, ShotState> state_;
     const scene::CamShot* current_ = nullptr;
+    // The objects the current shot's hide / show lists changed (RB's CamShot
+    // +0xec / +0xd8 lists), set back when it ends.
+    std::vector<const scene::Object*> hidByShot_, shownByShot_;
     const scene::PostProc* postProc_ = nullptr;
+    const scene::PostProc* blendFrom_ = nullptr;  // pp_blend_task
+    double blendStart_ = 0;
+    float blendTime_ = 0;
+    int blendUnits_ = 0;
     gfx::Camera camera_;
     Framing last_;  // the camera of the last frame (the filter's screen test)
     bool hasCamera_ = false;
@@ -173,6 +205,8 @@ private:
     bool shake_ = true;
     bool pickEnabled_ = true, freeCam_ = false;
     std::vector<const scene::CamShot*> sequence_;
+    int ppCalls_ = 0;                             // pp_blend_task / PostProc select calls
+    const scene::PostProc* lastOwn_ = nullptr;    // the last shot's own PostProc
     double nearestBeat_ = -1e30;               // cam_check_shot's nearest walk spot, once per beat
     const scene::Waypoint* nearest_ = nullptr;
     double lastSeconds_ = 0;

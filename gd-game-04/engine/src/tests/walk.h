@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -75,8 +76,16 @@ public:
     // notes pressed (200 ms ago or more) and hit, the frames a sustain was held (with the Whammy
     // key down), the lowest whammy value with the key down on one and the
     // highest without it.
-    bool playsKeys() const { return name_ == "keyboard"; }
+    bool playsKeys() const { return name_ == "keyboard" || name_ == "boss_keys"; }
     int keyNotes = 0, keyHits = 0, keyHoldFrames = 0, keyWhammyFrames = 0;
+    // A battle on the keys (boss_keys, GD04-120): power-ups the player got,
+    // fired, attacks received; frames with frets dead (Whammy / Broken
+    // String) and whether they are at the end; the notes judged and hit
+    // since the last attack's dead frets came back.
+    int keyCards = 0, keyFired = 0, keyReceived = 0, keyDeadFrames = 0, keyRecoveries = 0, keyWhammyAttackFrames = 0;
+    unsigned long long keyWhammyBars = 0;  // frames the Whammy attack's bar was drawn
+    bool keyDeadNow = false;
+    int keyNotesAtRecover = 0, keyHitsAtRecover = 0;
     float keyWhammy = 1, keyRest = 0;
 
 private:
@@ -117,6 +126,7 @@ private:
     int songsWithoutLoading_ = 0;
     std::string failure_;
     std::vector<std::string> log_;
+    std::map<SDL_FingerID, std::pair<float, float>> fingers_;  // the walk's fingers (finger:), where they landed
     // uitest: every flow state with a Create script, started in turn.
     bool uitest_ = false;
     std::vector<uint32_t> states_;

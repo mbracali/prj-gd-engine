@@ -531,13 +531,17 @@ bool StandardShaders::compile(uint32_t key, std::string& error) {
 }
 
 ProgramId StandardShaders::program(uint32_t key) {
-    if (auto it = programs_.find(key); it != programs_.end()) return it->second;
+    if (auto it = programs_.find(key); it != programs_.end()) {
+        if (substituted_.count(key)) shaderaudit::note("standard variant replaced by a simpler one", name(key));
+        return it->second;
+    }
     using namespace stdkey;
     // Simpler and simpler stand-ins: keep the texture, colour source and
     // skinning, then only the skinning, then nothing.
     const uint32_t keep = (3u << WeightsShift);
     const uint32_t tries[] = {key, key & (DiffuseMap | Prelit | UseEnviron | keep), key & (DiffuseMap | keep), key & keep, 0};
     ProgramId result;
+    bool own = false;  // key's own variant compiled (not a stand-in)
     for (uint32_t k : tries) {
         if (auto it = programs_.find(k); it != programs_.end() && it->second) {
             result = it->second;
@@ -549,12 +553,17 @@ ProgramId StandardShaders::program(uint32_t key) {
             owned_.push_back(p);
             programs_[k] = p;
             result = p;
+            own = k == key;
             break;
         }
         if (failedLogged_.insert(k).second)
             SDL_Log("render: shader standard_%x (%s) failed, using a simpler one: %s", k, name(k).c_str(), error.c_str());
     }
     programs_[key] = result;
+    if (!own) {
+        substituted_.insert(key);
+        shaderaudit::note(result ? "standard variant replaced by a simpler one" : "standard variant missing", name(key));
+    }
     return result;
 }
 

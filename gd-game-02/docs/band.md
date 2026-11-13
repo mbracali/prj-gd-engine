@@ -553,7 +553,13 @@ guitar | bass | grim | cheat)`, skins with outfit milo and mat),
   - **CharsysPanel** (`char_single`, 0x8228E8A8; slots of 0x30 bytes):
     `show_char n <outfit>` loads `char/<outfit>/og/<outfit>_ui.milo` (a
     Character of type `ui`, no guitar) through a cache (0x8228E0A0 /
-    0x8228E428 preload the list's neighbours; gd02 loads on demand);
+    0x8228E428 preload the list's neighbours; gd02 loads on demand, on a
+    thread with a clip library of its own, then uploads its pictures and
+    meshes at most 4 ms a frame; the slot keeps drawing its last character
+    until the new one is up, and `get_char` / `is_char_loaded` say not yet,
+    as the scripts expect (career.dta's `scl_loading.lbl`) [C data]
+    (GD02-162: 60 to 120 ms frames per switch before, none over 10 ms
+    after; headless runs and `GD02_CHAR_SYNC=1` load in the frame);
     `char_event n <msg>` is sent once loaded (0x8228D348): char_objects.dta
     `(Character (types (ui (animate ...) (select ...) (store ...))))`
     plays `ui_enter` then `ui_loop`; `get_char`, `is_char_loaded`,

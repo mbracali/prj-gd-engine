@@ -12,8 +12,10 @@
 
 #include "data/dta.h"
 #include "data/game_data.h"
+#include "render/anim_rate.h"
 #include "render/renderer.h"
 #include "scene/milo.h"
+#include "scene/world_objects.h"
 
 RbTrackView::RbTrackView() = default;
 RbTrackView::~RbTrackView() = default;
@@ -126,6 +128,7 @@ void RbTrackView::load(const GameData& data, scene::MiloLibrary& library, const 
     // smasher_plate_guitar / _drum, its draw_order.grp [C data].
     for (const auto& [owner, d] : track_->root().subdirs)
         if (owner == (drums_ ? "smasher_plate_drum" : "smasher_plate_guitar")) smasherGroup_ = d->get("draw_order.grp") ? d->get("draw_order.grp")->as<scene::Group>() : nullptr;
+    loadFx();
     colorSmashers();
     // The sustain tails' template and materials (track/gem_tail.milo) [C data].
     try {
@@ -195,14 +198,76 @@ void RbTrackView::load(const GameData& data, scene::MiloLibrary& library, const 
 }
 
 
-// PropAnim (RB rev 5) [C data, read here only as far as the smashers need,
-// checked against every PropAnim of tracksystem.milo]: the object header,
-// the RndAnimatable part, then keysets: the target's name, its property
-// path (a one-symbol DataArray: 11 bytes then the symbol), the key type (0
-// float, 1 colour, 2 object; 3 and 5 are not read: the keysets after one
-// are skipped), a u32, for objects one more, the keys (value, frame), then
-// one u32 (two after colour keys).
-bool RbTrackView::applyPropAnim(const scene::Object& anim, float frame) {
+void RbTrackView::configure(const Config& c, float meanDifficulty) {
+    if (!track_ || !cam_) return;
+    // set_pitch: rotater.grp's local rotation x = pitch, its y / z kept (0
+    // in the data) [C data]; Hmx's rotation rows as RbHudView's.
+    if (const scene::Object* rot = obj("rotater.grp")) {
+        const float a = c.pitch * 3.14159265f / 180.0f, cx = std::cos(a), sx = std::sin(a);
+        scene::Xfm x = pose_.local(rot);
+        x.rot = {1, 0, 0, 0, cx, sx, 0, -sx, cx};
+        pose_.setLocal(rot, x);
+    }
+    // set_cam_pos 0 y_pos z_pos: game.cam's local place; set_fov: its y_fov
+    // (degrees) [C data].
+    scene::Xfm cx = pose_.local(cam_);
+    cx.pos = {0, c.yPos, c.zPos};
+    pose_.setLocal(cam_, cx);
+    camFov_ = c.fov * 3.14159265f / 180.0f;
+    // set_fade: track.env's fade from the camera to (0, fade_start, 0) and
+    // to fade_start + fade_length; the far plane at its end [C data].
+    auto dist = [&](float y) { return std::sqrt((y - c.yPos) * (y - c.yPos) + c.zPos * c.zPos); };
+    envFadeStart_ = dist(c.fadeStart), envFadeEnd_ = dist(c.fadeStart + c.fadeLength);
+    camFar_ = envFadeEnd_;
+    fadeEnv_ = get<scene::Environ>("track.env");
+    topY_ = c.fadeStart + c.fadeLength + 5;
+    const float d = std::clamp(meanDifficulty / 3.0f, 0.0f, 1.0f);  // / kDifficultyExpert
+    const float viewTime = c.viewTimeEasy + d * (c.viewTimeExpert - c.viewTimeEasy);
+    yPerSecond_ = topY_ / std::max(0.1f, viewTime);
+    configured_ = true;
+}
+
+
+int RbTrackView::drawNowBarGems(gfx::Renderer& r, gfx::SceneCache& cache) {
+    if (!track_ || !cam_) return 0;
+    int vx, vy, vw, vh;
+    r.pictureRect(vx, vy, vw, vh);
+    const std::array<float, 4> rect = hasLayout_ ? layout_ : screenRect_;
+    const bool sub = rect != std::array<float, 4>{0, 0, 1, 1};
+    viewW_ = std::max(1, int(float(vw) * rect[2])), viewH_ = std::max(1, int(float(vh) * rect[3]));
+    if (sub) r.device().setViewport(vx + int(float(vw) * rect[0]), vy + int(float(vh) * rect[1]), viewW_, viewH_);
+    frameSet_ = false;
+    gfx::MaterialRenderer& mr = r.materials();
+    setEnv(mr, cache, trackEnv_);
+    int lanes = 0;
+    for (int f = drums_ ? 1 : 0; f < 5; ++f) {
+        const scene::TrackWidget* w = sets_[size_t(f)].normal;
+        if (!w) continue;
+        drawWidget(mr, cache, w, !drums_ ? slotX(f) : drumX_[size_t(f)], 0, f);
+        ++lanes;
+    }
+    if (sub) r.device().setViewport(vx, vy, vw, vh);
+    viewW_ = vw, viewH_ = vh;
+    return lanes;
+}
+
+
+// PropAnim (RB rev 5) [C data: checked against all 120 PropAnims of
+// tracksystem.milo, each read to its end]: the object header, the
+// RndAnimatable part (its rev, the frame range's end, the rate), then
+// keysets: the target's name, its property path (a DataArray: u8 1, u16
+// count, u32 line, then per node u32 type and a symbol (5, 0x12) or u32),
+// the key type (0 float, 1 colour, 2 object, 3 bool), 4 x type bytes, the
+// keys (float: value, frame; colour: rgba, frame; object: name, frame;
+// bool: u8, frame), then 12 - 4 x type bytes. Colours and objects step
+// (the key at or before the frame), floats are linear [I: the
+// interpolation field is not identified]. Applied: a Mat's color / alpha
+// / diffuse_tex, an object's showing, a ParticleSys' emit_rate (x low, y
+// high) and start / end colours (of `fx`'s running copy), a Mat's
+// emissive_map / emissive_multiplier; others ignored.
+bool RbTrackView::applyPropAnim(const scene::Object& anim, float frame) { return applyPropAnimFx(anim, frame, nullptr); }
+
+bool RbTrackView::applyPropAnimFx(const scene::Object& anim, float frame, FxDir* fx) {
     const Bytes& r = anim.record;
     size_t p = 0;
     auto u32 = [&](uint32_t& v) {
@@ -231,14 +296,32 @@ bool RbTrackView::applyPropAnim(const scene::Object& anim, float frame) {
     float fr;
     if (!u32(v) || !f32(fr) || !u32(v) || !u32(sets) || sets > 256) return false;
     for (uint32_t k = 0; k < sets; ++k) {
-        std::string target, prop;
+        std::string target, prop, sub;
         uint32_t ktype, count;
-        if (!str(target)) return false;
-        p += 11;
-        if (!str(prop) || !u32(ktype) || !u32(v)) return false;
-        if (ktype == 2 && !u32(v)) return false;
+        if (!str(target) || p + 7 > r.size()) return false;
+        const uint32_t nodes = uint32_t(r[p + 1]) << 8 | r[p + 2];
+        p += 7;
+        for (uint32_t i = 0; i < nodes; ++i) {
+            uint32_t nt;
+            std::string s;
+            if (!u32(nt)) return false;
+            if (nt == 5 || nt == 0x12) {
+                if (!str(s)) return false;
+            } else if (!u32(v)) {
+                return false;
+            }
+            if (i == 0) prop = s;
+            else if (i == 1) sub = s;
+        }
+        if (!u32(ktype) || ktype > 3) return true;  // a key type not read: the rest is skipped
+        p += 4 * ktype;
         if (!u32(count) || count > 4096) return false;
-        const scene::Mat* mat = anim.dir ? anim.dir->resolve<scene::Mat>(target) : nullptr;
+        const scene::Object* obj = anim.dir ? anim.dir->resolve(target) : nullptr;
+        const scene::Mat* mat = obj ? obj->as<scene::Mat>() : nullptr;
+        const scene::ParticleSys* ps = obj ? obj->as<scene::ParticleSys>() : nullptr;
+        gfx::ParticleSystem* sys = nullptr;
+        if (ps && fx)
+            if (auto it = fxSystem_.find(ps); it != fxSystem_.end()) sys = it->second;
         if (ktype == 2) {
             std::string pick;
             for (uint32_t i = 0; i < count; ++i) {
@@ -247,38 +330,72 @@ bool RbTrackView::applyPropAnim(const scene::Object& anim, float frame) {
                 if (!str(name) || !f32(kf)) return false;
                 if (i == 0 || kf <= frame + 1e-3f) pick = name;
             }
-            p += 4;
             if (mat && prop == "diffuse_tex")
                 if (const scene::Tex* t = anim.dir->resolve<scene::Tex>(pick)) pose_.matState(mat).tex = t;
+            if (mat && prop == "emissive_map" && count > 0) {
+                gfx::ScenePose::MatState& st = pose_.matState(mat);
+                st.hasEmissiveMap = true;
+                st.emissiveTex = pick.empty() ? nullptr : anim.dir->resolve<scene::Tex>(pick);
+            }
         } else if (ktype == 1) {
             std::array<float, 4> out{};
-            std::array<float, 5> prev{};
             bool have = false;
             for (uint32_t i = 0; i < count; ++i) {
                 std::array<float, 5> cur{};
                 for (float& x : cur)
                     if (!f32(x)) return false;
-                if (!have || cur[4] <= frame) {
-                    out = {cur[0], cur[1], cur[2], cur[3]};
-                } else if (prev[4] <= frame && cur[4] > frame) {
-                    const float t = (frame - prev[4]) / (cur[4] - prev[4]);
-                    for (size_t c = 0; c < 4; ++c) out[c] = prev[c] + (cur[c] - prev[c]) * t;
-                }
-                prev = cur, have = true;
+                if (!have || cur[4] <= frame + 1e-3f) out = {cur[0], cur[1], cur[2], cur[3]};
+                have = true;
             }
-            p += 8;
-            if (mat && prop == "color" && have) {
+            if (have && mat && prop == "color") {
                 gfx::ScenePose::MatState& st = pose_.matState(mat);
                 st.hasColor = true;
                 st.rgb[0] = out[0], st.rgb[1] = out[1], st.rgb[2] = out[2];
                 st.hasAlpha = true;
                 st.alpha = out[3];
+            } else if (have && sys) {
+                auto& pr = sys->params();
+                auto* c = prop == "start_color_high" ? &pr.startColorHigh : prop == "start_color_low" ? &pr.startColorLow
+                        : prop == "end_color_high"   ? &pr.endColorHigh   : prop == "end_color_low"   ? &pr.endColorLow : nullptr;
+                if (c) *c = out;
             }
         } else if (ktype == 0) {
-            p += size_t(count) * 8 + 4;
+            float out = 0, pv = 0, pf = 0;
+            bool have = false;
+            for (uint32_t i = 0; i < count; ++i) {
+                float kv, kf;
+                if (!f32(kv) || !f32(kf)) return false;
+                if (!have || kf <= frame) out = kv;
+                else if (pf <= frame && kf > frame) out = pv + (kv - pv) * (frame - pf) / (kf - pf);
+                pv = kv, pf = kf, have = true;
+            }
+            if (have && mat && prop == "alpha") {
+                gfx::ScenePose::MatState& st = pose_.matState(mat);
+                st.hasAlpha = true;
+                st.alpha = std::clamp(out, 0.0f, 1.0f);
+            } else if (have && mat && prop == "emissive_multiplier") {
+                gfx::ScenePose::MatState& st = pose_.matState(mat);
+                st.hasEmissive = true;
+                st.emissiveMultiplier = out;
+            } else if (have && sys && prop == "emit_rate") {
+                auto& er = sys->params().emitRate;
+                if (sub == "x") er[0] = out;
+                else if (sub == "y") er[1] = out;
+                else er = {out, out};
+            }
         } else {
-            return true;  // a key type the smashers' colours do not need: the rest is skipped
+            bool out = false, have = false;
+            for (uint32_t i = 0; i < count; ++i) {
+                float kf;
+                if (p >= r.size()) return false;
+                const bool kv = r[p++] != 0;
+                if (!f32(kf)) return false;
+                if (!have || kf <= frame + 1e-3f) out = kv;
+                have = true;
+            }
+            if (have && obj && prop == "showing") pose_.setShowing(obj, out);
         }
+        p += 12 - 4 * ktype;
         if (p > r.size()) return false;
     }
     return true;
@@ -304,11 +421,554 @@ void RbTrackView::colorSmashers() {
             for (int i = 0; i < 5; ++i)
                 if (color == kNames[i]) index = i;
             bool ok = true;
-            if (const scene::Object* a = d->get("particle_slot_colors.anim")) ok = applyPropAnim(*a, float(index)) && ok;
-            if (const scene::Object* a = d->get("smasher_glow.anim")) ok = applyPropAnim(*a, float(20 * index)) && ok;
+            FxDir* fx = smashFx_[size_t(slot)].dir == d.get() ? &smashFx_[size_t(slot)] : nullptr;
+            if (const scene::Object* a = d->get("particle_slot_colors.anim")) ok = applyPropAnimFx(*a, float(index), fx) && ok;
+            if (const scene::Object* a = d->get("smasher_glow.anim")) {
+                ok = applyPropAnimFx(*a, float(20 * index), fx) && ok;
+                animFrame_[a] = float(20 * index);
+            }
             if (!ok) SDL_Log("RB track: %s: a PropAnim was not read", o2.c_str());
         }
     }
+}
+
+// ---- The track's effects (GD05-045) -----------------------------------------
+
+RbTrackView::FxStats& RbTrackView::fxStats() {
+    static FxStats s;
+    return s;
+}
+
+namespace {
+constexpr float kFxFps = 30;  // the triggers' anims: rate 0 (k30_fps) [C data]; every rate taken as 30 [I]
+
+bool isPropAnim(const scene::Object* o) { return o && o->cls == "PropAnim"; }
+
+// The object list of a header property (systems (a b c)) [C data].
+std::vector<std::string> headerList(const scene::Object& o, const char* key) {
+    std::vector<std::string> out;
+    if (!o.header.hasProps) return out;
+    // The property array is key, value, key, value ... [C data].
+    const auto& c = o.header.props.children;
+    for (size_t i = 0; i + 1 < c.size(); ++i)
+        if (c[i].str == key)
+            for (const scene::DataNode& n : c[i + 1].children)
+                if (!n.str.empty()) out.push_back(n.str);
+    return out;
+}
+
+// A PropAnim's frame range end (its RndAnimatable part) [C data].
+float propAnimEnd(const scene::Object& a) {
+    const Bytes& r = a.record;
+    size_t p = 8;
+    auto u32 = [&](size_t at) { return at + 4 <= r.size() ? uint32_t(r[at]) << 24 | uint32_t(r[at + 1]) << 16 | uint32_t(r[at + 2]) << 8 | r[at + 3] : 0u; };
+    p += 4 + u32(p);  // the type
+    p += 4 + 1 + 4;   // the note, the props flag, the anim rev
+    const uint32_t b = u32(p);
+    float f;
+    std::memcpy(&f, &b, 4);
+    return std::isfinite(f) ? f : 0.0f;
+}
+}  // namespace
+
+void RbTrackView::loadFx() {
+    fxSystem_.clear();
+    // Each smasher's directory: its particle systems as one running copy
+    // [I: RB's smasher_plate collect_drawables moves same-named systems
+    // into one shared by the plate; a copy per smasher draws the same].
+    for (const auto& [owner, plate] : track_->root().subdirs) {
+        if (!plate || owner != (drums_ ? "smasher_plate_drum" : "smasher_plate_guitar")) continue;
+        if (const scene::Object* holder = track_->root().get(owner)) pose_.setDirBase(plate.get(), holder);
+        for (const auto& [o2, d] : plate->subdirs) {
+            if (!d || o2.rfind("gem_smasher", 0) != 0 || o2.size() != 12) continue;
+            const int slot = o2[11] - '0';
+            if (slot < 0 || slot > 4) continue;
+            if (const scene::Object* holder = plate->get(o2)) pose_.setDirBase(d.get(), holder);
+            FxDir& fx = smashFx_[size_t(slot)];
+            fx.dir = d.get();
+            for (const auto& o : d->objects)
+                if (o->as<scene::ParticleSys>() || o->as<scene::ParticleSysAnim>()) fx.parts.add(o.get(), uint32_t(17 + slot * 101));
+        }
+    }
+    trackFx_.dir = &track_->root();
+    for (const char* n : {"spotlight_draw.grp", "spotlight_FX.grp"})
+        if (const scene::Object* o = obj(n)) trackFx_.parts.add(o, 977);
+    for (FxDir* fx : {&smashFx_[0], &smashFx_[1], &smashFx_[2], &smashFx_[3], &smashFx_[4], &trackFx_})
+        for (gfx::ParticleSystem& s : fx->parts.systems()) fxSystem_[&s.def()] = &s;
+    // GD05_TRACKLOG: every EventTrigger of the track system (the effects' inventory).
+    if (SDL_getenv("GD05_TRACKLOG")) {
+        std::function<void(const scene::Directory&, const std::string&, int)> walk = [&](const scene::Directory& d, const std::string& path, int depth) {
+            std::string l;
+            for (const auto& o : d.objects)
+                if (o->as<scene::EventTrigger>()) l += " " + o->name;
+            if (!l.empty()) SDL_Log("RB track triggers %s:%s", path.c_str(), l.c_str());
+            if (depth < 4)
+                for (const auto& [owner, sd] : d.subdirs)
+                    if (sd && !(owner.rfind("gem_smasher", 0) == 0 && owner != "gem_smasher0")) walk(*sd, path + "/" + owner, depth + 1);
+        };
+        walk(track_->root(), track_->root().name, 0);
+    }
+    if (SDL_getenv("GD05_TRACKLOG"))
+        for (FxDir* fx : {&smashFx_[0], &trackFx_})
+            for (gfx::ParticleSystem& s : fx->parts.systems()) {
+                const scene::ParticleSys& d = s.def();
+                SDL_Log("RB track fx: %s life %.1f..%.1f emit %.1f..%.1f size %.1f..%.1f max %d burst %d frame_drive %d mat %s type %d grow %.2f shrink %.2f persp %d area %d aspect %.2f stretch %.2f", d.name.c_str(), double(d.life[0]),
+                        double(d.life[1]), double(d.emitRate[0]), double(d.emitRate[1]), double(d.startSize[0]), double(d.startSize[1]), d.maxParticles,
+                        d.maxBurst, int(d.frameDrive), d.mat.c_str(), d.type, double(d.growRatio), double(d.shrinkRatio), int(d.perspective), int(d.constantArea), double(d.screenAspect), double(d.stretchScale));
+            }
+}
+
+// The smashers' reset (gem_smasher.dta reset: set_color, reset.trig) and
+// the track's deploy look put away [C data; I: the track's own reset.trig
+// is not played, its intro is RbTrackView's].
+void RbTrackView::fxReset(FxDir& fx) {
+    fx.tasks.clear();
+    fx.parts.reset();
+    fx.burning = fx.glowing = false;
+    if (&fx == &trackFx_) {
+        for (const char* n : {"spotlight_draw.grp", "now_bar_rising_sun_draw.grp"})
+            if (const scene::Object* o = obj(n)) pose_.setShowing(o, false);
+        return;
+    }
+    fxTrigger(fx, "reset.trig", 0);
+}
+
+bool RbTrackView::fxTrigger(FxDir& fx, const std::string& name, float nowMs) {
+    const scene::Object* o = fx.dir ? fx.dir->get(name) : nullptr;
+    const scene::EventTrigger* t = o ? o->as<scene::EventTrigger>() : nullptr;
+    if (!t) return false;
+    fxTrigger(fx, *t, nowMs);
+    return true;
+}
+
+// EventTrigger::Trigger [C data: the record; I: the order of its parts]:
+// its anims (with their filter: range / loop / dest, period or scale,
+// delay), shows, hides, the type's trigger (particle_trigger: each
+// launcher's launch_particles; part_launcher: each system's launch_part),
+// and the proxy calls' events (gem_smasher's hit.trig fires break.trig).
+void RbTrackView::fxTrigger(FxDir& fx, const scene::EventTrigger& t, float nowMs) {
+    const scene::Directory* d = t.dir ? t.dir : fx.dir;
+    if (!d) return;
+    static const bool log = SDL_getenv("GD05_FXLOG") != nullptr;
+    if (log)
+        SDL_Log("RB track fx: %.0f ms %s %s (type %s, %d anims, %d shows, %d hides, %d proxy)", double(nowMs), d->name.c_str(), t.name.c_str(),
+                t.header.type.c_str(), int(t.anims.size()), int(t.shows.size()), int(t.hideDelays.size()), int(t.proxyEvents.size()));
+    for (const auto& a : t.anims) {
+        const scene::Object* anim = a.anim.empty() ? nullptr : d->resolve(a.anim);
+        if (!anim) continue;
+        float from = 0, to = isPropAnim(anim) ? propAnimEnd(*anim) : gfx::ScenePose::endFrame(anim);
+        int type = 0;
+        if (a.enable) {
+            from = a.start, to = a.end;
+            if (a.type == "loop") type = 1;
+            if (a.type == "dest") {
+                auto it = animFrame_.find(anim);
+                from = it != animFrame_.end() ? it->second : a.end;
+            }
+        }
+        const float len = std::fabs(to - from);
+        const float scale = a.enable && a.period > 0 ? (len > 0 ? len / (a.period * kFxFps) : 1.0f) : (a.scale != 0 ? std::fabs(a.scale) : 1.0f);
+        // The entry's rate (GD05-070): star_deploy.trig's track_streak_glow.mnm
+        // loops 1000..1480 at k480_fpb (a beat), not 16 s at 30 a second.
+        fxAnimate(fx, anim, from, to, type, scale, nowMs + std::max(0.0f, a.delay) * 1000.0f,
+                  a.period > 0 || gfx::highwayLegacy() ? gfx::k30Fps : int(a.rate));
+    }
+    for (const auto& s : t.shows)
+        if (const scene::Object* o = d->resolve(s)) pose_.setShowing(o, true);
+    for (const auto& [name, delay] : t.hideDelays)
+        if (const scene::Object* o = d->resolve(name)) {
+            if (delay <= 0) pose_.setShowing(o, false);
+            else fxAnimate(fx, o, 0, 0, 2, 1, nowMs + delay * 1000.0f);  // a hide later (type 2)
+        }
+    if (t.header.type == "particle_trigger") {
+        for (const std::string& n : headerList(t, "systems"))
+            if (const scene::Object* l = d->resolve(n)) fxLaunch(fx, l);
+    } else if (t.header.type == "part_launcher") {
+        // rnd_objects.dta part_launcher: {$elem launch_part} on each system:
+        // one burst (max_burst, at least 1) [I: launch_part's count].
+        for (const std::string& n : headerList(t, "systems"))
+            if (auto it = fxSystem_.find(d->resolve<scene::ParticleSys>(n)); it != fxSystem_.end())
+                fxLaunchedNow_ += it->second->launch(std::max(1, it->first->maxBurst));
+    }
+    for (const std::string& e : t.proxyEvents)
+        if (const scene::Object* o = !e.empty() ? d->get(e) : nullptr)
+            if (auto* next = o->as<scene::EventTrigger>(); next && next != &t) fxTrigger(fx, *next, nowMs);
+}
+
+void RbTrackView::fxAnimate(FxDir& fx, const scene::Object* anim, float from, float to, int type, float scale, float startMs, int rate) {
+    fx.tasks.erase(std::remove_if(fx.tasks.begin(), fx.tasks.end(), [&](const AnimTask& k) { return k.anim == anim && k.type != 2; }), fx.tasks.end());
+    AnimTask k;
+    k.anim = anim, k.from = from, k.to = to, k.type = type, k.scale = scale, k.t0 = startMs, k.rate = rate;
+    fx.tasks.push_back(k);
+    if (type != 2 && startMs <= lastFxMs_ + 0.5f) fxSetFrame(fx, anim, from);  // the first frame now
+}
+
+// RndAnimatable::SetFrame through the view: a Group's members one by one
+// (a PropAnim among them is read here; ScenePose plays the others).
+void RbTrackView::fxSetFrame(FxDir& fx, const scene::Object* anim, float frame) {
+    if (!anim) return;
+    animFrame_[anim] = frame;
+    if (isPropAnim(anim)) {
+        applyPropAnimFx(*anim, frame, &fx);
+    } else if (auto* g = anim->as<scene::Group>()) {
+        for (const std::string& n : g->objects)
+            if (const scene::Object* o = g->dir ? g->dir->resolve(n) : nullptr; o && o != g)
+                if (isPropAnim(o) || o->as<scene::Group>() || o->as<scene::TransAnim>() || o->as<scene::MatAnim>() || o->as<scene::AnimFilter>() ||
+                    o->as<scene::ParticleSysAnim>() || o->as<scene::MeshAnim>())
+                    fxSetFrame(fx, o, frame);
+    } else {
+        pose_.setFrame(anim, frame);
+    }
+}
+
+// BandMeshLauncher (rev 1) particle_launcher's launch_particles
+// [C data: the record after its header: the part, the trans, num_parts,
+// then use_life / life, use_speed / speed, use_size / size,
+// use_delta_size / delta_size, use + colour + alpha for the start, mid and
+// end colours, use_emit_direction + pitch / yaw ranges; band_objects.dta
+// names them]: num_parts particles of the part with those values in place
+// of its ranges [I: the mid colour and the emit direction are not applied;
+// launch_particles' native is not read]. gem_smasher.dta
+// set_launcher_color makes radial_debris / broken_glass_* take the part's
+// own high colours.
+int RbTrackView::fxLaunch(FxDir& fx, const scene::Object* launcher) {
+    const Bytes& r = launcher->record;
+    auto u32at = [&](size_t at) { return at + 4 <= r.size() ? uint32_t(r[at]) << 24 | uint32_t(r[at + 1]) << 16 | uint32_t(r[at + 2]) << 8 | r[at + 3] : 0u; };
+    auto f32at = [&](size_t at) {
+        const uint32_t b = u32at(at);
+        float f;
+        std::memcpy(&f, &b, 4);
+        return f;
+    };
+    // The part's name: the first string ending ".part".
+    size_t p = 0;
+    std::string part;
+    for (size_t i = 8; i + 4 < r.size(); ++i) {
+        const uint32_t n = u32at(i);
+        if (n < 6 || n > 64 || i + 4 + n > r.size()) continue;
+        const std::string s(reinterpret_cast<const char*>(r.data() + i + 4), n);
+        if (s.size() > 5 && s.compare(s.size() - 5, 5, ".part") == 0) {
+            part = s, p = i + 4 + n;
+            break;
+        }
+    }
+    if (part.empty() || !fx.dir) return 0;
+    const scene::ParticleSys* def = launcher->dir ? launcher->dir->resolve<scene::ParticleSys>(part) : nullptr;
+    auto it = fxSystem_.find(def);
+    if (it == fxSystem_.end()) return 0;
+    gfx::ParticleSystem& sys = *it->second;
+    p += 4 + u32at(p);  // the trans
+    const int num = int(std::min(u32at(p), 256u));
+    p += 4;
+    const gfx::ParticleSystem::Params saved = sys.params();
+    gfx::ParticleSystem::Params& pr = sys.params();
+    auto opt = [&](std::array<float, 2>& range) {
+        if (p + 5 > r.size()) return;
+        if (r[p]) range = {f32at(p + 1), f32at(p + 1)};
+        p += 5;
+    };
+    opt(pr.life), opt(pr.speed), opt(pr.startSize), opt(pr.deltaSize);
+    const std::string& ln = launcher->name;
+    const bool partColors = ln.rfind("radial_debris", 0) == 0 || ln.rfind("broken_glass", 0) == 0;
+    for (int c = 0; c < 3 && p + 17 <= r.size(); ++c, p += 17) {
+        if (!r[p] || c == 1) continue;  // unused; the mid colour [I]
+        std::array<float, 4> v{f32at(p + 1), f32at(p + 5), f32at(p + 9), f32at(p + 13)};
+        if (partColors) v = c == 0 ? saved.startColorHigh : saved.endColorHigh;
+        if (c == 0) pr.startColorLow = pr.startColorHigh = v;
+        else pr.endColorLow = pr.endColorHigh = v;
+    }
+    const int n = sys.launch(num);
+    if (static const bool log = SDL_getenv("GD05_FXLOG") != nullptr; log)
+        SDL_Log("RB track fx: %s launches %d of %d %s (life %.1f size %.1f), %d alive; at %.2f %.2f %.2f, x axis %.2f %.2f %.2f, rel %.1f", ln.c_str(), n, num, part.c_str(), double(pr.life[0]), double(pr.startSize[0]), sys.count(),
+                double(pose_.world(def).pos[0]), double(pose_.world(def).pos[1]), double(pose_.world(def).pos[2]), double(pose_.world(def).rot[0]), double(pose_.world(def).rot[1]), double(pose_.world(def).rot[2]), double(def->relativeMotion));
+    sys.params() = saved;
+    fxLaunchedNow_ += n;
+    return n;
+}
+
+// The player's changes this frame, as RB's natives send them [I: which
+// native sends each; the scripts are C data]: a gem struck: hit (hit_bonus
+// while Overdrive is deployed) on its smashers, and the last gem of an
+// intact Overdrive phrase: combo (spotlight_phrase_success.trig) on them
+// and gem_track's spotlight_phrase_success; a gem let pass: miss; a
+// sustain held: burn, let go: stop_burn; a fret held: set_glow TRUE
+// (smasher_glow.anim at base_frame + 19), released: set_glow FALSE (to
+// base_frame); Overdrive deployed: gem_track deploy (star_deploy.trig),
+// over: stop_deploy (star_stop_deploy.trig).
+void RbTrackView::fxEvents(const PlayerView& player, float nowMs) {
+    FxStats& st = fxStats();
+    if (hitsPending_ && (nowMs - hitsPendingMs_ > 100.0f || nowMs < hitsPendingMs_)) st.hitsUnseen += hitsPending_, hitsPending_ = 0;
+    const Chart* chart = player.chart;
+    if (chart != seenChart_ || !chart || gemSeen_.size() != chart->gems.size()) {
+        seenChart_ = chart;
+        gemSeen_.assign(chart ? chart->gems.size() : 0, 0);
+        phraseLast_.clear();
+        for (size_t i = 0; chart && i < chart->gems.size(); ++i)
+            if (const int ph = chart->gems[i].phrase; ph >= 0) {
+                if (size_t(ph) >= phraseLast_.size()) phraseLast_.resize(size_t(ph) + 1, -1);
+                phraseLast_[size_t(ph)] = int(i);
+            }
+    }
+    auto slotsOf = [&](uint32_t bits) {
+        uint32_t s = 0;
+        for (int b = 0; b < 5; ++b)
+            if (bits & (1u << b)) s |= 1u << player.laneOfBit[size_t(b)];
+        return s;
+    };
+    if (chart) {
+        const auto& gems = chart->gems;
+        auto first = std::lower_bound(gems.begin(), gems.end(), nowMs - 1000.0f, [](const Gem& g, float v) { return g.ms < v; });
+        for (auto it = first; it != gems.end() && it->ms < nowMs + 400.0f; ++it) {
+            const int i = int(it - gems.begin());
+            uint8_t& seen = gemSeen_[size_t(i)];
+            const bool struck = player.struck ? player.struck(i) : player.hit && player.hit(i);
+            if (struck && !(seen & 1)) {
+                seen |= 1;
+                const uint32_t slots = slotsOf(it->frets);
+                const bool combo = it->phrase >= 0 && size_t(it->phrase) < phraseLast_.size() && phraseLast_[size_t(it->phrase)] == i &&
+                                   (!player.phraseIntact || player.phraseIntact(it->phrase));
+                fxLaunchedNow_ = 0;
+                for (int s = 0; s < 5; ++s)
+                    if (slots & (1u << s)) {
+                        if (!fxTrigger(smashFx_[size_t(s)], player.overdriveActive ? "hit_bonus.trig" : "hit.trig", nowMs)) fxTrigger(smashFx_[size_t(s)], "hit.trig", nowMs);
+                        if (combo) fxTrigger(smashFx_[size_t(s)], "spotlight_phrase_success.trig", nowMs);
+                    }
+                ++st.hits;
+                if (fxLaunchedNow_ == 0) ++st.hitsNoFx;
+                if (!hitsPending_) hitsPendingMs_ = nowMs;
+                ++hitsPending_;
+                if (combo) fxTrigger(trackFx_, "spotlight_phrase_success.trig", nowMs), ++st.phrases;
+            }
+            const bool missed = !struck && player.missed && player.missed(i);
+            if (missed && !(seen & 2)) {
+                seen |= 2;
+                const uint32_t slots = slotsOf(it->frets);
+                for (int s = 0; s < 5; ++s)
+                    if (slots & (1u << s)) {
+                        fxTrigger(smashFx_[size_t(s)], "miss.trig", nowMs);
+                        if (smashFx_[size_t(s)].burning) fxTrigger(smashFx_[size_t(s)], "stop_burn.trig", nowMs), smashFx_[size_t(s)].burning = false;
+                    }
+                ++st.misses;
+            }
+        }
+        // The sustain held: burn on its smashers.
+        const int held = player.heldGem >= 0 && size_t(player.heldGem) < gems.size() ? player.heldGem : -1;
+        if (held != lastHeld_) {
+            if (lastHeld_ >= 0 && size_t(lastHeld_) < gems.size()) {
+                const uint32_t slots = slotsOf(gems[size_t(lastHeld_)].frets);
+                for (int s = 0; s < 5; ++s)
+                    if ((slots & (1u << s)) && smashFx_[size_t(s)].burning)
+                        fxTrigger(smashFx_[size_t(s)], "stop_burn.trig", nowMs), smashFx_[size_t(s)].burning = false;
+            }
+            if (held >= 0) {
+                const uint32_t slots = slotsOf(gems[size_t(held)].frets);
+                for (int s = 0; s < 5; ++s)
+                    if (slots & (1u << s)) {
+                        FxDir& fx = smashFx_[size_t(s)];
+                        if (!fxTrigger(fx, player.overdriveActive ? "burn_bonus.trig" : "burn.trig", nowMs)) fxTrigger(fx, "burn.trig", nowMs);
+                        fx.burning = true;
+                    }
+                ++st.burns;
+            }
+            lastHeld_ = held;
+        }
+    }
+    // The frets held: their smashers glow.
+    const uint32_t heldSlots = drums_ ? 0u : slotsOf(player.heldFrets);
+    static const char* kNames[5] = {"green", "red", "yellow", "blue", "orange"};
+    for (int s = 0; s < 5; ++s) {
+        const bool on = (heldSlots >> s) & 1, was = (lastHeldSlots_ >> s) & 1;
+        if (on == was) continue;
+        FxDir& fx = smashFx_[size_t(s)];
+        const scene::Object* glow = fx.dir ? fx.dir->get("smasher_glow.anim") : nullptr;
+        if (!glow) continue;
+        int index = 0;
+        for (int i = 0; i < 5; ++i)
+            if (slotColors_[size_t(s)] == kNames[i]) index = i;
+        const float base = float(20 * index);
+        if (on) fxAnimate(fx, glow, base + 19, base + 19, 0, 1, nowMs), ++st.glows;
+        else fxAnimate(fx, glow, animFrame_.count(glow) ? animFrame_[glow] : base + 19, base, 0, 1, nowMs);
+        fx.glowing = on;
+    }
+    lastHeldSlots_ = heldSlots;
+    // A solo section (player.dta solo_start / solo_end): the track's
+    // guitar_solo_start.trig / guitar_solo_stop.trig [C data]; the port fired
+    // neither (GD05-096).
+    if (player.soloActive != wasSolo_ && !SDL_getenv("GD05_TRACKFX_LEGACY")) {
+        wasSolo_ = player.soloActive;
+        if (fxTrigger(trackFx_, wasSolo_ ? "guitar_solo_start.trig" : "guitar_solo_stop.trig", nowMs)) ++(wasSolo_ ? st.soloStarts : st.soloStops);
+    }
+    // Overdrive deployed / over.
+    if (player.overdriveActive != wasOd_) {
+        wasOd_ = player.overdriveActive;
+        if (wasOd_) {
+            fxLaunchedNow_ = 0;
+            const bool fired = fxTrigger(trackFx_, "star_deploy.trig", nowMs);
+            ++st.deploys;
+            const scene::Object* sd = obj("spotlight_draw.grp");
+            if (!fired || !sd || !pose_.showing(sd) || fxLaunchedNow_ == 0) ++st.deploysNoFx;
+        } else {
+            fxTrigger(trackFx_, "star_stop_deploy.trig", nowMs);
+        }
+    }
+}
+
+// The anims running (30 frames a second of song time) and the particles.
+void RbTrackView::fxUpdate(float nowMs) {
+    for (FxDir* fx : {&smashFx_[0], &smashFx_[1], &smashFx_[2], &smashFx_[3], &smashFx_[4], &trackFx_}) {
+        for (size_t k = 0; k < fx->tasks.size();) {
+            AnimTask t = fx->tasks[k];
+            if (nowMs < t.t0) {
+                ++k;
+                continue;
+            }
+            if (t.type == 2) {  // a delayed hide
+                pose_.setShowing(t.anim, false);
+                fx->tasks.erase(fx->tasks.begin() + long(k));
+                continue;
+            }
+            const float run = float(gfx::animFrames(t.rate, float(t.t0), nowMs, tempo_)) * t.scale;
+            const float len = t.to - t.from;
+            bool done = false;
+            float f;
+            if (t.type == 1 && std::fabs(len) > 1e-4f) {
+                f = t.from + std::fmod(run, std::fabs(len)) * (len < 0 ? -1.0f : 1.0f);
+            } else if (run >= std::fabs(len)) {
+                f = t.to, done = true;
+            } else {
+                f = t.from + run * (len < 0 ? -1.0f : 1.0f);
+            }
+            fxSetFrame(*fx, t.anim, f);
+            if (done) fx->tasks.erase(fx->tasks.begin() + long(k));
+            else ++k;
+        }
+        const float clock = nowMs * 0.001f * kFxFps;
+        fx->parts.sync(pose_);
+        fx->parts.setFrame(clock);
+        fx->parts.update(pose_, scene::Xfm{}, clock);
+    }
+}
+
+// The draw group's members the view draws itself, at their place in it
+// (static.grp) [C data]: beat_markers.grp's bar widgets, now_bar.grp's
+// smasher plate, widgets.grp's tails and gems, smasher_fx.grp's
+// after_gems.grp. False: an ordinary group.
+bool RbTrackView::drawPart(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Group* g, const scene::Environ* env) {
+    if (g->name == "beat_markers.grp") {
+        drawBeatLines(mr, cache, *curSong_, curNowMs_);
+        return true;
+    }
+    if (g->name == "now_bar.grp") {
+        drawSmasherPlate(mr, cache, env);
+        return true;
+    }
+    if (g->name == "widgets.grp") {
+        // [I: a gem's tail before the gems, as RB's TrackWidget draws its
+        // instances; the order of the two is not read.]
+        drawTails(mr, cache, *curPlayer_, curNowMs_), drawLog_.push_back("tails");
+        drawGems(mr, cache, *curPlayer_, curNowMs_), drawLog_.push_back("gems");
+        return true;
+    }
+    if (g->name == "smasher_fx.grp") {
+        if (static bool once = false; !once && SDL_getenv("GD05_TRACKLOG")) {
+            once = true;
+            std::string l;
+            for (const std::string& n : g->objects) {
+                const scene::Object* o = g->dir->resolve(n);
+                l += " " + n + (o ? "(" + o->cls + (pose_.showing(o) ? "" : ", hidden") + ")" : "(missing)");
+            }
+            SDL_Log("RB track: smasher_fx.grp:%s", l.c_str());
+        }
+        for (const std::string& n : g->objects)
+            if (const scene::Object* o = g->dir->resolve(n); o && o != g)
+                if (auto* sub = o->as<scene::Group>()) drawGroup(mr, cache, sub, env, 2);
+        drawSmasherFx(mr, cache), drawLog_.push_back("effects.grp");
+        return true;
+    }
+    return false;
+}
+
+// now_bar.grp's smasher plate after its setup_draworder (smasher_plate.dta,
+// run by its reset) [C data]: its draw_order.grp's smasher_plate.mesh, then
+// before_gems.grp (collect_groups: each smasher of smasher_list's
+// base_bottom.grp, then each one's base_top.grp); after_hide.grp and
+// gem_smashers.grp hidden, so the smashers' effects.grp draw only after the
+// gems (smasher_fx.grp). Before GD05-070 every smasher drew whole
+// (bottom, top, effects) in gem_smashers.grp's order (2 3 1 0 4), the
+// effects under the gems and the next smasher.
+void RbTrackView::drawSmasherPlate(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Environ* env) {
+    if (!smasherGroup_ || !smasherGroup_->dir) return;
+    const scene::Directory& plate = *smasherGroup_->dir;
+    for (const std::string& n : smasherGroup_->objects) {
+        const scene::Object* o = plate.resolve(n);
+        if (!o || !pose_.showing(o)) continue;
+        if (auto* m = o->as<scene::Mesh>()) {
+            setEnv(mr, cache, env);
+            gfx::drawMesh(mr, cache, *m, gfx::toMat4(pose_.world(m)), &pose_);
+            drawLog_.push_back(m->name);
+        }
+    }
+    // smasher_list: the plate's property, else its smashers by name [I].
+    std::vector<const scene::Directory*> smashers;
+    std::vector<std::string> names;
+    if (const scene::Object* holder = track_->root().get(drums_ ? "smasher_plate_drum" : "smasher_plate_guitar")) names = headerList(*holder, "smasher_list");
+    if (names.empty() && plate.self) names = headerList(*plate.self, "smasher_list");
+    if (names.empty())
+        for (int i = 0; i < 5; ++i) names.push_back("gem_smasher" + std::to_string(i));
+    for (const std::string& n : names)
+        for (const auto& [owner, d] : plate.subdirs)
+            if (d && owner == n) smashers.push_back(d.get());
+    for (const char* part : {"base_bottom.grp", "base_top.grp"}) {
+        for (const scene::Directory* d : smashers)
+            if (const scene::Object* o = d->get(part))
+                if (auto* g = o->as<scene::Group>()) drawGroup(mr, cache, g, env, 2);
+        drawLog_.push_back(part);
+    }
+}
+
+std::vector<std::string> RbTrackView::expectedDrawOrder() const {
+    std::vector<std::string> out;
+    const scene::Group* g = get<scene::Group>(drawGroup_);
+    if (!g || !g->dir || !pose_.showing(g)) return out;
+    for (const std::string& n : g->objects) {
+        const scene::Object* o = g->dir->resolve(n);
+        if (!o || o == g || !pose_.showing(o) || !(o->as<scene::Mesh>() || o->as<scene::Group>())) continue;
+        out.push_back(o->name);
+        if (o->name == "now_bar.grp") out.insert(out.end(), {"smasher_plate.mesh", "base_bottom.grp", "base_top.grp"});
+        if (o->name == "widgets.grp") out.insert(out.end(), {"tails", "gems"});
+        if (o->name == "smasher_fx.grp") out.push_back("effects.grp");
+    }
+    return out;
+}
+
+void RbTrackView::drawLastTails(gfx::Renderer& r, gfx::SceneCache& cache, bool star) {
+    if (tailRanges_.empty() || !tailMesh_ || !tails_) return;
+    const scene::Mesh* tmpl = tails_->find<scene::Mesh>("tail02.mesh");
+    if (!tmpl) return;
+    gfx::MaterialRenderer& mr = r.materials();
+    frameSet_ = false;
+    const gfx::GpuMesh all = tailMesh_->upload(tailVerts_, tailIndices_);
+    setEnv(mr, cache, trackEnv_);
+    for (const TailRange& t : tailRanges_) {
+        if (t.star != star) continue;
+        gfx::GpuMesh part = all;
+        part.firstIndex = t.firstIndex, part.indexCount = t.indexCount;
+        gfx::drawMesh(mr, cache, *tmpl, gfx::Mat4::identity(), &pose_, t.mat, nullptr, &part);
+    }
+}
+
+// The smashers' effects after the gems (smasher_plate.dta setup_draworder:
+// each smasher's effects.grp into after_gems.grp, drawn after the gems).
+void RbTrackView::drawSmasherFx(gfx::MaterialRenderer& mr, gfx::SceneCache& cache) {
+    drawParticles_ = true;
+    const int before = particles_ ? particles_->drawnParticles() : 0;
+    for (const FxDir& fx : smashFx_)
+        if (const scene::Object* e = fx.dir ? fx.dir->get("effects.grp") : nullptr)
+            if (auto* g = e->as<scene::Group>()) drawGroup(mr, cache, g, trackEnv_, 1);
+    drawParticles_ = false;
+    const int drawn = (particles_ ? particles_->drawnParticles() : 0) - before;
+    FxStats& st = fxStats();
+    if (drawn > 0) st.fxParticlesDrawn += drawn, st.hitsSeen += hitsPending_, hitsPending_ = 0;
 }
 
 void RbTrackView::setEnv(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Environ* env) {
@@ -317,6 +977,7 @@ void RbTrackView::setEnv(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, cons
     frameSet_ = true;
     gfx::LightEnv le;
     if (env) le = cache.lightEnv(*env, &pose_);
+    if (env && env == fadeEnv_ && configured_) le.fade = true, le.fadeStart = envFadeStart_, le.fadeEnd = envFadeEnd_;  // set_fade
     mr.setFrame(camera_, le, viewW_, viewH_);
 }
 
@@ -327,10 +988,13 @@ void RbTrackView::drawGroup(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
     if (!g || depth > 8 || !pose_.showing(g) || !g->dir) return;
     if (!g->environment.empty())
         if (auto* e = g->dir->resolve<scene::Environ>(g->environment)) env = e;
+    if (depth == 1 && curSong_ && g->dir == &track_->root()) drawLog_.push_back(g->name);
+    if (curSong_ && g->dir == &track_->root() && !gfx::highwayLegacy() && drawPart(mr, cache, g, env)) return;
     for (const std::string& n : g->objects) {
         const scene::Object* o = g->dir->resolve(n);
         if (!o || o == g || !pose_.showing(o)) continue;
         if (auto* m = o->as<scene::Mesh>()) {
+            if (depth == 0 && curSong_ && g->dir == &track_->root()) drawLog_.push_back(m->name);
             if (static int n = 0; SDL_getenv("GD05_TRACKLOG") && n < 40 && depth > 0) {
                 ++n;
                 const scene::Mat* mt = m->dir ? m->dir->resolve<scene::Mat>(m->mat) : nullptr;
@@ -342,6 +1006,13 @@ void RbTrackView::drawGroup(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
             }
             setEnv(mr, cache, env);
             gfx::drawMesh(mr, cache, *m, gfx::toMat4(pose_.world(m)), &pose_);
+        } else if (auto* ps = o->as<scene::ParticleSys>()) {
+            // A running copy's particles (the effects; drawn in their group's place).
+            if (auto it = fxSystem_.find(ps); drawParticles_ && it != fxSystem_.end() && it->second->count() > 0) {
+                if (!particles_) particles_ = std::make_unique<gfx::ParticleRenderer>(cache.device());
+                setEnv(mr, cache, env);
+                particles_->draw(mr, cache, *it->second, camera_, gfx::Mat4::identity(), &pose_);
+            }
         } else if (auto* sub = o->as<scene::Group>()) {
             drawGroup(mr, cache, sub, env, depth + 1);
         } else if (o->as<scene::DirObj>()) {
@@ -494,6 +1165,7 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
     if (nowMs < lastTailMs_ - 1000) tailStates_.clear();  // a restart
     lastTailMs_ = nowMs;
     tailVerts_.clear(), tailIndices_.clear(), tailRanges_.clear();
+    starTails_ = starTailsBonus_ = 0;
     const auto& gems = player.chart->gems;
     const float aheadMs = topY_ / (yPerSecond_ * speed_) * 1000.0f;
     auto last = std::lower_bound(gems.begin(), gems.end(), nowMs + aheadMs, [](const Gem& g, float v) { return g.ms < v; });
@@ -526,10 +1198,18 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
         for (int b = 0; b < 5; ++b) {
             if (!(g.frets & (1u << b))) continue;
             const int f = player.laneOfBit[size_t(b)];
-            const std::string name = missed ? "tail_miss.mat" : "tail_" + slotColors_[size_t(f)] + ".mat";
+            // The tail's material by its type (Tail SetType RB 0x8281BEC8 [C]):
+            // a star (Overdrive phrase, or unison) tail takes the builder's
+            // tail_bonus.mat (track_flash_style.tex: the whitish Overdrive
+            // look), a missed one tail_miss.mat, the others their slot's
+            // tail_<colour>.mat. (Before GD05-070 the star tail kept its
+            // slot's coloured texture, only tinted by tail_star.mat's white.)
+            const std::string name = missed ? "tail_miss.mat"
+                                     : star && !gfx::highwayLegacy() ? "tail_bonus.mat"
+                                                                : "tail_" + slotColors_[size_t(f)] + ".mat";
             const scene::Mat* mat = tails_->find<scene::Mat>(name);
             if (!mat) continue;
-            const scene::Mat* starMat = star ? tails_->find<scene::Mat>("tail_star.mat") : nullptr;
+            const scene::Mat* starMat = star && gfx::highwayLegacy() ? tails_->find<scene::Mat>("tail_star.mat") : nullptr;
             const float* col = starMat ? starMat->color.data() : mat->color.data();
             const float x = slotX(f) + c.offsetX;
             const uint16_t base = uint16_t(tailVerts_.size() / 16);
@@ -559,7 +1239,8 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
                     const uint16_t a0 = uint16_t(base + r2 * n + q), a1 = uint16_t(a0 + 1), b0 = uint16_t(a0 + n), b1 = uint16_t(b0 + 1);
                     for (uint16_t k : {a0, a1, b1, a0, b1, b0}) tailIndices_.push_back(k);
                 }
-            tailRanges_.push_back({mat, first, int(tailIndices_.size()) - first});
+            tailRanges_.push_back({mat, first, int(tailIndices_.size()) - first, star});
+            if (star) ++starTails_, starTailsBonus_ += mat->name == "tail_bonus.mat" ? 1 : 0;
         }
     }
     for (auto it = tailStates_.begin(); it != tailStates_.end();) it = it->second.seen ? std::next(it) : tailStates_.erase(it);
@@ -588,20 +1269,72 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
     viewW_ = std::max(1, int(float(vw) * rect[2])), viewH_ = std::max(1, int(float(vh) * rect[3]));
     if (sub) r.device().setViewport(vx + int(float(vw) * rect[0]), vy + int(float(vh) * rect[1]), viewW_, viewH_);
     frameSet_ = false;
-    speed_ = trackSpeed;
+    // A configured track's y_per_second is the panel's (top_y / view_time):
+    // the GH2 per-difficulty speed is not RB's.
+    speed_ = configured_ ? 1.0f : trackSpeed;
     nowY_ = yOf(nowMs);
     gfx::MaterialRenderer& mr = r.materials();
     // The anim group at frame now_y (TrackDir::Poll, as GH2's): the surface's scroll [C GH2; I RB].
     if (!animGroup_.empty()) pose_.setFrame(obj(animGroup_), nowY_);
+    // rig.grp (rig_movement.tnm, repeat_trans) carries the surface, the
+    // smashers and the cameras along now_y while RB places the gems at
+    // their song y [C data]. The port draws the gems relative to now, so it
+    // keeps the rig at its origin: the same picture. (Before, the rig's move
+    // stopped at its last key, y 100, a second into the song: the smashers
+    // and camera sat 100 units ahead of the gems' now, so the gems crossed
+    // the smashers 100 / y_per_second early and were struck below them.)
+    if (const scene::Object* rig = animGroup_.empty() ? nullptr : obj(animGroup_)) {
+        scene::Xfm x = pose_.local(rig);
+        x.pos = {0, 0, 0};
+        pose_.setLocal(rig, x);
+    }
     // static.grp holds every instrument's parts; the other instrument's are
     // hidden, and the effects that show on events (the bass superstreak,
     // the Overdrive spotlight, a Unison phrase hit) until those are done [I].
-    for (const char* n : {"bass_superstreak_plane.mesh", "spotlight_draw.grp", "unison_phrase_hit.grp", "smasher_fx.grp"})
-        if (const scene::Object* o = obj(n)) pose_.setShowing(o, false);
+    // smasher_fx.grp is not one of them: it is where smasher_plate.dta's
+    // setup_draworder puts every smasher's effects.grp (after_gems), the hit
+    // flares, shockwaves and debris [C data]; hidden here since GD05-070 it
+    // drew none of them (GD05-096). GD05_SMASHFX_LEGACY=1: hidden as before.
+    static const bool fxLegacy = SDL_getenv("GD05_SMASHFX_LEGACY") != nullptr;
+    for (const char* n : {"bass_superstreak_plane.mesh", "unison_phrase_hit.grp", "smasher_fx.grp"})
+        if (const scene::Object* o = obj(n); o && (fxLegacy || std::string(n) != "smasher_fx.grp")) pose_.setShowing(o, false);
+    // The effects (GD05-045): reset at the song's start (and a restart),
+    // then this frame's events and the running anims / particles.
+    tempo_ = &song.tempo;  // before the reset: never an older song's (GD05-086)
+    if (lastFxMs_ < -1e29f || nowMs < lastFxMs_ - 1000.0f) {
+        lastFxMs_ = nowMs;
+        for (FxDir* fx : {&smashFx_[0], &smashFx_[1], &smashFx_[2], &smashFx_[3], &smashFx_[4], &trackFx_}) fxReset(*fx);
+        colorSmashers();
+        gemSeen_.clear(), seenChart_ = nullptr, wasOd_ = false, wasSolo_ = false, lastHeld_ = -1, lastHeldSlots_ = 0;
+    }
+    lastFxMs_ = nowMs;
+    fxEvents(player, nowMs);
+    fxUpdate(nowMs);
     if (const scene::Object* o = obj(drums_ ? "guitar_draw.grp" : "drum_draw.grp")) pose_.setShowing(o, false);
+    // The intro (tracksystem.milo intro.trig -> intro_anim.grp, 30 frames a
+    // second [I: the rate]): camera_intro.tnm brings cameras.grp from 300
+    // down the track to 0 by frame 20 (an overshoot to -6 at 15) and
+    // intro_anim.anim shows static.grp from frame 0.1 [C data]. Retracted
+    // before it: not drawn (track_panel.dta set_track_in) [I].
+    if (introAtMs_ > -1e29f) {
+        const float f = (nowMs - introAtMs_) * 0.03f;
+        if (f < 0) {
+            if (sub) r.device().setViewport(vx, vy, vw, vh);
+            viewW_ = vw, viewH_ = vh;
+            return;
+        }
+        if (const scene::Object* ia = obj("intro_anim.grp")) pose_.setFrame(ia, std::min(f, 20.0f));
+        if (const scene::Object* st = obj("static.grp")) pose_.setShowing(st, f >= 0.1f);
+    }
     camera_.world = gfx::toMat4(pose_.world(cam_));
     camera_.yFov = cam_->yFov, camera_.nearPlane = cam_->nearPlane, camera_.farPlane = cam_->farPlane;
+    if (configured_) camera_.yFov = camFov_, camera_.farPlane = camFar_;
     camera_.aspect = float(viewW_) / float(viewH_);
+    {
+        const gfx::Mat4 vp = camera_.viewProj(false);
+        const float cy = vp.at(1, 1) * 0 + vp.at(1, 3), cw = vp.at(3, 1) * 0 + vp.at(3, 3);
+        nowBarY_ = cw != 0 ? 0.5f - 0.5f * cy / cw : -1;
+    }
     if (static bool logged = false; !logged && SDL_getenv("GD05_TRACKLOG")) {
         logged = true;
         const gfx::Mat4 vp = camera_.viewProj(false);
@@ -628,11 +1361,27 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
         else SDL_Log("RB track: no smasher group");
     }
 
-    drawGroup(mr, cache, get<scene::Group>(drawGroup_), trackEnv_);
-    drawBeatLines(mr, cache, song, nowMs);
-    drawGroup(mr, cache, smasherGroup_, trackEnv_);
-    drawTails(mr, cache, player, nowMs);
-    drawGems(mr, cache, player, nowMs);
+    // The draw group in its own order (GD05-070): static.grp's members as
+    // the data lists them, the parts the view draws itself (the beat lines,
+    // the smasher plate, the tails and gems, the smashers' effects) at
+    // their group's place (drawPart).
+    drawLog_.clear();
+    curSong_ = &song, curPlayer_ = &player, curNowMs_ = nowMs;
+    if (gfx::highwayLegacy()) {  // GD05_HWY_LEGACY=1: the order before GD05-070, for the walks' before numbers
+        drawParticles_ = true;
+        drawGroup(mr, cache, get<scene::Group>(drawGroup_), trackEnv_);
+        drawParticles_ = false;
+        drawBeatLines(mr, cache, song, nowMs), drawLog_.push_back("beat_markers.grp");
+        drawGroup(mr, cache, smasherGroup_, trackEnv_), drawLog_.push_back("smasher_plate.mesh"), drawLog_.push_back("effects.grp");
+        drawTails(mr, cache, player, nowMs), drawLog_.push_back("tails");
+        drawGems(mr, cache, player, nowMs), drawLog_.push_back("gems");
+        drawSmasherFx(mr, cache), drawLog_.push_back("effects.grp");
+    } else {
+        drawParticles_ = true;  // the deploy's spotlight flares in spotlight_draw.grp
+        drawGroup(mr, cache, get<scene::Group>(drawGroup_), trackEnv_);
+        drawParticles_ = false;
+    }
+    curSong_ = nullptr, curPlayer_ = nullptr;
     if (sub) r.device().setViewport(vx, vy, vw, vh);
     viewW_ = vw, viewH_ = vh;
 }

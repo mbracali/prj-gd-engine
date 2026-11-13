@@ -361,6 +361,10 @@ private:
     std::vector<Anim> anims_;
     // The animations each exited panel's exit triggers posed (enterPanel forgets them).
     std::map<PanelObj*, std::set<std::string>> exitPosed_;
+    // GD05-059: the outgoing panels exited (their exit scripts run) as the
+    // transition begins, as RB's UIScreen Exit; exitPanel poses them at the switch.
+    std::set<PanelObj*> exitedEarly_;
+    bool fxFadingOut();
     std::map<std::string, std::unique_ptr<ScriptObject>> namedTasks_;
     void endTask(const std::string& task);
 

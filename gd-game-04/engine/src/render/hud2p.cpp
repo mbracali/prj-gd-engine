@@ -461,7 +461,11 @@ void Hud2P::draw(Canvas& c, const TextureCache& tex, const Match& m, double now)
             w = float(tw), h = float(th);
         }
         w *= e.bulb, h *= e.bulb;
-        items.push_back(Item{texKey, at, w, h, e.jx, e.jy, e.z, alpha, e.flipH[p], e.flipV[p]});
+        // GH3's flip_v mirrors left-right and flip_h top-bottom (ui_system.cpp,
+        // [C data]): battle's player 1 frame (p1 flip_v) was drawn upside
+        // down, its card holes over the meter's top while the cards sit at
+        // card_default_2/3_p1, the left of the p2 positions (GD04-120).
+        items.push_back(Item{texKey, at, w, h, e.jx, e.jy, e.z, alpha, e.flipV[p], e.flipH[p]});
         if (e.tube) {
             // The tube's fill and full sprites [C 0x821164D0].
             const int t = num.kind == 5 ? num.n : 1;
@@ -723,6 +727,27 @@ void Hud2P::drawBattle(Canvas& c, const TextureCache& tex, const Match& m, doubl
             const float x = p == 0 ? 380.0f : 890.0f;
             for (size_t i = 0; i < on.size() && i < 3; ++i)
                 text_(c, K("text_a6"), on[i], x, 35.0f + 30.0f * float(on.size() - 1 - i), 0.7f, {210, 210, 210, 250}, 0x12, Hud2D::TextStyle{});
+        }
+        // A Whammy attack (update_training_whammy_bar, animate_whammy_bar):
+        // battle_hud_whammy_bar at (610, 700), + (450, 0) for player 2, scale
+        // 0.8, just centre bottom, 15 px higher per whammy left, its angle -25
+        // and -45 by turns every 0.15 s, with WHAMMY (text_a4 x 1.2, turned
+        // 53, at (120, 145) on it) until the frets work again [C scripts; I:
+        // the morphs' easing, the child's origin the sprite's top left].
+        if (b.whammyLeft > 0) {
+            const float ang = (int(now / 150.0) & 1) ? -45.0f : -25.0f;
+            float w = 128, h = 256;
+            texSize(tex, K("battle_hud_whammy_bar"), w, h);
+            const float bx = 610.0f + (p == 1 ? 450.0f : 0.0f), by = 700.0f - 15.0f * float(b.whammyLeft);
+            spriteAt(c, tex, K("battle_hud_whammy_bar"), bx, by, w * 0.8f, h * 0.8f, 0, 1, ang, white);
+            ++const_cast<Hud2P*>(this)->n_.whammyBars;
+            if (text_) {
+                const float a = ang * float(M_PI) / 180, cs = std::cos(a), sn = std::sin(a);
+                const float lx = (120.0f - w / 2) * 0.8f, ly = (145.0f - h) * 0.8f;
+                Hud2D::TextStyle ts;
+                ts.rot = ang + 53;
+                text_(c, K("text_a4"), "WHAMMY", bx + lx * cs - ly * sn, by + lx * sn + ly * cs, 1.2f * 0.8f, white, 0x22, ts);
+            }
         }
     }
     // create_battle_death_meter (boss battles, not devil_finish): at the HUD's

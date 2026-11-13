@@ -68,6 +68,8 @@ public:
     // free section) is read as any deploy press here].
     bool deployOverdrive(float t, float drainMs);
     bool overdriveActive() const { return odActive_; }
+    float overdriveMeter() const { return meter_; }
+    void setOverdriveMeter(float v) { meter_ = std::clamp(v, 0.0f, 1.0f); }  // the walks (GD05-073)
     // The band's multiplier while deploying (the Overdrive bonus, RB band +0x68) and the drain.
     void setBandBonus(int m) { bandBonus_ = std::max(1, m); }
     void setDrainMs(float ms) { drainMs_ = ms; }

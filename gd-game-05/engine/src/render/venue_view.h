@@ -43,6 +43,9 @@ public:
     void setShot(const scene::CamShot* shot, size_t k = 0);
     const scene::CamShot* shot() const { return shot_; }
     void setCamera(const gfx::Camera& c) { camera_ = c; }
+    // The walks' crowd probe (GD05-071): draw() then draws only the
+    // audience (the WorldCrowds in the draw list's order), nothing else.
+    void setOnlyCrowd(bool on) { onlyCrowd_ = on; }
     const gfx::Camera& camera() const { return camera_; }
 
     // Runs the particle systems to the world clock (call once a frame, after
@@ -58,6 +61,18 @@ public:
     const gfx::SpotlightView& spotlights() const { return *spotlights_; }
     int particlesDrawn() const { return particles_; }
     size_t roots() const { return roots_.size(); }
+    // SpotlightDrawer proxies found in the venue and how many of them are
+    // still in the draw list (RB: none, GD05-069).
+    int spotlightDrawerProxies() const { return sdProxies_; }
+    int spotlightDrawerProxiesListed() const { return sdProxiesListed_; }
+    // The walks' particle probe: the systems of the milos whose path contains
+    // `part` (e.g. "sparks_fountain_blue_win"): particles started since the
+    // load, alive now, drawn in the last frame.
+    struct PartProbe {
+        long long started = 0;
+        int alive = 0, drawn = 0, systems = 0;
+    };
+    PartProbe particleProbe(const std::string& part) const;
     const CrowdView& crowdView() const { return *crowdView_; }
     BandView& bandView() { return *bandView_; }
     // The Enhanced Options' venue extras (render/enhanced_lights.h): the
@@ -84,10 +99,13 @@ private:
     gfx::Camera camera_;
     const scene::CamShot* shot_ = nullptr;
     std::vector<Root> roots_;
+    int sdProxies_ = 0, sdProxiesListed_ = 0;
     // A proxy's milo: its own draw list (drawn at the proxy's transform).
     std::unordered_map<const scene::Object*, std::vector<Root>> proxyRoots_;
     gfx::ParticleSet particleSet_;
     std::unordered_map<const scene::ParticleSys*, size_t> systemIndex_;
+    std::vector<std::string> systemMilo_;  // per system: its milo's path
+    std::vector<int> systemDrawn_;         // per system: particles drawn in the last frame
     std::unique_ptr<gfx::ParticleRenderer> particleRenderer_;
     std::unique_ptr<gfx::DynamicMesh> dynamic_;
     std::unique_ptr<gfx::SpotlightView> spotlights_;
@@ -98,6 +116,7 @@ private:
     std::vector<gfx::Vec3> feet_;
     float timeSec_ = 0;
     bool filling_ = false;  // drawing the band with More Lights' fill
+    bool onlyCrowd_ = false;
     const scene::Environ* currentEnv_ = nullptr;
     bool envSet_ = false;
     bool hdr_ = false;

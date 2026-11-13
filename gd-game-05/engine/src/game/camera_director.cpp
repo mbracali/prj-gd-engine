@@ -8,6 +8,7 @@
 #include <cmath>
 #include <set>
 
+#include "data/dta.h"
 #include "game/band.h"
 #include "game/world.h"
 #include "render/scene_gpu.h"
@@ -208,11 +209,39 @@ CameraDirector::CameraDirector(World& world, uint32_t seed) : world_(world), rng
         if (!s || it == directors().end()) return Value::integer(1);
         return it->second->camCheckShot(*s) ? Value::integer(1) : Value::integer(0);
     });
+    // {pp_blend_task blender pp time units delay} (RB 0x8220A8A0 ->
+    // PostProcBlendTask 0x8220A508) [C]: after `delay`, the selected PostProc
+    // blends into `pp` over `time` (in `units`), drawn through `blender`
+    // (override_blender.pp) which the task selects; the destination's maps
+    // are taken at once. band_objects.dta's start_shot runs it for every
+    // shot without its own PostProc (ProFilm_a.pp, or the VENUE track's
+    // override) [C data].
+    in.addBuiltin("pp_blend_task", [](Interp& i, const DataNode& c) {
+        auto it = directors().find(&i);
+        if (it == directors().end()) return Value::integer(0);
+        CameraDirector& d = *it->second;
+        const Value v = i.evalArg(c, 2);
+        const std::string n = v.type == Value::Type::Object && v.object ? v.object->name() : v.str();
+        const scene::PostProc* to = d.world_.venue().find<scene::PostProc>(n);
+        if (!to) return Value::integer(0);
+        const float time = c.children.size() > 3 ? i.evalArg(c, 3).number() : 0.0f;
+        const int units = c.children.size() > 4 ? int(i.evalArg(c, 4).integerValue()) : int(kTaskSeconds);
+        const float delay = c.children.size() > 5 ? i.evalArg(c, 5).number() : 0.0f;
+        d.blendFrom_ = d.postProc_;
+        d.postProc_ = to;
+        d.blendUnits_ = units == kTaskBeats ? kTaskBeats : kTaskSeconds;
+        d.blendStart_ = (d.blendUnits_ == kTaskBeats ? d.world_.beats() : d.world_.seconds()) + double(delay);
+        d.blendTime_ = std::max(0.0f, time);
+        if (d.blendTime_ <= 0 && delay <= 0) d.blendFrom_ = nullptr;
+        ++d.ppCalls_;
+        if (SDL_getenv("GD05_SHOTLOG")) SDL_Log("pp_blend_task %s -> %s over %.2f (%d)", d.blendFrom_ ? d.blendFrom_->name.c_str() : "-", to->name.c_str(), double(time), units);
+        return Value::integer(0);
+    });
     // `rnd reset_postproc` (the UI's rnd answers it quietly; the director
     // takes the shot's PostProc itself at start_shot).
     if (!in.findObject("rnd")) {
         rnd_ = std::make_unique<FnObject>("rnd", "Rnd", [this](const std::string& msg, Value&) {
-            if (msg == "reset_postproc") postProc_ = nullptr;
+            if (msg == "reset_postproc") postProc_ = nullptr, blendFrom_ = nullptr;
             return true;
         });
         in.registerObject(rnd_.get());
@@ -273,6 +302,13 @@ float CameraDirector::random01() { return float(random() >> 8) / float(1u << 24)
 float CameraDirector::shakeRandom01() {
     shakeRng_ ^= shakeRng_ << 13, shakeRng_ ^= shakeRng_ >> 17, shakeRng_ ^= shakeRng_ << 5;
     return float(shakeRng_ >> 8) / float(1u << 24);
+}
+
+float CameraDirector::postProcBlend() const {
+    if (!blendFrom_) return 1.0f;
+    const double t = (blendUnits_ == kTaskBeats ? world_.beats() : world_.seconds()) - blendStart_;
+    if (t <= 0) return 0.0f;
+    return blendTime_ > 0 ? float(std::min(1.0, t / double(blendTime_))) : 1.0f;
 }
 
 double CameraDirector::now(const scene::CamShot& shot) const {
@@ -347,7 +383,7 @@ bool CameraDirector::native(Interp& in, const std::string& msg, std::vector<Valu
         if (!sequence_.empty()) {
             const scene::CamShot* first = sequence_.front();
             sequence_.erase(sequence_.begin());
-            forceShot(first);
+            startShot(first);
         }
         return true;
     }
@@ -356,7 +392,7 @@ bool CameraDirector::native(Interp& in, const std::string& msg, std::vector<Valu
         r = Value::integer(!s || (msg == "cam_shot_ok" ? camShotOk(*s) : camCheckShot(*s)) ? 1 : 0);
         return true;
     }
-    if (msg == "reset_postproc") return postProc_ = nullptr, true;
+    if (msg == "reset_postproc") return postProc_ = nullptr, blendFrom_ = nullptr, true;
     if (msg == "set_min_lod") {
         // The band's characters (Character set_min_lod, 0x82152108).
         if (world_.band)
@@ -369,6 +405,9 @@ bool CameraDirector::native(Interp& in, const std::string& msg, std::vector<Valu
 
 bool CameraDirector::objectNative(Interp& in, scene::Object& o, const std::string& msg, std::vector<Value>& args, Value& r) {
     if (auto* c = o.as<scene::CamShot>()) {
+        // duration_seconds (worldbase.dta next_outro_camera, world_validate):
+        // its frames at 30 a second; a looping shot has none [I].
+        if (msg == "duration_seconds") return r = Value::real(c->looping ? 0.0f : c->lengthFrames() / 30.0f), true;
         if (msg == "get" && !args.empty()) {
             const std::string key = args[0].str();
             if (key == "duration") return r = Value::real(c->lengthFrames()), true;
@@ -379,7 +418,7 @@ bool CameraDirector::objectNative(Interp& in, scene::Object& o, const std::strin
         return false;
     }
     if (auto* p = o.as<scene::PostProc>()) {
-        if (msg == "select") return postProc_ = p, true;
+        if (msg == "select") return postProc_ = p, blendFrom_ = nullptr, ++ppCalls_, true;
         return false;
     }
     // The band slots: guitarist0's clip flags, walk and lose_teleport.
@@ -473,7 +512,16 @@ const scene::CamShot* CameraDirector::drawShot(const std::vector<std::string>& c
 }
 
 void CameraDirector::forceShot(const scene::CamShot* shot) {
-    if (shot) startShot(shot);
+    if (!shot) return;
+    if (!sequence_.empty() && SDL_getenv("GD05_SHOTLOG")) SDL_Log("director: %s drops the sequence's %zu shots", shot->name.c_str(), sequence_.size());
+    sequence_.clear();
+    startShot(shot);
+}
+
+void CameraDirector::playSequence(const std::vector<const scene::CamShot*>& shots) {
+    if (shots.empty()) return;
+    sequence_.assign(shots.begin() + 1, shots.end());
+    startShot(shots.front());
 }
 
 bool CameraDirector::camShotOk(const scene::CamShot& shot) {
@@ -524,8 +572,8 @@ bool CameraDirector::camCheckShot(const scene::CamShot& shot) {
 
 // ---- start / end -------------------------------------------------------------------
 
-// CamShot StartAnim 0x82226120 (start_shot, the hide list, state reset) after
-// the old shot's EndAnim 0x82226338 (stop_shot, its hide list shown again).
+// CamShot StartAnim RB 0x822904B0 (state reset, start_shot, the hide and show
+// lists) after the old shot's EndAnim RB 0x822906A8 (its lists set back).
 void CameraDirector::startShot(const scene::CamShot* shot) {
     endShot();
     current_ = shot;
@@ -535,34 +583,97 @@ void CameraDirector::startShot(const scene::CamShot* shot) {
     st.used = used;
     st.start = now(*shot);
     ++started_;
-    for (const std::string& h : shot->hideList)
-        if (const scene::Object* o = world_.venue().find(h)) world_.setShowing(o, false);
     // The shot's PostProc (camshot.dta start_shot: [postprocess] select, else
-    // rnd reset_postproc).
-    postProc_ = world_.venue().find<scene::PostProc>(shot->flag("postprocess"));
+    // rnd reset_postproc). RB's BandCamShot (band_objects.dta) keeps the
+    // selection for a shot without one: its start_shot blends to ProFilm_a.pp
+    // or the VENUE track's override (pp_blend_task) [C data].
+    const scene::PostProc* own = world_.venue().find<scene::PostProc>(shot->flag("postprocess"));
+    if (own || !world_.venue().find<scene::PostProc>("override_blender.pp")) postProc_ = own;
+    const scene::PostProc* before = postProc_;
+    const int ppCalls = ppCalls_;
+    blendFrom_ = nullptr;
     if (onShot) onShot("shot " + shot->name + " (" + shot->category + ")");
     if (world_.log) {
         std::string hides;
         for (const std::string& h : shot->hideList) hides += " " + h;
-        SDL_Log("world: shot %s (%s), planes %g..%g%s%s", shot->name.c_str(), shot->category.c_str(), double(shot->nearPlane), double(shot->farPlane),
-                hides.empty() ? "" : ", hides", hides.c_str());
+        std::string shows;
+        for (const std::string& n : shot->showList) shows += " " + n;
+        SDL_Log("world: shot %s (%s), planes %g..%g%s%s%s%s", shot->name.c_str(), shot->category.c_str(), double(shot->nearPlane),
+                double(shot->farPlane), hides.empty() ? "" : ", hides", hides.c_str(), shows.empty() ? "" : ", shows", shows.c_str());
     }
     world_.interp().send(world_.scriptFor(const_cast<scene::CamShot*>(shot)), "start_shot", {}, false);
+    // A shot without its own PostProc after one with its own (the intro's
+    // freeze, intro_test.pp): band_objects.dta's start_shot goes to the VENUE
+    // track's override or ProFilm_a.pp (postproc_blendtime 0) [C data]; when
+    // the script selected nothing (the port's start_shot did not reach its pp
+    // branch after the freeze), that here, so the freeze's grey look does not
+    // stay all song (GD05-098).
+    if (!own && current_ == shot && ppCalls == ppCalls_ && before && before == lastOwn_) {
+        Interp& in = world_.interp();
+        const Value ov = in.var("camera.postproc_override");
+        const scene::PostProc* pp = ov.truthy() ? world_.venue().find<scene::PostProc>(ov.type == Value::Type::Object && ov.object ? ov.object->name() : ov.str()) : nullptr;
+        if (!pp) pp = world_.venue().find<scene::PostProc>("ProFilm_a.pp");
+        if (pp) postProc_ = pp, blendFrom_ = nullptr;
+    }
+    if (current_ == shot) lastOwn_ = own;
+    if (current_ == shot) {
+        showShotCrowd(*shot);
+        applyShowLists(*shot);
+    }
+    // RB's shots always end with a PostProc selected (theirs, ProFilm_a.pp or
+    // the VENUE track's override): none is the look missing (shaderaudit).
+    if (current_ == shot && !postProc_ && world_.venue().find<scene::PostProc>("override_blender.pp"))
+        gfx::shaderaudit::note("shot without its PostProc", shot->name);
     if (onShotStarted && current_ == shot) onShotStarted(*shot);
+}
+
+// RB 0x82286E50 [C], from StartAnim when the shot's directory is a WorldDir:
+// every WorldCrowd of the world (WorldDir +0x29c, gathered through its
+// proxies, 0x82288188) shows only when it is the shot's crowd; a shot
+// without one hides them all. The theaters' crowds (showing FALSE in
+// theater_char.milo) show this way.
+void CameraDirector::showShotCrowd(const scene::CamShot& shot) {
+    for (const scene::WorldCrowd* c : world_.venue().all<scene::WorldCrowd>()) world_.setShowing(c, c->name == shot.crowd);
+}
+
+// RB 0x8228F608 [C]: the hide list's showing objects are hidden and the show
+// list's hidden ones shown; only the objects it changed are remembered.
+// RB 0x8228F6C0 [C] sets exactly those back (the theaters' WorldCrowds,
+// showing FALSE in theater_char.milo, are shown by their shots' show lists).
+void CameraDirector::applyShowLists(const scene::CamShot& shot) {
+    hidByShot_.clear();
+    shownByShot_.clear();
+    gfx::ScenePose& pose = world_.pose();
+    for (const std::string& h : shot.hideList)
+        if (const scene::Object* o = world_.venue().find(h); o && pose.showing(o)) {
+            world_.setShowing(o, false);
+            hidByShot_.push_back(o);
+        }
+    for (const std::string& n : shot.showList)
+        if (const scene::Object* o = world_.venue().find(n); o && !pose.showing(o)) {
+            world_.setShowing(o, true);
+            shownByShot_.push_back(o);
+        }
+}
+
+void CameraDirector::restoreShowLists() {
+    for (const scene::Object* o : shownByShot_) world_.setShowing(o, false);
+    for (const scene::Object* o : hidByShot_) world_.setShowing(o, true);
+    hidByShot_.clear();
+    shownByShot_.clear();
 }
 
 void CameraDirector::endShot() {
     if (!current_) return;
     const scene::CamShot* old = current_;
     current_ = nullptr;
-    for (const std::string& h : old->hideList)
-        if (const scene::Object* o = world_.venue().find(h)) world_.setShowing(o, true);
+    restoreShowLists();
     world_.interp().send(world_.scriptFor(const_cast<scene::CamShot*>(old)), "stop_shot", {}, false);
 }
 
 // ---- playback ------------------------------------------------------------------------
 
-bool CameraDirector::targetPoint(const World& world, const scene::CamTarget& t, std::array<float, 3>& out) {
+bool CameraDirector::worldTargetPoint(const World& world, const scene::CamTarget& t, std::array<float, 3>& out) {
     if (t.object.empty()) return false;
     // A band member and its subpart (a bone of its directory).
     if (world.band) {
@@ -583,6 +694,24 @@ bool CameraDirector::targetPoint(const World& world, const scene::CamTarget& t, 
     return true;
 }
 
+namespace {
+// The venue's world as a shot's scene (CameraDirector::targetPoint, the
+// band's and the venue's objects, the venue's TransAnims).
+class WorldShotScene : public ShotScene {
+public:
+    explicit WorldShotScene(const World& w) : w_(w) {}
+    bool targetPoint(const scene::CamTarget& t, std::array<float, 3>& out) const override { return CameraDirector::worldTargetPoint(w_, t, out); }
+    bool parentXfm(const scene::CamTarget& t, scene::Xfm& out) const override {
+        const bool mp = w_.venue().variant() != VenueVariant::Single;
+        return (w_.band && w_.band->objectXfm(t.object, t.subpart, out)) || venueObjectXfm(w_, t.object, mp, out);
+    }
+    const scene::TransAnim* path(const std::string& name) const override { return w_.venue().find<scene::TransAnim>(name); }
+
+private:
+    const World& w_;
+};
+}  // namespace
+
 // 0x82226988 [C]: one keyframe's camera.
 // - Its targets' mean (0x82226800), low-passed into the keyframe's filtered
 //   target: once a 60 Hz frame by filter x min(d, 1), d the distance on the
@@ -600,14 +729,14 @@ bool CameraDirector::targetPoint(const World& world, const scene::CamTarget& t, 
 // - `look` (the two keyframes aim at different targets): turned to the
 //   filtered target with the transform's own up row (0x82224BD8).
 // Other frame rates take the same per-second rate: (1 - a)^(dt x 60).
-void CameraDirector::keyframeXfm(const World& world, const scene::CamShot& shot, ShotState* st, size_t k, float frame,
+void CameraDirector::keyframeXfm(const ShotScene& world, const scene::CamShot& shot, ShotState* st, size_t k, float frame,
                                  const Framing* prev, float dt, bool look, KeyframeCam& out) {
     const auto& kf = shot.keyframes[k];
     V3 sum{0, 0, 0};
     int n = 0;
     for (const auto& t : kf.targets) {
         V3 p;
-        if (targetPoint(world, t, p)) sum = {sum[0] + p[0], sum[1] + p[1], sum[2] + p[2]}, ++n;
+        if (world.targetPoint(t, p)) sum = {sum[0] + p[0], sum[1] + p[1], sum[2] + p[2]}, ++n;
     }
     out.hasTarget = n > 0;
     const V3 raw = n > 0 ? V3{sum[0] / float(n), sum[1] / float(n), sum[2] / float(n)} : V3{0, 0, 0};
@@ -635,19 +764,17 @@ void CameraDirector::keyframeXfm(const World& world, const scene::CamShot& shot,
     scene::Xfm& x = out.xfm;
     x = kf.xfm;
     if (!shot.path.empty())
-        if (auto* path = world.venue().find<scene::TransAnim>(shot.path)) {
+        if (auto* path = world.path(shot.path)) {
             const float length = shot.lengthFrames();
             float u = length > 0 ? std::clamp(frame / length, 0.0f, 1.0f) : 0.0f;
             if (shot.pathEase != 0) u = sigmoid(u, shot.pathEase);
             x = scene::compose(shot.keyframes[0].xfm, evalPath(*path, gfx::ScenePose::endFrame(path) * u));
         }
     if (!kf.parent.object.empty()) {
-        const bool mp = world.venue().variant() != VenueVariant::Single;
         scene::Xfm px;
-        const bool bandParent = world.band && world.band->objectXfm(kf.parent.object, kf.parent.subpart, px);
-        if (bandParent || venueObjectXfm(world, kf.parent.object, mp, px)) {
+        if (world.parentXfm(kf.parent, px)) {
             V3 p;
-            if (targetPoint(world, kf.parent, p)) px.pos = p;
+            if (world.targetPoint(kf.parent, p)) px.pos = p;
             if (st) {
                 scene::Xfm& f = st->parent[k];
                 if (snap) {
@@ -663,7 +790,7 @@ void CameraDirector::keyframeXfm(const World& world, const scene::CamShot& shot,
             // clamp_height with one target: not below it + clamp_height.
             if (shot.clampHeight > 0 && kf.targets.size() == 1) {
                 V3 t;
-                if (targetPoint(world, kf.targets[0], t)) x.pos[2] = std::max(x.pos[2], t[2] + shot.clampHeight);
+                if (world.targetPoint(kf.targets[0], t)) x.pos[2] = std::max(x.pos[2], t[2] + shot.clampHeight);
             }
         }
     }
@@ -682,7 +809,7 @@ void CameraDirector::keyframeXfm(const World& world, const scene::CamShot& shot,
 // +0xf4 / +0x118), d the distance to the target(s) and so the offset, both
 // lerped, fov the keyframes' (without zoom_fov). Field of view: lerped,
 // then zoom_fov lerped and added. Depth of field from the moved camera.
-void CameraDirector::frameShot(const World& world, const scene::CamShot& shot, ShotState* st, float f, const Framing* prev, float dt,
+void CameraDirector::frameShot(const ShotScene& world, const scene::CamShot& shot, ShotState* st, float f, const Framing* prev, float dt,
                                Framing& out, Dof* dof) {
     const size_t n = shot.keyframes.size();
     if (st) st->target.resize(n), st->parent.resize(n), st->filtered.resize(n, false);
@@ -754,7 +881,7 @@ void CameraDirector::frameShot(const World& world, const scene::CamShot& shot, S
     *dof = {};
     if (shot.useDepthOfField) {
         V3 fa, fb;
-        const bool hfa = targetPoint(world, ka.focalTarget, fa), hfb = targetPoint(world, kb.focalTarget, fb);
+        const bool hfa = world.targetPoint(ka.focalTarget, fa), hfb = world.targetPoint(kb.focalTarget, fb);
         if (hfa && hfb) {
             const float da = len(sub(fa, x.pos)), db = len(sub(fb, x.pos));
             const float m = ka.focusBlurMultiplier + (kb.focusBlurMultiplier - ka.focusBlurMultiplier) * t;
@@ -771,6 +898,10 @@ void CameraDirector::frameShot(const World& world, const scene::CamShot& shot, S
 }
 
 gfx::Camera CameraDirector::evaluate(const World& world, const scene::CamShot& shot, float frame) {
+    return evaluate(WorldShotScene(world), shot, frame);
+}
+
+gfx::Camera CameraDirector::evaluate(const ShotScene& world, const scene::CamShot& shot, float frame) {
     gfx::Camera cam;
     if (shot.keyframes.empty()) return cam;
     Framing fr;
@@ -806,7 +937,7 @@ void CameraDirector::update() {
         if (!sequence_.empty()) {
             const scene::CamShot* next = sequence_.front();
             sequence_.erase(sequence_.begin());
-            forceShot(next);
+            startShot(next);
         } else {
             in.send(o, "shot_over", {}, false);
         }
@@ -821,7 +952,7 @@ void CameraDirector::update() {
 void CameraDirector::play(const scene::CamShot& shot, ShotState& st, float f, float dt) {
     if (shot.keyframes.empty()) return;  // RB has shots without keyframes (testlight...)
     Framing fr;
-    frameShot(world_, shot, &st, f, &last_, dt, fr, &dof_);
+    frameShot(WorldShotScene(world_), shot, &st, f, &last_, dt, fr, &dof_);
     scene::Xfm x = fr.xfm;
     const auto& ka = shot.keyframes[fr.a];
     const auto& kb = shot.keyframes[fr.b];

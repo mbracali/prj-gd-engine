@@ -839,7 +839,30 @@ What GH3's device adds over GH2's, and how it maps:
 - **Not on the core path**: the frame pacing is local's; gd04 has no True
   HDR.
 
-## 7. Tests
+## 6e. gd-game-05 on the core only (GD05-074)
+
+Rock Band (gd-game-05) is a renamed copy of gd02's engine, so it came with
+gd02's adapter (section 6b). Since GD05-074 (gd05 DECISIONS.md D71) it is
+the first game with **no local renderer**: gd05's OpenGL device was deleted
+and `CoreDevice` is its only `gfx::RenderDevice`.
+
+- **Default Vulkan, then SDL3, then OpenGL3** (`render/core_backend.cpp`
+  `backendsToTry`): `App::run` makes the window for each backend in turn
+  (destroying the previous one, so in the launcher the shim's
+  `SDL_CreateWindow` asks for the next API) until a device starts. This is
+  rule 2 with the core's own backends in place of `local`.
+- **True HDR** on the Vulkan backend's HDR swapchain
+  (`DeviceCreateInfo::hdrOutput`): the frame is RGBA16F and the adapter's
+  output pass (`applyOutput`: the gamma ramp of 6d's kind, then local's
+  scRGB / PQ conversion) draws into an RGBA16F target that is presented;
+  `readPixels` blits an RGBA16F frame to RGBA8 first. sdl3 / opengl3 report
+  "True HDR is not on the <id> graphics backend yet" and run Emulated.
+- The development tools and the launcher's model explorer (an OpenGL-only
+  host) use the OpenGL3 backend.
+- No core change was needed. Pixels (fixed-clock shots, NVIDIA RTX 3060):
+  vulkan after = vulkan before, opengl3 after = gd05's old local, 0 differing
+  pixels each; gd05/agents/PROGRESS.md has vulkan vs the old local.
+
 
 - `gdcore_render_selftest` (render/tests/): creates the OpenGL3 device on a
   hidden window (works with `SDL_VIDEO_DRIVER=offscreen`), draws triangles

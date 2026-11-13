@@ -12,6 +12,7 @@
 #include "data/game_data.h"
 #include "input/input.h"
 #include "render/canvas.h"
+#include "render/core_backend.h"
 
 #if GD05_VIDEO
 
@@ -812,7 +813,7 @@ int runPlayMovie(const std::string& dataPath, const std::string& name) {
         std::fprintf(stderr, "%s: cannot start SDL: %s\n", app::kProgram, SDL_GetError());
         return 2;
     }
-    SDL_Window* window = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), SDL_WINDOW_RESIZABLE | gfx::prepareWindow());
+    SDL_Window* window = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), SDL_WINDOW_RESIZABLE | gfx::prepareWindowFor(gfx::rendererBackend()));
     int code = 2;
     {
         Canvas canvas;

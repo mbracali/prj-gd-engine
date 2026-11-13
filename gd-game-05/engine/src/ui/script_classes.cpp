@@ -49,7 +49,7 @@ float optionNumber(const std::vector<Value>& args, const char* key, size_t idx, 
 // ---------------------------------------------------------------- components
 
 ComponentObj::ComponentObj(PanelObj* p, const scene::Object* o, const std::string& name)
-    : ScriptObject(name, o ? o->cls : "Component"), panel(p), object(o) {
+    : ScriptObject(name, o ? o->cls : "Component"), panel(p), object(o), key(name) {
     if (isTextEntry()) initTextEntry();
 }
 
@@ -60,20 +60,27 @@ bool ComponentObj::isCheck() const { return object && object->as<scene::CheckBox
 bool ComponentObj::isTextEntry() const { return object && object->as<scene::BandTextEntry>(); }
 
 scene::UiState ComponentObj::state() const {
-    if (panel->isDisabled(name())) return scene::UiState::Disabled;
-    if (panel->selecting == name() || (isSlider() && sliderSelected)) return scene::UiState::Selecting;
+    if (panel->isDisabled(key)) return scene::UiState::Disabled;
+    if (panel->selecting == key || (isSlider() && sliderSelected)) return scene::UiState::Selecting;
+    if (!scope.empty()) {
+        auto f = panel->scopeFocus.find(scope);
+        return f != panel->scopeFocus.end() && f->second == name() ? scene::UiState::Focused : scene::UiState::Normal;
+    }
     return panel->focus == name() ? scene::UiState::Focused : scene::UiState::Normal;
 }
 
 void ComponentObj::setState(scene::UiState s) {
-    if (s == scene::UiState::Disabled) panel->disable(name(), kPad_DDown);
-    else if (panel->isDisabled(name())) panel->enable(name());
-    if (s == scene::UiState::Focused) panel->setFocus(name(), false);
+    if (s == scene::UiState::Disabled) panel->disable(key, kPad_DDown);
+    else if (panel->isDisabled(key)) panel->enable(key);
+    if (s == scene::UiState::Focused) {
+        if (scope.empty()) panel->setFocus(name(), false);
+        else panel->setScopeFocus(scope, name(), false);
+    }
     panel->applyStates();
 }
 
 void ComponentObj::setText(const std::string& s) {
-    if (panel->view) panel->view->setText(name(), s);
+    if (panel->view) panel->view->setText(key, s);
     if (isTextEntry()) entered = s, updateTextEntry();
 }
 
@@ -95,7 +102,7 @@ void ComponentObj::initTextEntry() {
 void ComponentObj::updateTextEntry() {
     if (!panel->view) return;
     const bool canPick = !done && int(entered.size()) < maxLength;
-    panel->view->setTextEntry(name(), entered, canPick ? std::string(1, charset[size_t(charIndex) % charset.size()]) : "", done);
+    panel->view->setTextEntry(key, entered, canPick ? std::string(1, charset[size_t(charIndex) % charset.size()]) : "", done);
 }
 
 void ComponentObj::refreshList() {
@@ -104,7 +111,7 @@ void ComponentObj::refreshList() {
         std::vector<gfx::UiView::ListRow> rows;
         int selRow = 0;
         p->rows(rows, selected, selRow);
-        panel->view->setList(name(), std::move(rows), selRow);
+        panel->view->setList(key, std::move(rows), selRow);
     }
 }
 
@@ -196,14 +203,23 @@ bool ComponentObj::buttonDown(int button, int player) {
         return false;
     }
     if (isSlider()) {
-        if (sliderSelected) {
+        // RB's scripts give a slider the focus while it is set
+        // (options_audio.dta / charcreator.dta: <x>.btn -> set_focus <x>.sld,
+        // kPad_X confirms): left / right move a focused one [I: RB's
+        // UISlider ButtonDown not read].
+        const bool focusedMove = !sliderSelected && (button == kPad_DLeft || button == kPad_DRight) && state() == scene::UiState::Focused;
+        if (sliderSelected || focusedMove) {
             if (isDirection(button)) {
                 const int d = button == kPad_DUp || button == kPad_DRight ? 1 : -1;
                 const int next = std::clamp(current + d, 0, std::max(0, steps - 1));
                 if (next != current) {
                     current = next;
-                    if (panel->view) panel->view->setSlider(name(), current, steps);
+                    if (panel->view) panel->view->setSlider(key, current, steps);
                     ui.callScript(panel, "slider_start_msg", {Value::obj(this)});
+                    // The scroll message (charcreator.dta's SCROLL_MSG sets
+                    // the weight / height from {weight.sld frame}) [C data; I:
+                    // RB's UISlider sends it as a list scrolls].
+                    ui.route("component_scroll", {Value::obj(this)});
                 }
                 return true;
             }
@@ -215,7 +231,7 @@ bool ComponentObj::buttonDown(int button, int player) {
             if (button == kPad_Tri) {
                 ui.callScript(panel, "slider_select_cancel", {Value::obj(this)});
                 sliderSelected = false;
-                if (panel->view) panel->view->setSlider(name(), current, steps);
+                if (panel->view) panel->view->setSlider(key, current, steps);
                 panel->applyStates();
                 return true;
             }
@@ -240,7 +256,7 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     // TrackDir practice_reset) [I], logged once.
     // The vocal track's directory (track_paneldir.dta milo_apply, the tutorials) [I: its display options not done].
     if (msg == "set_configuration" || msg == "set_enable_vocals_options" || msg == "get_display_mode") return r = Value::integer(0), true;
-    if (msg == "trigger" || msg == "select" || msg == "practice_reset" || msg == "set_colors" || (msg == "reset" && (!object || object->cls != "BandList"))) {
+    if (msg == "trigger" || msg == "select" || msg == "practice_reset" || msg == "sort_draws" || (msg == "set_colors" && !(args.size() == 1 && dynamic_cast<ListProvider*>(args[0].object))) || (msg == "reset" && (!object || object->cls != "BandList"))) {
         panel->ui.logOnce("STUB-quiet " + name() + " " + msg);
         return r = Value::integer(0), true;
     }
@@ -288,12 +304,21 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         return true;
     }
     if (msg == "set_localized_text" || msg == "set_localized") return setText(argStr(0)), true;
-    if (msg == "get_text") return r = Value::string(isTextEntry() ? entered : v ? v->text(name()) : std::string()), true;
+    if (msg == "get_text") return r = Value::string(isTextEntry() ? entered : v ? v->text(key) : std::string()), true;
     if (msg == "set_wrap_width") {
-        if (v) v->setWrapWidth(name(), argNum(0));
+        if (v) v->setWrapWidth(key, argNum(0));
         return true;
     }
     if (msg == "jitter_text" || msg == "set_caps") return true;
+    // UISlider's frame (charcreator.dta's weight.sld / height.sld: {$char
+    // get weight} in, {weight.sld frame} out): the position 0..1, current
+    // over steps - 1 [I: RB's UISlider Frame / SetFrame not read].
+    if (isSlider() && (msg == "frame" || msg == "set_frame")) {
+        if (msg == "frame") return r = Value::real(steps > 1 ? float(current) / float(steps - 1) : 0.0f), true;
+        current = std::clamp(int(std::lround(argNum(0) * float(std::max(1, steps - 1)))), 0, std::max(0, steps - 1));
+        if (v) v->setSlider(key, current, steps);
+        return true;
+    }
     if (msg == "set_frame") {
         if (v) v->setFrame(name(), argNum(0));
         return true;
@@ -373,6 +398,21 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         return true;
     }
     if (msg == "selected_pos") return r = Value::integer(selected), true;
+    // RB's colour lists (charcreator.dta skin.lst / color.lst set_colors
+    // {$char get skin_color_palette}): one row per colour of the palette
+    // (the meta game's palette provider).
+    if (msg == "set_colors") {
+        std::vector<Value> a{args[0]};
+        return handleNative(in, "set_provider", a, r);
+    }
+    // UIList store / undo / confirm (charcreator.dta skin.lst): the
+    // position kept on store, put back by undo; confirm keeps the current.
+    if (msg == "store") return storedSelected = selected, true;
+    if (msg == "undo") {
+        if (storedSelected >= 0) selected = storedSelected, refreshList();
+        return true;
+    }
+    if (msg == "confirm") return storedSelected = -1, true;
     // RB's BandList rows shown at once (the town list) [I: the list keeps its own].
     if (msg == "num_display") return r = Value::integer(numDisplay_), true;
     if (msg == "set_num_display") return numDisplay_ = args.empty() ? numDisplay_ : args[0].integerValue(), r = Value::integer(0), true;
@@ -388,6 +428,34 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         refreshList();
         return true;
     }
+    // UIList set_data (<sym> ...) (charcreator.dta attitude.lst): the
+    // symbols are the list's rows, shown localized [C data: the uses].
+    if (msg == "set_data" && !args.empty() && args[0].type == Value::Type::Array && args[0].array) {
+        struct DataList : ListProvider {
+            DataList(UiManager& u) : ListProvider("", "UIListData"), ui(u) {}
+            UiManager& ui;
+            std::vector<std::string> syms;
+            int numData() override { return int(syms.size()); }
+            std::string symbol(int i) override { return i >= 0 && i < int(syms.size()) ? syms[size_t(i)] : std::string(); }
+            void rows(std::vector<gfx::UiView::ListRow>& out, int sel, int& selRow) override {
+                out.clear();
+                for (const std::string& sy : syms) {
+                    gfx::UiView::ListRow row;
+                    const std::string* loc = ui.locale().find(sy);
+                    row.texts["list.lbl"] = row.texts["name.lbl"] = loc ? *loc : sy;
+                    out.push_back(std::move(row));
+                }
+                selRow = sel;
+            }
+        };
+        auto l = std::make_unique<DataList>(ui);
+        for (const Value& e : *args[0].array) l->syms.push_back(e.str());
+        provider = l.get();
+        dataList = std::move(l);
+        selected = std::clamp(selected, 0, std::max(0, int(static_cast<DataList*>(provider)->syms.size()) - 1));
+        refreshList();
+        return true;
+    }
     if (msg == "set_dirty" || msg == "set_first_showing" || msg == "set_data") return refreshList(), true;
     if (msg == "is_scrolling") return r = Value::integer(0), true;
     if (msg == "num_data") {
@@ -398,13 +466,13 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     if (msg == "current") return r = Value::integer(current), true;
     if (msg == "set_current") {
         current = std::clamp(int(argNum(0)), 0, std::max(0, steps - 1));
-        if (v) v->setSlider(name(), current, steps);
+        if (v) v->setSlider(key, current, steps);
         return true;
     }
     if (msg == "set_num_steps") {
         steps = std::max(1, int(argNum(0, 10)));
         current = std::clamp(current, 0, steps - 1);
-        if (v) v->setSlider(name(), current, steps);
+        if (v) v->setSlider(key, current, steps);
         return true;
     }
     if (msg == "num_steps") return r = Value::integer(steps), true;
@@ -412,7 +480,7 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     if (msg == "get_check") return r = Value::integer(checked ? 1 : 0), true;
     if (msg == "set_check" || msg == "toggle") {
         checked = msg == "toggle" ? !checked : (!args.empty() && args[0].truthy());
-        if (v) v->setCheck(name(), checked);
+        if (v) v->setCheck(key, checked);
         return true;
     }
     // BandTextEntry (0x82143B28)
@@ -425,7 +493,7 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     }
     // UIPicture set_tex
     if (msg == "set_tex") {
-        if (v) v->setPictureTex(name(), argStr(0));
+        if (v) v->setPictureTex(key, argStr(0));
         return true;
     }
     // An Sfx under a fader ({practice_snare add_fader music_fader},
@@ -452,8 +520,8 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         return true;
     }
     if (msg == "set_name" || msg == "set_rendered") return true;
-    if (msg == "enable") return panel->enable(name()), true;
-    if (msg == "disable") return panel->disable(name(), kPad_DDown), true;
+    if (msg == "enable") return panel->enable(key), true;
+    if (msg == "disable") return panel->disable(key, kPad_DDown), true;
     return false;
 }
 
@@ -546,6 +614,9 @@ ComponentObj* PanelObj::scopedComponent(const std::string& scope, const std::str
     if (!o) return nullptr;
     auto c = std::make_unique<ComponentObj>(this, o, name);
     ComponentObj* raw = c.get();
+    raw->scope = scope, raw->key = key;
+    view->registerScope(scope);
+    if (raw->isTextEntry()) raw->initTextEntry();
     scoped_[key] = std::move(c);
     return raw;
 }
@@ -567,8 +638,10 @@ void PanelObj::load() {
         // A file is relative to the script that names it: RB's tutorial
         // panels (tutorial/*.dta) name tutorial/ milos [C data; the port
         // keeps no script file per node, so tutorial/ is tried next].
-        if (!ui.data().exists(path))
-            if (const std::string alt = scene::miloArkPath(scene::resolveMiloRelative("tutorial/panel.milo", file)); ui.data().exists(alt)) path = alt;
+        // patchcreator/patchcreator.dta's panels (patch_panel, patch_help_panel) name patchcreator/ milos [C data].
+        for (const char* dir : {"tutorial/panel.milo", "patchcreator/panel.milo"})
+            if (!ui.data().exists(path))
+                if (const std::string alt = scene::miloArkPath(scene::resolveMiloRelative(dir, file)); ui.data().exists(alt)) path = alt;
         std::string error;
         if (path.rfind("world/", 0) == 0) {
             // The venue (world_panel): the program's (game/world.h).
@@ -660,6 +733,7 @@ void PanelObj::applyStates() {
     if (!view) return;
     view->clearStates();
     view->setFocus(focus);
+    for (const auto& [sc, f] : scopeFocus) view->setScopeFocus(sc, f);
     for (const std::string& d : disabled) view->setState(d, scene::UiState::Disabled);
     if (!selecting.empty()) view->setState(selecting, scene::UiState::Selecting);
     for (auto& [n, c] : components_)
@@ -678,13 +752,37 @@ void PanelObj::setFocus(const std::string& name, bool notify) {
     }
 }
 
+void PanelObj::setScopeFocus(const std::string& scope, const std::string& name, bool notify) {
+    if (scope.empty()) return setFocus(name, notify);
+    std::string& f = scopeFocus[scope];
+    if (f == name) return;
+    const std::string old = f;
+    f = name;
+    applyStates();
+    if (notify) ui.route("component_focus", {Value::obj(scopedComponent(scope, name)), Value::obj(scopedComponent(scope, old)), Value::obj(this)});
+}
+
+ComponentObj* PanelObj::componentByKey(const std::string& key) {
+    const size_t slash = key.find('/');
+    return slash == std::string::npos ? component(key) : scopedComponent(key.substr(0, slash), key.substr(slash + 1));
+}
+
 void PanelObj::enable(const std::string& name) {
     disabled.erase(name);
     applyStates();
 }
 
 void PanelObj::disable(const std::string& name, int navButton) {
-    // PanelDir disable (0x82374500): the focus moves on first.
+    // PanelDir disable (0x82374500): the focus moves on first (a slot's
+    // component: its slot's focus).
+    if (const size_t slash = name.find('/'); slash != std::string::npos) {
+        const std::string sc = name.substr(0, slash), n = name.substr(slash + 1);
+        if (scopeFocus[sc] == n) navigate(navButton == 0 ? kPad_DDown : navButton, sc);
+        if (scopeFocus[sc] == n) scopeFocus[sc].clear();
+        disabled.insert(name);
+        applyStates();
+        return;
+    }
     if (focus == name) navigate(navButton == 0 ? kPad_DDown : navButton);
     if (focus == name) focus.clear();
     disabled.insert(name);
@@ -703,19 +801,34 @@ bool PanelObj::navigable() {
     return false;
 }
 
-void PanelObj::navigate(int button) {
+void PanelObj::navigate(int button) { navigate(button, ""); }
+
+void PanelObj::navigate(int button, const std::string& scope) {
     // 0x82374160 / 0x82373A08 [C]: down / right follow nav_down / nav_right,
     // up / left the component that names this one; disabled ones are skipped.
+    // A slot directory's components navigate among themselves, its focus.
+    std::string& focus = scope.empty() ? this->focus : scopeFocus[scope];
     if (!view || focus.empty()) return;
+    const auto findC = [&](const std::string& n) -> const scene::UIComponent* {
+        const scene::Object* o = scope.empty() ? view->find(n) : view->findIn(scope, n);
+        return o ? o->as<scene::UIComponent>() : nullptr;
+    };
     const auto navOf = [&](const std::string& n, bool down) -> std::string {
-        const auto* c = view->find(n) ? view->find(n)->as<scene::UIComponent>() : nullptr;
+        const auto* c = findC(n);
         return c ? (down ? c->navDown : c->navRight) : std::string();
     };
     const auto inverse = [&](const std::string& n, bool down) -> std::string {
+        if (!scope.empty()) {
+            for (const char* cls : {"BandButton", "BandList", "UIList", "BandSlider", "UIButton", "CheckBox", "BandTextEntry", "UIPicture"})
+                for (const scene::Object* o : view->byClassIn(scope, cls))
+                    if (const auto* c = o->as<scene::UIComponent>(); c && (down ? c->navDown : c->navRight) == n) return c->name;
+            return {};
+        }
         for (const scene::UIComponent* c : view->milo()->root().all<scene::UIComponent>())
             if ((down ? c->navDown : c->navRight) == n) return c->name;
         return {};
     };
+    const auto disabledName = [&](const std::string& n) { return isDisabled(gfx::UiView::scopedKey(scope, n)); };
     std::string cur = focus;
     for (int guard = 0; guard < 64; ++guard) {
         std::string next;
@@ -728,9 +841,9 @@ void PanelObj::navigate(int button) {
         }
         if (next.empty() || next == focus) return;
         cur = next;
-        if (!isDisabled(cur)) break;  // 0x82374160: state 2 only, hidden components count
+        if (!disabledName(cur)) break;  // 0x82374160: state 2 only, hidden components count
     }
-    if (cur != focus && !isDisabled(cur)) setFocus(cur, true);
+    if (cur != focus && !disabledName(cur)) setScopeFocus(scope, cur, true);
 }
 
 // ui_objects.dta (UIComponent (select_frames 30)), read by RB 0x82270BD0
@@ -740,7 +853,7 @@ constexpr double kSelectMs = 500;
 void PanelObj::selectStart(ComponentObj* c, int button, int player) {
     // UIComponent select (0x8236F058): Selecting, component_select_start
     // now, component_select after select_frames (30 frames, ui_objects.dta).
-    selecting = c->name();
+    selecting = c->key;
     selectEndMs = ui.nowMs() + kSelectMs;
     if (view) view->setSelectProgress(selecting, 0);
     applyStates();
@@ -753,7 +866,7 @@ void PanelObj::pollSelect() {
     const std::string name = selecting;
     selecting.clear();
     applyStates();
-    if (up && ui.current() && ui.current()->hasPanel(this)) ui.route("component_select", {Value::obj(component(name))});
+    if (up && ui.current() && ui.current()->hasPanel(this)) ui.route("component_select", {Value::obj(componentByKey(name))});
 }
 
 bool PanelObj::buttonDown(int button, int player) {
@@ -866,6 +979,15 @@ bool PanelObj::handleNative(Interp& in, const std::string& msg, std::vector<Valu
                 if (gfx::ScenePose::endFrame(o.get()) > 0) view->setFrame(o->name, args[0].number());
         return r = Value::integer(0), true;
     }
+    // {$panel button_down <button> <player>}: the panel's BUTTON_DOWN_MSG
+    // (Interp::send ran it first), then UIPanel's native ButtonDown, the
+    // focused component [I: Hmx::Object::Handle falls through to the class].
+    // The title's splash_panel turns Start into kPad_X this way (ui/main.dta):
+    // a pad's or a guitar's Start went nowhere (GD05-056).
+    if (msg == "button_down" && !args.empty()) {
+        buttonDown(int(args[0].number()), args.size() > 1 ? int(args[1].number()) : 0);
+        return r = Value::integer(0), true;
+    }
     // RB's practice mode (M7, GD05-009): its vocal mode is not there yet.
     if (msg == "set_in_vocal_mode" && className() == "PracticePanel") return in.onStub(name(), msg, Value::integer(0)), r = Value::integer(0), true;
     // RB's MetaPanel: {$this meta_music} (meta.dta) [C data].
@@ -876,7 +998,13 @@ bool PanelObj::handleNative(Interp& in, const std::string& msg, std::vector<Valu
         std::string var = args[1].str();
         if (!var.empty() && var[0] == '$') var = var.substr(1);
         const Value saved = in.var(var);
-        for (scene::Object* o : view->milo()->root().byClass(args[0].str())) {
+        // A class's objects, its derived classes' too (RB's iterate is
+        // IsA: shop_instrument.dta's UIList over the BandLists).
+        std::vector<scene::Object*> objs = view->milo()->root().byClass(args[0].str());
+        if (args[0].str() == "UIList")
+            for (const char* sub : {"BandList", "BandSwatch"})
+                for (scene::Object* o : view->milo()->root().byClass(sub)) objs.push_back(o);
+        for (scene::Object* o : objs) {
             ComponentObj* c = component(o->name);
             if (!c) continue;
             in.var(var) = Value::obj(c);
@@ -1041,9 +1169,23 @@ bool ScreenObj::handleNative(Interp&, const std::string& msg, std::vector<Value>
     }
     if (msg == "export_all") {
         const std::string m = args.empty() ? std::string() : args[0].str();
-        for (auto& sl : ui.playerSlots()) sl->dispatch(m);
+        for (size_t k = 0; k < ui.playerSlots().size(); ++k) ui.playerSlots()[k]->dispatch(m);
         return true;
     }
+    // MultiFocusScreen's all_ready (RB 0x8282DE20) [C]: every slot's
+    // is_ready, then the screen's own (is_ready) handler (none: ready).
+    if (msg == "all_ready" && !ui.playerSlots().empty()) {
+        for (auto& sl : ui.playerSlots())
+            if (!sl->ready()) return r = Value::integer(0), true;
+        const Value own = handler("is_ready") ? ui.callScript(this, "is_ready") : Value::integer(1);
+        return r = Value::integer(own.isUnhandled() || own.truthy() ? 1 : 0), true;
+    }
+    // get_panel_from_slot_num (RB 0x8282DAB8): the slot object of that number.
+    if (msg == "get_panel_from_slot_num" && !ui.playerSlots().empty()) {
+        const int n = args.empty() ? -1 : args[0].integerValue();
+        return r = n >= 0 && size_t(n) < ui.playerSlots().size() ? Value::obj(ui.playerSlots()[size_t(n)].get()) : Value::integer(0), true;
+    }
+    if (msg == "get_player_num_from_slot_num") return r = ui.interp().send("gamecfg", msg, args), true;
     // RB's UIScreen has_panel <panel>: whether the panel is one of the screen's [C data: main.dta].
     if (msg == "has_panel") {
         const std::string want = args.empty() ? std::string() : args[0].type == Value::Type::Object && args[0].object ? args[0].object->name() : args[0].str();

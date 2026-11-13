@@ -7,6 +7,8 @@
 #include <functional>
 #include <set>
 
+#include <SDL3/SDL_log.h>
+
 #include "char/character.h"
 #include "game/band.h"
 #include "game/world.h"
@@ -175,6 +177,18 @@ std::vector<const scene::Mesh*> BandView::meshesToDraw(const chr::Character& c, 
     return out;
 }
 
+// GD02-161: once per character material, its render state and shader key
+// (the owner's Windows log shows what the band draws with on that GPU).
+void BandView::logMaterial(const chr::Character& c, const scene::Mat& mat, const gfx::Material& gm, const gfx::DrawContext& ctx,
+                           const gfx::MaterialRenderer& mr) {
+    const std::string id = c.name() + "/" + mat.name;
+    if (!logged_.insert(id).second) return;
+    SDL_Log("band: material %s: blend %d z %d cut %d write %d alpha %.2f key %#x textures d%d n%d s%d g%d c%d e%d", id.c_str(),
+            int(gm.blend), int(gm.zMode), int(gm.alphaCut), int(gm.alphaWrite), double(gm.alpha), gfx::standardKey(gm, &mr.env(), ctx),
+            int(bool(gm.diffuseTex)), int(bool(gm.normalMap)), int(bool(gm.specularMap)), int(bool(gm.emissiveMap)),
+            int(bool(gm.customDiffuseMap)), int(bool(gm.environMap)));
+}
+
 void BandView::drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scene::Mesh& m) {
     const gfx::GpuMesh* cached = cache_.mesh(&m);
     if (!cached || !m.dir) return;
@@ -220,6 +234,7 @@ void BandView::drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scen
     for (int pass = 0; mat && pass < 4; ++pass) {
         gfx::Material gm = cache_.material(*mat, matPose ? matPose : pose);
         if (forceAlphaWrite) gm.alphaWrite = true;
+        logMaterial(c, *mat, gm, ctx, mr);
         mr.draw(g, bones, gm, ctx);
         if (mat->nextPass.empty() || !mat->dir) break;
         const scene::Mat* next = mat->dir->resolve<scene::Mat>(mat->nextPass);

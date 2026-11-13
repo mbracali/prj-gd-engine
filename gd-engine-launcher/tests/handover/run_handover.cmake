@@ -11,7 +11,7 @@ file(REMOVE_RECURSE ${DIR}/xdg ${DIR}/after.bmp)
 file(MAKE_DIRECTORY ${DIR}/xdg)
 execute_process(
   COMMAND ${CMAKE_COMMAND} -E env SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy XDG_DATA_HOME=${DIR}/xdg
-          GDUL_GAMES_YAML=${DIR}/games.yaml "GDUL_SCRIPT=8000:shot=${DIR}/after.bmp;8300:quit"
+          GDUL_GAMES_YAML=${DIR}/games.yaml GDUL_TEST_RESTART_ONCE=1 "GDUL_SCRIPT=8000:shot=${DIR}/after.bmp;8300:quit"
           SDL_GAMECONTROLLER_IGNORE_DEVICES=0x1bad/0x0002 SDL_JOYSTICK_IGNORE_DEVICES=0x1bad/0x0002
           ${GDUL} --play gd-test-handover --iso ${DIR}/disc.iso
   RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 120)
@@ -27,6 +27,9 @@ if(NOT rc EQUAL 0)
 endif()
 if(NOT all MATCHES "handover: 0 failed")
   list(APPEND problems "the module's checks did not all pass")
+endif()
+if(NOT all MATCHES "handover: run again after Restart Now")
+  list(APPEND problems "Restart Now did not run the game again (GDUL-028)")
 endif()
 if(NOT all MATCHES "back from gd-test-handover: the OpenGL window again")
   list(APPEND problems "the launcher did not make its OpenGL window again")

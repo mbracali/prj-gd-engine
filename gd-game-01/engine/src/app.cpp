@@ -164,6 +164,18 @@ std::map<std::string, Json> profileValues(bool deck) {
     return d;
 }
 
+// The graphics backend a fresh start uses (GDALL-050, owner 11-13): Vulkan on
+// Windows and Linux (Steam Deck too), local on macOS and Android.
+#if !defined(__APPLE__) && !defined(__ANDROID__)
+constexpr const char* kDefaultGraphicsBackend = "vulkan";
+#else
+constexpr const char* kDefaultGraphicsBackend = "local";
+#endif
+// enhanced.json's settings_version: 2 = Vulkan became the default on Windows /
+// Linux (GDALL-050); a file without it (or older) has its "local" graphics
+// backend (the old default) turned into the new default once.
+constexpr int kEnhancedVersion = 2;
+
 // Enhanced Settings defaults (keys of enhanced.json): the build's profile
 // over the rest. XInput controllers and Rock Band guitars are always on (no
 // setting since 1.1.7).
@@ -187,8 +199,9 @@ const std::map<std::string, Json>& enhancedDefaults() {
         {"video_offset", Json::string("0")},
         // Enhanced > Performance > Graphics / Audio backend (GDCORE-006): read
         // once at start-up (startupGraphicsBackend / startupAudioBackend); no
-        // Mode button sets them.
-        {"graphics_backend", Json::string("local")}, {"audio_backend", Json::string("local")},
+        // Mode button sets them. Graphics: Vulkan on Windows / Linux (GDALL-050),
+        // local elsewhere.
+        {"graphics_backend", Json::string(kDefaultGraphicsBackend)}, {"audio_backend", Json::string("local")},
         };
         for (auto& [k, v] : profileValues(false)) m[k] = v;
         return m;
@@ -263,6 +276,12 @@ void migrateEnhanced(Json& e) {
     map("star_blur", {{"high", "strong"}});
     map("more_lights", {{"off", "none"}, {"subtle", "1.5x"}, {"strong", "2x"}});
     map("light_dust", {{"true", "1.5x"}, {"false", "none"}});
+    // GDALL-050: a file older than settings_version 2 kept "local" as the old
+    // default; it takes the new default (Vulkan on Windows / Linux) once. A
+    // player who picks local afterwards keeps it (the file is version 2 then).
+    const bool older = !e.has("settings_version") || e["settings_version"].num() < kEnhancedVersion;
+    if (older && e.has("graphics_backend") && e["graphics_backend"].type == Json::Type::String && e["graphics_backend"].s == "local")
+        e.set("graphics_backend", Json::string(kDefaultGraphicsBackend));
     // XInput and Rock Band guitars are always on now; Ground Fog and Light
     // Streaks were removed (1.1.7): their saved values are dropped.
     // A backend this build does not offer (OpenGL3 copied from another OS to
@@ -275,6 +294,7 @@ void migrateEnhanced(Json& e) {
     Json kept = Json::object();
     for (const auto& [k, v] : e.o)
         if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks" && offered(k, v)) kept.set(k, v);
+    kept.set("settings_version", Json::number(kEnhancedVersion));
     e = std::move(kept);
 }
 // Enhanced > Performance > Graphics / Audio backend as the game started with
@@ -293,7 +313,7 @@ StartupBackends& startupBackends() {
 void latchStartupBackends(const Json& e) {
     StartupBackends& b = startupBackends();
     b.latched = true;
-    b.graphics = e.has("graphics_backend") ? e["graphics_backend"].str() : "local";
+    b.graphics = e.has("graphics_backend") ? e["graphics_backend"].str() : kDefaultGraphicsBackend;
     b.audio = e.has("audio_backend") ? e["audio_backend"].str() : "local";
 }
 // Number settings (as strings, ms) and their range.
@@ -339,6 +359,9 @@ void rememberPath(const std::string& path) {
 class App {
 public:
     explicit App(const Options& o) : opt_(o), difficulty_(std::clamp(o.difficulty, 0, 3)) {}
+    // track2_ is declared before renderer_, so it would be destroyed after
+    // it: its SceneRenderer frees GPU objects through renderer_ (#100).
+    ~App() { track2_.reset(); }
     int run(int* restartSlot = nullptr);  // restartSlot: set (the profile slot) when Restart Now ends the run
 
 private:
@@ -419,6 +442,13 @@ private:
     void updateVenue(float t);
     bool running_ = true;
     bool restart_ = false;  // Enhanced > Graphics / Audio backend > Restart Now
+    // The mouse cursor (#98, GD01-322): shown in the menus (and the pause
+    // menu) while the mouse is used, hidden while a song plays, 3 s after the
+    // mouse stops, and at once when a key, a guitar or a gamepad drives them.
+    bool cursorShown_ = true;
+    double mouseUsedMs_ = -1e9;
+    void cursorEvent(const SDL_Event& e);
+    void updateCursor();
     Screen screen_ = Screen::NeedData;
     std::string message_;
 
@@ -1354,6 +1384,9 @@ bool App::typedKey(const SDL_Event& e) {
     return true;
 }
 
+// How far the movie's sound is queued ahead of its clock (the 0.5 s it starts with).
+constexpr double kMovieLead = 0.5;
+
 void App::startMovie(const std::string& file) {
     std::string path = "videos/" + file;
     if (!data_ || !data_->exists(path)) {
@@ -1400,8 +1433,11 @@ void App::startMovie(const std::string& file) {
 void App::movieFrame() {
     Movie& m = *movie_;
     std::vector<int16_t> pcm;
-    if (m.pss->takeAudio(pcm) && m.audio) SDL_PutAudioStreamData(m.audio, pcm.data(), int(pcm.size() * sizeof(int16_t)));
     double elapsed = double(SDL_GetTicksNS() - m.startNs) / 1e9;
+    // The sound kept kMovieLead ahead of the clock: demuxed ahead of the
+    // pictures, which the file puts before their sound (PssMovie::demuxAudioUntil). GD01-323 (#79).
+    m.pss->demuxAudioUntil(uint64_t((elapsed + kMovieLead) * PssMovie::kAudioRate));
+    if (m.pss->takeAudio(pcm) && m.audio) SDL_PutAudioStreamData(m.audio, pcm.data(), int(pcm.size() * sizeof(int16_t)));
     uint64_t target = uint64_t(elapsed * PssMovie::kFrameRate);
     bool changed = false;
     try {
@@ -1829,6 +1865,7 @@ void App::postFrameExtras(PostFrame& pf, bool song) {
 }
 
 void App::saveEnhanced() {
+    enhanced_.set("settings_version", Json::number(kEnhancedVersion));  // GDALL-050: no second migration
     std::ofstream out(enhancedPath());
     out << enhanced_.dump(2) << "\n";
     if (!out) SDL_Log("enhanced settings: could not save %s", enhancedPath().c_str());
@@ -1911,6 +1948,7 @@ void App::exportUserFiles(const std::string& dir) {
     if (!base.empty() && base.back() != '/' && base.back() != '\\') base += '/';
     Json all = Json::object();
     for (const auto& [key, def] : enhancedDefaults()) all.set(key, enhanced_.has(key) ? enhanced_[key] : def);
+    all.set("settings_version", Json::number(kEnhancedVersion));
     std::ofstream out(base + kSettingsFile);
     out << all.dump(2) << "\n";
     bool ok = bool(out);
@@ -2350,7 +2388,26 @@ void App::drawResults() {
     renderer_.textCentered(kScreenW / 2, 470, 1.5f, kDim, "Press Enter to continue");
 }
 
+void App::cursorEvent(const SDL_Event& e) {
+    const bool mouse = (e.type == SDL_EVENT_MOUSE_MOTION && e.motion.which != SDL_TOUCH_MOUSEID) ||
+                       (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.which != SDL_TOUCH_MOUSEID) || e.type == SDL_EVENT_MOUSE_WHEEL;
+    if (mouse) mouseUsedMs_ = double(SDL_GetTicksNS()) / 1e6;
+    else if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || e.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN ||
+             e.type == SDL_EVENT_JOYSTICK_HAT_MOTION)
+        mouseUsedMs_ = -1e9;
+}
+
+void App::updateCursor() {
+    const double now = double(SDL_GetTicksNS()) / 1e6;
+    const bool show = screen_ != Screen::Playing && (!ui_ || enhancedOn("mouse")) && now - mouseUsedMs_ < 3000;  // the ISO picker screen too
+    if (show == cursorShown_) return;
+    cursorShown_ = show;
+    if (show) SDL_ShowCursor();
+    else SDL_HideCursor();
+}
+
 void App::frame() {
+    updateCursor();
     // Lefty Flip (Options > Game Settings), per player: the mirrored highway,
     // the lefty gamepad layout, and a guitar's swapped menu strum.
     if (campaign_) {
@@ -2741,6 +2798,7 @@ int App::run(int* restartSlot) {
         updateTouchLanes();
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
+            cursorEvent(e);
             if (e.type == SDL_EVENT_QUIT) running_ = false;
             else if (e.type == SDL_EVENT_WINDOW_HDR_STATE_CHANGED) renderer_.hdrStateChanged();  // HDR on / off, paper white, headroom
             else if (e.type == SDL_EVENT_DROP_FILE && e.drop.data && screen_ != Screen::Playing) tryLoadData(e.drop.data);
@@ -2818,10 +2876,12 @@ int runApp(const Options& options) {
         const int r = App(o).run(&restartSlot);
         if (restartSlot < 0) return r;
         SDL_Log("restart: Enhanced Settings asked for a restart (the new backends)");
+        // In the launcher the launcher starts the game again, as a new Play
+        // (its controllers and window handed over again: in the module they
+        // were lost, GDUL-028); on its own the game starts again from its start.
+        if (const char* h = SDL_getenv("GD_LAUNCHER_HOSTED"); h && h[0] == '1') return 75;  // GD_GAME_EXIT_RESTART
         o = options;
         o.song.clear(), o.panel.clear(), o.viewScene.clear();
-        o.skipBoot = true;
-        o.startScreen = "enhanced_settings";
         o.startSlot = restartSlot;
     }
 }
@@ -2848,6 +2908,35 @@ std::string startupAudioBackend() {
 }
 
 namespace {
+// The script's {mod a b} as Harmonix's Mod (#100, GD01-319): wrapped into
+// [0, b); the store's {mod {+ itemIdx -1} n} on the first item gives n - 1.
+int scriptModSelfTest() {
+    Interp in;
+    int failures = 0;
+    const struct { const char* code; float want; bool real; } cases[] = {
+        {"{mod -1 5}", 4, false}, {"{mod {+ 0 -1} 7}", 6, false}, {"{mod 7 5}", 2, false}, {"{mod -6 5}", 4, false},
+        {"{mod -5 5}", 0, false}, {"{mod 0 5}", 0, false}, {"{mod 5.5 2}", 1.5f, true}, {"{mod -0.5 2}", 1.5f, true},
+    };
+    for (const auto& c : cases) {
+        const DataNode tree = parseDtaText(c.code);
+        const Value v = tree.children.empty() ? Value() : in.eval(tree.children[0]);
+        const bool ok = std::fabs(v.number() - c.want) < 1e-4f && (v.type == Value::Type::Float) == c.real;
+        if (!ok) std::printf("  FAIL script mod: %s = %g, want %g\n", c.code, double(v.number()), double(c.want)), ++failures;
+    }
+    std::printf("script mod: %d of %zu cases\n", int(std::size(cases)) - failures, std::size(cases));
+    // The menus' held direction (#100, GD01-320): a release ends the
+    // releasing player's, else the other's (Bind to moved the device).
+    const int U = UiSystem::Up, D = UiSystem::Down;
+    const struct { int h0, h1, button, player, want; } rel[] = {
+        {U, -1, U, 0, 0}, {-1, U, U, 1, 1}, {U, -1, U, 1, 0}, {-1, D, D, 0, 1}, {U, D, D, 1, 1}, {U, U, U, 1, 1}, {U, -1, D, 0, -1}, {-1, -1, U, 0, -1},
+    };
+    int relFails = 0;
+    for (const auto& r : rel)
+        if (UiSystem::releasedHeldSlot(r.h0, r.h1, r.button, r.player) != r.want) ++relFails;
+    std::printf("menu held release: %d of %zu cases\n", int(std::size(rel)) - relFails, std::size(rel));
+    return failures + relFails;
+}
+
 // The universal controls' rules (universal_mechanisms.md 1.1.4 / 1.2.1),
 // on the keyboard's default bindings: no double inputs where two controls
 // share a key, none missed, the keyboard's Start selects in the menus, and
@@ -2917,10 +3006,33 @@ int inputSelfTest() {
           "1.1.6 enhanced.json migrated");
     for (const auto& [k, v] : old.o)
         if (auto c = enhancedChoices().find(k); c != enhancedChoices().end()) check(v.type == Json::Type::String && c->second.count(v.s), "migrated value valid");
-    // GDCORE-006: Graphics / Audio backend default local; no Mode button sets
-    // them; a value this build does not offer is dropped at load.
-    check(enhancedDefaults().at("graphics_backend").str() == "local" && enhancedDefaults().at("audio_backend").str() == "local",
-          "backends default local");
+    // GDCORE-006 / GDALL-050: graphics default Vulkan on Windows / Linux, local
+    // elsewhere; audio default local; no Mode button sets them; a value this
+    // build does not offer is dropped at load.
+#if !defined(__APPLE__) && !defined(__ANDROID__)
+    const std::string wantGraphics = "vulkan";
+#else
+    const std::string wantGraphics = "local";
+#endif
+    check(enhancedDefaults().at("graphics_backend").str() == wantGraphics && enhancedDefaults().at("audio_backend").str() == "local",
+          ("backends default: graphics " + wantGraphics + ", audio local").c_str());
+    {
+        StartupBackends saved = startupBackends();
+        latchStartupBackends(Json::object());
+        check(startupBackends().graphics == wantGraphics, ("no saved backend: graphics " + wantGraphics).c_str());
+        startupBackends() = saved;
+    }
+    // GDALL-050: an old file's local (the old default) takes the new default once;
+    // local picked in a version 2 file stays.
+    Json mig = Json::parse(R"({"graphics_backend":"local","audio_backend":"local"})");
+    migrateEnhanced(mig);
+    check(mig["graphics_backend"].str() == wantGraphics && mig["audio_backend"].str() == "local" && mig["settings_version"].num() == 2,
+          ("old enhanced.json: local graphics -> " + wantGraphics).c_str());
+    migrateEnhanced(mig);
+    check(mig["graphics_backend"].str() == wantGraphics, "migrated twice: same");
+    mig = Json::parse(R"({"settings_version":2,"graphics_backend":"local"})");
+    migrateEnhanced(mig);
+    check(mig["graphics_backend"].str() == "local", "local picked in a new enhanced.json stays");
     for (const char* m : {"steam_deck", "original", "clean", "max_hd", "max_4k", "budget", "good_old_days"}) {
         auto p = enhancedPreset(m);
         check(!p.empty() && !p.count("graphics_backend") && !p.count("audio_backend"), "a mode keeps the backends");
@@ -3077,11 +3189,172 @@ int easyChordsSelfTest(const std::vector<SongInfo>& songs, GameData& data, const
 }
 }  // namespace
 
+// GD01-323 (#79): the intro movie's sound, decoded as App::startMovie /
+// movieFrame feed it, paced at real time (60 frames a second): the PCM must
+// have no jump between samples far above the movie's own, and the queue
+// must never run dry (the device eats 48000 frames a second from the first
+// push; a lead under one device period, kMinLead, is silence: a pop).
+// GD01_MOVIE_WAV=<file> writes the decoded PCM as it was queued.
+static int movieSelfTest(const GameData& data) {
+    const std::string path = "videos/ghintro.pss";
+    if (!data.exists(path)) return std::printf("movie: %s not on the disc, skipped\n", path.c_str()), 0;
+    uint64_t pos = 0;
+    PssMovie pss([&](uint8_t* dst, size_t n) {
+        size_t got = data.readRange(path, pos, dst, n);
+        pos += got;
+        return got;
+    });
+    pss.prefetchAudio(24000);
+    std::vector<int16_t> pcm;
+    constexpr double kTick = 1.0 / 60, kMinLead = 2048;  // SDL's WASAPI / Pulse periods are 480..1024 frames
+    double minLead = 1e30, minLeadAt = 0;
+    size_t next = 0;
+    bool ended = false;
+    for (int k = 0; !ended; ++k) {
+        const double elapsed = k * kTick;
+        pss.demuxAudioUntil(uint64_t((elapsed + kMovieLead) * PssMovie::kAudioRate));  // as movieFrame
+        pss.takeAudio(pcm);
+        const double lead = double(pcm.size() / 2) - elapsed * PssMovie::kAudioRate;
+        if (lead < minLead && !pss.ended()) minLead = lead, minLeadAt = elapsed;
+        const uint64_t target = uint64_t(elapsed * PssMovie::kFrameRate);
+        while (next <= target)
+            if (!pss.nextFrame()) {
+                ended = true;
+                break;
+            } else
+                ++next;
+    }
+    pss.takeAudio(pcm);
+    // Sample jumps: the largest per channel, against the movie's typical (99.9th percentile) step.
+    int worst = 0;
+    size_t worstAt = 0;
+    std::vector<int> steps;
+    steps.reserve(pcm.size());
+    for (size_t i = 2; i < pcm.size(); ++i) {
+        const int d = std::abs(int(pcm[i]) - int(pcm[i - 2]));
+        steps.push_back(d);
+        if (d > worst) worst = d, worstAt = i / 2;
+    }
+    // Steps across the 0x200-byte L / R blocks' edges (every 256 frames) against the rest: a block
+    // edge decoded wrong (dropped, repeated or swapped samples) shows as larger steps there.
+    double edge = 0, inner = 0;
+    size_t edges = 0, inners = 0;
+    for (size_t i = 2; i < pcm.size(); ++i)
+        if ((i / 2) % 256 == 0) edge += steps[i - 2], ++edges;
+        else inner += steps[i - 2], ++inners;
+    edge /= double(std::max<size_t>(edges, 1)), inner /= double(std::max<size_t>(inners, 1));
+    std::printf("movie: mean step at block edges %.0f, elsewhere %.0f\n", edge, inner);
+    std::vector<int> sorted = steps;
+    std::nth_element(sorted.begin(), sorted.begin() + ptrdiff_t(sorted.size() * 999 / 1000), sorted.end());
+    const int p999 = sorted.empty() ? 0 : sorted[sorted.size() * 999 / 1000];
+    std::printf("movie: %s %zu pictures, %.2f s of sound; min queue lead %.0f frames (%.1f ms) at %.2f s; largest step %d at %.3f s "
+                "(99.9%% of steps under %d)\n",
+                path.c_str(), next, double(pcm.size() / 2) / PssMovie::kAudioRate, minLead, minLead * 1000 / PssMovie::kAudioRate, minLeadAt,
+                worst, double(worstAt) / PssMovie::kAudioRate, p999);
+    if (const char* wav = SDL_getenv("GD01_MOVIE_WAV")) {
+        if (FILE* f = std::fopen(wav, "wb")) {
+            auto u32 = [&](uint32_t v) { std::fwrite(&v, 4, 1, f); };
+            auto u16 = [&](uint16_t v) { std::fwrite(&v, 2, 1, f); };
+            const uint32_t bytes = uint32_t(pcm.size() * 2);
+            std::fwrite("RIFF", 1, 4, f), u32(36 + bytes), std::fwrite("WAVEfmt ", 1, 8, f), u32(16), u16(1), u16(2), u32(PssMovie::kAudioRate),
+                u32(PssMovie::kAudioRate * 4), u16(4), u16(16), std::fwrite("data", 1, 4, f), u32(bytes);
+            std::fwrite(pcm.data(), 2, pcm.size(), f);
+            std::fclose(f);
+        }
+    }
+    bool bad = false;
+    if (minLead < kMinLead) bad = true, std::fprintf(stderr, "movie: the sound queue runs under %.0f frames (%.0f)\n", kMinLead, minLead);
+    if (edge > inner * 1.5) bad = true, std::fprintf(stderr, "movie: steps at the block edges %.0f vs %.0f elsewhere\n", edge, inner);
+    if (worst > std::max(16384, p999 * 4)) bad = true, std::fprintf(stderr, "movie: a sample jump of %d at %.3f s\n", worst, double(worstAt) / PssMovie::kAudioRate);
+    return bad ? 1 : 0;
+}
+
+// GD01-322 (#98): the lessons' end dim (tut_script's tut_screen_dim.view)
+// was made for the PS2's 4:3 screen: through the panel camera on the 16:9
+// screen it spans only the middle; widened as PanelObj::draw does, it must
+// reach both edges (menu units 0..1280).
+static int tutorialDimSelfTest(const GameData& data) {
+    const std::string path = "ghui/tut_script.gh";
+    if (!data.exists(path)) return std::printf("tutorial dim: %s not on the disc, skipped\n", path.c_str()), 0;
+    Scene sc(data.read(path));
+    const SceneObject* cam = nullptr;
+    for (const SceneObject& o : sc.objects())
+        if (o.cam && !cam) cam = &o;
+    if (!cam || !sc.find("tut_screen_dim.view")) return std::fprintf(stderr, "tutorial dim: no camera or tut_screen_dim.view\n"), 1;
+    const CamObj& c = *cam->cam;
+    const float fovY = 2.0f * std::atan(std::tan(c.fov * 0.5f) / (4.0f / 3.0f));  // as Panel::viewProj
+    const Mat4 vp = Mat4::perspective(fovY, kScreenW / kScreenH, c.nearPlane, c.farPlane) * Mat4::cameraView(c.trans.world.rot, c.trans.world.pos);
+    float x0 = 1e30f, x1 = -1e30f;
+    std::vector<std::string> todo{"tut_screen_dim.view"};
+    while (!todo.empty()) {
+        const SceneObject* o = sc.find(todo.back());
+        todo.pop_back();
+        if (!o) continue;
+        if (const Drawable* d = o->drawable()) todo.insert(todo.end(), d->draws.begin(), d->draws.end());
+        if (!o->mesh) continue;
+        const Mat4 m = vp * Mat4::fromRowXfm(o->mesh->trans.world.rot, o->mesh->trans.world.pos);
+        for (const MeshVertex& v : o->mesh->verts) {
+            const float cx = m.m[0] * v.pos[0] + m.m[4] * v.pos[1] + m.m[8] * v.pos[2] + m.m[12];
+            const float cw = m.m[3] * v.pos[0] + m.m[7] * v.pos[1] + m.m[11] * v.pos[2] + m.m[15];
+            if (cw <= 1e-6f) continue;
+            x0 = std::min(x0, cx / cw), x1 = std::max(x1, cx / cw);
+        }
+    }
+    const float k = (16.0f / 9.0f) / (4.0f / 3.0f);
+    auto px = [](float ndc) { return (ndc + 1) * 0.5f * kScreenW; };
+    std::printf("tutorial dim: spans x %.0f..%.0f of 1280 as drawn on the PS2's 4:3, %.0f..%.0f widened\n", px(x0), px(x1), px(x0 * k), px(x1 * k));
+    return px(x0 * k) <= 1 && px(x1 * k) >= kScreenW - 1 ? 0 : (std::fprintf(stderr, "tutorial dim: does not cover the screen\n"), 1);
+}
+
+// GD01-322 (#98): the help bar's rounded boxes (help_box_* in
+// resources.rnd_ps2) are drawn blended with smooth edges: a texel left
+// transparent with a light colour bleeds into the edge as a light fringe
+// once the texture is filtered. Their transparent texels next to drawn ones
+// must carry the drawn texels' colour (as uploaded, bleedTransparent).
+static int helpBoxEdgeSelfTest(const GameData& data) {
+    Scene sc(data.read("ghui/gen/resources.rnd_ps2"));
+    int bad = 0;
+    std::set<std::string> seen;
+    for (const SceneObject& o : sc.objects()) {
+        if (!o.mesh || o.name.rfind("help_box_", 0) != 0) continue;
+        const SceneObject* m = sc.find(o.mesh->mat);
+        if (!m || !m->mat || m->mat->stages.empty() || !seen.insert(m->mat->stages[0].tex).second) continue;
+        const SceneObject* t = sc.find(m->mat->stages[0].tex);
+        if (!t || !t->tex || t->tex->image.width == 0) continue;
+        for (int pass = 0; pass < 2; ++pass) {
+            Image img = t->tex->image;
+            if (pass) bleedTransparent(img);
+            // The largest luminance step a filtered edge texel can show: a transparent
+            // texel's colour against its drawn neighbour's, over all such pairs.
+            int worst = 0, w = img.width, h = img.height;
+            auto px = [&](int x, int y) { return &img.rgba[(size_t(y) * size_t(w) + size_t(x)) * 4]; };
+            auto lum = [](const uint8_t* p) { return (p[0] * 3 + p[1] * 6 + p[2]) / 10; };
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x) {
+                    const uint8_t* p = px(x, y);
+                    if (p[3] != 0) continue;
+                    for (auto [dx, dy] : {std::pair{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+                        const int nx = x + dx, ny = y + dy;
+                        if (nx < 0 || ny < 0 || nx >= w || ny >= h || px(nx, ny)[3] == 0) continue;
+                        worst = std::max(worst, lum(p) - lum(px(nx, ny)));
+                    }
+                }
+            std::printf("help box %s (%dx%d): edge fringe %d (%s)\n", m->mat->stages[0].tex.c_str(), w, h, worst, pass ? "as uploaded" : "as on the disc");
+            if (pass && worst > 8) ++bad;
+        }
+    }
+    if (bad) std::fprintf(stderr, "help box: %d texture(s) with a light fringe\n", bad);
+    return bad ? 1 : 0;
+}
+
 int runSelfTest(const Options& options) {
     std::string path = options.dataPath.empty() ? loadRememberedPath() : options.dataPath;
     if (inputSelfTest()) return 1;
+    if (scriptModSelfTest()) return 1;
     try {
         GameData data(path);
+        if (SDL_getenv("GD01_MOVIE_ONLY")) return movieSelfTest(data) | tutorialDimSelfTest(data) | helpBoxEdgeSelfTest(data);  // GD01_MOVIE_ONLY=1: these checks alone
+        const int movieFailed = movieSelfTest(data) | tutorialDimSelfTest(data) | helpBoxEdgeSelfTest(data);
         Rules rules = loadRules(data);
         auto songs = loadSongs(data);
         std::printf("%u songs in %s; slop %.0f ms, head %d, tail %d\n", unsigned(songs.size()), data.description().c_str(),
@@ -3123,7 +3396,7 @@ int runSelfTest(const Options& options) {
         }
         std::printf("%d gems hit as hammer-ons / pull-offs\n", hopos);
         std::printf(failures ? "%d chart(s) not fully hit\n" : "all charts fully hit\n", failures);
-        return failures ? 1 : 0;
+        return failures || movieFailed ? 1 : 0;
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;
@@ -3152,10 +3425,35 @@ int runShaderTest() {
     for (const std::string& name : failed) std::printf("  FAILED: %s (the compiler's message is above)\n", name.c_str());
     if (failed.empty()) std::printf("all %d shader programs compiled\n", programs);
     else std::printf("%d of %d shader programs failed\n", int(failed.size()), programs);
+    // GPU objects are freed (#100, GD01-321): made, freed (twice: nothing
+    // more), drawn freed (skipped), back to the count before.
+    int gpuFails = 0;
+    if (renderer.backend() == "local") {
+        const int t0 = renderer.liveTextures(), m0 = renderer.liveMeshes();
+        Image img;
+        img.width = img.height = 4, img.rgba.assign(4 * 4 * 4, 255);
+        const std::vector<Vertex> quad{{0, 0, 0, 0, 0, 255, 255, 255, 255}, {1, 0, 0, 1, 0, 255, 255, 255, 255}, {1, 1, 0, 1, 1, 255, 255, 255, 255}};
+        const std::vector<uint32_t> idx{0, 1, 2};
+        std::vector<int> ts, ms;
+        for (int k = 0; k < 8; ++k) ts.push_back(renderer.createTexture(img)), ms.push_back(renderer.createMesh(quad, idx));
+        const bool made = renderer.liveTextures() == t0 + 8 && renderer.liveMeshes() == m0 + 8;
+        for (int k = 0; k < 8; ++k) renderer.deleteTexture(ts[size_t(k)]), renderer.deleteMesh(ms[size_t(k)]);
+        for (int k = 0; k < 8; ++k) renderer.deleteTexture(ts[size_t(k)]), renderer.deleteMesh(ms[size_t(k)]);
+        renderer.deleteTexture(0), renderer.deleteMesh(0);
+        Renderer::RenderState st;
+        Mat4 id;
+        renderer.drawMesh(ms[0], id.m.data(), st);
+        renderer.updateMesh(ms[0], quad, idx);
+        const bool freed = renderer.liveTextures() == t0 && renderer.liveMeshes() == m0;
+        gpuFails = !made + !freed;
+        std::printf("gpu objects: %d / %d live before, +8 / +8 made: %s, freed: %s (%d / %d)\n", t0, m0, made ? "yes" : "NO",
+                    freed ? "yes" : "NO", renderer.liveTextures(), renderer.liveMeshes());
+    }
     renderer.shutdown();
+    renderer.deleteTexture(1), renderer.deleteMesh(1);  // after shutdown: nothing
     SDL_DestroyWindow(window);
     SDL_Quit();
-    return failed.empty() ? 0 : 1;
+    return failed.empty() && !gpuFails ? 0 : 1;
 }
 
 int runSceneTest(const Options& options) {

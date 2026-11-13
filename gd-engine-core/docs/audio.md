@@ -122,7 +122,17 @@ gd01 sets `nullDevice` when SDL's current audio driver is `dummy`, so
 - Logs: `audio: backend <id>: <name> (<ms> held back from the song clock)`, or
   `audio: backend <id> failed (<why>); using local`.
 
-## Adding a backend
+## gd-game-05 (core only, GD05-074)
+
+gd05 has no local audio path: `audio/audio_device.cpp` opens a core output
+(`miniaudio` by default; `GD05_AUDIO_BACKEND` / Enhanced > Audio Backend pick
+another), and when it fails the next of miniaudio and the core's other
+backends (`backends()`, menu order). Every stream is an unbound
+`SDL_AudioStream` pulled by the output's thread, summed and passed through
+GH2's master limiter, as gd02's route. When no backend starts, the game
+stops at start-up with "cannot open the audio device" (as it did when SDL's
+device failed). `nullDevice` follows SDL's `dummy` driver.
+
 
 1. `audio/src/<name>_output.cpp`: a class implementing `Output` and a
    `Backend <name>Backend()` (id, menu text, probe, maker); declare it in

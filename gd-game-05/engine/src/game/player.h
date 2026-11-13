@@ -109,7 +109,12 @@ public:
     // The tutorials' Star Power natives: the meter set, clamped to 0..1; the
     // meter lost per measure while deployed and the meter a captured phrase
     // adds replaced for this song [C].
-    void setStarMeter(float v) { meter_->value = v < 0 ? 0.0f : v > 1 ? 1.0f : v; }
+    // A meter set from outside (the cheats, the walks): under ready_level
+    // it is not ready (spPoll makes it ready again at ready_level).
+    void setStarMeter(float v) {
+        meter_->value = v < 0 ? 0.0f : v > 1 ? 1.0f : v;
+        if (!spActive_ && meter_->value < sp_.readyLevel) spReady_ = false;
+    }
     void setDeployRate(float r) { sp_.deployRate = r; }
     void setPhraseBoost(float b) { sp_.phrase = b; }
     // Enhanced Options > Forgiving Hammer-ons and Pull-offs [I: the port's]:
@@ -149,6 +154,11 @@ public:
     // Rock Band's drums (DrumTrackWatcherImpl, Swing RB 0x824A2320): every
     // pad of a chord is its own gem (splitDrumChords) [C].
     void setDrumMode(bool on) { drumMode_ = on; }
+    // A one-player song takes every device (D34 / D35): the watcher follows
+    // the device that plays, a gamepad's (every fret press strums) or a
+    // guitar's / the keyboard's (strummed) (GD05-056).
+    ControllerMode controllerMode() const { return mode_; }
+    void setControllerMode(ControllerMode m) { if (!drumMode_) mode_ = m; }
     // A saved member returns from the brink at this gem (RB 0x82442060): the
     // gems before it pass without a penalty [C].
     void skipUntil(int gem) { firstPlayable_ = std::max(firstPlayable_, gem); }

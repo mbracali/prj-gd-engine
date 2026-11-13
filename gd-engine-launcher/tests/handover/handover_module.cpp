@@ -226,6 +226,19 @@ extern "C" GD_MODULE_EXPORT int gd_game_run(const GdHost* host) {
     w = windowFor(w, gr::Backend::SdlGpu);
     check(w && !(SDL_GetWindowFlags(w) & SDL_WINDOW_OPENGL), "SDL_GPU again, left so for the launcher to take back");
 
+    // 6. Restart Now (GDUL-028): the module knows it runs in the launcher, asks
+    // for a restart once and is run again as a new Play.
+    const char* hosted = SDL_getenv("GD_LAUNCHER_HOSTED");
+    check(hosted && hosted[0] == '1', "GD_LAUNCHER_HOSTED is 1 inside the launcher");
+    const bool again = SDL_getenv("GDUL_TEST_RESTARTED") != nullptr;
+    if (again) SDL_Log("handover: run again after Restart Now");
+    if (!again && SDL_getenv("GDUL_TEST_RESTART_ONCE") && g_failed == 0) {
+        gdshim_setenv("GDUL_TEST_RESTARTED", "1");
+        SDL_Log("handover: asking for a restart");
+        gdshim_end();
+        return GD_GAME_EXIT_RESTART;
+    }
+
     SDL_Log("handover: %d failed", g_failed);
     if (host->log) host->log(host->log_user, ("hand-over test: " + std::to_string(g_failed) + " failed").c_str());
     gdshim_end();

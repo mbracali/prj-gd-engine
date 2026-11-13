@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "render/core_backend.h"
 #include "render/renderer.h"
 
 int runShaderTest() {
@@ -16,7 +17,7 @@ int runShaderTest() {
         return 2;
     }
     // A hidden window: only the context matters.
-    SDL_Window* window = SDL_CreateWindow("gd05 shader test", 320, 180, gfx::prepareWindow() | SDL_WINDOW_HIDDEN);
+    SDL_Window* window = SDL_CreateWindow("gd05 shader test", 320, 180, gfx::prepareWindowFor(gfx::rendererBackend()) | SDL_WINDOW_HIDDEN);
     gfx::Renderer renderer;
     std::string error;
     if (!window || !renderer.init(window, error)) {

@@ -2,6 +2,11 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "input/input.h"
 
+#if defined(__linux__)
+#include <fcntl.h>
+#include <linux/input.h>
+#include <unistd.h>
+#endif
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -204,10 +209,14 @@ Input::Bindings Input::defaults(Profile p) {
         // The gyro (Star Power): tilt, the XInput guitar's right stick Y [I],
         // and Back (force_mercury kPad_Select) [C]; the HID Rock Band
         // guitars' tilt bit is the right shoulder (kRockBandMappings) [I].
+        // Tilting up is one way (+): taken either way from the rest, a
+        // rest read before the guitar's first report (0, the guitar level
+        // at -32768) held the tilt for good and Overdrive never deployed by
+        // tilt (GD05-073, rb_od_guitar).
         if (p == Profile::RockBand)
             set(C::Gyro, {btn(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER), btn(SDL_GAMEPAD_BUTTON_BACK)});
         else
-            set(C::Gyro, {axis(Kind::AxisAny, SDL_GAMEPAD_AXIS_RIGHTY), btn(SDL_GAMEPAD_BUTTON_BACK)});
+            set(C::Gyro, {axis(Kind::AxisPos, SDL_GAMEPAD_AXIS_RIGHTY), btn(SDL_GAMEPAD_BUTTON_BACK)});
         break;
     case Profile::Ps2Guitar:
         // GH2's `guitar`: kPad_R2 kPad_Circle kPad_Tri kPad_X kPad_Square [C],
@@ -272,6 +281,10 @@ void Input::setRockBand(bool on) {
 }
 
 void Input::prepareSdl() {
+    // Controllers keep sending while SDL thinks no window has the keyboard
+    // (a window made again for another graphics API in the launcher): SDL
+    // otherwise drops every joystick and gamepad event then (GD05-058).
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     if (SDL_getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES") || SDL_getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT"))
         SDL_setenv_unsafe("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", "1", 0);  // read from the environment (SDL_gamepad.c)
 }
@@ -281,6 +294,36 @@ SDL_JoystickID Input::attachVirtualPad(const std::string& spec) {
     if (std::sscanf(spec.c_str(), "%x:%x", &vendor, &product) != 2) {
         SDL_Log("virtual pad: expected <vendor>:<product>[:guitar] in hex, got '%s'", spec.c_str());
         return 0;
+    }
+    if (spec.find(":rbguitar") != std::string::npos) {
+        // The owner's Harmonix Rock Band Guitar (Xbox 360, USB 1bad:0002) as
+        // Linux's xpad reports it: a plain pad of 11 buttons, 6 axes and a
+        // hat, the whammy (axis 3) and the triggers resting at -32768, with
+        // the SDL mapping of his controller report (GD05-056). Only the GUID
+        // differs (SDL's virtual bus).
+        SDL_VirtualJoystickDesc d;
+        SDL_INIT_INTERFACE(&d);
+        d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+        d.vendor_id = Uint16(vendor), d.product_id = Uint16(product);
+        d.naxes = 6, d.nbuttons = 11, d.nhats = 1;
+        d.name = "Harmonix Rock Band Guitar";
+        const SDL_JoystickID jid = SDL_AttachVirtualJoystick(&d);
+        if (!jid) {
+            SDL_Log("virtual pad: %s", SDL_GetError());
+            return 0;
+        }
+        char guid[64];
+        SDL_GUIDToString(SDL_GetJoystickGUIDForID(jid), guid, sizeof guid);
+        const std::string m = std::string(guid) +
+                              ",Harmonix Rock Band Guitar,a:b0,b:b1,x:b2,y:b3,back:b6,guide:b8,start:b7,leftstick:b9,"
+                              "rightstick:b10,leftshoulder:b4,rightshoulder:b5,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,"
+                              "leftx:a0,lefty:a1,rightx:a3,righty:a4,lefttrigger:a2,righttrigger:a5,";
+        if (SDL_Joystick* j = SDL_OpenJoystick(jid)) {  // the resting axes, before the game opens it
+            for (const int a : {2, 3, 5}) SDL_SetJoystickVirtualAxis(j, a, -32768);
+            SDL_UpdateJoysticks();
+        }
+        if (SDL_AddGamepadMapping(m.c_str()) < 0) SDL_Log("virtual pad mapping: %s", SDL_GetError());
+        return jid;
     }
     const bool guitar = spec.find(":guitar") != std::string::npos;
     // ":dpadaxis=<v>": a pad whose D-pad left / right and up / down are its
@@ -341,6 +384,7 @@ void Input::closeShake() {
 
 void Input::close() {
     closeShake();
+    while (!kernel_.empty()) closeKernel(kernel_.begin()->first);
     for (auto& [id, p] : pads_) SDL_CloseGamepad(p.pad);
     pads_.clear();
     midiDevs_.clear();
@@ -362,6 +406,8 @@ void Input::emit(std::vector<InputEvent>& out, Action a, bool down, uint64_t ts,
         }
     }
     // TODO(multiplayer): per player; gd05 plays one player, fed by every slot.
+    trace(std::string("  -> ") + actionName(a) + (down ? " down" : " up") + ", player " + std::to_string(player + 1) +
+          (mode == ControllerMode::Guitar ? ", strummed (guitar)" : ", frets strum (joypad)") + (inGame() ? ", in a song" : ", menus"));
     lastMode_ = mode;
     out.push_back({a, down, ts, mode, player, a == Action::Whammy && curAnalog_, curJoypad_, enterKey});
 }
@@ -436,7 +482,17 @@ std::string Input::savePath(const char* file) const {
     return dir + file;
 }
 
+void Input::trace(const std::string& line) {
+    const std::string l = std::to_string(double(SDL_GetTicksNS()) / 1e9).substr(0, 9) + " s  " + line;
+    if (traceLog_) SDL_Log("input: %s", line.c_str());
+    if (traceSink_) traceSink_(l);
+    trace_.push_back(l);
+    if (trace_.size() > 600) trace_.erase(trace_.begin(), trace_.begin() + 200);
+}
+
 void Input::load() {
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");  // as prepareSdl (the launcher started SDL)
+    if (const char* l = SDL_getenv("GD05_INPUTLOG")) traceLog_ = *l && *l != '0';
     loaded_ = true;
     std::ifstream in(savePath("controllers.json"));
     if (!in) return;
@@ -563,9 +619,16 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
     case SDL_EVENT_JOYSTICK_BUTTON_DOWN:
     case SDL_EVENT_JOYSTICK_BUTTON_UP:
         raw_.push_back({e.jbutton.timestamp, e.jbutton.which, 'b', e.jbutton.button, e.jbutton.down ? 1 : 0});
+        ++eventCounts_[e.jbutton.which][0];
+        trace("raw controller " + std::to_string(e.jbutton.which) + " button " + std::to_string(e.jbutton.button) + " = " +
+              (e.jbutton.down ? "1" : "0") + " (t " + std::to_string(e.jbutton.timestamp / 1000000) + " ms)");
         break;
     case SDL_EVENT_JOYSTICK_HAT_MOTION:
         raw_.push_back({e.jhat.timestamp, e.jhat.which, 'h', e.jhat.hat, e.jhat.value});
+        ++eventCounts_[e.jhat.which][0];
+        trace("raw controller " + std::to_string(e.jhat.which) + " hat " + std::to_string(e.jhat.hat) + " = " + std::to_string(e.jhat.value) +
+              (e.jhat.value & SDL_HAT_UP ? " (up)" : e.jhat.value & SDL_HAT_DOWN ? " (down)" : e.jhat.value == SDL_HAT_CENTERED ? " (centred)" : "") +
+              " (t " + std::to_string(e.jhat.timestamp / 1000000) + " ms)");
         break;
     case SDL_EVENT_JOYSTICK_AXIS_MOTION: {
         // Axes report constantly: kept when they move a sixth of their range from the last one kept.
@@ -575,7 +638,12 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
                 last = r->value;
                 break;
             }
-        if (std::abs(int(e.jaxis.value) - last) > 10000) raw_.push_back({e.jaxis.timestamp, e.jaxis.which, 'a', e.jaxis.axis, e.jaxis.value});
+        ++eventCounts_[e.jaxis.which][0];
+        if (std::abs(int(e.jaxis.value) - last) > 10000) {
+            raw_.push_back({e.jaxis.timestamp, e.jaxis.which, 'a', e.jaxis.axis, e.jaxis.value});
+            trace("raw controller " + std::to_string(e.jaxis.which) + " axis " + std::to_string(e.jaxis.axis) + " = " + std::to_string(e.jaxis.value) +
+                  " (t " + std::to_string(e.jaxis.timestamp / 1000000) + " ms)");
+        }
         // A button the mapping reads from this axis: from the axis's rest.
         if (auto it = pads_.find(e.jaxis.which); it != pads_.end() && !it->second.axisButtons.empty()) {
             Pad& p = it->second;
@@ -624,6 +692,10 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         char guid[64];
         SDL_GUIDToString(SDL_GetGamepadGUIDForID(id), guid, sizeof guid);
         np.guid = guid;
+        // Tests: GD05_TEST_PAD_GUID gives a virtual controller a real device's
+        // GUID (SDL's virtual bus has its own), so a saved controllers.json
+        // of that device applies to it as to the real one (GD05-058).
+        if (const char* g = SDL_getenv("GD05_TEST_PAD_GUID"); g && *g && SDL_IsJoystickVirtual(id)) np.guid = g;
         np.name = SDL_GetGamepadName(pad) ? SDL_GetGamepadName(pad) : "Gamepad";
         if (auto t = types_.find(np.guid); t != types_.end()) np.profile = profile = t->second;  // chosen in GAMEPADS
         // The axes' rest values as connected (a whammy bar rests at -32768).
@@ -659,6 +731,14 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
             for (int s = 0; s < kPlayers && np.slot < 0; ++s)
                 if (!slotTaken(s, nullptr) && playerEnabled(s)) np.slot = s;
         pads_[id] = np;
+#if defined(__linux__)
+        if (const char* path = SDL_GetGamepadPath(pad); path && SDL_strncmp(path, "/dev/input/event", 16) == 0) {
+            KernelProbe k;
+            k.path = path;
+            k.fd = ::open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+            kernel_[id] = k;
+        }
+#endif
         SDL_Log("Controller connected: %s (%04x:%04x, %s, %s)", np.name.c_str(), SDL_GetGamepadVendorForID(id),
                 SDL_GetGamepadProductForID(id), profileName(profile), np.slot < 0 ? "no player" : np.slot == 0 ? "player 1" : "player 2");
         break;
@@ -669,12 +749,16 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
             // moving a direction held as it went away (a wireless pad asleep).
             device_ = int64_t(it->first);
             releaseAll(it->second, e.gdevice.timestamp, out);
+            closeKernel(it->first);
             SDL_CloseGamepad(it->second.pad);
             pads_.erase(it);
         }
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
     case SDL_EVENT_GAMEPAD_BUTTON_UP:
+        ++eventCounts_[e.gbutton.which][1];
+        trace(std::string("gamepad ") + std::to_string(e.gbutton.which) + " " + SDL_GetGamepadStringForButton(SDL_GamepadButton(e.gbutton.button)) +
+              (e.gbutton.down ? " down" : " up") + (pads_.count(e.gbutton.which) ? "" : " (not an open pad: ignored)"));
         if (auto it = pads_.find(e.gbutton.which); it != pads_.end() && e.gbutton.button < SDL_GAMEPAD_BUTTON_COUNT) {
             Pad& p = it->second;
             const size_t b = e.gbutton.button;
@@ -682,6 +766,7 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
             if (e.gbutton.timestamp < p.settleNs) p.stuck[b] = e.gbutton.down;
             if (p.stuck[b]) {  // held since it connected: nothing until released
                 if (!e.gbutton.down) p.stuck[b] = false;
+                trace("  ignored: held since the controller connected (counts after its release)");
                 break;
             }
             p.buttons[b] = e.gbutton.down;
@@ -707,8 +792,8 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
                 const bool menuControl = captureControl_ <= C::GuitarSelect;
                 int d = int(e.gaxis.value) - int(captureRest_[size_t(a)]);
                 if (!menuControl && std::abs(d) > 20000) {
-                    // The whammy and the gyro (tilt) take the axis either way; the others its direction.
-                    Kind k = captureControl_ == C::Whammy || captureControl_ == C::Gyro ? Kind::AxisAny : d > 0 ? Kind::AxisPos : Kind::AxisNeg;
+                    // The whammy takes the axis either way; the others (the gyro's tilt too, GD05-073) its direction.
+                    Kind k = captureControl_ == C::Whammy ? Kind::AxisAny : d > 0 ? Kind::AxisPos : Kind::AxisNeg;
                     captureFrom(id, axis(k, SDL_GamepadAxis(a)));
                 }
                 break;
@@ -793,6 +878,7 @@ std::string Input::gh2Type(const std::string& id) const {
 }
 
 bool Input::writeReport() const {
+    drainKernel();
     std::ofstream out(reportPath());
     if (!out) return false;
     const int v = SDL_GetVersion();
@@ -821,6 +907,20 @@ bool Input::writeReport() const {
             << (j ? SDL_GetNumJoystickHats(j) : 0) << " hats\n"
             << "  Type: " << deviceType(sid) << ", GH2 type " << gh2Type(sid) << ", player "
             << (p.slot < 0 ? std::string("none") : std::to_string(p.slot + 1)) << "\n";
+        if (auto k = kernel_.find(id); k != kernel_.end()) {
+            const auto c = eventCounts_.find(id);
+            const uint64_t sdl = c == eventCounts_.end() ? 0 : c->second[0];  // joystick events: one per kernel event
+            out << "  Kernel device " << k->second.path << ": "
+                << (k->second.fd < 0 ? std::string("cannot be read")
+                                     : std::to_string(k->second.events) + " events from the controller" +
+                                           (k->second.dropped ? " (" + std::to_string(k->second.dropped) + " buffer overflows)" : ""))
+                << ", SDL joystick events " << sdl << "\n";
+            if (k->second.fd >= 0 && !k->second.events)
+                out << "  -> The controller sent nothing to the system while the game ran (its cable / USB port, the\n"
+                       "     guitar itself, or the xpad driver): not a setting of the game.\n";
+            else if (k->second.events && !sdl)
+                out << "  -> The system had the controller's events but SDL gave the game none.\n";
+        }
         if (char* m = SDL_GetGamepadMapping(p.pad)) {
             out << "  SDL mapping: " << m << "\n";
             SDL_free(m);
@@ -842,6 +942,14 @@ bool Input::writeReport() const {
                     << ", USB id " << hex4(SDL_GetJoystickVendorForID(all[k])) << ":" << hex4(SDL_GetJoystickProductForID(all[k])) << "\n";
         SDL_free(all);
     }
+    out << "\nEvents seen this session (joystick / gamepad), by controller:";
+    if (eventCounts_.empty()) out << " none";
+    for (const auto& [id, c] : eventCounts_) out << "  " << id << ": " << c[0] << " / " << c[1];
+    out << "\nSDL: keyboard focus " << (SDL_GetKeyboardFocus() ? "on a window" : "none") << ", joystick events "
+        << (SDL_JoystickEventsEnabled() ? "on" : "off") << ", gamepad events " << (SDL_GamepadEventsEnabled() ? "on" : "off")
+        << ", background events " << (SDL_GetHintBoolean(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, false) ? "on" : "off") << "\n";
+    out << "\nLast input lines (raw events and what the game did with them):\n";
+    for (const std::string& l : trace_) out << "  " << l << "\n";
     out << "\nLast raw events (the device's own button / axis / hat numbers):\n";
     for (const RawEvent& r : raw_)
         out << "  " << double(r.ns) / 1e9 << " s  controller " << r.id << "  "
@@ -852,6 +960,7 @@ bool Input::writeReport() const {
 void Input::keyEvent(const SDL_KeyboardEvent& k, std::vector<InputEvent>& out) {
     const bool down = k.down;
     const uint64_t ts = k.timestamp;
+    if (!k.repeat) trace(std::string("key ") + SDL_GetKeyName(k.key) + (down ? " down" : " up"));
     if (detect_ >= 0 && down) {  // Bind to: Detect... (Esc cancels)
         if (k.key == SDLK_ESCAPE) detect_ = -1;
         else detectFrom("keyboard");
@@ -980,7 +1089,7 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
     for (size_t k = 0; k < 4; ++k)
         if (help[k] != p.helper[k]) {
             p.helper[k] = help[k];
-            if (p.slot >= 0 || !inGame() || kHelp[k] == Action::Back) emit(out, kHelp[k], help[k], ts, ControllerMode::Joypad, std::max(p.slot, 0));
+            if (p.slot >= 0 || !inGame() || onePlayerSong_ || kHelp[k] == Action::Back) emit(out, kHelp[k], help[k], ts, ControllerMode::Joypad, std::max(p.slot, 0));
         }
     curGuitar_ = curJoypad_ = curAnalog_ = false;
 }
@@ -988,14 +1097,15 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
 // The actions a device's held controls give, each at most once: a guitar's
 // strum also moves the menus (the other way round when lefty); Select and
 // the gyro are Star Power; a gamepad's frets take the lefty_joypad order.
-// A device without a player works the menus as player 1, and only pauses in a song.
+// A device without a player works the menus as player 1; in a song it only
+// pauses, unless the song has one player (D34, GD05-056: plays it).
 Input::ActionSet Input::actionsOf(const std::array<bool, size_t(Control::Count)>& held, bool joypad, int player) const {
     ActionSet a;
     const bool lefty = lefty_[size_t(std::max(player, 0) & 1)];
     const bool play = !joypad || gamepadPlay_;
     for (size_t c = 0; c < size_t(Control::Count); ++c) {
         if (!held[c]) continue;
-        if (player < 0 && inGame() && C(c) != C::Start && C(c) != C::GuitarStart) continue;
+        if (player < 0 && inGame() && !onePlayerSong_ && C(c) != C::Start && C(c) != C::GuitarStart) continue;
         auto on = [&](Action x) { a.on[size_t(x)] = true; };
         switch (C(c)) {
         case C::Green: case C::Red: case C::Yellow: case C::Blue: case C::Orange: {
@@ -1027,6 +1137,8 @@ Input::ActionSet Input::actionsOf(const std::array<bool, size_t(Control::Count)>
 void Input::controlEdges(const std::array<bool, size_t(Control::Count)>& was, const std::array<bool, size_t(Control::Count)>& now,
                          ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out) {
     const ActionSet before = actionsOf(was, joypad, player), after = actionsOf(now, joypad, player);
+    if (player < 0 && inGame() && !onePlayerSong_ && was != now)
+        trace("  ignored: the controller has no player (GAMEPADS None) in a song with more players; only Start counts");
     const int pl = std::max(player, 0);
     const bool keyboardStart = device_ == -1 && !inGame();
     for (size_t k = 0; k < after.on.size(); ++k) {
@@ -1117,6 +1229,14 @@ void Input::setPlayer(const std::string& id, int player) {
     Pad* mine = padById(id);
     MidiDev* midi = midiById(id);
     if (!mine && !midi && id != "keyboard") return;
+    if (id == "keyboard") {
+        // The keyboard shares its player with a pad that has it (keyboardSlot
+        // falls back the same way): taking player 1 for the keyboard left the
+        // owner's guitar at None (his controllers.json, GD05-058).
+        players_["keyboard"] = player;
+        save();
+        return;
+    }
     if (player >= 0) {  // one device per player: the one that had it swaps to this one's old player
         const int old = mine ? mine->slot : midi ? midi->slot : keyboardSlot();
         if (id != "keyboard" && keyboardSlot() == player) players_["keyboard"] = old;
@@ -1783,7 +1903,32 @@ void Input::pollShake(uint64_t nowNs, std::vector<InputEvent>& out) {
     }
 }
 
+void Input::drainKernel() const {
+#if defined(__linux__)
+    for (auto& [id, k] : kernel_) {
+        input_event e[64];
+        for (ssize_t n; k.fd >= 0 && (n = read(k.fd, e, sizeof e)) > 0;)
+            for (ssize_t i = 0; i < n / ssize_t(sizeof(input_event)); ++i) {
+                if (e[i].type == EV_SYN && e[i].code == SYN_DROPPED) ++k.dropped;
+                else if (e[i].type != EV_SYN && e[i].type != EV_MSC) ++k.events;
+            }
+    }
+#endif
+}
+
+void Input::closeKernel(SDL_JoystickID id) {
+#if defined(__linux__)
+    if (auto it = kernel_.find(id); it != kernel_.end()) {
+        if (it->second.fd >= 0) ::close(it->second.fd);
+        kernel_.erase(it);
+    }
+#else
+    kernel_.erase(id);
+#endif
+}
+
 void Input::poll(uint64_t nowNs, std::vector<InputEvent>& out) {
+    drainKernel();
     pollShake(nowNs, out);
     pollMidi(nowNs, out);
     for (int p = 0; p < kPlayers; ++p) {

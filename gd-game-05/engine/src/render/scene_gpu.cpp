@@ -376,7 +376,23 @@ void ScenePose::transAnim(const scene::TransAnim& a, float frame) {
         scaleRows(x.rot, s);
     }
     std::array<float, 3> p;
-    if (scene::sampleTrans(k.transKeys, frame, k.transSpline, p)) x.pos = p;  // trans_spline: 0x8226E560
+    // repeat_trans: past its keys the move goes on, each span of the keys
+    // adding the last key's position less the first's (tracksystem.milo's
+    // rig_movement.tnm, 0 -> 100 over frames 0 -> 100, carries the track's
+    // rig, surface and cameras along now_y for the whole song; clamped at
+    // 100 the rig stopped a second in while the gems kept their song
+    // places) [C data: the flag; I: the wrap's exact form].
+    float f = frame;
+    std::array<float, 3> extra{0, 0, 0};
+    if (a.repeatTrans && k.transKeys.size() > 1) {
+        const float f0 = k.transKeys.front().frame, f1 = k.transKeys.back().frame;
+        if (f1 > f0 && (frame < f0 || frame > f1)) {
+            const float n = std::floor((frame - f0) / (f1 - f0));
+            f = frame - n * (f1 - f0);
+            for (int i = 0; i < 3; ++i) extra[size_t(i)] = n * (k.transKeys.back().v[size_t(i)] - k.transKeys.front().v[size_t(i)]);
+        }
+    }
+    if (scene::sampleTrans(k.transKeys, f, k.transSpline, p)) x.pos = {p[0] + extra[0], p[1] + extra[1], p[2] + extra[2]};  // trans_spline: 0x8226E560
     local_[target] = x;
 }
 
@@ -501,6 +517,7 @@ TextureId SceneCache::texture(const scene::Tex* tex) {
         textures_.erase(it);
     }
     stale(tex);
+    ++uploads_;
     TextureId id;
     const scene::Bitmap& b = tex->bitmap;
     TexFormat format = TexFormat::RGBA8;
@@ -631,6 +648,7 @@ const GpuMesh* SceneCache::mesh(const scene::Mesh* m) {
     stale(geom);
     std::unique_ptr<GpuMesh> g;
     if (!geom->verts.empty() && !geom->faces.empty()) {
+        ++uploads_;
         g = std::make_unique<GpuMesh>();
         const std::vector<float> verts = packVertices(*geom);
         g->vertices = device_.createBuffer(BufferKind::Vertex, verts.size() * sizeof(float), verts.data(), false);
@@ -673,6 +691,8 @@ Material SceneCache::material(const scene::Mat& mat, const ScenePose* pose) {
         if (s->hasXfm) texXfm = s->texXfm;
         if (s->tex) g.diffuseTex = texture(s->tex);
         if (s->texId.id) g.diffuseTex = s->texId;
+        if (s->hasEmissive) g.emissiveMultiplier = s->emissiveMultiplier;
+        if (s->hasEmissiveMap) g.emissiveMap = s->emissiveTex ? texture(s->emissiveTex) : TextureId{};
     }
     if (!g.diffuseTex && !mat.diffuseTex.empty() && mat.dir)
         if (const auto* t = mat.dir->resolve<scene::Tex>(mat.diffuseTex); t && t->bitmap.empty() && t->file.empty()) g.unfilled = true;
@@ -819,6 +839,7 @@ void drawMesh(MaterialRenderer& r, SceneCache& cache, const scene::Mesh& mesh, c
     if (!mat) mat = mesh.dir->resolve<scene::Mat>(mesh.mat);
     const Mat4 bones[1] = {world};
     if (!mat) {
+        if (!mesh.mat.empty()) shaderaudit::note("mesh without its material", mesh.name + " (" + mesh.mat + ")");  // none named: the data's
         Material plain;
         r.draw(*g, bones, plain, {1});
         return;

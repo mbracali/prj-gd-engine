@@ -12,6 +12,9 @@
 #include "render/scene_gpu.h"
 
 class World;
+namespace gfx {
+class CharSkin;
+}
 namespace chr {
 class Character;
 class Skeleton;
@@ -52,6 +55,8 @@ public:
     static std::vector<const scene::Mesh*> meshesToDraw(const chr::Character& c, const gfx::ScenePose* pose);
 
     int meshesDrawn() const { return meshes_; }
+    // The characters' skins rendered at run time (render/char_skin.h).
+    gfx::CharSkin& skin() { return *skin_; }
     // Materials also write alpha (the crowd's card textures, render/crowd_view.h).
     bool forceAlphaWrite = false;
     // A ScenePose for the materials' animations (the crowd's lighter flame); null: the world's.
@@ -91,6 +96,7 @@ private:
     World* world_ = nullptr;
     gfx::SceneCache& cache_;
     std::unique_ptr<gfx::DynamicMesh> dynamic_;
+    std::unique_ptr<gfx::CharSkin> skin_;
     bool hdr_ = false;
     int meshes_ = 0;
 };

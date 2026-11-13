@@ -43,6 +43,16 @@ constexpr uint32_t Billboard = 1u << 25;     // no effect in the standard shader
 constexpr int FadeShift = 26;                // 2 bits: 1 alpha, 2 colour, 3 colour + alpha + depth fade
 constexpr int ProjLightsShift = 28;          // 2 bits: projected (spot) lights among the lights
 constexpr uint32_t UseEnviron = 1u << 30;    // the environment's ambient (else the default white)
+// gd02's own bit (GH2 has no bit 31): a prelit draw of a skinned mesh, whose
+// vertex layout has bone weights where the colour would be, so it has no
+// colour input. GL reads a missing input as (0, 0, 0, 1); Vulkan, D3D12 and
+// Metal leave it undefined (zero on RADV), which drew Pandora's prelit
+// body with alpha 0 (cut away) on the core backends (GD02-161). With this
+// bit the shader uses white (1, 1, 1, 1) on every backend: GL's (0, 0, 0, 1)
+// took the prelit ambient away, so Izzy, Axel and Pandora drew much darker
+// than the others on Character Select (GD02-163) [I: GH2's skinned vertex
+// declaration is not traced].
+constexpr uint32_t NoColorInput = 1u << 31;
 
 inline int texGen(uint32_t k) { return int(k >> TexGenShift) & 3; }
 inline int weights(uint32_t k) { return int(k >> WeightsShift) & 3; }

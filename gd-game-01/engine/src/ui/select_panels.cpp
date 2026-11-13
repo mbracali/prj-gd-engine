@@ -894,8 +894,8 @@ public:
         if (ask_ >= 0) return askMouse(x, y, click), true;
         x -= offset_;
         if (dropdown_ < 0) {
-            // Back / Export / Import.
-            for (int b = 0; b < 3; ++b) {
+            // Export / Import (Back is the help bar's original BACK pill: GD01-322, #98).
+            for (int b = 1; b < 3; ++b) {
                 float x0, x1;
                 bottomButton(b, x0, x1);
                 if (x < x0 || x > x1 || y < kBtnY0 || y > kBtnY1) continue;
@@ -1008,7 +1008,7 @@ public:
             quad(kBarX - 3 + o, kListTop, kBarX + 3 + o, kListBottom, {1, 1, 1, 0.1f});
             quad(kBarX - 4 + o, t0, kBarX + 4 + o, t0 + thumb, {1, 1, 1, 0.45f});
         }
-        for (int b = 0; b < 3; ++b) drawBottomButton(b);
+        for (int b = 1; b < 3; ++b) drawBottomButton(b);  // no "< Back": the help bar's BACK (GD01-322)
         drawHelp();
         if (dropdown_ >= 0) drawDropdown();
         if (cal_.phase != 0) drawCalib();

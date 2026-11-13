@@ -424,6 +424,12 @@ void TextDrawer::draw(MaterialRenderer& r, const void* key, const scene::Font& f
             for (int k = 0; k < 3; ++k) m.color[k] *= tint[k];
             m.alpha *= tint[3];
         }
+        if (probes && pass == 0) {
+            TextProbe p = probeStyle;
+            p.name = probeName, p.mat = mat, p.world = world, p.verts = verts, p.faces = layout.faces, p.m = m, p.env = r.lightEnv();
+            p.drawViewProj = r.camera().viewProj(false), p.targetW = r.viewportW(), p.targetH = r.viewportH();
+            probes->push_back(std::move(p));
+        }
         r.draw(e->gpu, bones, m, {1});
         if (mat->nextPass.empty() || !mat->dir) break;
         const scene::Mat* next = mat->dir->resolve<scene::Mat>(mat->nextPass);

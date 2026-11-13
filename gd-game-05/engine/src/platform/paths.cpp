@@ -2,16 +2,14 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "platform/paths.h"
 
-#include <SDL3/SDL.h>
-
 #include "app_ids.h"
+#include "gd/core/platform/paths.h"
+
+// gd-engine-core's pref folder: SDL_GetPrefPath("gd-engine", "gd05") as
+// before, the launcher shim's nested folder on Android in a module build.
+static_assert(std::string_view(app::kPrefOrg) == gd::core::platform::kPrefOrg, "the core's organisation folder");
 
 std::string prefDir() {
-    static const std::string dir = [] {
-        char* pref = SDL_GetPrefPath(app::kPrefOrg, app::kPrefApp);
-        std::string p = pref ? pref : "";
-        SDL_free(pref);
-        return p;
-    }();
+    static const std::string dir = gd::core::platform::gamePrefDir(app::kPrefApp);
     return dir;
 }

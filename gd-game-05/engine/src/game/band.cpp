@@ -13,6 +13,7 @@
 
 #include "char/facefx.h"
 #include "char/midi_parser.h"
+#include "char/rb_midi_parser.h"
 #include "data/dta.h"
 #include "data/game_data.h"
 #include "data/midi.h"
@@ -556,6 +557,7 @@ Band::Band(World& world, const GameData& data, const SongInfo& song, Config conf
 }
 
 Band::~Band() {
+    if (rbCheck_) rbCheckReport();
     Interp& in = world_.interp();
     auto drop = [&](ScriptObject* o) {
         if (!o) return;
@@ -579,6 +581,8 @@ Band::~Band() {
     for (auto& p : parts_) drop(p.get());
     for (auto& p : players_) drop(p.get());
     parsers_.reset();
+    rbParsers_.reset();
+    for (auto& m : members_) m->rbParts.clear();
     if (world_.band == this) world_.band = nullptr;
 }
 
@@ -740,6 +744,35 @@ void Band::setupFace(Member& m, scene::Object* servo) {
     m.expr = std::make_unique<facefx::ExpressionScript>();
     m.expr->randomInt = [this](int lo, int hi) { return rng_.integer(lo, hi); };
     m.expr->randomFloat = [this](float lo, float hi) { return rng_.real(lo, hi); };
+    if (startsWith(m.type, "rb_") && !rbLegacy()) {
+        // Rock Band (char_objects.dta FaceFxLipSyncServo singer / guitar,
+        // CHAR_COMMON sync_objects, vocal load_face_song) [C data]: the graph
+        // ../singer.fac from the milo's source folder (char/singer.fac); the
+        // visemes the character's own `visemes` set or
+        // char/male/anim/male_viseme_head_1.milo; the singer plays the song's
+        // .voc, the others the blink track [I: the guitar type's song_owner
+        // (the singer's servo) under singalong.weight is not followed].
+        try {
+            const std::string fac = scene::resolveMiloRelative(m.character->path(), s->faceGraph);
+            chr::ClipSet* set = clips_->byObject(m.character->path(), m.character->milo().root(), "visemes");
+            if (!set) set = clips_->get("", "char/male/anim/male_viseme_head_1.milo");
+            const facefx::FaceGraph graph = facefx::loadFaceGraph(data_, fac);
+            std::vector<std::string> names;
+            for (const auto& n : graph.nodes)
+                if (n.isBonePose() && set && set->clip(n.name)) names.push_back(n.name);
+            std::vector<std::string> entries;
+            for (const auto& e : s->entries) entries.push_back(e.node);
+            m.lip->setup(graph, names, entries);
+            const std::string voc = m.type == "rb_vocals" ? facefx::singerVocPath(midiFile_) : facefx::kBlinkTrackPath;
+            if (data_.exists(voc)) m.lip->play(std::make_shared<facefx::Anim>(facefx::loadAnim(data_, voc)));
+            m.character->setRbFace(set, names);
+            m.character->attachFace(m.lip.get());
+            if (log) SDL_Log("band: %s face %s, %zu visemes, %s", m.slot.c_str(), fac.c_str(), names.size(), voc.c_str());
+        } catch (const std::exception& e) {
+            SDL_Log("band: %s lip.servo: %s", m.slot.c_str(), e.what());
+        }
+        return;
+    }
     try {
         const std::string fac = facefx::resolveFacePath(data_, m.character->path(), s->faceGraph);
         std::vector<std::string> entries;
@@ -769,6 +802,11 @@ void Band::pollFaces() {
 }
 
 void Band::loadSong(const MidiFile& midi, const Song* song) {
+    if (!members_.empty() && startsWith(members_.front()->type, "rb_")) {
+        if (!rbLegacy()) return rbLoadSong(midi, song);
+        song_ = song;
+        return;
+    }
     Interp& in = world_.interp();
     std::vector<std::string> names = {"bassist_parser", "drummer_parser", "singer_parser", "keyboard_parser"};
     for (int p = 0; p < config_.players && p < 2; ++p)
@@ -866,6 +904,10 @@ void Band::enter() {
     // handler), then GuitarCharacter's own (0x822D3B18) [I: the base enter
     // runs the script first, so the walk schedule's solo teleport wins].
     for (auto& m : members_) {
+        if (startsWith(m->type, "rb_")) {
+            rbEnter(*m);
+            continue;
+        }
         in.send(m->script.get(), "enter", {}, false);
         if (m->type == "guitarist") guitarEnter(*m);
     }
@@ -1583,6 +1625,7 @@ void Band::update(double seconds, double beats, const std::array<float, 3>* came
     first_ = false;
     seconds_ = seconds, beat_ = beats, dBeats_ = dB;
     if (parsers_ && entered_) parsers_->poll(beats);
+    if (rbParsers_ && entered_) rbParsers_->poll(beats);
     if (entered_) pollFaces();
     Interp& in = world_.interp();
     const float faceSong = float(in.tasks().time(kTaskSeconds)), faceUi = float(in.tasks().time(kTaskUISeconds));
@@ -1591,6 +1634,7 @@ void Band::update(double seconds, double beats, const std::array<float, 3>* came
         if (startsWith(m->type, "rb_") && entered_) rbPoll(*m);
     }
     for (auto& m : members_) {
+        if (m->frozen && seconds >= m->frozenAt) continue;  // the shot's freeze frame: the pose held
         chr::Character& c = *m->character;
         chr::Skeleton& sk = c.skeleton();
         // What the world animates on the character's objects (the drum kit's
@@ -1608,4 +1652,5 @@ void Band::update(double seconds, double beats, const std::array<float, 3>* came
         if (camera) ctx.hasCamera = true, ctx.camera = *camera;
         c.poll(ctx);
     }
+    if (rbCheck_ && entered_) rbCheckFrame();
 }

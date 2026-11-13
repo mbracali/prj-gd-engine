@@ -169,6 +169,16 @@ void readUIList(Rd& r, UIList& o) {
     o.autoScrollPause = r.i32();
 }
 
+// BandSwatch Load RB 0x822D27F0 (rev 1) [C]: rev > 0 adds the palette's
+// name (a ColorPalette, empty in the creator's skin.lst: the script sets
+// it, set_colors), then the UIList (rev 9).
+void readBandSwatch(Rd& r, UIList& o) {
+    checkVersion(o.version, "BandSwatch", 0, 1);
+    if (o.version > 0) r.str();
+    o.version = version(r, "UIList", 9, 9);
+    readUIList(r, o);
+}
+
 // UIProxy PreLoad RB 0x8225F520 (rev 2) [C]: the UIComponent only.
 void readUIProxy(Rd& r, UIProxy& o) {
     checkVersion(o.version, "UIProxy", 2, 2);
@@ -291,6 +301,7 @@ const std::map<std::string, UiDecoder>& uiDecoders() {
         {"UIProxy", dec<UIProxy>(readUIProxy)},
         {"UIButton", dec<BandButton>(readUIButton)},
         {"BandList", dec<UIList>(readUIList)},
+        {"BandSwatch", dec<UIList>(readBandSwatch)},
         {"UISlider", dec<BandSlider>(readUISlider)},
         {"BandHighlight", dec<UIProxy>(readBandHighlight)},
         {"BandSlider", dec<BandSlider>(readBandSlider)},

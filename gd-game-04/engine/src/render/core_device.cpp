@@ -1013,6 +1013,11 @@ SDL_Surface* CoreDevice::readPixels(int x, int y, int w, int h) {
 // display's rate is a whole multiple of the cap, software pacing otherwise;
 // headless runs are not paced.
 void CoreDevice::setFrameCap(int fps) {
+    if (fps <= 0) {  // Unlimited: no vsync, no pacing
+        dev_->setPresentMode(core::PresentMode::Immediate);
+        paceNs_ = 0, nextFrameNs_ = 0;
+        return;
+    }
     fps = std::max(fps, 30);
     int interval = 0;
     if (const SDL_DisplayMode* m = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window_)); m && m->refresh_rate > 0) {

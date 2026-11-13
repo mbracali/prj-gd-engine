@@ -455,6 +455,12 @@ void Interp::installCoreBuiltins() {
         }
         return Value::string(neg ? "-" + out : out);
     });
+    // {random a b ...} (registered with random_int, RB 0x8248F908): one of
+    // its arguments (seldiff.dta's {random 0 1}) [I: Milo's DataRandom].
+    addBuiltin("random", [arg](Interp& in, const DataNode& c) {
+        if (c.children.size() < 2) return Value::integer(0);
+        return arg(in, c, size_t(in.randomInt(1, int(c.children.size()))));
+    });
     addBuiltin("random_int", [arg](Interp& in, const DataNode& c) {
         return Value::integer(in.randomInt(arg(in, c, 1).integerValue(), arg(in, c, 2).integerValue()));
     });
@@ -573,6 +579,17 @@ void Interp::installCoreBuiltins() {
     });
     addBuiltin("strlen", [arg](Interp& in, const DataNode& c) {
         return Value::integer(static_cast<int>(arg(in, c, 1).str().size()));
+    });
+    // {basename <path>}: the file name without its folders and extension
+    // (RB registers it at 0x8248F908: 0x8248E098 -> FileGetBase 0x823A73B0)
+    // [C]; shop.dta names a tattoo location by {basename {$component name}}
+    // (patch_chest.btn -> patch_chest).
+    addBuiltin("basename", [arg](Interp& in, const DataNode& c) {
+        const Value v = arg(in, c, 1);
+        std::string p = v.type == Value::Type::Object && v.object ? v.object->name() : v.str();
+        if (const size_t sl = p.find_last_of("/\\"); sl != std::string::npos) p = p.substr(sl + 1);
+        if (const size_t dot = p.rfind('.'); dot != std::string::npos) p = p.substr(0, dot);
+        return Value::symbol(p);
     });
 
     // -- objects

@@ -28,8 +28,9 @@ enum class Blend { Opaque, Alpha, Add };
 class Canvas {
 public:
     ~Canvas();
-    // Creates the renderer for `window` (made with gfx::prepareWindow()'s
-    // flags); returns false and sets `error` on failure.
+    // Creates the renderer for `window` (made with
+    // gfx::prepareWindowFor(gfx::rendererBackend())'s flags); returns false
+    // and sets `error` on failure.
     bool init(SDL_Window* window, std::string& error);
     void shutdown();
 

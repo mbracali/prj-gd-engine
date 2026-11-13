@@ -128,6 +128,7 @@ module_systems_02="linux steamdeck windows macos android"
 module_systems_03="linux steamdeck windows macos android"
 module_systems_04="linux steamdeck windows macos android"
 module_systems_05="linux steamdeck windows macos android"
+module_systems_10="linux steamdeck windows macos android"
 
 # module_inputs_hash <NN>: what a module takes from the launcher besides its
 # game's sources (the module SDK, modules/gdNN/); a module is reused only when
@@ -486,6 +487,74 @@ build_module_04() {
   esac
   ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
   # glslang, linked for the sdl3 / vulkan graphics backends' run-time SPIR-V (GD04_RUNTIME_SPIRV).
+  if [ -f "$work/glslang-LICENSE.txt" ]; then cp "$work/glslang-LICENSE.txt" "$dest/licenses/glslang-LICENSE.txt"; fi
+  (. "$engine/build_common.sh"; ship_ffmpeg_licence "$ffmpeg" "$dest")
+  if [ "$os" != android ]; then cp "$engine/third_party/rtmidi/LICENSE" "$dest/licenses/RtMidi-LICENSE.txt"; fi  # Generic MIDI (none on Android)
+  cp "$engine/README.md" "$dest/README.md"
+}
+
+# gd-game-10 (Guitar Hero: Metallica, Xbox 360): gd04's engine with gh4's
+# layers; FFmpeg for the XMA audio and the Bink videos, the same recipe as
+# gd04's (gd-game-10/engine/build_common.sh: the same configure line, so the
+# APK's one libavcodec.so serves both).
+build_module_10() {
+  local os="$1" work="$2" dest="$3" engine="$repo/gd-game-10/engine" ffmpeg
+  ffmpeg="$engine/build/ffmpeg/$os/ffmpeg-prefix"
+  (
+    cd "$engine"
+    # shellcheck source=/dev/null
+    . ./build_common.sh
+    if [ "$os" = windows ] && [ "$host" != windows ]; then
+      build_ffmpeg build/ffmpeg/windows Windows --disable-x86asm --enable-cross-compile --target-os=mingw32 --arch=x86_64 \
+        --cross-prefix=x86_64-w64-mingw32- --pkg-config=false
+    elif [ "$os" = windows ] || [ "$os" = macos ]; then
+      build_ffmpeg "build/ffmpeg/$os" "$os" --disable-x86asm
+    elif [ "$os" = android ]; then
+      local tc="$ANDROID_NDK/toolchains/llvm/prebuilt/$NDK_HOST/bin" arch=aarch64 triple=aarch64-linux-android
+      [ "$android_abi" = x86_64 ] && arch=x86_64 triple=x86_64-linux-android
+      build_ffmpeg "build/ffmpeg/android/$android_abi" "Android $android_abi, NDK $(basename "$ANDROID_NDK")" --enable-cross-compile \
+        --target-os=android --arch="$arch" --cc="$tc/${triple}24-clang" --cxx="$tc/${triple}24-clang++" \
+        --nm="$tc/llvm-nm" --ar="$tc/llvm-ar" --ranlib="$tc/llvm-ranlib" --strip="$tc/llvm-strip" --pkg-config=false \
+        --disable-x86asm --extra-ldflags=-Wl,-z,max-page-size=16384
+    elif [ "$os" = steamdeck ]; then
+      build_ffmpeg build/ffmpeg/steamdeck "Steam Deck" --disable-x86asm --cc="${CC:-gcc}"
+    else
+      build_ffmpeg build/ffmpeg/linux Linux --disable-x86asm
+    fi
+  )
+  local ffmpeg_arg="$ffmpeg" sdl_arg="" deck=""
+  [ "$os" = steamdeck ] && deck="-DGD10_STEAM_DECK=ON"
+  if [ "$os" = android ]; then
+    ffmpeg="$engine/build/ffmpeg/android/$android_abi/ffmpeg-prefix"
+    ffmpeg_arg="$engine/build/ffmpeg/android"
+    sdl_arg="-DGD10_SDL3_SOURCE=$SDL3_SRC"
+  fi
+  # shellcheck disable=SC2046
+  cmake -S "$engine" -B "$work" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGD10_MODULE=ON -DGD10_VIDEO=ON \
+    -DGD10_FFMPEG_DIR="$ffmpeg_arg" $sdl_arg $deck $(cmake_args "$os")
+  cmake --build "$work" --target gd10_module
+  mkdir -p "$dest/licenses"
+  case "$os" in
+    windows)
+      cp "$work/gd-game-10.dll" "$ffmpeg"/bin/av*.dll "$dest/"
+      (. "$engine/build_common.sh"; ship_winpthread "$dest" "$dest/licenses") ;;
+    linux|steamdeck)
+      cp "$work/gd-game-10.so" "$dest/"
+      for lib in avformat avcodec avutil; do
+        cp -L "$(ls "$ffmpeg/lib/lib$lib.so."[0-9]* | grep -E '\.so\.[0-9]+$' | head -1)" "$dest/"
+      done ;;
+    macos)
+      cp "$work/gd-game-10.dylib" "$dest/"
+      for lib in avformat avcodec avutil; do
+        cp -L "$(ls "$ffmpeg/lib/lib$lib".[0-9]*.dylib | grep -E "lib$lib\.[0-9]+\.dylib\$" | head -1)" "$dest/"
+      done
+      macos_fix_module "$dest" ;;
+    android)
+      cp "$work/libgd-game-10.so" "$ffmpeg"/lib/libavformat.so "$ffmpeg"/lib/libavcodec.so "$ffmpeg"/lib/libavutil.so "$dest/"
+      printf '%s\n' libgd-game-10.so libavformat.so libavcodec.so libavutil.so > "$dest/native-libs.txt" ;;
+  esac
+  ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
+  # glslang, linked for the sdl3 / vulkan graphics backends' run-time SPIR-V (GD10_RUNTIME_SPIRV).
   if [ -f "$work/glslang-LICENSE.txt" ]; then cp "$work/glslang-LICENSE.txt" "$dest/licenses/glslang-LICENSE.txt"; fi
   (. "$engine/build_common.sh"; ship_ffmpeg_licence "$ffmpeg" "$dest")
   if [ "$os" != android ]; then cp "$engine/third_party/rtmidi/LICENSE" "$dest/licenses/RtMidi-LICENSE.txt"; fi  # Generic MIDI (none on Android)

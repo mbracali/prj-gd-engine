@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "render/canvas.h"
+#include "ui/dev_key_cheats.h"
 #include "ui/port_draw.h"
 #include "ui/ui_host.h"
 #include "ui/ui_manager.h"
@@ -40,10 +41,14 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         // engine-backend-guidelines.md 4): read once at start-up
         // (startupGraphicsBackend / startupAudioBackend in app.h); no mode
         // changes them. Only what this build offers (no OpenGL on macOS, rule 7).
-#ifdef __APPLE__
+        // The first value is the default (GDALL-050, owner 11-13): Vulkan on
+        // Windows and Linux (Steam Deck too), local on macOS and Android.
+#if defined(__APPLE__)
         {"graphics_backend", {"local", "sdl3", "vulkan"}},
-#else
+#elif defined(__ANDROID__)
         {"graphics_backend", {"local", "sdl3", "vulkan", "opengl3"}},
+#else
+        {"graphics_backend", {"vulkan", "local", "sdl3", "opengl3"}},
 #endif
         {"audio_backend", {"local", "miniaudio", "openal", "faudio"}},
         {"internal_res", {"1080", "0", "448", "480", "720", "800", "900", "1440", "2160"}},
@@ -175,10 +180,22 @@ void migrateEnhanced(Json& e) {
         const EnhancedSetting* s = enhancedSetting(k);
         return v.type == Json::Type::String && s && enhancedValid(*s, v.str());
     };
+    // GDALL-050: a file older than settings_version 2 kept "local" as the old
+    // default; it takes the new default (Vulkan on Windows / Linux) once. A
+    // player who picks local afterwards keeps it (the file is version 2 then).
+    const bool older = !e.has("settings_version") || e["settings_version"].num() < kEnhancedVersion;
+    if (older && e.has("graphics_backend") && e["graphics_backend"].str() == "local")
+        e.set("graphics_backend", Json::string(defaultGraphicsBackend()));
     Json kept = Json::object();
     for (const auto& [k, v] : e.o)
         if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks" && backendKept(k, v)) kept.set(k, v);
+    kept.set("settings_version", Json::number(kEnhancedVersion));
     e = std::move(kept);
+}
+
+std::string defaultGraphicsBackend() {
+    const EnhancedSetting* s = enhancedSetting("graphics_backend");
+    return s && !s->values.empty() ? s->values.front() : std::string("local");
 }
 
 std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck) {
@@ -440,12 +457,7 @@ const std::vector<Item>& items() {
          "(forgiving): a wrong fret can be corrected, and a note whose fret is already held when it arrives plays by "
          "itself.",
          {{"original", "Original"}, {"forgiving", "Forgiving"}}},
-        {Kind::Check, "dev_key_cheats", "Developer Keyboard Cheats", true,
-         "Developer cheats: GH2's own debug keys from its development kit, never on in the retail game. With this on, "
-         "a keyboard key that is not bound to a control runs its cheat, e.g. p Autoplay, l Automatically Lose, e / E "
-         "lower / raise the crowd, c next camera, V hold the camera, h hide the HUD and fretboard, H the HUD only, "
-         "P cycle the track speed, + force the encore, A access all. Keys bound to frets (1-5, F1-F5) keep playing. "
-         "Some only show the developers' debug overlays, which the port does not draw."},
+        {Kind::Check, "dev_key_cheats", "Developer Keyboard Cheats", true, devKeyCheatsHelp()},
         {Kind::Cheat, "cheat_unlock_all", "", true,
          "The original cheat: every song, venue, character and guitar is open. Saving and the career are off while it "
          "is on. Code at the main menu: Blue, Yellow, Orange, Red, Yellow, Orange, Blue, Yellow, Blue, Yellow, Blue, "

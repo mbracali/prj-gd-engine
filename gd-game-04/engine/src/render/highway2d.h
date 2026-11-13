@@ -124,6 +124,12 @@ public:
         std::function<uint32_t(size_t)> card;
         float dx = 0, dy = 0;
         bool battle = false;  // star gems: sys_BattleGEM_* [C 0x82120C90]
+        // A Whammy attack on this player: the whammies left (animate_whammy_bar:
+        // the fret buttons 15 px up per whammy left, bobbing 5 px every 0.15 s,
+        // at alpha 0.5); Broken String: the presses left per fret
+        // (update_broken_button: that button raised 5 px per press left) [C scripts].
+        int whammyLeft = 0;
+        std::array<int, 5> broken{};
     };
     void setEffects(Effects e) { fx_ = std::move(e); }
     // The five lanes for touch play (menu units): at the strike line and at

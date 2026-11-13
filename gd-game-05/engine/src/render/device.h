@@ -12,9 +12,11 @@
 
 // The render device: the only part of the renderer that talks to a graphics
 // API. Everything above it (2D canvas, GH2 materials, scenes) uses these
-// handles and plain state structs, so the OpenGL back end (gl_device.cpp:
-// OpenGL 3.3 core, or OpenGL ES 3.0 on mobile and with GD05_GLES=1) can be
-// joined later by a Vulkan one without touching the callers.
+// handles and plain state structs. Its one implementation is
+// render/core_device.cpp on gd-engine-core's backends (Vulkan by default,
+// SDL3 GPU, OpenGL 3.3 core / OpenGL ES 3.0 on mobile and with GD05_GLES=1;
+// render/core_backend.h, D71). gd05's own OpenGL device (gl_device.cpp,
+// "local") was removed with D71.
 //
 // Shaders are written once in the GLSL subset shared by "330 core" and
 // "300 es" (the back end adds the version line, precision and the program's
@@ -146,6 +148,28 @@ struct DeviceInfo {
     bool clipDepthZeroToOne = false;  // projection: depth 0..1 instead of -1..1
 };
 
+// Draws that lack their shader (GD05-054): a draw dropped because its
+// program failed to compile or link, its pipeline failed, or a standard
+// material variant stood in by a simpler one. Counted always (the walks'
+// counter missing_shaders); GD05_SHADERLOG=1 logs each kind once.
+namespace shaderaudit {
+inline int& count() {
+    static int n = 0;
+    return n;
+}
+inline void note(const char* what, const std::string& name) {
+    ++count();
+    static const bool log = SDL_getenv("GD05_SHADERLOG") != nullptr;
+    static std::vector<std::string> seen;
+    if (!log) return;
+    const std::string key = std::string(what) + ": " + name;
+    for (const std::string& s : seen)
+        if (s == key) return;
+    seen.push_back(key);
+    SDL_Log("shaderaudit: %s", key.c_str());
+}
+}  // namespace shaderaudit
+
 // GD05_PERF=1: what the device did since the last read (perfStats).
 struct DevicePerf {
     uint64_t draws = 0, uniformBytes = 0, bufferBytes = 0, textureBytes = 0;
@@ -205,6 +229,9 @@ public:
     // Reads a rectangle of the window's back buffer (origin top-left), as
     // RGBA32. Synchronous: development aids only (screenshots).
     virtual SDL_Surface* readPixels(int x, int y, int w, int h) = 0;
+    // The same for a target's colour (origin top-left, as drawn; no output
+    // gamma): the walks' checks of a texture rendered at run time.
+    virtual SDL_Surface* readTarget(TargetId t, int x, int y, int w, int h) = 0;
     // Presents, keeping to the frame cap (vsync where the display's rate
     // matches it, otherwise paced in software; headless is not paced).
     virtual void endFrame() = 0;
@@ -215,12 +242,12 @@ public:
     // aspect), which drawableSize then reports, and scaled to the window as
     // it is presented. 0: straight to the window.
     virtual void setInternalHeight(int height) = 0;
-    // Enhanced > HDR > True HDR (render/hdr_output.h): the window's surface
-    // (hdr::Surface: 0 SDR, 1 scRGB, 2 PQ). With one, every frame is drawn
-    // into an RGBA16F target and endFrame converts it for the surface (the
-    // UI at the display's paper white, highlights above 1.0 up to its
-    // headroom), re-reading the window's HDR state after hdrStateChanged
-    // (SDL_EVENT_WINDOW_HDR_STATE_CHANGED).
+    // Enhanced > HDR > True HDR (setHdrRequest before the device starts):
+    // the swapchain's colour space (0 SDR, 1 scRGB, 2 PQ). With one, every
+    // frame is drawn into an RGBA16F target and endFrame converts it for the
+    // surface (the UI at the display's paper white, highlights above 1.0 up
+    // to its headroom), re-reading the window's HDR state after
+    // hdrStateChanged (SDL_EVENT_WINDOW_HDR_STATE_CHANGED).
     // What the Xbox 360 sends an HDTV: the game's gamma ramp pow(c, gamma)
     // (Rock Band's rnd (gamma 0.85), RB 0x8246BD90) composed by the XDK
     // with its display conversion (RB 0x8253DFB8 / 0x8253DE28: the value
@@ -228,7 +255,9 @@ public:
     // BT.709) [C] (outputCurve). 0: none. A frame target is used while it is
     // on; readPixels returns the converted picture, as the screen shows it.
     virtual void setOutputGamma(float gamma) { (void)gamma; }
-    virtual void setHdrSurface(int surface) { (void)surface; }
+    virtual int hdrSurface() const { return 0; }
+    // Why there is no HDR surface ("" when there is one).
+    virtual std::string hdrReason() const { return "no HDR surface"; }
     virtual void hdrStateChanged() {}
     // The display's headroom in paper whites while it shows HDR on the surface (1: SDR).
     virtual float hdrHeadroom() const { return 1; }
@@ -238,11 +267,10 @@ public:
     virtual DevicePerf takePerf() = 0;
 };
 
-// The window flags and GL attributes the device needs: call before
-// SDL_CreateWindow and pass the result in its flags. OpenGL 3.3 core
-// (forward compatible, as macOS requires) or OpenGL ES 3.0 on Android and
-// with GD05_GLES=1.
-SDL_WindowFlags prepareWindow();
+// Enhanced > HDR > True HDR: whether the next device asks for an HDR
+// swapchain (Vulkan; the other backends draw SDR and say why).
+void setHdrRequest(bool on);
+bool hdrRequested();
 // setOutputGamma's curve for one channel (0..1): BT.709's encoding of the
 // sRGB-decoded pow(c, gamma).
 float outputCurve(float c, float gamma);
@@ -250,7 +278,5 @@ float outputCurve(float c, float gamma);
 extern const char* const kOutputCurveGlsl;
 // readPixels' output curve on the CPU (setOutputGamma).
 void applyOutputGamma(SDL_Surface* s, float gamma);
-// Creates the OpenGL device for a window made with prepareWindow's flags.
-std::unique_ptr<RenderDevice> createGlDevice(SDL_Window* window, std::string& error);
 
 }  // namespace gfx

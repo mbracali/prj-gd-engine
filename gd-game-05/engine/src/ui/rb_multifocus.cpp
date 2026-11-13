@@ -9,8 +9,12 @@
 // disable). Buttons go to the slot of the player who pressed, the panel's
 // FOCUS_MSG / SELECT_MSG to the slot first; once every active slot
 // is_ready the screen gets start_loading_msg.
-// Wave 01: one slot per local player (player 0 for the solo modes) [I: the
-// original's MultiFocusScreen natives are not read yet] (GD05-005).
+// One slot per (slots ...) entry, each its own focus in its directory
+// (slot0..slot3) and the buttons of the player in it (RB 0x8282EA48:
+// the slot whose player_num is the player's, else the first free slot
+// whose allow_button_msg takes the player) on the band lobby
+// (matchmaking_band_screen, GD05-082). The other screens keep one slot,
+// player 0's [I: seldiff's per-player difficulty is GD05-091].
 #include "ui/rb_multifocus.h"
 
 #include <SDL3/SDL.h>
@@ -36,7 +40,10 @@ PlayerSlotObj::PlayerSlotObj(UiManager& ui, ScreenObj& screen, PanelObj& panel, 
     // name its components (seldiff.grp, selpart.grp, medium.btn) there, not
     // the panel's own seldiff.grp of the same name.
     const std::string own = "slot" + std::to_string(slotNum);
-    if (panel.view && panel.view->findIn(own, "ready.lbl")) scope_ = own;
+    if (panel.view && panel.view->hasScope(own)) {
+        scope_ = own;
+        panel.view->registerScope(own);
+    }
 }
 
 PlayerSlotObj::~PlayerSlotObj() { ui_.interp().unregisterObject(this); }
@@ -59,6 +66,26 @@ bool PlayerSlotObj::handleNative(Interp& in, const std::string& msg, std::vector
         in.var(var) = saved;
         return true;
     }
+    // The slot's own focus (its directory's PanelDir) and its components' states.
+    if (!scope_.empty()) {
+        const auto compName = [&](size_t i) {
+            if (i >= args.size()) return std::string();
+            if (auto* c = dynamic_cast<ComponentObj*>(args[i].object)) return c->name();
+            return args[i].str();
+        };
+        if (msg == "set_focus") {
+            const std::string n = compName(0);
+            if (n.empty() || n == "0" || panel_.scopedComponent(scope_, n)) panel_.setScopeFocus(scope_, n == "0" ? std::string() : n, false);
+            return r = Value::integer(0), true;
+        }
+        if (msg == "focus_name") return r = Value::symbol(panel_.scopeFocus[scope_]), true;
+        if (msg == "enable" || msg == "disable") {
+            const std::string key = gfx::UiView::scopedKey(scope_, compName(0));
+            if (msg == "enable") panel_.enable(key);
+            else panel_.disable(key, args.size() > 1 && args[1].isNumber() ? args[1].integerValue() : kPad_DDown);
+            return r = Value::integer(0), true;
+        }
+    }
     if (msg == "find" || msg == "set_focus" || msg == "iterate" || msg == "disable" || msg == "enable" || msg == "focus_name" ||
         msg == "is_up")
         return r = in.send(&panel_, msg, args), true;
@@ -68,6 +95,21 @@ bool PlayerSlotObj::handleNative(Interp& in, const std::string& msg, std::vector
 }
 
 Value PlayerSlotObj::dispatch(const std::string& msg, std::vector<Value> args) {
+    // A slot's update (RB 0x8282E5E0) [C]: when its current_option is no
+    // longer its (option ...), the option is set to it and the new state's
+    // init runs, then update.
+    if (msg == "update" && options_) {
+        const Value now = ui_.callScript(this, "current_option");
+        const std::string want = now.str();
+        if (!now.isUnhandled() && getProp(ui_.interp(), "option").str() != want) {
+            props["option"] = Value::symbol(want);
+            if (const DataNode* o = options_->find(want))
+                if (const DataNode* h = o->find("init")) {
+                    std::vector<Value> none;
+                    ui_.interp().callHandler(this, *h, none);
+                }
+        }
+    }
     // The state's handler first, then the type's.
     if (options_) {
         const Value state = ui_.callScript(this, "current_option");
@@ -80,10 +122,34 @@ Value PlayerSlotObj::dispatch(const std::string& msg, std::vector<Value> args) {
     return ui_.callScript(this, msg, std::move(args));
 }
 
+bool PlayerSlotObj::buttonDown(int button, int player) {
+    if (scope_.empty()) return false;
+    if (!panel_.selecting.empty()) return true;  // one selection at a time
+    const std::string focus = panel_.scopeFocus[scope_];
+    if (ComponentObj* c = focus.empty() ? nullptr : panel_.scopedComponent(scope_, focus))
+        if (!panel_.isDisabled(c->key) && c->buttonDown(button, player)) return true;
+    if (button == kPad_DUp || button == kPad_DDown || button == kPad_DLeft || button == kPad_DRight) {
+        panel_.navigate(button, scope_);
+        return panel_.scopeFocus[scope_] != focus;
+    }
+    return false;
+}
+
+int PlayerSlotObj::playerNum() {
+    // Its code ({gamecfg get_player_num_from_slot_num [slot_num]}) runs as the slot's.
+    const Value saved = ui_.interp().var("this");
+    ui_.interp().var("this") = Value::obj(this);
+    const Value v = getProp(ui_.interp(), "player_num");
+    ui_.interp().var("this") = saved;
+    return v.isNumber() ? v.integerValue() : -1;
+}
+
 bool PlayerSlotObj::ready() {
     const Value r = ui_.callScript(this, "is_ready");
     return r.isUnhandled() || r.truthy();
 }
+
+bool multiSlotScreen(const ScreenObj& screen) { return screen.name() == "matchmaking_band_screen"; }
 
 std::vector<std::unique_ptr<PlayerSlotObj>> makePlayerSlots(UiManager& ui, ScreenObj& screen) {
     std::vector<std::unique_ptr<PlayerSlotObj>> out;
@@ -94,18 +160,30 @@ std::vector<std::unique_ptr<PlayerSlotObj>> makePlayerSlots(UiManager& ui, Scree
     if (!panelNode || panelNode->children.size() < 2 || !type) return out;
     PanelObj* panel = panelNode->children[1].isText() ? ui.panel(panelNode->children[1].s) : nullptr;
     if (!panel) return out;
-    // (slots COOP_SLOTS_ORDER): the slot names in order; one local player: slot 0.
-    std::string slot = "guitar";
+    // (slots COOP_SLOTS_ORDER): the slot names in order.
+    std::vector<std::string> names;
     if (const DataNode* slots = pp->find("slots"); slots && slots->children.size() > 1) {
-        const DataNode& first = slots->children[1].isList() && !slots->children[1].children.empty() ? slots->children[1].children[0] : slots->children[1];
-        if (first.isText()) slot = first.s;
+        if (slots->children[1].isList()) {
+            for (const DataNode& n : slots->children[1].children)
+                if (n.isText()) names.push_back(n.s);
+        } else {
+            for (size_t k = 1; k < slots->children.size(); ++k)
+                if (slots->children[k].isText()) names.push_back(slots->children[k].s);
+        }
     }
-    // The slots no player has (one local player: slot1..3) are hidden.
-    if (panel->view)
-        for (int n = 1; n < 4; ++n) panel->view->setScopeShowing("slot" + std::to_string(n), false);
-    auto s = std::make_unique<PlayerSlotObj>(ui, screen, *panel, *type, pp->find("options"), 0, slot);
-    ui.interp().registerObject(s.get());
-    out.push_back(std::move(s));
+    if (names.empty()) names.push_back("guitar");
+    // One local player (every screen but the band lobby): slot 0, the
+    // others' directories hidden.
+    if (!multiSlotScreen(screen)) {
+        names.resize(1);
+        if (panel->view)
+            for (int n = 1; n < 4; ++n) panel->view->setScopeShowing("slot" + std::to_string(n), false);
+    }
+    for (size_t n = 0; n < names.size(); ++n) {
+        auto s = std::make_unique<PlayerSlotObj>(ui, screen, *panel, *type, pp->find("options"), int(n), names[n]);
+        ui.interp().registerObject(s.get());
+        out.push_back(std::move(s));
+    }
     return out;
 }
 

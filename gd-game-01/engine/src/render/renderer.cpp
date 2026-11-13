@@ -348,6 +348,32 @@ int Renderer::createTexture(const Image& image, bool repeat) {
     return static_cast<int>(textures_.size()) - 1;
 }
 
+void Renderer::deleteTexture(int texture) {
+    if (core_ || !context_ || texture <= 0 || size_t(texture) >= textures_.size()) return;
+    unsigned& id = textures_[size_t(texture)];
+    if (texture == font_ || !id) return;
+    gl::glDeleteTextures(1, &id);
+    id = 0;
+}
+
+void Renderer::deleteMesh(int mesh) {
+    if (core_ || !context_ || mesh <= 0 || size_t(mesh) >= meshes_.size()) return;
+    GpuMesh& m = meshes_[size_t(mesh)];
+    if (!m.vao) return;
+    gl::glDeleteBuffers(1, &m.vbo);
+    gl::glDeleteBuffers(1, &m.ibo);
+    gl::glDeleteVertexArrays(1, &m.vao);
+    m = GpuMesh{};  // count 0: drawMesh skips it
+}
+
+int Renderer::liveTextures() const {
+    return int(std::count_if(textures_.begin(), textures_.end(), [](unsigned t) { return t != 0; }));
+}
+
+int Renderer::liveMeshes() const {
+    return int(std::count_if(meshes_.begin(), meshes_.end(), [](const GpuMesh& m) { return m.vao != 0; }));
+}
+
 void Renderer::updateTexture(int texture, const Image& image) {
     if (core_) return core_->updateTexture(texture, image);
     if (texture <= 0 || size_t(texture) >= textures_.size()) return;
@@ -951,6 +977,7 @@ void Renderer::updateMesh(int mesh, const std::vector<Vertex>& vertices, const s
     if (core_) return core_->updateMesh(mesh, vertices, indices);
     if (mesh <= 0 || size_t(mesh) >= meshes_.size()) return;
     GpuMesh& m = meshes_[size_t(mesh)];
+    if (!m.vao) return;  // freed (deleteMesh)
     gl::glBindVertexArray(m.vao);
     gl::glBindBuffer(GL_ARRAY_BUFFER, m.vbo);
     gl::glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
