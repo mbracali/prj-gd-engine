@@ -94,7 +94,7 @@ The official site (`docs/index.html`, guitardreamengine.com).
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
 | GDSITE-001 | Enhancement | 🟡 in progress (wave B) | Downloads page (`docs/index.html`): cards by type. "Stage releases (Desktop)": latest Windows, macOS, Linux. "Roadie releases (Handhelds)": latest Steam Deck; PS Vita (Coming soon); 3DS (Coming soon). "On tour releases (Mobile)": latest Android; iOS (Coming soon). "Jam session releases (TV OS)": Android TV, LG TV, Samsung TV (all Coming soon) |  | Wave B 10-28 |
-| GDSITE-002 | Enhancement | ❌ | BE-2026-11-13-14: show the latest git updates (releases / commits) on the site |  | Owner 11-13 (BUGLIST_20261113.md) |
+| GDSITE-002 | Enhancement | ✅ | BE-2026-11-13-14: show the latest git updates (releases / commits) on the site | 11-13: a Latest updates section (docs/index.html, after the setlist): the 6 newest releases and the 6 latest merged pull requests, read from the public GitHub API in the visitor's browser (no Actions, no build), text only (no HTML from the API), a fallback line when GitHub is out of reach. Checked: script compiles (node --check), both endpoints answer (releases gdul/v1.1.14.., merged #106, #102, ...); not seen in a browser here (none installed) | Owner 11-13 (BUGLIST_20261113.md) |
 
 
 ## All games
