@@ -5,6 +5,18 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-11-13
+
+### Fixed
+- Max FPS works: 120, 144, 240 and Unlimited go above 60, in the menus and in songs.
+- Enhanced options that did nothing now apply: HDR (Emulated), Particles 2x, All Band Mates Cast Shadows, More Lights, Dust in Light Beams.
+- The band's shadows are solid instead of grey stripes.
+- Better performance, mostly in the Art Deco venue.
+- Battle mode: the whammy and broken-string prompts show, so attacks can be shaken off; the battle meter is no longer upside down.
+- Android: cheats can be entered by touching the frets; Unlock All Songs / Everything are buttons that unlock at once (#85).
+- Restart Now (Enhanced > backends) starts the game again from its start, with the controllers working.
+
+
 ### Added
 - Enhanced > HDR: Emulated (a filmic curve and an automatic exposure) now works; True HDR is not available yet.
 

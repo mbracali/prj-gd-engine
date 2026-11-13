@@ -5,6 +5,13 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [1.1.8] - 2026-11-13
+
+### Fixed
+- The guitarist and the singer cast their shadows on the stage's spotlight pools again.
+- Restart Now (Enhanced > backends) starts the game again from its start, with the controllers working.
+
+
 ## [1.1.7] - 2026-11-10
 
 ### Added
