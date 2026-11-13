@@ -1895,7 +1895,9 @@ int App::run() {
         if (quitAfter && double(SDL_GetTicksNS() - startNs_) / 1e6 >= std::atof(quitAfter)) running_ = false;
         updatePointer();
         menuRepeat();
-        // Enhanced > Max FPS in a song (the menus keep the engine's own 60).
+        // Enhanced > Max FPS, in the menus too (owner 11-13: they stayed at
+        // 60; the front end steps GH3's scripts at a fixed 60 Hz, FrontEnd's
+        // accumulator, so drawing faster does not speed them up).
         // The device keeps to it (vsync where the display's rate is a whole
         // multiple of it, its own clock otherwise: setFrameCap); it was only
         // ever given 60 at start, so 120 / 144 / 240 / Unlimited did nothing
@@ -1903,7 +1905,7 @@ int App::run() {
         // loop's own wait on top of the vsync could miss a refresh (GD04-118).
         // Headless runs (no vsync, the device does not pace) wait here.
         const std::string mf = enhanced_.get("max_fps");
-        const int cap = !song_ ? 60 : mf == "unlimited" ? 0 : std::max(30, std::atoi(mf.c_str()));
+        const int cap = mf == "unlimited" ? 0 : std::max(30, std::atoi(mf.c_str()));
         if (cap != frameCap_ && !SDL_getenv("GD04_FPS")) {
             canvas_.renderer().device().setFrameCap(cap);
             frameCap_ = cap;
@@ -1913,7 +1915,7 @@ int App::run() {
             const char* d = SDL_GetCurrentVideoDriver();
             return d && std::strcmp(d, "offscreen") == 0;
         }();
-        const uint64_t minNs = !song_ ? kMinFrameNs : !headless || cap == 0 ? 0 : uint64_t(1e9 / cap);
+        const uint64_t minNs = !headless ? 0 : cap == 0 ? kMinFrameNs : uint64_t(1e9 / cap);
         const uint64_t spent = SDL_GetTicksNS() - frameStart;
         perf::frameDone(spent, song_ ? "song" : front_ ? front_->flowState() : "-");
         // GD04_FRAMELOG: every frame over 25 ms, with the screen (owner 1.7).
