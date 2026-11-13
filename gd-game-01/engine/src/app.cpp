@@ -3224,14 +3224,92 @@ static int movieSelfTest(const GameData& data) {
     return bad ? 1 : 0;
 }
 
+// GD01-322 (#98): the lessons' end dim (tut_script's tut_screen_dim.view)
+// was made for the PS2's 4:3 screen: through the panel camera on the 16:9
+// screen it spans only the middle; widened as PanelObj::draw does, it must
+// reach both edges (menu units 0..1280).
+static int tutorialDimSelfTest(const GameData& data) {
+    const std::string path = "ghui/tut_script.gh";
+    if (!data.exists(path)) return std::printf("tutorial dim: %s not on the disc, skipped\n", path.c_str()), 0;
+    Scene sc(data.read(path));
+    const SceneObject* cam = nullptr;
+    for (const SceneObject& o : sc.objects())
+        if (o.cam && !cam) cam = &o;
+    if (!cam || !sc.find("tut_screen_dim.view")) return std::fprintf(stderr, "tutorial dim: no camera or tut_screen_dim.view\n"), 1;
+    const CamObj& c = *cam->cam;
+    const float fovY = 2.0f * std::atan(std::tan(c.fov * 0.5f) / (4.0f / 3.0f));  // as Panel::viewProj
+    const Mat4 vp = Mat4::perspective(fovY, kScreenW / kScreenH, c.nearPlane, c.farPlane) * Mat4::cameraView(c.trans.world.rot, c.trans.world.pos);
+    float x0 = 1e30f, x1 = -1e30f;
+    std::vector<std::string> todo{"tut_screen_dim.view"};
+    while (!todo.empty()) {
+        const SceneObject* o = sc.find(todo.back());
+        todo.pop_back();
+        if (!o) continue;
+        if (const Drawable* d = o->drawable()) todo.insert(todo.end(), d->draws.begin(), d->draws.end());
+        if (!o->mesh) continue;
+        const Mat4 m = vp * Mat4::fromRowXfm(o->mesh->trans.world.rot, o->mesh->trans.world.pos);
+        for (const MeshVertex& v : o->mesh->verts) {
+            const float cx = m.m[0] * v.pos[0] + m.m[4] * v.pos[1] + m.m[8] * v.pos[2] + m.m[12];
+            const float cw = m.m[3] * v.pos[0] + m.m[7] * v.pos[1] + m.m[11] * v.pos[2] + m.m[15];
+            if (cw <= 1e-6f) continue;
+            x0 = std::min(x0, cx / cw), x1 = std::max(x1, cx / cw);
+        }
+    }
+    const float k = (16.0f / 9.0f) / (4.0f / 3.0f);
+    auto px = [](float ndc) { return (ndc + 1) * 0.5f * kScreenW; };
+    std::printf("tutorial dim: spans x %.0f..%.0f of 1280 as drawn on the PS2's 4:3, %.0f..%.0f widened\n", px(x0), px(x1), px(x0 * k), px(x1 * k));
+    return px(x0 * k) <= 1 && px(x1 * k) >= kScreenW - 1 ? 0 : (std::fprintf(stderr, "tutorial dim: does not cover the screen\n"), 1);
+}
+
+// GD01-322 (#98): the help bar's rounded boxes (help_box_* in
+// resources.rnd_ps2) are drawn blended with smooth edges: a texel left
+// transparent with a light colour bleeds into the edge as a light fringe
+// once the texture is filtered. Their transparent texels next to drawn ones
+// must carry the drawn texels' colour (as uploaded, bleedTransparent).
+static int helpBoxEdgeSelfTest(const GameData& data) {
+    Scene sc(data.read("ghui/gen/resources.rnd_ps2"));
+    int bad = 0;
+    std::set<std::string> seen;
+    for (const SceneObject& o : sc.objects()) {
+        if (!o.mesh || o.name.rfind("help_box_", 0) != 0) continue;
+        const SceneObject* m = sc.find(o.mesh->mat);
+        if (!m || !m->mat || m->mat->stages.empty() || !seen.insert(m->mat->stages[0].tex).second) continue;
+        const SceneObject* t = sc.find(m->mat->stages[0].tex);
+        if (!t || !t->tex || t->tex->image.width == 0) continue;
+        for (int pass = 0; pass < 2; ++pass) {
+            Image img = t->tex->image;
+            if (pass) bleedTransparent(img);
+            // The largest luminance step a filtered edge texel can show: a transparent
+            // texel's colour against its drawn neighbour's, over all such pairs.
+            int worst = 0, w = img.width, h = img.height;
+            auto px = [&](int x, int y) { return &img.rgba[(size_t(y) * size_t(w) + size_t(x)) * 4]; };
+            auto lum = [](const uint8_t* p) { return (p[0] * 3 + p[1] * 6 + p[2]) / 10; };
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x) {
+                    const uint8_t* p = px(x, y);
+                    if (p[3] != 0) continue;
+                    for (auto [dx, dy] : {std::pair{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+                        const int nx = x + dx, ny = y + dy;
+                        if (nx < 0 || ny < 0 || nx >= w || ny >= h || px(nx, ny)[3] == 0) continue;
+                        worst = std::max(worst, lum(p) - lum(px(nx, ny)));
+                    }
+                }
+            std::printf("help box %s (%dx%d): edge fringe %d (%s)\n", m->mat->stages[0].tex.c_str(), w, h, worst, pass ? "as uploaded" : "as on the disc");
+            if (pass && worst > 8) ++bad;
+        }
+    }
+    if (bad) std::fprintf(stderr, "help box: %d texture(s) with a light fringe\n", bad);
+    return bad ? 1 : 0;
+}
+
 int runSelfTest(const Options& options) {
     std::string path = options.dataPath.empty() ? loadRememberedPath() : options.dataPath;
     if (inputSelfTest()) return 1;
     if (scriptModSelfTest()) return 1;
     try {
         GameData data(path);
-        if (SDL_getenv("GD01_MOVIE_ONLY")) return movieSelfTest(data);  // GD01_MOVIE_ONLY=1: the movie check alone
-        const int movieFailed = movieSelfTest(data);
+        if (SDL_getenv("GD01_MOVIE_ONLY")) return movieSelfTest(data) | tutorialDimSelfTest(data) | helpBoxEdgeSelfTest(data);  // GD01_MOVIE_ONLY=1: these checks alone
+        const int movieFailed = movieSelfTest(data) | tutorialDimSelfTest(data) | helpBoxEdgeSelfTest(data);
         Rules rules = loadRules(data);
         auto songs = loadSongs(data);
         std::printf("%u songs in %s; slop %.0f ms, head %d, tail %d\n", unsigned(songs.size()), data.description().c_str(),

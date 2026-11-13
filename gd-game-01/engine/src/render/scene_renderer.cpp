@@ -276,8 +276,11 @@ int SceneRenderer::texture(const std::string& name, bool repeat) {
     const SceneObject* t = scene_.find(name);
     if (!t && lookup_) t = lookup_(name);
     int id = 0;
-    if (t && t->tex && t->tex->image.width > 0)
-        id = renderer_.createTexture(enhance ? enhanceImage(t->tex->image, glyphTextures_.count(name) > 0) : t->tex->image, repeat);
+    if (t && t->tex && t->tex->image.width > 0) {
+        Image img = enhance ? enhanceImage(t->tex->image, glyphTextures_.count(name) > 0) : t->tex->image;
+        if (uiTextures_) bleedTransparent(img);  // the menus' blended edges without a light fringe (GD01-322, #98)
+        id = renderer_.createTexture(img, repeat);
+    }
     textures_[key] = id;
     return id;
 }

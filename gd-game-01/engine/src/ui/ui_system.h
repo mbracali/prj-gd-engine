@@ -155,6 +155,11 @@ public:
     // any key or pad press): that pill is the only highlight on the screen.
     bool helpHover_ = false;
     bool helpHovered() const;
+    // GD01-322 (#98): the pointer moved and is over no menu item (empty
+    // space, a gap, the help bar): the menu's focus and the list's selection
+    // are not highlighted until it is over an item again or a button is pressed.
+    bool mouseAway_ = false;
+    bool menuMuted() const { return mouseAway_ || helpHovered(); }
     // The right end of the help bar's last label in menu units (0: no help bar).
     float helpBarRight() const;
     // [I] Port (#76): the song list row under the pointer takes the list's
@@ -173,7 +178,7 @@ public:
     // the original's camera swing and fade (off by default: the original).
     void setNoTransitions(bool on) { noTransitions_ = on; }
     bool noTransitions_ = false;
-    bool loggedHelpHover_ = false;
+    int loggedHelpHover_ = 0;  // 1 help bar, 2 none (mouseAway_), 0 menu focus
     float gotoMs_ = 0;  // frameMs_ at the last screen change
     static constexpr float kWheelHoverSlack = 24;
     // `player`: the pad slot (player_num in the scripts).

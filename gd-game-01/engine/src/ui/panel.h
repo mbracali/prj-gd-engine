@@ -23,8 +23,12 @@ public:
     // transition animations.
     Panel(Renderer& renderer, const GameData& data, UiResources& res, const std::string& name, Scene* shared = nullptr);
 
-    // Draws <name>.view (or the given view) through the panel's camera.
-    void draw(const std::string& view = "");
+    // Draws <name>.view (or the given view) through the panel's camera;
+    // widenX > 1 stretches it sideways about the screen's middle (a 4:3
+    // backdrop over the 16:9 screen).
+    void draw(const std::string& view = "", float widenX = 1);
+    // Whether a drawable object of the panel is showing.
+    bool showing(const std::string& object) const;
 
     Scene& scene() { return *scene_; }
     // The panel camera's view-projection; false without a camera.

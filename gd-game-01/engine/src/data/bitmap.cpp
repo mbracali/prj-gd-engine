@@ -65,3 +65,26 @@ Image decodeBitmap(const uint8_t* data, size_t size, size_t* consumed) {
     }
     return img;
 }
+
+void bleedTransparent(Image& img) {
+    const int w = img.width, h = img.height;
+    if (w <= 0 || h <= 0 || img.rgba.size() < size_t(w) * size_t(h) * 4) return;
+    const std::vector<uint8_t> src = img.rgba;
+    auto at = [&](int x, int y) { return &src[(size_t(y) * size_t(w) + size_t(x)) * 4]; };
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            if (at(x, y)[3] != 0) continue;
+            int sum[3] = {0, 0, 0}, n = 0;
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dx = -1; dx <= 1; ++dx) {
+                    const int nx = x + dx, ny = y + dy;
+                    if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                    const uint8_t* q = at(nx, ny);
+                    if (q[3] == 0) continue;
+                    sum[0] += q[0], sum[1] += q[1], sum[2] += q[2], ++n;
+                }
+            if (!n) continue;
+            uint8_t* d = &img.rgba[(size_t(y) * size_t(w) + size_t(x)) * 4];
+            for (int k = 0; k < 3; ++k) d[k] = uint8_t(sum[k] / n);
+        }
+}
