@@ -137,6 +137,13 @@ The scenes themselves are listed in `milo_and_textures.md`.
   `track_explode.view` at (now − t0) × 0.03 through `track_explode.filt`
   (scale 2.5, end 400), gems and track hidden (`0x82695988`, poll
   `0x82695C08`), "You Rock!" = `youwin.mesh` shown (`0x8268EBD8`) [C].
+- Win or fail: hud_panel.dta's `game_won_msg` / `game_lost` send
+  `on_game_over`, which in HudPanel (`0x8268EBD8`) is
+  `set_meters_showing FALSE` (`0x8268E9F8`: the showing flag, +0x88, of
+  every display in the panel's four lists): the score, streak, star, crowd
+  and lead meters go at once, the "You Rock!" / "SONG FAILED!" message
+  stays; `game_outro_complete` hides the panel [C] (GD02-164; the walks'
+  `hud_after_song` check, single player and co-op).
 - Fail (`game_lost`): the track is hidden, the music slows to a stop over 2 s
   (`LOSE_MUSIC_SLOW_SEC`), "SONG FAILED!" [C data].
 - Far-end fade: the Environ fade (`track.env` 135–180, surface and beat-line

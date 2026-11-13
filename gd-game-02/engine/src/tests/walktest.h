@@ -184,6 +184,7 @@ private:
     std::vector<std::string> expect_;  // screens that must be entered, in order
     size_t step_ = 0;
     double stepStart_ = -1;
+    double hudOverMs_ = -1;  // hud_after_song: when the song ended (GD02-164)
     double markMs_ = 0;
     std::string lastScreen_;           // screen-change times, for load_hold (GD02-155)
     double lastChangeMs_ = 0, lastLoadingMs_ = -1;  // a "mark" wait's time, for "until" waits (steps on a fixed beat)

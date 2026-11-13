@@ -10,6 +10,8 @@
 #include <set>
 #include <cstdio>
 #include <functional>
+#include <chrono>
+#include <future>
 
 #include "char/char_driver.h"
 #include "char/char_objects.h"
@@ -358,8 +360,20 @@ public:
             const std::string outfit = strArg(args, 1);
             if (!s || outfit == s->outfit) return true;
             s->outfit = outfit;
-            s->ch = load(outfit);
-            if (s->ch) s->ch->ch->setXfm(placerXfm(*s));
+            // GD02-162: a character not in the cache loads on a thread and
+            // its pictures go up a few at a time (warm), as GH2's loads in
+            // the background (career.dta: scl_loading.lbl shows while
+            // are_chars_loaded is false; is_char_loaded) [C data]. Until
+            // then the slot keeps drawing the character it had [I], and
+            // get_char / is_char_loaded say "not yet".
+            if (auto it = cache_.find(outfit); it != cache_.end() || outfit.empty() || !async()) {
+                s->ch = outfit.empty() ? nullptr : it != cache_.end() ? it->second.get() : load(outfit);
+                s->showing = s->ch;
+                if (s->ch) s->ch->ch->setXfm(placerXfm(*s));
+            } else {
+                startLoad(outfit);
+                s->ch = nullptr;
+            }
             return r = Value::integer(1), true;
         }
         if (msg == "char_event") {
@@ -402,14 +416,15 @@ public:
         if (paused) return;
         const float dt = float(std::clamp(dtMs, 0.0, 100.0) / 1000.0);
         clock_ += dt;
+        finishLoads();
         for (Slot& s : slots_) {
             // Poll 0x8228F250 places, wakes (the pending event, 0x8228D348)
             // and polls a loaded character only while its slot has a placer
             // (slot +0xc, set_placer 0x8228E6F8) [C]: the character select
             // sets it at TRANSITION_COMPLETE, so ui_enter's kick starts once
             // the screen is up, behind the closed door (GD02-078).
-            if (!s.ch || s.placer.empty()) continue;
-            if (!s.event.empty()) {
+            if (!s.showing || s.placer.empty()) continue;
+            if (s.ch && !s.event.empty()) {
                 // 0x8228D348: the pending event goes to the loaded character.
                 const std::string e = s.event;
                 s.event.clear();
@@ -418,8 +433,8 @@ public:
             chr::RigContext ctx;
             // The menus' clock at 120 beats a minute [I].
             ctx.beat = clock_ * 2.0, ctx.dBeats = dt * 2.0f, ctx.dSeconds = dt, ctx.seconds = clock_;
-            s.ch->ch->setXfm(placerXfm(s));
-            s.ch->ch->poll(ctx);
+            s.showing->ch->setXfm(placerXfm(s));
+            s.showing->ch->poll(ctx);
         }
         for (Slot& s : slots_) {
             // Poll 0x8228F250: the door stands at (pi / 2, 0, 0); a loaded,
@@ -427,8 +442,8 @@ public:
             // rotation's z) [C].
             if (s.doorView && !s.door.empty()) {
                 float z = 0;
-                if (s.ch && !s.placer.empty()) {
-                    chr::Skeleton& sk = s.ch->ch->skeleton();
+                if (s.showing && !s.placer.empty()) {
+                    chr::Skeleton& sk = s.showing->ch->skeleton();
                     int b = sk.find("bone_door.trans");
                     if (b < 0) b = sk.find("bone_door.mesh");
                     if (b >= 0) {
@@ -450,7 +465,8 @@ public:
 private:
     struct Slot {
         std::string outfit, event, placer, door, env;
-        UiCharObj* ch = nullptr;
+        UiCharObj* ch = nullptr;       // the outfit's character, once loaded
+        UiCharObj* showing = nullptr;  // the one drawn: ch, or the last one while ch loads
         gfx::UiView* placerView = nullptr;
         gfx::UiView* envView = nullptr;
         gfx::UiView* doorView = nullptr;
@@ -459,7 +475,7 @@ private:
 
     void drawSlot(Slot& s, bool inOwner) {
         if (!showing || !up || ui.headless() || !ui.sceneCache()) return;
-        if (!s.ch || !s.placerView || s.placer.empty() || !s.placerView->find(s.placer)) return;
+        if (!s.showing || !s.placerView || s.placer.empty() || !s.placerView->find(s.placer)) return;
         if (!view_) view_ = std::make_unique<BandView>(*ui.sceneCache());
         gfx::Renderer& r = ui.canvas().renderer();
         ui.canvas().flush();
@@ -469,7 +485,7 @@ private:
         // the door frame and the room hide the character as on the 360 [I].
         gfx::UiView& v = *s.placerView;
         r.materials().setFrame(v.camera(), s.envView ? s.envView->environment(s.env) : v.environment(), vw, vh);
-        view_->drawCharacter(r.materials(), *s.ch->ch, v.camera(), false);
+        view_->drawCharacter(r.materials(), *s.showing->ch, v.camera(), false);
         if (inOwner) r.materials().setFrame(v.camera(), v.environment(), vw, vh);
         else ui.keepDepthOnce();
     }
@@ -480,31 +496,117 @@ private:
         return x;
     }
 
+    std::string charPath(const std::string& outfit) const {
+        return scene::findMiloRelative(ui.data(), "char/x/x.milo_xbox", "../" + outfit + "/og/" + outfit + "_ui.milo");
+    }
+
+    UiCharObj* adopt(const std::string& outfit, std::unique_ptr<chr::Character> ch) {
+        auto obj = std::make_unique<UiCharObj>(outfit, std::move(ch));
+        // Its script: char_objects.dta's (Character (types (ui ...))).
+        if (const DataNode* objects = ui.bootTree() ? ui.bootTree()->find("objects") : nullptr)
+            if (const DataNode* c = objects->find("Character"))
+                if (const DataNode* types = c->find("types"))
+                    if (const DataNode* t = types->find("ui")) obj->addHandlers(*t, 1);
+        UiCharObj* out = obj.get();
+        cache_[outfit] = std::move(obj);
+        return out;
+    }
+
+    // In the frame (headless runs, GD02_CHAR_SYNC=1).
     UiCharObj* load(const std::string& outfit) {
         if (outfit.empty()) return nullptr;
         if (auto it = cache_.find(outfit); it != cache_.end()) return it->second.get();
-        UiCharObj* out = nullptr;
         try {
             if (!clips_) clips_ = std::make_unique<chr::ClipLibrary>(ui.data());
-            const std::string path = scene::findMiloRelative(ui.data(), "char/x/x.milo_xbox", "../" + outfit + "/og/" + outfit + "_ui.milo");
-            auto obj = std::make_unique<UiCharObj>(outfit, std::make_unique<chr::Character>(ui.data(), path, *clips_));
-            // Its script: char_objects.dta's (Character (types (ui ...))).
-            if (const DataNode* objects = ui.bootTree() ? ui.bootTree()->find("objects") : nullptr)
-                if (const DataNode* c = objects->find("Character"))
-                    if (const DataNode* types = c->find("types"))
-                        if (const DataNode* t = types->find("ui")) obj->addHandlers(*t, 1);
-            out = obj.get();
-            cache_[outfit] = std::move(obj);
+            return adopt(outfit, std::make_unique<chr::Character>(ui.data(), charPath(outfit), *clips_));
         } catch (const std::exception& e) {
             SDL_Log("%s: %s: %s", name().c_str(), outfit.c_str(), e.what());
             cache_[outfit] = nullptr;
         }
-        return out;
+        return nullptr;
     }
 
+    // On a thread: the milo parsed, the rig built and the clips read with a
+    // clip library of its own (the main thread's is not shared).
+    void startLoad(const std::string& outfit) {
+        if (loads_.count(outfit)) return;
+        Load& l = loads_[outfit];
+        l.clips = std::make_unique<chr::ClipLibrary>(ui.data());
+        l.started = SDL_GetTicksNS();
+        const GameData* data = &ui.data();
+        chr::ClipLibrary* clips = l.clips.get();
+        const std::string path = charPath(outfit);
+        l.result = std::async(std::launch::async, [data, clips, path]() -> std::unique_ptr<chr::Character> {
+            try {
+                return std::make_unique<chr::Character>(*data, path, *clips);
+            } catch (const std::exception& e) {
+                SDL_Log("char_select: %s: %s", path.c_str(), e.what());
+                return nullptr;
+            }
+        });
+    }
+
+    // Each frame: a finished load's pictures and meshes go up at most
+    // kWarmBudgetNs a frame, then the slots waiting for it show it and
+    // get their pending event.
+    void finishLoads() {
+        constexpr uint64_t kWarmBudgetNs = 4'000'000;
+        const uint64_t t0 = SDL_GetTicksNS();
+        for (auto it = loads_.begin(); it != loads_.end();) {
+            Load& l = it->second;
+            if (!l.ch) {
+                if (l.result.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+                    ++it;
+                    continue;
+                }
+                l.ch = l.result.get();
+                if (!l.ch) {
+                    cache_[it->first] = nullptr;
+                    it = loads_.erase(it);
+                    continue;
+                }
+                if (!ui.headless() && ui.sceneCache())
+                    l.ch->forEachObject([&](const scene::Object& o) {
+                        if (auto* t = o.as<scene::Tex>()) l.textures.push_back(t);
+                        else if (auto* m = o.as<scene::Mesh>()) l.meshes.push_back(m);
+                    });
+            }
+            if (gfx::SceneCache* cache = ui.headless() ? nullptr : ui.sceneCache()) {
+                while ((!l.textures.empty() || !l.meshes.empty()) && SDL_GetTicksNS() - t0 < kWarmBudgetNs) {
+                    if (!l.textures.empty()) cache->texture(l.textures.back()), l.textures.pop_back();
+                    else cache->mesh(l.meshes.back()), l.meshes.pop_back();
+                }
+                if (!l.textures.empty() || !l.meshes.empty()) return;  // more next frame
+            }
+            UiCharObj* obj = adopt(it->first, std::move(l.ch));
+            ownClips_.push_back(std::move(l.clips));
+            SDL_Log("char_select: %s ready in %.0f ms", it->first.c_str(), double(SDL_GetTicksNS() - l.started) / 1e6);
+            for (Slot& s : slots_)
+                if (s.outfit == it->first) {
+                    s.ch = s.showing = obj;
+                    obj->ch->setXfm(placerXfm(s));
+                }
+            it = loads_.erase(it);
+        }
+    }
+
+    struct Load {
+        std::unique_ptr<chr::ClipLibrary> clips;
+        std::future<std::unique_ptr<chr::Character>> result;
+        std::unique_ptr<chr::Character> ch;
+        std::vector<const scene::Tex*> textures;   // still to upload
+        std::vector<const scene::Mesh*> meshes;
+        uint64_t started = 0;
+    };
+
     std::vector<Slot> slots_;
-    std::map<std::string, std::unique_ptr<UiCharObj>> cache_;
+    // Destroyed after the characters that use them (members go in reverse).
+    std::vector<std::unique_ptr<chr::ClipLibrary>> ownClips_;
     std::unique_ptr<chr::ClipLibrary> clips_;
+    std::map<std::string, std::unique_ptr<UiCharObj>> cache_;
+    std::map<std::string, Load> loads_;  // last: its threads finish first
+    // Headless runs (uitest) load in the frame, as before; GD02_CHAR_SYNC=1 too.
+    bool async() const { return !ui.headless() && !SDL_getenv("GD02_CHAR_SYNC"); }
     std::unique_ptr<BandView> view_;
     double clock_ = 0;
 };

@@ -135,6 +135,7 @@ void HudView::reset(float introStartMs) {
     lastMs_ = 0;
     introStartMs_ = introStartMs;
     wonMs_ = -1e9f;
+    displaysHidden_ = false;
     meterShakeMs_ = scoreShakeMs_ = -1e9f;
 }
 
@@ -396,6 +397,7 @@ void HudView::drawObject(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, cons
         if (!particles_) particles_ = std::make_unique<gfx::ParticleRenderer>(*device_);
         it->second.draw(*particles_, mr, cache, camera_, Mat4::identity(), &pose);
     } else if (auto* d = o->as<scene::DirObj>()) {
+        if (displaysHidden_) return;  // on_game_over: the Band* displays hidden
         for (auto& p : parts_)
             if (p->proxy == d) drawDir(mr, cache, *p->dir, scene::compose(pose.world(d), base), env, p.get());
     }

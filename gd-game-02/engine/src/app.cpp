@@ -536,6 +536,7 @@ private:
     uint64_t failTicks_ = 0;
     bool exploded_ = false;
     // The UI's song: the game events sent so far, the outro, the counts.
+    mutable uint64_t frameMaxNs_ = 0;  // the longest frame since frame_mark (GD02-162)
     bool begun_ = false, wonSent_ = false, lostSent_ = false, outroSent_ = false, spReadySent_ = false;
     uint64_t overNs_ = 0, outroAtNs_ = 0;
     float overT_ = 0;
@@ -784,6 +785,12 @@ int App::run() {
     const bool perf = envOn("GD02_PERF");
     uint64_t perfStart = SDL_GetTicksNS(), perfMaxNs = 0, perfLimitNs = 0;
     int perfFrames = 0;
+    // Development aid (GD02-162, usual-bugs.md "Micro stutter"):
+    // GD02_HITCHLOG=<ms> logs every frame whose work took longer, with its
+    // screen; the count and the longest print at the end.
+    const int hitchMs = SDL_getenv("GD02_HITCHLOG") ? std::atoi(SDL_getenv("GD02_HITCHLOG")) : 0;
+    int hitches = 0;
+    uint64_t hitchMaxNs = 0;
     if (perf) {
         const gfx::DeviceInfo& di = canvas_.renderer().device().info();
         SDL_Log("perf: %s %s on %s, video driver %s", di.api.c_str(), di.version.c_str(), di.gpu.c_str(), SDL_GetCurrentVideoDriver());
@@ -810,6 +817,12 @@ int App::run() {
         // frames a second instead of spinning; gd01's frame limiter comes
         // with its renderer.
         const uint64_t spent = SDL_GetTicksNS() - frameStart;
+        frameMaxNs_ = std::max(frameMaxNs_, spent);
+        if (hitchMs > 0 && spent > uint64_t(hitchMs) * 1'000'000ull) {
+            ++hitches;
+            hitchMaxNs = std::max(hitchMaxNs, spent);
+            SDL_Log("hitch: %.1f ms on %s%s", double(spent) / 1e6, ui_ ? ui_->currentScreen().c_str() : "-", player_ ? " (song)" : "");
+        }
         if (spent < kMinFrameNs) SDL_DelayNS(kMinFrameNs - spent);
         if (perf) {
             const uint64_t now = SDL_GetTicksNS();
@@ -821,6 +834,7 @@ int App::run() {
         }
     }
 
+    if (hitchMs > 0) SDL_Log("hitches: %d frames over %d ms, the longest %.1f ms", hitches, hitchMs, double(hitchMaxNs) / 1e6);
     // Restart Now as a walk's last step: the walk is over (its checks go on
     // in the restarted game's walk, runApp).
     if (walk_ && ui_ && restart_) walk_->poll(*ui_, double(SDL_GetTicksNS()) / 1e6);
@@ -2164,6 +2178,12 @@ int App::gameCounter(int player, const std::string& key) const {
         return 0;
     }
     if (key == "spot_shadows") return venueView_ ? venueView_->spotlights().shadowsTotal() : 0;
+    // GD02-162: the longest frame's work (ms) since the last "frame_mark".
+    if (key == "frame_mark") return frameMaxNs_ = 0, 0;
+    if (key == "frame_max_ms") return int(frameMaxNs_ / 1'000'000ull);
+    // GD02-164: the song over (won or lost), and the HUD's displays hidden.
+    if (key == "song_over") return wonSent_ || lostSent_ ? 1 : 0;
+    if (key == "hud_displays_hidden") return hud_ ? int(hud_->displaysHidden()) : -1;
     const int p = std::clamp(player, 0, 1);
     if (key == "sp_phrases") return spPhrases_[p];
     if (key == "sp_started") return spStarted_[p];
@@ -2218,6 +2238,8 @@ void App::hudCommand(const std::string& msg, const std::vector<Value>& args) {
     // set_win_showing TRUE: the HUD's win message (HudView::won); the meters
     // and SONG FAILED are the HUD view's own.
     if (msg == "set_win_showing" && !args.empty() && args[0].truthy() && hud_) hud_->won(lastT_);
+    // on_game_over (game_won_msg, game_lost): the displays go (GD02-164).
+    if (msg == "on_game_over" && hud_) hud_->gameOver();
 }
 
 // The world: drawn into GH2's HDR buffer and post-processed (bloom, DOF,

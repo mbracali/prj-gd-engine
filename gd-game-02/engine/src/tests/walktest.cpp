@@ -137,6 +137,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("star_phrase");
         check("track_surface");
         check("band_shadows");
+        check("hud_after_song", 90000);
         at("endgame_screen", 90000);
         wait(600);
         press(kX);  // CONTINUE (me_continue.btn)
@@ -369,8 +370,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             wait(900);
             check("confirm_on sel_guitar_new_screen");
         } else {
+        check("frame_mark");
         press(kDown);  // Punk -> Alterna (Judy Nails)
-        wait(300);
+        wait(1000);
+        check("char_switch_frames");  // GD02-162: loaded off the frame
         press(kX);  // two outfits (alterna2 bought): pick one
         wait(800);
         press(kDown);  // outfit1.btn -> outfit2.btn (alterna2)
@@ -1192,6 +1195,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             check("sp_multi_fill", 30000);
         }
         const char* results = scenario == "coop" ? "multi_compete_coop_screen" : scenario == "faceoff" ? "multi_compete_screen" : "multi_compete_fo_screen";
+        check("hud_after_song", 90000);
         at(results, 90000);
         wait(1500);
         if (scenario == "coop") check("coop_record");
@@ -2044,6 +2048,44 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::printf("  volumes: the mixer's band %d%%, guitar %d%%\n", band, guitar);
         if (band >= 100 || guitar >= 100) return fail("the sliders' volumes did not reach the mixer");
         ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "frame_mark") {
+        ui.host().gameCounter(0, "frame_mark");
+        return pass();
+    }
+    if (s.screen == "char_switch_frames") {
+        // GD02-162: a character not loaded yet loads on a thread and goes up
+        // a few pictures a frame (CharsysPanel show_char): no frame of the
+        // switch over 50 ms (in the frame: 60 to 120 ms each on this PC).
+        Interp& in = ui.interp();
+        const bool loaded = in.send("char_single", "are_chars_loaded", {}).truthy();
+        const int worst = ui.host().gameCounter(0, "frame_max_ms");
+        std::printf("  character switch: loaded %d, the longest frame %d ms\n", int(loaded), worst);
+        if (!loaded) return fail("the character did not load within a second");
+        if (worst > 50) return fail("a frame of the character switch took " + std::to_string(worst) + " ms");
+        return pass();
+    }
+    if (s.screen == "hud_after_song") {
+        // GD02-164: HudPanel's on_game_over (game_won_msg / game_lost) hides
+        // the Band* displays at once (0x8268EBD8 -> set_meters_showing FALSE).
+        const bool over = ui.host().gameCounter(0, "song_over") == 1;
+        const int hidden = ui.host().gameCounter(0, "hud_displays_hidden");
+        if (!over) {
+            if (hidden == 1) return fail("the HUD's displays hidden before the song ended");
+            if (nowMs - stepStart_ > s.ms) return fail("the song did not end");
+            return;
+        }
+        if (hudOverMs_ < 0) hudOverMs_ = nowMs;
+        if (hidden == 1) {
+            std::printf("  HUD displays hidden %.0f ms after the song ended\n", nowMs - hudOverMs_);
+            hudOverMs_ = -1;
+            return pass();
+        }
+        if (nowMs - hudOverMs_ > 1000) {
+            hudOverMs_ = -1;
+            return fail("the HUD's displays still showing 1 s after the song ended");
+        }
         return;
     }
     if (s.screen == "game_sinks") {

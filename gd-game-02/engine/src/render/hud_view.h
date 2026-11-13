@@ -49,6 +49,13 @@ public:
     // FALSE WIN_MESSAGE_SECS (3) later; the flag is youwin.mesh's showing,
     // 0x8268EBD8) [C].
     void won(float nowMs) { wonMs_ = nowMs; }
+    // The song is over, won or lost (hud_panel.dta game_won_msg / game_lost:
+    // on_game_over). HudPanel's on_game_over (0x8268EBD8) is
+    // set_meters_showing FALSE (0x8268E9F8): every Band* display (score,
+    // streak, star, crowd and lead meters) hidden until the next reset [C]
+    // (GD02-164).
+    void gameOver() { displaysHidden_ = true; }
+    bool displaysHidden() const { return displaysHidden_; }
     // Player `player`'s events of this frame (-1: the co-op band's).
     void onEvents(const std::vector<PlayerEvent>& events, int player, float nowMs);
     // Draws the HUD over the bound 16:9 picture (its own camera, depth
@@ -118,6 +125,7 @@ private:
     float lastMs_ = 0;
     float introStartMs_ = -1e9f;
     float wonMs_ = -1e9f;
+    bool displaysHidden_ = false;
     float meterShakeMs_ = -1e9f, scoreShakeMs_ = -1e9f;
     bool sharedStar_ = false;
 };
