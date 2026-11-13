@@ -1609,3 +1609,65 @@ pattern). Each says what, why and how to undo it.
   64.1 -> 41.5, theater_02 45.3 -> 31.2 (luma).
 - **Undo:** WorldDriver::poll's VENUE text (GD05_VENUE_TEXT_LEGACY=1),
   LightPresets::rebuild's platform filter.
+
+## D98
+- **What (2026-11-13, GD05-098, g5b):** the song's start as RB's script
+  runs it [C data + C]: the world's enter (worldbase.dta) forces the intro
+  shot (find_shot keeps the shot's own next_shot chain; construct_active_shot
+  takes per player the INTRO shot with its focus and that shot's next_shot);
+  game.dta pick_intro sets the clock to minus the shot's duration_seconds,
+  which for a BandCamShot is frames / 30 + 0.0425 plus its next shot's
+  (0x822D6560, recursive on +0x188). The port took the first shot's 20
+  frames: coop_intro_guitarist.shot ran 0.67 s, then the VENUE track cut in;
+  now coop_intro_guitarist.shot + coop_intro_guitarist_freeze.shot, 2.585 s.
+  Every BandCamShot's targets apply as the shot starts (the intro's too:
+  intro_guitar, teleports, freeze after freeze_delay, return to the place
+  before the shot) [I: RB 0x822D8108 not traced for freeze / return]. The
+  chain is picked when a song is loaded and the world draws before the clock
+  (the game's first frames showed no shot / the venue's load shot).
+  gem_track.dta play_intro's delay is 0.25 x index + 0.05 s when
+  $game.play_mode is coop (every solo mode), 0.55 s only for h2h; the port
+  gave a solo player 0.55 s, so the HUD's meters stood half a second without
+  the track. A shot without its own PostProc after one with it (the freeze's
+  intro_test.pp) goes to the VENUE override or ProFilm_a.pp when start_shot
+  selected nothing (the port's start_shot did not reach that branch; the
+  grey freeze look stayed all song).
+- **Measured:** walk quickplay's intro check (App::rbIntroErrors: frames
+  before the clock and until 0 show only the chain's shots, in order, each
+  within 2 frames + 50 ms of its place, the clock at minus the chain): 0
+  errors (qp solo: coop_intro-venue.shot 6.709 s); GD05_INTRO_LEGACY=1:
+  FAILED (no chain). --song inbloom: chain 2.585 s (was 0.667), the freeze
+  shot from -1920 ms, the first VENUE shot at 0.
+- **Undo:** App::rbIntroShots / recordShotSpan, CameraDirector::playSequence,
+  Band::rbShotStart, rbIntroAt (all: GD05_INTRO_LEGACY=1).
+
+## D99
+- **What (2026-11-13, GD05-096, g5b):** smasher_fx.grp is drawn: it is
+  where smasher_plate.dta's setup_draworder collects every smasher's
+  effects.grp (after_gems) [C data]; the track hid it with the event
+  effects (bass superstreak, unison hit) since GD05-070 [I there], so every
+  hit's radial_flare / shockwave / debris / broken glass / gem caps were
+  launched (rb_fx_hits_no_flame 0) and never drawn. Walk counter
+  rb_fx_hits_unseen_pct: hits with no smasher-effect particle drawn within
+  100 ms.
+- **Measured:** quickplay 18 of 18 hits seen (81,652 particles), rb_guitar_none
+  86 of 86 (339,374); GD05_SMASHFX_LEGACY=1: 0 seen (FAILED).
+- **Undo:** RbTrackView::draw's hide list (GD05_SMASHFX_LEGACY=1).
+
+## D100
+- **What (2026-11-13, GD05-096, g5b):** the track's solo triggers:
+  player.dta solo_start / solo_end fire the track's guitar_solo_start.trig /
+  guitar_solo_stop.trig [C data]; the port only ran the HUD's
+  player_feedback solo. The track system's triggers (TrackDir) and which
+  the port fires: intro, reset, star_deploy / star_stop_deploy,
+  spotlight_phrase_success, guitar_solo_start / stop (now); not fired:
+  3x_ / 4x_deploy and stop_deploy, BassSuperStreak_ON / OFF,
+  unison_phrase_success, enter_coda, bre_success, retract / win_retract /
+  immediate_retract, spotlight_fail(_guilty), indv_player_warning(_off),
+  solo_hit / solo_reset, dynamic_gem_activate, kick_drummer / kick_neighbor,
+  fill_hit_1..3 / drum_fill_reset, bfb_*. Smashers (gem_smasher):
+  hit, hit_bonus, break, burn, burn_bonus, stop_burn, miss, reset,
+  spotlight_phrase_success fired; big_rock_hit / big_rock_burn,
+  BRE_final_gem_hit, finger_tap(_bonus), hit_fill, hit_drums / hit_cymbals,
+  drumfill_complete_hit, break_bonus not.
+- **Undo:** RbTrackView::fxEvents' solo (GD05_TRACKFX_LEGACY=1).

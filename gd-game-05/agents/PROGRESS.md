@@ -1717,3 +1717,32 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   darker than the preset that used to stay stuck; GD05_INTRO_LEGACY=1
   GD05_VENUE_TEXT_LEGACY=1 gives the old reading (arena_04 58.8). Open:
   the venues' luma against the movies (GD05-069 / 095).
+
+## 2026-11-13: song start, strike line, track effects (g5b: GD05-096 / 098)
+
+- **Song start (GD05-098, D98) [C data + C]:** the intro runs the shot's
+  next_shot chain with the clock at minus its duration_seconds (frames / 30
+  + 0.0425 per shot): --song inbloom coop_intro_guitarist +
+  coop_intro_guitarist_freeze 2.585 s (was 0.667 s, then a hard cut); every
+  BandCamShot's targets as it starts (the guitarist's intro_guitar, the
+  teleports, the freeze frame, return); the chain picked before the game's
+  first world frame; the track's intro 0.05 s after on_extend for a solo
+  player (was 0.55 s: meters without the highway); the freeze's grey
+  intro_test.pp no longer stays all song. Walk quickplay: intro check 0
+  errors (qp solo: coop_intro-venue.shot 6.709 s); GD05_INTRO_LEGACY=1 fails.
+- **Strike line (GD05-096, D99):** smasher_fx.grp (the smashers'
+  effects.grp after the gems) was hidden since GD05-070: the hit flares,
+  shockwaves, glass and gem caps launched but never drew. Now drawn:
+  quickplay 18 / 18 hits seen within 100 ms (81,652 particles),
+  rb_guitar_none 86 / 86; GD05_SMASHFX_LEGACY=1: 0.
+- **Track effects (D100):** the TrackDir / gem_smasher triggers listed with
+  fired / not; guitar_solo_start / stop.trig now fire on solos.
+- **Camera in the drum kit (30 s inbloom):** coop_d_c07.shot (NORMAL drums
+  closeup, VENUE note 60 with the drums focus): camera (45.7, -21.0, 59.7),
+  11 units above the stage behind the drummer's left side, near 10, target
+  player_drum0 without a subpart (the character's root on the floor). The
+  port follows the shot's data; not changed: whether RB aims a
+  subpart-less character target at its root or its bounding centre
+  (0x82226800 region) is not read [I].
+- **Not done:** the freeze frame's name / instrument labels (worldbase.dta
+  name_*.lbl), the other track triggers of D100, venue look (GD05-069).
