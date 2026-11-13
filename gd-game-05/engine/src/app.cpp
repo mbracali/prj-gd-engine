@@ -3256,6 +3256,13 @@ int App::gameCounter(int player, const std::string& key) const {
     // GD05-045: the fret board's effects (render/rb_track_view.h FxStats).
     if (key == "rb_fx_hits") return RbTrackView::fxStats().hits;
     if (key == "rb_fx_hits_no_flame") return RbTrackView::fxStats().hitsNoFx;
+    if (key == "rb_fx_hits_seen") return RbTrackView::fxStats().hitsSeen;
+    if (key == "rb_fx_hits_unseen_pct") {
+        const auto& f = RbTrackView::fxStats();
+        const int n = f.hitsSeen + f.hitsUnseen;
+        if (SDL_getenv("GD05_FXLOG") || walk_) SDL_Log("smasher fx: %d hits, %d seen drawn within 100 ms, %d not; %ld particles drawn", f.hits, f.hitsSeen, f.hitsUnseen, f.fxParticlesDrawn);
+        return n ? int(std::lround(100.0 * f.hitsUnseen / n)) : 100;
+    }
     if (key == "rb_fx_deploys") return RbTrackView::fxStats().deploys;
     if (key == "rb_fx_deploys_no_visual") return RbTrackView::fxStats().deploysNoFx;
     if (key == "rb_fx_glows") return RbTrackView::fxStats().glows;
@@ -3462,6 +3469,20 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
         director_->onShotStarted = [this](const scene::CamShot& s) {
             world_->crowd().startShot(&s);
             if (SDL_getenv("GD05_SHOTLOG")) SDL_Log("shot started %s at %.0f ms (band %d), PostProc %s", s.name.c_str(), double(lastT_), band_ ? 1 : 0, director_->postProc() ? director_->postProc()->name.c_str() : "-");
+            if (SDL_getenv("GD05_SHOTLOG2")) {
+                for (const auto& k : s.keyframes) {
+                    std::string tg;
+                    for (const auto& t : k.targets) tg += " " + t.object + "/" + t.subpart;
+                    SDL_Log("  key so %.2f %.2f rot fwd %.2f %.2f %.2f dur %.0f blend %.0f fov %.2f pos %.1f %.1f %.1f parent %s/%s focal %s/%s targets%s", double(k.screenOffset[0]), double(k.screenOffset[1]), double(k.xfm.rot[3]), double(k.xfm.rot[4]), double(k.xfm.rot[5]), double(k.duration), double(k.blend), double(k.fieldOfView),
+                            double(k.xfm.pos[0]), double(k.xfm.pos[1]), double(k.xfm.pos[2]), k.parent.object.c_str(), k.parent.subpart.c_str(), k.focalTarget.object.c_str(), k.focalTarget.subpart.c_str(), tg.c_str());
+                }
+                if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(&s))
+                    for (const auto& tg : bs->bandTargets)
+                        SDL_Log("  band target %s anim '%s' teleport %d to %.1f %.1f %.1f", tg.target.c_str(), tg.anim.c_str(), int(tg.teleport), double(tg.to.pos[0]), double(tg.to.pos[1]), double(tg.to.pos[2]));
+                std::string hl;
+                for (const auto& h : s.hideList) hl += " " + h;
+                SDL_Log("  near %.2f far %.0f hide%s show %zu", double(s.nearPlane), double(s.farPlane), hl.c_str(), s.showList.size());
+            }
             static const bool legacy = SDL_getenv("GD05_INTRO_LEGACY") != nullptr, noTeleport = SDL_getenv("GD05_NO_TELEPORT") != nullptr;
             if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(&s); bs && band_ && !rbShots_.empty() && (!legacy || rbShotsPicking_))
                 band_->rbShotStart(*bs, !noTeleport);

@@ -2268,6 +2268,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("counter:rb_track_frames:30");
         check("counter:band_members:4");
         at("endgame_waiting_screen", 90000);  // modes.dta win_screen (the default mode)
+        // GD05-096: the hits' effects (hit flares, shockwaves, glass) drawn:
+        // particles from the smashers' effects.grp within 100 ms of each hit
+        // (GD05_SMASHFX_LEGACY=1, smasher_fx.grp hidden as before: 100 %).
+        check("counter:rb_fx_hits_seen:10");
+        check("counter_max:rb_fx_hits_unseen_pct:5");
         // GD05-058: RB's own HUD (render/rb_hud_view.h): each element drawn alone
         // lands within 4 px of the box its milo data gives; the score, the
         // multiplier, the Overdrive and crowd meters show the players' values.
@@ -2425,6 +2430,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // smashers, a sustain burned, the deploy showed its spotlight.
         check("counter:rb_fx_hits:20");
         check("counter_max:rb_fx_hits_no_flame:0");
+        // GD05-096: the hits' effects are drawn, not only launched: particles
+        // from the smashers' effects.grp within 100 ms of each hit
+        // (GD05_SMASHFX_LEGACY=1, smasher_fx.grp hidden: 100 %).
+        check("counter_max:rb_fx_hits_unseen_pct:5");
         check("counter:rb_fx_glows:1");
         check("counter:rb_fx_burns:1");
         check("counter:rb_fx_deploys:1");

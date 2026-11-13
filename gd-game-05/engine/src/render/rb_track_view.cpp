@@ -684,6 +684,7 @@ int RbTrackView::fxLaunch(FxDir& fx, const scene::Object* launcher) {
 // over: stop_deploy (star_stop_deploy.trig).
 void RbTrackView::fxEvents(const PlayerView& player, float nowMs) {
     FxStats& st = fxStats();
+    if (hitsPending_ && (nowMs - hitsPendingMs_ > 100.0f || nowMs < hitsPendingMs_)) st.hitsUnseen += hitsPending_, hitsPending_ = 0;
     const Chart* chart = player.chart;
     if (chart != seenChart_ || !chart || gemSeen_.size() != chart->gems.size()) {
         seenChart_ = chart;
@@ -721,6 +722,8 @@ void RbTrackView::fxEvents(const PlayerView& player, float nowMs) {
                     }
                 ++st.hits;
                 if (fxLaunchedNow_ == 0) ++st.hitsNoFx;
+                if (!hitsPending_) hitsPendingMs_ = nowMs;
+                ++hitsPending_;
                 if (combo) fxTrigger(trackFx_, "spotlight_phrase_success.trig", nowMs), ++st.phrases;
             }
             const bool missed = !struck && player.missed && player.missed(i);
@@ -847,6 +850,15 @@ bool RbTrackView::drawPart(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, co
         return true;
     }
     if (g->name == "smasher_fx.grp") {
+        if (static bool once = false; !once && SDL_getenv("GD05_TRACKLOG")) {
+            once = true;
+            std::string l;
+            for (const std::string& n : g->objects) {
+                const scene::Object* o = g->dir->resolve(n);
+                l += " " + n + (o ? "(" + o->cls + (pose_.showing(o) ? "" : ", hidden") + ")" : "(missing)");
+            }
+            SDL_Log("RB track: smasher_fx.grp:%s", l.c_str());
+        }
         for (const std::string& n : g->objects)
             if (const scene::Object* o = g->dir->resolve(n); o && o != g)
                 if (auto* sub = o->as<scene::Group>()) drawGroup(mr, cache, sub, env, 2);
@@ -929,10 +941,14 @@ void RbTrackView::drawLastTails(gfx::Renderer& r, gfx::SceneCache& cache, bool s
 // each smasher's effects.grp into after_gems.grp, drawn after the gems).
 void RbTrackView::drawSmasherFx(gfx::MaterialRenderer& mr, gfx::SceneCache& cache) {
     drawParticles_ = true;
+    const int before = particles_ ? particles_->drawnParticles() : 0;
     for (const FxDir& fx : smashFx_)
         if (const scene::Object* e = fx.dir ? fx.dir->get("effects.grp") : nullptr)
             if (auto* g = e->as<scene::Group>()) drawGroup(mr, cache, g, trackEnv_, 1);
     drawParticles_ = false;
+    const int drawn = (particles_ ? particles_->drawnParticles() : 0) - before;
+    FxStats& st = fxStats();
+    if (drawn > 0) st.fxParticlesDrawn += drawn, st.hitsSeen += hitsPending_, hitsPending_ = 0;
 }
 
 void RbTrackView::setEnv(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Environ* env) {
@@ -1255,8 +1271,13 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
     // static.grp holds every instrument's parts; the other instrument's are
     // hidden, and the effects that show on events (the bass superstreak,
     // the Overdrive spotlight, a Unison phrase hit) until those are done [I].
+    // smasher_fx.grp is not one of them: it is where smasher_plate.dta's
+    // setup_draworder puts every smasher's effects.grp (after_gems), the hit
+    // flares, shockwaves and debris [C data]; hidden here since GD05-070 it
+    // drew none of them (GD05-096). GD05_SMASHFX_LEGACY=1: hidden as before.
+    static const bool fxLegacy = SDL_getenv("GD05_SMASHFX_LEGACY") != nullptr;
     for (const char* n : {"bass_superstreak_plane.mesh", "unison_phrase_hit.grp", "smasher_fx.grp"})
-        if (const scene::Object* o = obj(n)) pose_.setShowing(o, false);
+        if (const scene::Object* o = obj(n); o && (fxLegacy || std::string(n) != "smasher_fx.grp")) pose_.setShowing(o, false);
     // The effects (GD05-045): reset at the song's start (and a restart),
     // then this frame's events and the running anims / particles.
     tempo_ = &song.tempo;  // before the reset: never an older song's (GD05-086)

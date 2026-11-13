@@ -65,6 +65,10 @@ public:
     // smashers launched no particle, deploys that showed no deploy visual.
     struct FxStats {
         int hits = 0, hitsNoFx = 0, misses = 0, burns = 0, deploys = 0, deploysNoFx = 0, phrases = 0, glows = 0;
+        // GD05-096: hits whose smasher effects drew particles within 100 ms
+        // (seen) or not (unseen); particles the smashers' effects drew.
+        int hitsSeen = 0, hitsUnseen = 0;
+        long fxParticlesDrawn = 0;
     };
     static FxStats& fxStats();
 
@@ -231,6 +235,8 @@ private:
     bool drawParticles_ = false;
     const TempoMap* tempo_ = nullptr;  // the song's (draw), for the beat rates
     int fxLaunchedNow_ = 0;  // particles launched by the triggers being fired
+    int hitsPending_ = 0;    // hits not yet seen drawn (fxStats)
+    float hitsPendingMs_ = 0;
     float lastFxMs_ = -1e30f;
     // What the view saw last frame (the events are its changes).
     std::vector<uint8_t> gemSeen_;  // bit 0 struck, 1 missed
