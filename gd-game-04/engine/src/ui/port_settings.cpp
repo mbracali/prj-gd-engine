@@ -30,10 +30,14 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         // (startupGraphicsBackend / startupAudioBackend in app.h); no mode
         // changes them. Only what this build offers (no OpenGL on macOS, rule
         // 7): another saved value is dropped on load, a set refused.
-#ifdef __APPLE__
+        // The first value is the default (GDALL-050, owner 11-13): Vulkan on
+        // Windows and Linux (Steam Deck too), local on macOS and Android.
+#if defined(__APPLE__)
         {"graphics_backend", {"local", "sdl3", "vulkan"}},
-#else
+#elif defined(__ANDROID__)
         {"graphics_backend", {"local", "sdl3", "vulkan", "opengl3"}},
+#else
+        {"graphics_backend", {"vulkan", "local", "sdl3", "opengl3"}},
 #endif
         {"audio_backend", {"local", "miniaudio", "openal", "faudio"}},
         {"internal_res", {"0", "720", "800", "900", "1080", "1440", "2160"}},
@@ -194,6 +198,11 @@ void EnhancedStore::load(const std::string& dir) {
             // none and original both become Original (owner 11-04 doc 1.3:
             // the doubled bloom burnt the stage lights white).
             if (k == "bloom" && version < 2 && (value == "none" || value == "original")) value = "original";
+            // Version 3 (GDALL-050, owner 11-13): Vulkan became the default
+            // graphics backend on Windows / Linux; an older file's "local"
+            // (the old default) takes the new default once. Local picked
+            // afterwards stays (the file is version 3 then).
+            if (k == "graphics_backend" && version < 3 && value == "local") value = enhancedDefault(k);
             if (s && enhancedValid(*s, value)) values_[k] = value;
         }
     } catch (const std::exception& e) {
@@ -216,7 +225,7 @@ void EnhancedStore::set(const std::string& key, const std::string& value) {
 void EnhancedStore::save() const {
     if (dir_.empty()) return;
     Json root = Json::object(), settings = Json::object();
-    root.set("version", Json::number(2));
+    root.set("version", Json::number(3));  // 3: Vulkan the default graphics backend (GDALL-050)
     for (const auto& [k, v] : values_) settings.set(k, Json::string(v));
     root.set("settings", settings);
     std::error_code ec;

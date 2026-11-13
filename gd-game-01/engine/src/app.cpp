@@ -164,6 +164,18 @@ std::map<std::string, Json> profileValues(bool deck) {
     return d;
 }
 
+// The graphics backend a fresh start uses (GDALL-050, owner 11-13): Vulkan on
+// Windows and Linux (Steam Deck too), local on macOS and Android.
+#if !defined(__APPLE__) && !defined(__ANDROID__)
+constexpr const char* kDefaultGraphicsBackend = "vulkan";
+#else
+constexpr const char* kDefaultGraphicsBackend = "local";
+#endif
+// enhanced.json's settings_version: 2 = Vulkan became the default on Windows /
+// Linux (GDALL-050); a file without it (or older) has its "local" graphics
+// backend (the old default) turned into the new default once.
+constexpr int kEnhancedVersion = 2;
+
 // Enhanced Settings defaults (keys of enhanced.json): the build's profile
 // over the rest. XInput controllers and Rock Band guitars are always on (no
 // setting since 1.1.7).
@@ -187,8 +199,9 @@ const std::map<std::string, Json>& enhancedDefaults() {
         {"video_offset", Json::string("0")},
         // Enhanced > Performance > Graphics / Audio backend (GDCORE-006): read
         // once at start-up (startupGraphicsBackend / startupAudioBackend); no
-        // Mode button sets them.
-        {"graphics_backend", Json::string("local")}, {"audio_backend", Json::string("local")},
+        // Mode button sets them. Graphics: Vulkan on Windows / Linux (GDALL-050),
+        // local elsewhere.
+        {"graphics_backend", Json::string(kDefaultGraphicsBackend)}, {"audio_backend", Json::string("local")},
         };
         for (auto& [k, v] : profileValues(false)) m[k] = v;
         return m;
@@ -263,6 +276,12 @@ void migrateEnhanced(Json& e) {
     map("star_blur", {{"high", "strong"}});
     map("more_lights", {{"off", "none"}, {"subtle", "1.5x"}, {"strong", "2x"}});
     map("light_dust", {{"true", "1.5x"}, {"false", "none"}});
+    // GDALL-050: a file older than settings_version 2 kept "local" as the old
+    // default; it takes the new default (Vulkan on Windows / Linux) once. A
+    // player who picks local afterwards keeps it (the file is version 2 then).
+    const bool older = !e.has("settings_version") || e["settings_version"].num() < kEnhancedVersion;
+    if (older && e.has("graphics_backend") && e["graphics_backend"].type == Json::Type::String && e["graphics_backend"].s == "local")
+        e.set("graphics_backend", Json::string(kDefaultGraphicsBackend));
     // XInput and Rock Band guitars are always on now; Ground Fog and Light
     // Streaks were removed (1.1.7): their saved values are dropped.
     // A backend this build does not offer (OpenGL3 copied from another OS to
@@ -275,6 +294,7 @@ void migrateEnhanced(Json& e) {
     Json kept = Json::object();
     for (const auto& [k, v] : e.o)
         if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks" && offered(k, v)) kept.set(k, v);
+    kept.set("settings_version", Json::number(kEnhancedVersion));
     e = std::move(kept);
 }
 // Enhanced > Performance > Graphics / Audio backend as the game started with
@@ -293,7 +313,7 @@ StartupBackends& startupBackends() {
 void latchStartupBackends(const Json& e) {
     StartupBackends& b = startupBackends();
     b.latched = true;
-    b.graphics = e.has("graphics_backend") ? e["graphics_backend"].str() : "local";
+    b.graphics = e.has("graphics_backend") ? e["graphics_backend"].str() : kDefaultGraphicsBackend;
     b.audio = e.has("audio_backend") ? e["audio_backend"].str() : "local";
 }
 // Number settings (as strings, ms) and their range.
@@ -1845,6 +1865,7 @@ void App::postFrameExtras(PostFrame& pf, bool song) {
 }
 
 void App::saveEnhanced() {
+    enhanced_.set("settings_version", Json::number(kEnhancedVersion));  // GDALL-050: no second migration
     std::ofstream out(enhancedPath());
     out << enhanced_.dump(2) << "\n";
     if (!out) SDL_Log("enhanced settings: could not save %s", enhancedPath().c_str());
@@ -1927,6 +1948,7 @@ void App::exportUserFiles(const std::string& dir) {
     if (!base.empty() && base.back() != '/' && base.back() != '\\') base += '/';
     Json all = Json::object();
     for (const auto& [key, def] : enhancedDefaults()) all.set(key, enhanced_.has(key) ? enhanced_[key] : def);
+    all.set("settings_version", Json::number(kEnhancedVersion));
     std::ofstream out(base + kSettingsFile);
     out << all.dump(2) << "\n";
     bool ok = bool(out);
@@ -2984,10 +3006,33 @@ int inputSelfTest() {
           "1.1.6 enhanced.json migrated");
     for (const auto& [k, v] : old.o)
         if (auto c = enhancedChoices().find(k); c != enhancedChoices().end()) check(v.type == Json::Type::String && c->second.count(v.s), "migrated value valid");
-    // GDCORE-006: Graphics / Audio backend default local; no Mode button sets
-    // them; a value this build does not offer is dropped at load.
-    check(enhancedDefaults().at("graphics_backend").str() == "local" && enhancedDefaults().at("audio_backend").str() == "local",
-          "backends default local");
+    // GDCORE-006 / GDALL-050: graphics default Vulkan on Windows / Linux, local
+    // elsewhere; audio default local; no Mode button sets them; a value this
+    // build does not offer is dropped at load.
+#if !defined(__APPLE__) && !defined(__ANDROID__)
+    const std::string wantGraphics = "vulkan";
+#else
+    const std::string wantGraphics = "local";
+#endif
+    check(enhancedDefaults().at("graphics_backend").str() == wantGraphics && enhancedDefaults().at("audio_backend").str() == "local",
+          ("backends default: graphics " + wantGraphics + ", audio local").c_str());
+    {
+        StartupBackends saved = startupBackends();
+        latchStartupBackends(Json::object());
+        check(startupBackends().graphics == wantGraphics, ("no saved backend: graphics " + wantGraphics).c_str());
+        startupBackends() = saved;
+    }
+    // GDALL-050: an old file's local (the old default) takes the new default once;
+    // local picked in a version 2 file stays.
+    Json mig = Json::parse(R"({"graphics_backend":"local","audio_backend":"local"})");
+    migrateEnhanced(mig);
+    check(mig["graphics_backend"].str() == wantGraphics && mig["audio_backend"].str() == "local" && mig["settings_version"].num() == 2,
+          ("old enhanced.json: local graphics -> " + wantGraphics).c_str());
+    migrateEnhanced(mig);
+    check(mig["graphics_backend"].str() == wantGraphics, "migrated twice: same");
+    mig = Json::parse(R"({"settings_version":2,"graphics_backend":"local"})");
+    migrateEnhanced(mig);
+    check(mig["graphics_backend"].str() == "local", "local picked in a new enhanced.json stays");
     for (const char* m : {"steam_deck", "original", "clean", "max_hd", "max_4k", "budget", "good_old_days"}) {
         auto p = enhancedPreset(m);
         check(!p.empty() && !p.count("graphics_backend") && !p.count("audio_backend"), "a mode keeps the backends");

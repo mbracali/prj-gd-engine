@@ -201,7 +201,7 @@ components: we will.
 | Controls | Enable Touch Controls | Enables touch controls, and the virtual buttons | On by default only on Steam Deck and Android |
 | Controls | Audio / Video Calibration | Opens our own calibration tool | A button that opens a new screen |
 | *(space)* | | | |
-| Performance & graphics | Graphics backend | local, SDL3, Vulkan, OpenGL3 (`graphics_backend`: `local` / `sdl3` / `vulkan` / `opengl3`; only those the platform runs) | Dropdown, default local; the **first row** of the section; applies on the next start (a change asks Restart Now / Later, see "Backends" below). Selectable on gd-game-01 only for now ([engine-backend-guidelines.md](engine-backend-guidelines.md)) |
+| Performance & graphics | Graphics backend | local, SDL3, Vulkan, OpenGL3 (`graphics_backend`: `local` / `sdl3` / `vulkan` / `opengl3`; only those the platform runs) | Dropdown, default Vulkan on Windows / Linux (Steam Deck too), local elsewhere (GDALL-050; an old settings file's local takes Vulkan once); the **first row** of the section; applies on the next start (a change asks Restart Now / Later, see "Backends" below). Selectable on gd-game-01 only for now ([engine-backend-guidelines.md](engine-backend-guidelines.md)) |
 | Performance & graphics | Audio backend | local, miniaudio, OpenAL, FAudio (`audio_backend`: `local` / `miniaudio` / `openal` / `faudio`) | Dropdown, default local; the **second row** of the section; applies on the next start (Restart Now / Later, as Graphics backend). Selectable on gd-game-01 only for now |
 | Performance & graphics | Screen mode | Windowed, full screen, or full screen without borders | Dropdown |
 | Performance & graphics | Resolution | Keep what we have today | Dropdown |

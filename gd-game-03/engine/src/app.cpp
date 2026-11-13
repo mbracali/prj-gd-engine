@@ -216,7 +216,7 @@ private:
 // enhanced.json once, at the start of App::run (each restart reads it again).
 struct StartupBackends {
     bool latched = false;
-    std::string graphics = "local", audio = "local";
+    std::string graphics = ui::defaultGraphicsBackend(), audio = "local";  // GDALL-050
 };
 StartupBackends& startupBackends() {
     static StartupBackends b;
@@ -2748,6 +2748,7 @@ void App::setEnhancedValue(const std::string& key, const std::string& value) {
 // Written atomically, as the save (ui/career.h).
 void App::saveEnhanced() {
     enhanced_.set("format", Json::string("gd03-enhanced"));
+    enhanced_.set("settings_version", Json::number(ui::kEnhancedVersion));  // GDALL-050: no second migration
     const std::string path = enhancedPath(), tmp = path + ".tmp";
     std::error_code ec;
     if (const std::filesystem::path dir = std::filesystem::path(path).parent_path(); !dir.empty()) std::filesystem::create_directories(dir, ec);
@@ -2824,6 +2825,7 @@ void App::exportUserFiles(const std::string& dir) {
     if (!base.empty() && base.back() != '/' && base.back() != '\\') base += '/';
     Json all = Json::object();
     all.set("format", Json::string("gd03-enhanced"));
+    all.set("settings_version", Json::number(ui::kEnhancedVersion));
     for (const ui::EnhancedSetting& e : ui::enhancedSettings()) all.set(e.key, Json::string(enhancedValue(e.key)));
     bool ok = false;
     {

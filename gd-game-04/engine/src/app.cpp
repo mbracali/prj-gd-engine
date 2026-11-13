@@ -75,7 +75,7 @@ bool envOn(const char* name) {
 // enhanced.json once, at the start of App::run (each restart reads it again).
 struct StartupBackends {
     bool latched = false;
-    std::string graphics = "local", audio = "local";
+    std::string graphics = enhancedDefault("graphics_backend"), audio = "local";  // GDALL-050: Vulkan on Windows / Linux
 };
 StartupBackends& startupBackends() {
     static StartupBackends b;
@@ -91,7 +91,7 @@ void latchStartupBackends(const std::string& dir) {
     EnhancedStore st;
     st.load(dir);
     b.graphics = st.get("graphics_backend"), b.audio = st.get("audio_backend");
-    if (b.graphics.empty()) b.graphics = "local";
+    if (b.graphics.empty()) b.graphics = enhancedDefault("graphics_backend");
     if (b.audio.empty()) b.audio = "local";
 }
 // GD04_AUDIO_BACKEND=<id> (development aid; the walks on each backend) over the latched one.
