@@ -221,6 +221,7 @@ shipped in the universal launcher.
 | GDALL-048 | Enhancement | ❌ | #94: extra cheats: forced multiplier, Star Power always full, hyperspeed in GH1 |  | Owner 11-13 (BUGLIST_20261113.md) |
 | GDALL-049 | Enhancement | ❌ | Faster test suite (owner 11-13: a 30-40 min gd05 gate is too much): a quick tier per game under ~5 min (selftest + the walks that cover the files changed, run in parallel, no full songs where a seek works), the full gate only before a release; songs entered at a seek point; one script that picks the walks from the changed files |  | Owner 11-13 |
 | GDALL-050 | Enhancement | ✅ | Vulkan the default graphics backend on Windows and Linux (Steam Deck too) in every game; macOS / Android keep local (gd05: Vulkan everywhere already, D71) | gd01, gd02, gd03, gd04, gd10: the settings tables' first value (gd01 enhancedDefaults) and the start-up latch's fallback are Vulkan on Windows / Linux; a one-time migration turns an older enhanced.json's "local" (the old default) into Vulkan (gd01 / gd02 / gd03: settings_version 2, gd04 / gd10: version 3), local picked afterwards stays; the fallback to local when Vulkan cannot start is unchanged; self-tests check the default and the migration | Owner 11-13 |
+| GDALL-051 | Enhancement | ❌ | #108: Hyperspeed in GH1 (with #94) and an option for the GH2 note engine in GH1; the Hyperspeed choice kept across games |  | Owner 11-13 |
 
 ## gd-engine-core
 
