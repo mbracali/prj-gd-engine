@@ -1364,6 +1364,9 @@ bool App::typedKey(const SDL_Event& e) {
     return true;
 }
 
+// How far the movie's sound is queued ahead of its clock (the 0.5 s it starts with).
+constexpr double kMovieLead = 0.5;
+
 void App::startMovie(const std::string& file) {
     std::string path = "videos/" + file;
     if (!data_ || !data_->exists(path)) {
@@ -1410,8 +1413,11 @@ void App::startMovie(const std::string& file) {
 void App::movieFrame() {
     Movie& m = *movie_;
     std::vector<int16_t> pcm;
-    if (m.pss->takeAudio(pcm) && m.audio) SDL_PutAudioStreamData(m.audio, pcm.data(), int(pcm.size() * sizeof(int16_t)));
     double elapsed = double(SDL_GetTicksNS() - m.startNs) / 1e9;
+    // The sound kept kMovieLead ahead of the clock: demuxed ahead of the
+    // pictures, which the file puts before their sound (PssMovie::demuxAudioUntil). GD01-323 (#79).
+    m.pss->demuxAudioUntil(uint64_t((elapsed + kMovieLead) * PssMovie::kAudioRate));
+    if (m.pss->takeAudio(pcm) && m.audio) SDL_PutAudioStreamData(m.audio, pcm.data(), int(pcm.size() * sizeof(int16_t)));
     uint64_t target = uint64_t(elapsed * PssMovie::kFrameRate);
     bool changed = false;
     try {
@@ -3138,12 +3144,94 @@ int easyChordsSelfTest(const std::vector<SongInfo>& songs, GameData& data, const
 }
 }  // namespace
 
+// GD01-323 (#79): the intro movie's sound, decoded as App::startMovie /
+// movieFrame feed it, paced at real time (60 frames a second): the PCM must
+// have no jump between samples far above the movie's own, and the queue
+// must never run dry (the device eats 48000 frames a second from the first
+// push; a lead under one device period, kMinLead, is silence: a pop).
+// GD01_MOVIE_WAV=<file> writes the decoded PCM as it was queued.
+static int movieSelfTest(const GameData& data) {
+    const std::string path = "videos/ghintro.pss";
+    if (!data.exists(path)) return std::printf("movie: %s not on the disc, skipped\n", path.c_str()), 0;
+    uint64_t pos = 0;
+    PssMovie pss([&](uint8_t* dst, size_t n) {
+        size_t got = data.readRange(path, pos, dst, n);
+        pos += got;
+        return got;
+    });
+    pss.prefetchAudio(24000);
+    std::vector<int16_t> pcm;
+    constexpr double kTick = 1.0 / 60, kMinLead = 2048;  // SDL's WASAPI / Pulse periods are 480..1024 frames
+    double minLead = 1e30, minLeadAt = 0;
+    size_t next = 0;
+    bool ended = false;
+    for (int k = 0; !ended; ++k) {
+        const double elapsed = k * kTick;
+        pss.demuxAudioUntil(uint64_t((elapsed + kMovieLead) * PssMovie::kAudioRate));  // as movieFrame
+        pss.takeAudio(pcm);
+        const double lead = double(pcm.size() / 2) - elapsed * PssMovie::kAudioRate;
+        if (lead < minLead && !pss.ended()) minLead = lead, minLeadAt = elapsed;
+        const uint64_t target = uint64_t(elapsed * PssMovie::kFrameRate);
+        while (next <= target)
+            if (!pss.nextFrame()) {
+                ended = true;
+                break;
+            } else
+                ++next;
+    }
+    pss.takeAudio(pcm);
+    // Sample jumps: the largest per channel, against the movie's typical (99.9th percentile) step.
+    int worst = 0;
+    size_t worstAt = 0;
+    std::vector<int> steps;
+    steps.reserve(pcm.size());
+    for (size_t i = 2; i < pcm.size(); ++i) {
+        const int d = std::abs(int(pcm[i]) - int(pcm[i - 2]));
+        steps.push_back(d);
+        if (d > worst) worst = d, worstAt = i / 2;
+    }
+    // Steps across the 0x200-byte L / R blocks' edges (every 256 frames) against the rest: a block
+    // edge decoded wrong (dropped, repeated or swapped samples) shows as larger steps there.
+    double edge = 0, inner = 0;
+    size_t edges = 0, inners = 0;
+    for (size_t i = 2; i < pcm.size(); ++i)
+        if ((i / 2) % 256 == 0) edge += steps[i - 2], ++edges;
+        else inner += steps[i - 2], ++inners;
+    edge /= double(std::max<size_t>(edges, 1)), inner /= double(std::max<size_t>(inners, 1));
+    std::printf("movie: mean step at block edges %.0f, elsewhere %.0f\n", edge, inner);
+    std::vector<int> sorted = steps;
+    std::nth_element(sorted.begin(), sorted.begin() + ptrdiff_t(sorted.size() * 999 / 1000), sorted.end());
+    const int p999 = sorted.empty() ? 0 : sorted[sorted.size() * 999 / 1000];
+    std::printf("movie: %s %zu pictures, %.2f s of sound; min queue lead %.0f frames (%.1f ms) at %.2f s; largest step %d at %.3f s "
+                "(99.9%% of steps under %d)\n",
+                path.c_str(), next, double(pcm.size() / 2) / PssMovie::kAudioRate, minLead, minLead * 1000 / PssMovie::kAudioRate, minLeadAt,
+                worst, double(worstAt) / PssMovie::kAudioRate, p999);
+    if (const char* wav = SDL_getenv("GD01_MOVIE_WAV")) {
+        if (FILE* f = std::fopen(wav, "wb")) {
+            auto u32 = [&](uint32_t v) { std::fwrite(&v, 4, 1, f); };
+            auto u16 = [&](uint16_t v) { std::fwrite(&v, 2, 1, f); };
+            const uint32_t bytes = uint32_t(pcm.size() * 2);
+            std::fwrite("RIFF", 1, 4, f), u32(36 + bytes), std::fwrite("WAVEfmt ", 1, 8, f), u32(16), u16(1), u16(2), u32(PssMovie::kAudioRate),
+                u32(PssMovie::kAudioRate * 4), u16(4), u16(16), std::fwrite("data", 1, 4, f), u32(bytes);
+            std::fwrite(pcm.data(), 2, pcm.size(), f);
+            std::fclose(f);
+        }
+    }
+    bool bad = false;
+    if (minLead < kMinLead) bad = true, std::fprintf(stderr, "movie: the sound queue runs under %.0f frames (%.0f)\n", kMinLead, minLead);
+    if (edge > inner * 1.5) bad = true, std::fprintf(stderr, "movie: steps at the block edges %.0f vs %.0f elsewhere\n", edge, inner);
+    if (worst > std::max(16384, p999 * 4)) bad = true, std::fprintf(stderr, "movie: a sample jump of %d at %.3f s\n", worst, double(worstAt) / PssMovie::kAudioRate);
+    return bad ? 1 : 0;
+}
+
 int runSelfTest(const Options& options) {
     std::string path = options.dataPath.empty() ? loadRememberedPath() : options.dataPath;
     if (inputSelfTest()) return 1;
     if (scriptModSelfTest()) return 1;
     try {
         GameData data(path);
+        if (SDL_getenv("GD01_MOVIE_ONLY")) return movieSelfTest(data);  // GD01_MOVIE_ONLY=1: the movie check alone
+        const int movieFailed = movieSelfTest(data);
         Rules rules = loadRules(data);
         auto songs = loadSongs(data);
         std::printf("%u songs in %s; slop %.0f ms, head %d, tail %d\n", unsigned(songs.size()), data.description().c_str(),
@@ -3185,7 +3273,7 @@ int runSelfTest(const Options& options) {
         }
         std::printf("%d gems hit as hammer-ons / pull-offs\n", hopos);
         std::printf(failures ? "%d chart(s) not fully hit\n" : "all charts fully hit\n", failures);
-        return failures ? 1 : 0;
+        return failures || movieFailed ? 1 : 0;
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;

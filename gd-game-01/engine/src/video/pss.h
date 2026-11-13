@@ -43,6 +43,15 @@ public:
     // Demuxes ahead (buffering video too) until at least `frames` stereo
     // frames of audio are buffered or the file ends.
     void prefetchAudio(size_t frames);
+    // Demuxes ahead (buffering video too) until `total` stereo frames of
+    // audio have come out of the file since the start, or the file ends.
+    // The movies interleave their sound behind their pictures (ghintro.pss:
+    // up to 2.3 s by its end), so a player that only demuxes for the next
+    // picture runs its sound dry; the PS2 player reads ahead into its
+    // buffers [I]. GD01-323 (#79).
+    void demuxAudioUntil(uint64_t total);
+    // Stereo frames of audio demuxed since the start.
+    uint64_t audioFramesDemuxed() const { return audioTotal_; }
 
     // Sample rate written in the SShd header (0 until seen); informational only.
     int headerAudioRate() const { return headerRate_; }
@@ -67,5 +76,6 @@ private:
     size_t interleave_ = 0x200;
     std::vector<uint8_t> block_;        // partial L/R block pair
     std::vector<int16_t> audio_;
+    uint64_t audioTotal_ = 0;  // stereo frames demuxed since the start
     int headerRate_ = 0;
 };
