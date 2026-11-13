@@ -1634,6 +1634,7 @@ void Band::update(double seconds, double beats, const std::array<float, 3>* came
         if (startsWith(m->type, "rb_") && entered_) rbPoll(*m);
     }
     for (auto& m : members_) {
+        if (m->frozen && seconds >= m->frozenAt) continue;  // the shot's freeze frame: the pose held
         chr::Character& c = *m->character;
         chr::Skeleton& sk = c.skeleton();
         // What the world animates on the character's objects (the drum kit's

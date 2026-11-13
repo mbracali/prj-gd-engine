@@ -2257,6 +2257,13 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         endMs_ = 30000;  // the song ends early (the walk's end time; GD05_WALK_END overrides)
         if (const char* e = SDL_getenv("GD05_WALK_END")) endMs_ = float(std::atof(e));
         rbQuickplay();
+        // GD05-098: the song's start as RB's script runs it (App::rbIntroErrors):
+        // the intro chain's shots in order with their lengths, nothing else
+        // first, the clock from minus the chain (GD05_INTRO_LEGACY=1 fails it).
+        check("song_clock_running", 30000);
+        wait(300);
+        check("counter:rb_intro_shots:1");
+        check("counter_max:rb_intro_errors:0");
         wait(3000);
         check("counter:rb_track_frames:30");
         check("counter:band_members:4");

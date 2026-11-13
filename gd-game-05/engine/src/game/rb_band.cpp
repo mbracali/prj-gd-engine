@@ -831,6 +831,28 @@ void Band::rbShotTargets(const std::vector<std::pair<std::string, std::string>>&
         if (Member* m = member(slot); m && m->character) m->character->teleport(to);
 }
 
+void Band::rbShotStart(const scene::BandCamShot& shot, bool teleports) {
+    for (auto& m : members_) {
+        m->frozen = false;
+        if (m->hasReturn && m->character) m->character->teleport(m->returnTo);
+        m->hasReturn = false;
+    }
+    std::vector<std::pair<std::string, std::string>> groups;
+    std::vector<std::pair<std::string, scene::Xfm>> moves;
+    for (const auto& tg : shot.bandTargets) {
+        if (!tg.anim.empty()) groups.emplace_back(tg.target, tg.anim);
+        Member* m = member(tg.target);
+        if (tg.teleport && teleports) {
+            if (tg.returns && m && m->character) m->hasReturn = true, m->returnTo = m->character->xfm();
+            moves.emplace_back(tg.target, tg.to);
+        }
+        if (tg.freeze && m) m->frozen = true, m->frozenAt = seconds_ + double(tg.freezeDelay);
+        if (log) SDL_Log("band: shot %s target %s (%s) group '%s' teleport %d freeze %d at %.3f", shot.name.c_str(), tg.target.c_str(), m ? "found" : "no member",
+                         tg.anim.c_str(), int(tg.teleport), int(tg.freeze), m ? m->frozenAt : 0.0);
+    }
+    rbShotTargets(groups, moves);
+}
+
 // ---- measurements (GD05_BANDCHECK=1) -----------------------------------------
 //
 // Objective checks of the band, frame by frame (the owner's rule: measured,

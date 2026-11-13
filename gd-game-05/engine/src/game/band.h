@@ -13,6 +13,7 @@
 #include "char/facefx.h"
 #include "char/patch.h"
 #include "scene/milo.h"
+#include "scene/world_objects.h"
 #include "scene/objects.h"
 #include "script/script.h"
 
@@ -145,7 +146,19 @@ public:
         uint32_t rbCurPlay = 0;
         bool rbPlaying = true;
         std::vector<std::unique_ptr<ScriptObject>> rbParts;  // the parsers' sinks (rb_band.cpp)
+        // A BandCamShot target's freeze (the intro's freeze frame): the pose
+        // held from frozenAt (world seconds) on; return: the place to go back
+        // to when the next shot starts.
+        bool frozen = false;
+        double frozenAt = 0;
+        bool hasReturn = false;
+        scene::Xfm returnTo;
     };
+    // A BandCamShot's start for its targets (RB 0x822D8108) [C data]: the
+    // members' clip groups and teleports (rbShotTargets), each target's
+    // freeze (after freeze_delay seconds) and return; the members a shot
+    // before froze or moved with return go back first.
+    void rbShotStart(const scene::BandCamShot& shot, bool teleports = true);
     // Rock Band's BandCamShot start (RB 0x822D8108) [C data; I: no IK, props,
     // fast-forward or return]: each target's member plays its clip group
     // (stand, closeup, sit ...) and, with teleport, moves to the target's `to`.
