@@ -57,6 +57,11 @@ public:
     // ui camera (config/default.dta (ui (cam (fov 34.516) (y -768) (near 1)
     // (far 1000)))).
     Camera camera() const;
+    // A camera the panel's code picks in place of the PanelDir's (RB's
+    // select_cam: a WorldDir panel drawn through one of its CamShots);
+    // cleared with clearCameraOverride.
+    void setCameraOverride(const Camera& c) { camOverride_ = c, hasCamOverride_ = true; }
+    void clearCameraOverride() { hasCamOverride_ = false; }
     std::string cameraName() const;
     // GH2's ui camera (config/default.dta), for panels without one.
     static Camera defaultCamera();
@@ -322,6 +327,8 @@ private:
     TextDrawer texts_;
     ScenePose pose_;
     scene::Milo* milo_ = nullptr;
+    Camera camOverride_;
+    bool hasCamOverride_ = false;
     std::vector<scene::Milo*> subdirs_;
     std::map<std::string, std::string> overrides_;
     std::map<std::string, float> wrapWidths_;  // set_wrap_width

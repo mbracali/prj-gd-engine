@@ -645,7 +645,7 @@ void CameraDirector::endShot() {
 
 // ---- playback ------------------------------------------------------------------------
 
-bool CameraDirector::targetPoint(const World& world, const scene::CamTarget& t, std::array<float, 3>& out) {
+bool CameraDirector::worldTargetPoint(const World& world, const scene::CamTarget& t, std::array<float, 3>& out) {
     if (t.object.empty()) return false;
     // A band member and its subpart (a bone of its directory).
     if (world.band) {
@@ -666,6 +666,24 @@ bool CameraDirector::targetPoint(const World& world, const scene::CamTarget& t, 
     return true;
 }
 
+namespace {
+// The venue's world as a shot's scene (CameraDirector::targetPoint, the
+// band's and the venue's objects, the venue's TransAnims).
+class WorldShotScene : public ShotScene {
+public:
+    explicit WorldShotScene(const World& w) : w_(w) {}
+    bool targetPoint(const scene::CamTarget& t, std::array<float, 3>& out) const override { return CameraDirector::worldTargetPoint(w_, t, out); }
+    bool parentXfm(const scene::CamTarget& t, scene::Xfm& out) const override {
+        const bool mp = w_.venue().variant() != VenueVariant::Single;
+        return (w_.band && w_.band->objectXfm(t.object, t.subpart, out)) || venueObjectXfm(w_, t.object, mp, out);
+    }
+    const scene::TransAnim* path(const std::string& name) const override { return w_.venue().find<scene::TransAnim>(name); }
+
+private:
+    const World& w_;
+};
+}  // namespace
+
 // 0x82226988 [C]: one keyframe's camera.
 // - Its targets' mean (0x82226800), low-passed into the keyframe's filtered
 //   target: once a 60 Hz frame by filter x min(d, 1), d the distance on the
@@ -683,14 +701,14 @@ bool CameraDirector::targetPoint(const World& world, const scene::CamTarget& t, 
 // - `look` (the two keyframes aim at different targets): turned to the
 //   filtered target with the transform's own up row (0x82224BD8).
 // Other frame rates take the same per-second rate: (1 - a)^(dt x 60).
-void CameraDirector::keyframeXfm(const World& world, const scene::CamShot& shot, ShotState* st, size_t k, float frame,
+void CameraDirector::keyframeXfm(const ShotScene& world, const scene::CamShot& shot, ShotState* st, size_t k, float frame,
                                  const Framing* prev, float dt, bool look, KeyframeCam& out) {
     const auto& kf = shot.keyframes[k];
     V3 sum{0, 0, 0};
     int n = 0;
     for (const auto& t : kf.targets) {
         V3 p;
-        if (targetPoint(world, t, p)) sum = {sum[0] + p[0], sum[1] + p[1], sum[2] + p[2]}, ++n;
+        if (world.targetPoint(t, p)) sum = {sum[0] + p[0], sum[1] + p[1], sum[2] + p[2]}, ++n;
     }
     out.hasTarget = n > 0;
     const V3 raw = n > 0 ? V3{sum[0] / float(n), sum[1] / float(n), sum[2] / float(n)} : V3{0, 0, 0};
@@ -718,19 +736,17 @@ void CameraDirector::keyframeXfm(const World& world, const scene::CamShot& shot,
     scene::Xfm& x = out.xfm;
     x = kf.xfm;
     if (!shot.path.empty())
-        if (auto* path = world.venue().find<scene::TransAnim>(shot.path)) {
+        if (auto* path = world.path(shot.path)) {
             const float length = shot.lengthFrames();
             float u = length > 0 ? std::clamp(frame / length, 0.0f, 1.0f) : 0.0f;
             if (shot.pathEase != 0) u = sigmoid(u, shot.pathEase);
             x = scene::compose(shot.keyframes[0].xfm, evalPath(*path, gfx::ScenePose::endFrame(path) * u));
         }
     if (!kf.parent.object.empty()) {
-        const bool mp = world.venue().variant() != VenueVariant::Single;
         scene::Xfm px;
-        const bool bandParent = world.band && world.band->objectXfm(kf.parent.object, kf.parent.subpart, px);
-        if (bandParent || venueObjectXfm(world, kf.parent.object, mp, px)) {
+        if (world.parentXfm(kf.parent, px)) {
             V3 p;
-            if (targetPoint(world, kf.parent, p)) px.pos = p;
+            if (world.targetPoint(kf.parent, p)) px.pos = p;
             if (st) {
                 scene::Xfm& f = st->parent[k];
                 if (snap) {
@@ -746,7 +762,7 @@ void CameraDirector::keyframeXfm(const World& world, const scene::CamShot& shot,
             // clamp_height with one target: not below it + clamp_height.
             if (shot.clampHeight > 0 && kf.targets.size() == 1) {
                 V3 t;
-                if (targetPoint(world, kf.targets[0], t)) x.pos[2] = std::max(x.pos[2], t[2] + shot.clampHeight);
+                if (world.targetPoint(kf.targets[0], t)) x.pos[2] = std::max(x.pos[2], t[2] + shot.clampHeight);
             }
         }
     }
@@ -765,7 +781,7 @@ void CameraDirector::keyframeXfm(const World& world, const scene::CamShot& shot,
 // +0xf4 / +0x118), d the distance to the target(s) and so the offset, both
 // lerped, fov the keyframes' (without zoom_fov). Field of view: lerped,
 // then zoom_fov lerped and added. Depth of field from the moved camera.
-void CameraDirector::frameShot(const World& world, const scene::CamShot& shot, ShotState* st, float f, const Framing* prev, float dt,
+void CameraDirector::frameShot(const ShotScene& world, const scene::CamShot& shot, ShotState* st, float f, const Framing* prev, float dt,
                                Framing& out, Dof* dof) {
     const size_t n = shot.keyframes.size();
     if (st) st->target.resize(n), st->parent.resize(n), st->filtered.resize(n, false);
@@ -837,7 +853,7 @@ void CameraDirector::frameShot(const World& world, const scene::CamShot& shot, S
     *dof = {};
     if (shot.useDepthOfField) {
         V3 fa, fb;
-        const bool hfa = targetPoint(world, ka.focalTarget, fa), hfb = targetPoint(world, kb.focalTarget, fb);
+        const bool hfa = world.targetPoint(ka.focalTarget, fa), hfb = world.targetPoint(kb.focalTarget, fb);
         if (hfa && hfb) {
             const float da = len(sub(fa, x.pos)), db = len(sub(fb, x.pos));
             const float m = ka.focusBlurMultiplier + (kb.focusBlurMultiplier - ka.focusBlurMultiplier) * t;
@@ -854,6 +870,10 @@ void CameraDirector::frameShot(const World& world, const scene::CamShot& shot, S
 }
 
 gfx::Camera CameraDirector::evaluate(const World& world, const scene::CamShot& shot, float frame) {
+    return evaluate(WorldShotScene(world), shot, frame);
+}
+
+gfx::Camera CameraDirector::evaluate(const ShotScene& world, const scene::CamShot& shot, float frame) {
     gfx::Camera cam;
     if (shot.keyframes.empty()) return cam;
     Framing fr;
@@ -904,7 +924,7 @@ void CameraDirector::update() {
 void CameraDirector::play(const scene::CamShot& shot, ShotState& st, float f, float dt) {
     if (shot.keyframes.empty()) return;  // RB has shots without keyframes (testlight...)
     Framing fr;
-    frameShot(world_, shot, &st, f, &last_, dt, fr, &dof_);
+    frameShot(WorldShotScene(world_), shot, &st, f, &last_, dt, fr, &dof_);
     scene::Xfm x = fr.xfm;
     const auto& ka = shot.keyframes[fr.a];
     const auto& kb = shot.keyframes[fr.b];

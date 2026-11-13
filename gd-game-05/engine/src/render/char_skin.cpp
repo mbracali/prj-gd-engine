@@ -105,6 +105,10 @@ void CharSkin::render(MaterialRenderer& mr, chr::Character& c, const scene::TexR
     const bool alpha0 = mr.forceAlphaWrite;
     // The proxy's materials and masks are drawn as they are: no lights, a
     // white ambient [I: RB's proxies hold no Environ].
+    // The pose holds only this render's overrides (the patch outputs on this
+    // proxy's materials): a material of another proxy, or of a character
+    // since freed, must not keep one.
+    pose_.clear();
     LightEnv env;
     env.ambient = {1, 1, 1};
     env.envAmbient = {1, 1, 1};
@@ -191,6 +195,7 @@ void CharSkin::drawList(MaterialRenderer& mr, const scene::Directory& dir) {
 
 void CharSkin::drawObject(MaterialRenderer& mr, const scene::Object& o, int depth) {
     if (depth > 8) return;
+    if (const char* skip = SDL_getenv("GD05_SKINSKIP"); skip && std::string(skip).find(o.name) != std::string::npos) return;
     if (const scene::Draw* d = drawOf(&o); d && !d->showing) return;
     if (const auto* g = o.as<scene::Group>()) {
         for (const std::string& n : g->objects)
@@ -198,6 +203,11 @@ void CharSkin::drawObject(MaterialRenderer& mr, const scene::Object& o, int dept
         return;
     }
     if (const auto* mesh = o.as<scene::Mesh>()) {
+        if (SDL_getenv("GD05_SKINLOG")) {
+            const scene::Xfm w = pose_.world(mesh);
+            SDL_Log("char skin:   mesh %s mat %s parent %s bones %d at %.2f %.2f %.2f", mesh->name.c_str(), mesh->mat.c_str(), mesh->trans.parent.c_str(),
+                    int(mesh->bones.size()), w.pos[0], w.pos[1], w.pos[2]);
+        }
         drawMesh(mr, cache_, *mesh, toMat4(pose_.world(mesh)), &pose_);
         return;
     }
@@ -210,6 +220,12 @@ void CharSkin::drawObject(MaterialRenderer& mr, const scene::Object& o, int dept
     const scene::Mat* mat = sm->dir->resolve<scene::Mat>(sm->mat);
     if (!mat) return;
     Material gm = cache_.material(*mat, &pose_);
+    if (SDL_getenv("GD05_SKINLOG")) {
+        const scene::Tex* t = mat->dir ? mat->dir->resolve<scene::Tex>(mat->diffuseTex) : nullptr;
+        SDL_Log("char skin:   mask %s mat %s tex %s (%p uid %llu, %s) texId %u colour %.2f %.2f %.2f %.2f", sm->name.c_str(), mat->name.c_str(),
+                mat->diffuseTex.c_str(), static_cast<const void*>(t), t ? (unsigned long long)t->uid : 0ull, t && !t->bitmap.empty() ? "bitmap" : "none",
+                gm.diffuseTex.id, gm.color[0], gm.color[1], gm.color[2], gm.alpha);
+    }
     for (int k = 0; k < 3; ++k) gm.color[k] *= sm->color[size_t(k)];
     gm.alpha *= sm->color[3];
     gm.zMode = ZMode::Disable;

@@ -430,6 +430,7 @@ Camera UiView::defaultCamera() {
 }
 
 Camera UiView::camera() const {
+    if (hasCamOverride_) return camOverride_;
     const auto* own = milo_ && milo_->root().self ? milo_->root().self->as<scene::DirObj>() : nullptr;
     // A RenderDir (RB's song list): the inline PanelDir its TexRenderer
     // draws into a texture (draw()) takes that panel's own camera.

@@ -56,6 +56,17 @@ class PostProc;
 // own plane so they sit at screen_offset (0x82227440); field of view
 // lerped, zoom_fov added; depth of field from the focal targets; the shake
 // spring (0x82224D18); near / far. See frameShot / keyframeXfm.
+// What a shot is framed against: its targets' points, its parents' world
+// transforms and its path (the venue's world and band, CameraDirector; a
+// menu's WorldDir, the creator's practice space). Empty when absent.
+class ShotScene {
+public:
+    virtual ~ShotScene() = default;
+    virtual bool targetPoint(const scene::CamTarget& t, std::array<float, 3>& out) const = 0;
+    virtual bool parentXfm(const scene::CamTarget& t, scene::Xfm& out) const = 0;
+    virtual const scene::TransAnim* path(const std::string& name) const = 0;
+};
+
 class CameraDirector {
 public:
     explicit CameraDirector(World& world, uint32_t seed = 0x43414d31u);
@@ -119,6 +130,10 @@ public:
     // The shot's camera at `frame` with its targets' current places, without
     // the filter and the shake (the viewer, --venuetest's camera checks).
     static gfx::Camera evaluate(const World& world, const scene::CamShot& shot, float frame);
+    static gfx::Camera evaluate(const ShotScene& scene, const scene::CamShot& shot, float frame);
+    // A target's point in the venue's world: a band member's bone, else a
+    // venue object (a character slot: its bone's height above it).
+    static bool worldTargetPoint(const World& world, const scene::CamTarget& t, std::array<float, 3>& out);
 
 private:
     struct ShotState {
@@ -157,10 +172,9 @@ private:
     Value prop(const scene::CamShot& shot, const std::string& key);
     bool passes(const scene::CamShot& shot, const std::vector<std::pair<std::string, Value>>& filter);
     void play(const scene::CamShot& shot, ShotState& st, float frame, float dt);
-    static bool targetPoint(const World& world, const scene::CamTarget& t, std::array<float, 3>& out);
-    static void keyframeXfm(const World& world, const scene::CamShot& shot, ShotState* st, size_t k, float frame, const Framing* prev,
+    static void keyframeXfm(const ShotScene& world, const scene::CamShot& shot, ShotState* st, size_t k, float frame, const Framing* prev,
                             float dt, bool look, KeyframeCam& out);
-    static void frameShot(const World& world, const scene::CamShot& shot, ShotState* st, float frame, const Framing* prev, float dt,
+    static void frameShot(const ShotScene& world, const scene::CamShot& shot, ShotState* st, float frame, const Framing* prev, float dt,
                           Framing& out, Dof* dof);
     double now(const scene::CamShot& shot) const;
     float random01();

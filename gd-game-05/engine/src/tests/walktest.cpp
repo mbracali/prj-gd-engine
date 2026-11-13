@@ -36,6 +36,7 @@
 #include "render/scene_gpu.h"
 #include "render/texture_codec.h"
 #include "char/character.h"
+#include "game/camera_director.h"  // ShotScene (rb_front_creator)
 #include "render/ui_view.h"
 #include "char/char_objects.h"
 #include "scene/milo.h"
@@ -1182,6 +1183,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             check(slots(p == 0 ? "ready_leader" : "ready_not_leader").c_str());
         }
         check("rb_lobby_chars");
+        check("rb_slots_drawn");  // car9: the slots' characters in the practice space
         pressP(kX, 0);  // CONTINUE (the leader's continue.btn)
         at("tour_band_create_screen", 30000);
         if (!again) {
@@ -1538,6 +1540,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         }
         check("rb_deform_sliders");
         check("rb_preview_drawn");
+        check("rb_front_creator");
         check("focus_to done.btn", 5000);
         press(kX);
         at("charcreator_maker_screen", 20000);
@@ -4782,6 +4785,182 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::printf("  head texture in makeup_eyes.mask's rect (%d,%d)-(%d,%d): expected the make-up over the bare skin (mean error <= 3), %ld pixels "
                     "changed by > 8 levels; measured mean error %.2f, %ld pixels changed\n", x0, y0, x1, y1, wantPx, merr, gotPx);
         if (n == 0 || merr > 3 || wantPx < 200 || std::labs(gotPx - wantPx) > wantPx / 10) return fail("the eyes' make-up is not in the head's texture as the data says");
+        return pass();
+    }
+    // rb_slots_drawn (GD05-083, car9): the band lobby's players'
+    // characters, each at its slot's proxy in practice_space.milo (coop<N>.pxy,
+    // N the slot) through the screen's shot (select_cam coop_enter).
+    // Expected: the box from the proxy up the creator's framing height
+    // (creator.trans above creator.pxy), 30 units wide, projected through the
+    // shot; measured: the frame with and without the previews differs in
+    // >= 10% of that box for every slot with a player.
+    if (s.screen == "rb_slots_drawn") {
+        static int phase = 0;
+        static double at = 0;
+        const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+        const std::string base = std::string(dir ? dir : SDL_GetBasePath()) + "/slots_";
+        if (phase == 0) {
+            if (!ui.host().saveScreenshot(base + "on.bmp")) return fail("no screenshot");
+            ui::RbCharPreview::hidden = true;
+            at = nowMs, phase = 1;
+            return;
+        }
+        if (nowMs - at < 300) return;
+        const bool saved = ui.host().saveScreenshot(base + "off.bmp");
+        ui::RbCharPreview::hidden = false;
+        phase = 0;
+        if (!saved) return fail("no screenshot");
+        ui::PanelObj* ps = ui.panel("practice_space_panel");
+        gfx::UiView* v = ps ? ps->view.get() : nullptr;
+        const auto* shot = v ? dynamic_cast<const scene::CamShot*>(v->find("coop_enter.shot")) : nullptr;
+        scene::Xfm cp, ct;
+        if (!v || !shot || !v->worldXfm("creator.pxy", cp) || !v->worldXfm("creator.trans", ct)) return fail("no practice space or coop_enter.shot");
+        const float height = ct.pos[2] - cp.pos[2];
+        struct Scene : ShotScene {
+            const gfx::UiView& v;
+            explicit Scene(const gfx::UiView& view) : v(view) {}
+            bool targetPoint(const scene::CamTarget& t, std::array<float, 3>& out) const override {
+                scene::Xfm x;
+                if (!v.worldXfm(t.object, x)) return false;
+                out = x.pos;
+                return true;
+            }
+            bool parentXfm(const scene::CamTarget& t, scene::Xfm& out) const override { return v.worldXfm(t.object, out); }
+            const scene::TransAnim* path(const std::string&) const override { return nullptr; }
+        } scene(*v);
+        gfx::Camera cam = CameraDirector::evaluate(scene, *shot, 0);
+        const gfx::Mat4 vp = cam.viewProj(false);
+        SDL_Surface* a = SDL_LoadBMP((base + "on.bmp").c_str());
+        SDL_Surface* b = SDL_LoadBMP((base + "off.bmp").c_str());
+        SDL_Surface* ca = a ? SDL_ConvertSurface(a, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        SDL_Surface* cb = b ? SDL_ConvertSurface(b, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        std::string bad;
+        int players = 0;
+        for (auto& sl : ui.playerSlots()) {
+            const int pn = sl ? sl->playerNum() : -1;
+            if (pn < 0) continue;
+            ++players;
+            int slotNum = 0;
+            for (size_t i = 0; i < ui.playerSlots().size(); ++i)
+                if (ui.playerSlots()[i].get() == sl.get()) slotNum = int(i);
+            scene::Xfm px;
+            const std::string proxy = "coop" + std::to_string(slotNum) + ".pxy";
+            if (!v->worldXfm(proxy, px) || !ca || !cb || ca->w != cb->w) {
+                bad += " no " + proxy;
+                continue;
+            }
+            int x0 = ca->w, y0 = ca->h, x1 = 0, y1 = 0;
+            for (const float dz : {0.0f, height})
+                for (const float dx : {-15.0f, 15.0f}) {
+                    const float x = px.pos[0] + dx, y = px.pos[1], z = px.pos[2] + dz;
+                    float c[4];
+                    for (int r = 0; r < 4; ++r) c[r] = vp.m[r] * x + vp.m[4 + r] * y + vp.m[8 + r] * z + vp.m[12 + r];
+                    if (c[3] <= 0) continue;
+                    const int sx = int((c[0] / c[3] + 1) * 0.5f * ca->w), sy = int((1 - c[1] / c[3]) * 0.5f * ca->h);
+                    x0 = std::min(x0, sx), x1 = std::max(x1, sx), y0 = std::min(y0, sy), y1 = std::max(y1, sy);
+                }
+            x0 = std::max(x0, 0), y0 = std::max(y0, 0), x1 = std::min(x1, ca->w - 1), y1 = std::min(y1, ca->h - 1);
+            long changed = 0, total = 0;
+            for (int yy = y0; yy <= y1; ++yy)
+                for (int xx = x0; xx <= x1; ++xx) {
+                    const uint8_t* pa = static_cast<const uint8_t*>(ca->pixels) + yy * ca->pitch + xx * 4;
+                    const uint8_t* pb = static_cast<const uint8_t*>(cb->pixels) + yy * cb->pitch + xx * 4;
+                    ++total;
+                    changed += std::abs(int(pa[0]) - int(pb[0])) + std::abs(int(pa[1]) - int(pb[1])) + std::abs(int(pa[2]) - int(pb[2])) > 24;
+                }
+            std::printf("  slot %d (player %d) at %s: expected the character in (%d,%d)-(%d,%d) through coop_enter.shot; measured %ld of %ld pixels "
+                        "drawn by it (>= 10%% expected: a seated drummer fills less of the box)\n", slotNum, pn, proxy.c_str(), x0, y0, x1, y1, changed, total);
+            if (total == 0 || changed * 100 < total * 10) bad += " slot " + std::to_string(slotNum) + " not drawn";
+        }
+        for (SDL_Surface* x : {a, b, ca, cb})
+            if (x) SDL_DestroySurface(x);
+        if (players == 0) bad += " no player in a slot";
+        if (!bad.empty()) return fail("the lobby's characters:" + bad);
+        return pass();
+    }
+    // rb_front_creator (GD05-083, car9): the creator's character through
+    // practice_space.milo's creator.shot (select_cam creator), standing at
+    // creator.pxy. Expected: its head and chest where the shot puts them
+    // (CameraDirector::evaluate over the milo's objects: the keyframe, its
+    // target creator.trans, its screen offset), the character's own pose
+    // moved to creator.pxy; measured: the frame with and without the
+    // preview differs at those points (the character in front, not behind
+    // the menu).
+    if (s.screen == "rb_front_creator") {
+        static int phase = 0;
+        static double at = 0;
+        const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+        const std::string base = std::string(dir ? dir : SDL_GetBasePath()) + "/front_";
+        if (phase == 0) {
+            if (!ui.host().saveScreenshot(base + "on.bmp")) return fail("no screenshot");
+            ui::RbCharPreview::hidden = true;
+            at = nowMs, phase = 1;
+            return;
+        }
+        if (nowMs - at < 300) return;
+        const bool saved = ui.host().saveScreenshot(base + "off.bmp");
+        ui::RbCharPreview::hidden = false;
+        phase = 0;
+        if (!saved) return fail("no screenshot");
+        ui::PanelObj* ps = ui.panel("practice_space_panel");
+        gfx::UiView* v = ps ? ps->view.get() : nullptr;
+        ui::RbCharPreview* p = ui::RbCharPreview::drawnLast();
+        chr::Character* ch = p ? p->character() : nullptr;
+        const auto* shot = v ? dynamic_cast<const scene::CamShot*>(v->find("creator.shot")) : nullptr;
+        scene::Xfm pxy;
+        if (!v || !ch || !shot || !v->worldXfm("creator.pxy", pxy)) return fail("no practice space, preview, creator.shot or creator.pxy");
+        struct Scene : ShotScene {
+            const gfx::UiView& v;
+            explicit Scene(const gfx::UiView& view) : v(view) {}
+            bool targetPoint(const scene::CamTarget& t, std::array<float, 3>& out) const override {
+                scene::Xfm x;
+                if (!v.worldXfm(t.object, x)) return false;
+                out = x.pos;
+                return true;
+            }
+            bool parentXfm(const scene::CamTarget& t, scene::Xfm& out) const override { return v.worldXfm(t.object, out); }
+            const scene::TransAnim* path(const std::string&) const override { return nullptr; }
+        } scene(*v);
+        gfx::Camera cam = CameraDirector::evaluate(scene, *shot, 0);
+        cam.aspect = gfx::kLogicalW / gfx::kLogicalH;
+        const gfx::Mat4 vp = cam.viewProj(false);
+        SDL_Surface* a = SDL_LoadBMP((base + "on.bmp").c_str());
+        SDL_Surface* b = SDL_LoadBMP((base + "off.bmp").c_str());
+        SDL_Surface* ca = a ? SDL_ConvertSurface(a, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        SDL_Surface* cb = b ? SDL_ConvertSurface(b, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        std::string bad;
+        // The body between its feet (creator.pxy) and the shot's target
+        // above them (creator.trans, the framing point): at 1/2 and 3/4 of the
+        // way up.
+        scene::Xfm aim;
+        if (!v->worldXfm("creator.trans", aim)) return fail("no creator.trans");
+        for (const float f : {0.5f, 0.75f}) {
+            const float x = pxy.pos[0] + (aim.pos[0] - pxy.pos[0]) * f, y = pxy.pos[1] + (aim.pos[1] - pxy.pos[1]) * f, z = pxy.pos[2] + (aim.pos[2] - pxy.pos[2]) * f;
+            float c[4];
+            for (int r = 0; r < 4; ++r) c[r] = vp.m[r] * x + vp.m[4 + r] * y + vp.m[8 + r] * z + vp.m[12 + r];
+            if (!ca || !cb || ca->w != cb->w || c[3] <= 0) {
+                bad += " the body is not in front of the camera";
+                continue;
+            }
+            const int px = int((c[0] / c[3] + 1) * 0.5f * ca->w), py = int((1 - c[1] / c[3]) * 0.5f * ca->h);
+            const int r = ca->h / 40;
+            int changed = 0, total = 0;
+            for (int yy = py - r; yy <= py + r; ++yy)
+                for (int xx = px - r; xx <= px + r; ++xx) {
+                    if (xx < 0 || yy < 0 || xx >= ca->w || yy >= ca->h) continue;
+                    const uint8_t* pa = static_cast<const uint8_t*>(ca->pixels) + yy * ca->pitch + xx * 4;
+                    const uint8_t* pb = static_cast<const uint8_t*>(cb->pixels) + yy * cb->pitch + xx * 4;
+                    ++total;
+                    changed += std::abs(int(pa[0]) - int(pb[0])) + std::abs(int(pa[1]) - int(pb[1])) + std::abs(int(pa[2]) - int(pb[2])) > 24;
+                }
+            std::printf("  the body at %.0f%% of creator.pxy -> creator.trans: expected on screen at (%d, %d) of %dx%d through creator.shot; measured %d of "
+                        "%d pixels there drawn by the preview (>= 50%% expected)\n", f * 100, px, py, ca->w, ca->h, changed, total);
+            if (px < 0 || py < 0 || px >= ca->w || py >= ca->h) bad += " the body is off screen";
+            else if (changed * 2 < total) bad += " the body is hidden at " + std::to_string(int(f * 100)) + "%";
+        }
+        for (SDL_Surface* x : {a, b, ca, cb})
+            if (x) SDL_DestroySurface(x);
+        if (!bad.empty()) return fail("the creator's character is not where creator.shot shows it:" + bad);
         return pass();
     }
     // rb_preview_drawn (GD05-083): the menu's character preview

@@ -20,6 +20,7 @@
 // loaded.
 #include "ui/rb_meta.h"
 #include "ui/rb_char_preview.h"
+#include "ui/rb_multifocus.h"
 
 #include <SDL3/SDL.h>
 
@@ -34,6 +35,10 @@
 #include "data/json.h"
 #include "char/char_objects.h"
 #include "scene/milo.h"
+#include "scene/world_objects.h"
+#include "render/ui_view.h"
+#include "game/camera_director.h"
+#include "char/character.h"
 #include "game/song_db.h"
 #include "platform/paths.h"
 #include "ui/natives.h"
@@ -1398,29 +1403,139 @@ RbCharPreview::Look previewLook(const RbCharObj& c) {
     return l;
 }
 
-// The creator's practice space (charcreator.dta's screens:
-// practice_space_panel, practice_space.milo): the character being made
-// stands at creator.trans (GD05-083, ui/rb_char_preview.h) [C data: the
-// milo's slot]; its cameras (select_cam) answered [I].
+// RB's select_cam on a menu's WorldDir panel (practice_space_panel,
+// shop_char_panel): the panel draws through its <name>.shot, a BandCamShot
+// of its milo (practice_space.milo creator / creator_heads, store.milo
+// idle / makeup / tattoo_* ...) [C data]. The camera is the shot framed by
+// CameraDirector::evaluate over the panel's objects (targets, parents,
+// path); a target naming the character's slot is the previewed
+// character's bone (its subpart), else its place [I: RB's targets on a
+// shell character]. The shot's first frame, no blend from the last [I].
+class PanelShotCamera {
+public:
+    void select(const std::string& shot) {
+        if (shot != shot_) shot_ = shot, at_ = double(SDL_GetTicks());
+    }
+    const std::string& shot() const { return shot_; }
+    // Sets (or clears) the view's camera; `slot` / `ch`: the character's slot and the preview.
+    void apply(gfx::UiView& view, const std::string& slot, chr::Character* ch) const {
+        if (legacy()) return view.clearCameraOverride();
+        const auto* cs = shot_.empty() ? nullptr : dynamic_cast<const scene::CamShot*>(view.find(shot_ + ".shot"));
+        if (!cs || cs->keyframes.empty()) return view.clearCameraOverride();
+        const Scene scene(view, slot, ch);
+        const gfx::Camera cam = CameraDirector::evaluate(scene, *cs, 0);
+        view.setCameraOverride(cam);
+        static const bool log = SDL_getenv("GD05_SHOTLOG") != nullptr;
+        if (log) {
+            static std::string last;
+            if (last != shot_) {
+                last = shot_;
+                SDL_Log("select_cam %s: camera at %.1f %.1f %.1f, forward %.2f %.2f %.2f, fov %.3f", shot_.c_str(), cam.world.m[12], cam.world.m[13],
+                        cam.world.m[14], cam.world.m[4], cam.world.m[5], cam.world.m[6], cam.yFov);
+            }
+        }
+    }
+
+    // GD05_SHOTCAM_LEGACY=1: the panels' own cameras and D83's creator.trans (the walks' "before").
+    static bool legacy() {
+        static const bool l = SDL_getenv("GD05_SHOTCAM_LEGACY") != nullptr;
+        return l;
+    }
+
+private:
+    class Scene : public ShotScene {
+    public:
+        Scene(const gfx::UiView& v, const std::string& slot, chr::Character* ch) : v_(v), slot_(slot), ch_(ch) {}
+        bool targetPoint(const scene::CamTarget& t, std::array<float, 3>& out) const override {
+            scene::Xfm x;
+            if (!parentXfm(t, x)) return false;
+            out = x.pos;
+            return true;
+        }
+        bool parentXfm(const scene::CamTarget& t, scene::Xfm& out) const override {
+            if (t.object.empty()) return false;
+            if (ch_ && t.object == slot_) {
+                if (!t.subpart.empty() && ch_->worldOf(t.subpart, out)) return true;
+                out = ch_->xfm();
+                return true;
+            }
+            return v_.worldXfm(t.object, out);
+        }
+        const scene::TransAnim* path(const std::string& name) const override { return dynamic_cast<const scene::TransAnim*>(v_.find(name)); }
+
+    private:
+        const gfx::UiView& v_;
+        std::string slot_;
+        chr::Character* ch_;
+    };
+    std::string shot_;
+    double at_ = 0;
+};
+
+// The practice space (practice_space_panel, a CharSelectPanel:
+// matchmaking.dta, practice_space.milo) [C data: the milo's objects]:
+// - the creator (charcreator.dta: set_creator_player_num <n>, then
+//   select_cam creator): the character being made stands at creator.pxy,
+//   the UIProxy RB loads it into (creator.trans is the shots' target; D83
+//   placed it at creator.trans, in the air);
+// - a screen with player slots (the lobbies' player_panels): each slot's
+//   player's character (its player config's get_char) at the slot's proxy
+//   (coop0..3.pxy for four slots, hth0..1 for two, solo0 for one [I: RB's
+//   CharSelectPanel 0x82827000.. not read]) while the slot's show_char
+//   (matchmaking.dta MATCHMAKING_LOAD_CHAR_METHODS) is true;
+// select_cam frames them (PanelShotCamera). GD05-083.
 class PracticeSpacePanelObj : public QuietPanelObj {
 public:
     using QuietPanelObj::QuietPanelObj;
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        if (msg == "select_cam") return cam_.select(args.empty() ? std::string() : in.evalValue(args[0]).str()), r = Value::integer(0), true;
+        if (msg == "set_creator_player_num") return creator_ = args.empty() ? -1 : in.evalValue(args[0]).integerValue(), r = Value::integer(0), true;
+        return QuietPanelObj::handleNative(in, msg, args, r);
+    }
     void poll(double dtMs) override {
         QuietPanelObj::poll(dtMs);
         preview_.poll(dtMs);
+        for (auto& p : slots_) p->poll(dtMs);
     }
     void draw() override {
-        QuietPanelObj::draw();
         PanelObj* cc = ui.panel("charcreator_panel");
         auto* c = cc && cc->up ? dynamic_cast<RbCharObj*>(ui.interp().send(cc, "get_tour_char", {}).object) : nullptr;
         scene::Xfm at;
-        if (!showing || !view || !c || !view->worldXfm("creator.trans", at)) return;
-        preview_.set(ui, previewLook(*c));
-        preview_.draw(ui, *view, at);
+        const bool legacy = PanelShotCamera::legacy();
+        const bool shown = showing && view && c && view->worldXfm(legacy ? "creator.trans" : "creator.pxy", at);
+        if (shown) preview_.set(ui, previewLook(*c));
+        // The slots' characters (not while the creator shows its own).
+        struct Shown {
+            RbCharPreview* p;
+            scene::Xfm at;
+        };
+        std::vector<Shown> slotChars;
+        auto& slots = ui.playerSlots();
+        if (showing && view && !shown && !legacy && !slots.empty()) {
+            const char* kind = slots.size() >= 4 ? "coop" : slots.size() == 2 ? "hth" : "solo";
+            while (slots_.size() < slots.size()) slots_.push_back(std::make_unique<RbCharPreview>());
+            for (size_t i = 0; i < slots.size(); ++i) {
+                PlayerSlotObj* sl = slots[i].get();
+                const int pn = sl ? sl->playerNum() : -1;
+                if (pn < 0 || !sl->dispatch("show_char").truthy()) continue;
+                const Value cfg = ui.interp().send("game", "get_player_config", {Value::integer(pn)});
+                auto* pc = cfg.object ? dynamic_cast<RbCharObj*>(ui.interp().send(cfg.object, "get_char", {}).object) : nullptr;
+                scene::Xfm sat;
+                if (!pc || !view->worldXfm(std::string(kind) + std::to_string(i) + ".pxy", sat)) continue;
+                if (slots_[i]->set(ui, previewLook(*pc))) slotChars.push_back({slots_[i].get(), sat});
+            }
+        }
+        if (view) cam_.apply(*view, "creator.pxy", shown ? preview_.character() : nullptr);
+        QuietPanelObj::draw();
+        if (shown) preview_.draw(ui, *view, at);
+        for (const Shown& sc : slotChars) sc.p->draw(ui, *view, sc.at);
     }
 
 private:
     RbCharPreview preview_;
+    std::vector<std::unique_ptr<RbCharPreview>> slots_;
+    PanelShotCamera cam_;
+    int creator_ = -1;
 };
 
 // Rock Band's tutorial main panels (GuitarTutorialPanel, DrumTutorialPanel,
@@ -1775,15 +1890,17 @@ public:
         preview_.poll(dtMs);
     }
     void draw() override {
-        PanelObj::draw();
         auto* c = dynamic_cast<RbCharObj*>(ui.interp().send(this, "get_tour_char", {}).object);
         scene::Xfm at;
-        if (!showing || !view || !c || !view->worldXfm("char0", at)) return;
-        preview_.set(ui, previewLook(*c));
-        preview_.draw(ui, *view, at);
+        const bool shown = showing && view && c && view->worldXfm("char0", at);
+        if (shown) preview_.set(ui, previewLook(*c));
+        if (view) cam_.apply(*view, "char0", shown ? preview_.character() : nullptr);
+        PanelObj::draw();
+        if (shown) preview_.draw(ui, *view, at);
     }
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
-        if (msg == "select_cam" || msg == "update_appearance" || msg == "load_char") return r = Value::integer(0), true;
+        if (msg == "select_cam") return cam_.select(args.empty() ? std::string() : in.evalValue(args[0]).str()), r = Value::integer(0), true;
+        if (msg == "update_appearance" || msg == "load_char") return r = Value::integer(0), true;
         // get_tour_char, or the property ({shop_char_panel get tour_char}: shop.dta's back of shop_instrument_screen).
         if (msg == "get_tour_char" || (msg == "get" && sArg(args, 0) == "tour_char")) {
             const int pn = getProp(in, "char_player_num").integerValue();
@@ -1795,6 +1912,7 @@ public:
 
 private:
     RbCharPreview preview_;
+    PanelShotCamera cam_;
 };
 
 // AudioLatencyPanel (ui/options.dta, the A/V calibration): its click track
@@ -1906,7 +2024,7 @@ std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& 
         return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"in_vocal_mode", "set_in_vocal_mode", "set_pitch_shift_ratio"});
     if (cls == "PracticeBackgroundPanel") return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"select_cam", "select_camera_shot"});
     if (name == "practice_space_panel")
-        return std::make_unique<PracticeSpacePanelObj>(ui, name, cls, std::set<std::string>{"select_cam", "set_creator_player_num", "play_attitude_group", "set_char_player_num"});
+        return std::make_unique<PracticeSpacePanelObj>(ui, name, cls, std::set<std::string>{"play_attitude_group", "set_char_player_num"});
     return nullptr;
 }
 

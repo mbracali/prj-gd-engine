@@ -1394,3 +1394,32 @@ pattern). Each says what, why and how to undo it.
   proxy stays out of the draw list (D79's code is right; its reason is
   this one).
 - **Undo:** none (documentation; the code is D79's).
+
+## D90
+- **What (2026-11-12, GD05-083, car9):** the menus' 3D panels draw through
+  RB's select_cam shots [C data]: practice_space_panel (practice_space.milo,
+  a WorldDir: creator / creator_heads / coop_enter / solo_enter ... .shot)
+  and shop_char_panel (store.milo: idle, makeup, tattoo_* ... .shot) take
+  the named BandCamShot, framed by CameraDirector::evaluate over the
+  panel's own objects (ShotScene: targets, parents, path; a target naming
+  the character's slot is the previewed character's bone [I]), its first
+  frame [I: the shot's keyframe blend over time is not played]; UiView's
+  camera override. creator.shot aims at creator.trans with screen offset
+  (0.24, 0.37); the character stands at creator.pxy, the UIProxy RB loads
+  it into [C data: the milo's objects] (D83 put it at creator.trans, 67
+  units up, behind the menu with the UI camera). The practice space also
+  draws the lobby's players' characters (a CharSelectPanel,
+  matchmaking.dta): each slot with a player whose show_char is true shows
+  its player config's character at coop<slot>.pxy (hth / solo for two / one
+  slot) [I: RB's CharSelectPanel not read; the char list's highlighted
+  character is not previewed before it is chosen]. CameraDirector's
+  framing (frameShot / keyframeXfm) now takes a ShotScene (the venue's
+  WorldShotScene for the game, unchanged).
+- **Also (D84):** CharSkin's pose keeps only the current render's patch
+  overrides (a material freed with an earlier preview lent a patch target
+  to the next character's skin.mat: the creator's torso went black after a
+  slider moved).
+- **Measured:** rb_front_creator (rb_body_deform), rb_slots_drawn
+  (rb_band_lobby) (PROGRESS 2026-11-12 car9).
+- **Undo:** GD05_SHOTCAM_LEGACY=1 (the panels' own cameras, creator.trans,
+  no slot characters).
