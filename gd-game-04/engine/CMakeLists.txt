@@ -58,6 +58,7 @@ target_sources(gd04 PRIVATE
   src/data/xdvdfs.cpp
   src/devaids/menu_keys.cpp
   src/devaids/screenshot.cpp
+  src/devaids/perf.cpp
   src/input/input.cpp
   src/input/midi_in.cpp
   src/input/input_selftest.cpp
@@ -117,6 +118,7 @@ target_sources(gd04 PRIVATE
   src/tests/selftest_play.cpp
   src/tests/sfxtest.cpp
   src/tests/venuetest.cpp
+  src/tests/enhancedtest.cpp
   src/ui/song_screen.cpp
   src/ui/song_hooks.cpp
   src/ui/song_preview.cpp

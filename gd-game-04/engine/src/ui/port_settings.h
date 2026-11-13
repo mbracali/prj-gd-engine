@@ -35,6 +35,10 @@ std::string migrateEnhancedValue(const std::string& key, const std::string& valu
 // The values, saved at once on every change (enhanced.json: {"version": 1,
 // "settings": {key: value}}, written to a temporary file and renamed). A
 // value missing or not valid keeps its default.
+class EnhancedStore;
+// Applies the Enhanced options kept in the engine's statics (app.cpp).
+void applyEnhancedGlobals(const EnhancedStore& st);
+
 class EnhancedStore {
 public:
     // `dir`: the folder, with a trailing separator ("" : nothing is saved).

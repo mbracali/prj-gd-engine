@@ -149,6 +149,7 @@ public:
     // The intro transition's play_intro props (current_intro); empty: no play_intro.
     const std::string& introProps() const { return introProps_; }
     const Match& match() const { return *match_; }
+    const Hud2P::Counters& hud2pCounters() const { return hud2p_.counters(); }
     const Hud2P& hud2p() const { return hud2p_; }
     const Chart& chart() const { return chart_; }
     const SongInfo& song() const { return song_; }

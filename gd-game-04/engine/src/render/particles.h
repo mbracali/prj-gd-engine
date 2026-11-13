@@ -38,6 +38,10 @@ class LightShow;
 // what is drawn.
 class Particles {
 public:
+    // Enhanced > Particles FX: 1 (Original) or 2 (2x: twice the burst and
+    // the emit rate); None does not start them (VenueStage::particlesOn).
+    static inline float density = 1;
+    size_t lastQuads = 0;  // the particles the last draw drew (--enhancedtest)
     Particles();
     ~Particles();
     bool start(const Disc& disc, const Globals& g, const venue::Venue& v, const Chart& chart, const venue::PerfTimeline* perf,

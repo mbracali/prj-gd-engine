@@ -139,6 +139,8 @@ int runVenueTest(const std::string& discPath) {
     const uint32_t songKey = qbkey::key(song);
     int failures = 0;
     std::printf("venuetest: %s, %zu venues, %d frames at 60 and at 240 fps from %.0f ms\n", song.c_str(), zones.size(), frames, drawAt);
+    // The most of the band's lit texels allowed to be acne-prone (GD04-119).
+    constexpr double kAcneMaxPct = 10.0;
     for (const std::string& zone : zones) {
         auto fail = [&](const std::string& why) {
             std::printf("venuetest %s: FAIL %s\n", zone.c_str(), why.c_str());
@@ -187,6 +189,7 @@ int runVenueTest(const std::string& discPath) {
         int shadowLight = -1;
         bool shadowMoved = false;
         long shadowFrames = 0, bothCascades = 0;  // frames with a shadow light; of them, both cascades drawn
+        VenueStage::acneProbe = true, VenueStage::acne = {0, 0, 0};  // the band's self-shadowing (GD04-119)
         for (int fps : {60, 240}) {
             VenueStage& st = d;
             double step = -kLeadInMs;
@@ -224,6 +227,17 @@ int runVenueTest(const std::string& discPath) {
         if (d.band() && d.band()->view() && !SDL_getenv("GD04_NO_SHADOWS") && shadowFrames > 0 && bothCascades != shadowFrames)
             fail("the dynamic shadow drew " + std::to_string(bothCascades) + " of " + std::to_string(shadowFrames) +
                  " frames into both cascades");
+        VenueStage::acneProbe = false;
+        if (const VenueStage::Acne a = VenueStage::acne; a.area > 0) {
+            // GD04-119: the band's lit surfaces whose depth changes more than
+            // their caster's bias within a texel shadow themselves in stripes.
+            // GH3's double_sided bias keeps it to the surfaces almost edge-on
+            // to the light; the single_sided 64 x 2^-24 applied to every
+            // caster before striped most of them.
+            const double now = 100.0 * a.prone / a.area, old = 100.0 * a.proneOld / a.area;
+            std::printf("venuetest %s: band shadow acne-prone %.1f %% of its lit texels (%.1f %% with the single-sided bias)\n", zone.c_str(), now, old);
+            if (now > kAcneMaxPct) fail("the band shadows itself in stripes: " + std::to_string(now) + " % acne-prone");
+        }
 
         // 3. Screenshots: the middle of the first shots after the intro.
         int saved = 0;

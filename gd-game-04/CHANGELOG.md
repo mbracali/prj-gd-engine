@@ -5,6 +5,17 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+### Added
+- Enhanced > HDR: Emulated (a filmic curve and an automatic exposure) now works; True HDR is not available yet.
+
+### Fixed
+- Enhanced > Max FPS: 120, 144, 240 and Unlimited now apply in songs (the game stayed at 60 or, in Art Deco, slowed to a crawl).
+- Enhanced > Enable Particles FX: 2x now doubles the particles.
+- Enhanced > All Band Mates Cast Shadows, More Lights on Venues and Dust in Light Beams: the shadows, the light pools and the dust were hidden under the stage.
+- The band's shadows no longer draw grey stripes over the characters.
+- Performance: the Art Deco venue's dragon and knights cost several milliseconds a frame (more at high frame rates); gameplay there is much faster.
+- Battle (boss battles too): a Whammy attack shows GH3's whammy bar prompt and lifts the fret buttons until you whammy; a broken string's button is raised until repaired.
+
 ## [1.1.6] - 2026-11-10
 
 ### Added

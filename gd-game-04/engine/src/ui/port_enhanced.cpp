@@ -189,10 +189,10 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          {{"60", "60"}, {"120", "120"}, {"144", "144"}, {"240", "240"}, {"unlimited", "Unlimited"}}},
         {Kind::Check, "fps_counter", "Show FPS Counter", true,
          "Shows the frames drawn per second in the bottom-left corner of the screen."},
-        {Kind::Choice, "hdr", "HDR", false,
-         "High dynamic range for the venue and the band: None, Emulated (a filmic curve and an automatic exposure) or True "
-         "HDR on an HDR display. Not in gd04 yet.",
-         {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR"}}},
+        {Kind::Choice, "hdr", "HDR", true,
+         "High dynamic range for the venue and the band: None (as the original), Emulated (a filmic curve and an automatic "
+         "exposure, on any display) or True HDR on an HDR display (not in gd04 yet).",
+         {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR", false}}},
         {Kind::Choice, "bokeh", "Bokeh Effect", true,
          "The depth-of-field blur of the close shots. None: always sharp. Medium: as the original game. Light is softer; "
          "Strong and Stronger blur wider.",

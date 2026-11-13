@@ -351,6 +351,22 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"song", {}, 60000});
         steps_.push_back({"song_over", {}, 900000});
         steps_.push_back({"career_newspaper_fs", {}, 60000});
+    } else if (name == "boss_keys") {
+        // GD04-120: Slash's battle (bossslash, tier 5) played on the keys as
+        // a player plays it (App::walkKeyBot: the notes on the fret keys,
+        // Require Strum off; a card fired as it comes; the Whammy key worked
+        // under a Whammy attack): the player gets power-ups from the battle
+        // phrases, Slash's attacks end and the frets play again after them.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"xpad_attach", "keyboard_p1", "keyboard_nostrum", C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {D, D, D, D, C}, 20000});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_character_hub_fs", {C}, 20000});
+        steps_.push_back({"career_select_venue_fs", {C}, 20000});
+        steps_.push_back({"career_setlist_fs", {"setlist:bossslash", C}, 20000});
+        steps_.push_back({"career_battle_help_fs", {C}, 20000});
+        steps_.push_back({"song", {}, 60000});
+        steps_.push_back({"song_over", {"check:battlekeys"}, 900000});
     } else if (name == "boss_devil") {
         // Lou's battle (bossdevil, the last tier's boss): won, GH3 restarts
         // the song mid-way for the finish (start_devil_finish: <song>_markers[37],
@@ -1393,6 +1409,21 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
                                                      std::to_string(keyNotes) + " notes");
         if (keyHoldFrames == 0) return fail("no sustain was held");
         if (keyWhammyFrames < 10 || keyWhammy < 0.99f || keyRest > 0.01f) return fail("the Whammy key does not move the whammy on a held sustain");
+        return true;
+    }
+    if (what == "check:battlekeys") {
+        const int notesAfter = keyNotes - keyNotesAtRecover, hitsAfter = keyHits - keyHitsAtRecover;
+        std::printf("  battle on the keys: %d notes pressed, %d hit; power-ups got %d, fired %d; attacks received %d; frets dead %d frames, "
+                    "%d recoveries, dead at the end %s; since the last recovery %d of %d notes hit; Whammy attack %d frames, its bar drawn %llu\n",
+                    keyNotes, keyHits, keyCards, keyFired, keyReceived, keyDeadFrames, keyRecoveries, keyDeadNow ? "yes" : "no", hitsAfter,
+                    notesAfter, keyWhammyAttackFrames, keyWhammyBars);
+        if (keyCards < 1) return fail("the player got no power-up from the battle phrases");
+        if (keyFired < 1) return fail("the player fired no power-up");
+        if (keyReceived < 1) return fail("the boss fired no attack at the player");
+        if (keyDeadFrames > 0 && keyRecoveries < 1) return fail("an attack's dead frets never came back");
+        if (keyWhammyAttackFrames > 0 && keyWhammyBars == 0) return fail("a Whammy attack without its whammy bar prompt");
+        if (notesAfter < 10 || hitsAfter * 10 < notesAfter * 8)
+            return fail("after the attacks the frets hit " + std::to_string(hitsAfter) + " of " + std::to_string(notesAfter) + " notes");
         return true;
     }
     if (what == "keyboard_p2") {  // the keyboard given player 2 (the Gamepads screen's Bind to)

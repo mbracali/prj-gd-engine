@@ -457,9 +457,14 @@ gd04 (VenueStage::shadowPass, gh3shader::DynamicShadow) does the same:
 two depth targets 1024 x 1024 and 512 x 512, each cascade's matrix as
 above, the band's opaque meshes drawn into both (the second reuses the
 first's skinning), the receivers given both maps with c141 = (0.5, 1, 13,
-16) and c143 = (1024, 512), the single_sided bias subtracted from the
-receivers' depth instead of added to the casters' [I: the same test; the
-double_sided values are not applied]. The camera's near plane is the
+16) and c143 = (1024, 512), the casters' depth biased as GH3's depth-bias
+state does (z + b w), the band's with the double_sided values, as its
+meshes draw cull none (both faces: double-sided casters) [I: GH3's choice
+by the caster's cull state]; the receivers compare unbiased. With the
+single_sided 64 x 2^-24 on cascade 0 (gd04 before GD04-119), 70-85 % of the
+band's lit surface changed depth by more than the bias within one texel
+and shadowed itself in grey stripes; --venuetest measures it
+(BandView::AcneProbe, under 1.1 % now, fails above 10 %). The camera's near plane is the
 port's (0.05) and the view vector for |cos| the camera's forward [I]. The
 light: the band group's strongest directional light pointing down (by its
 own colour x intensity, chosen once per venue: GH3's shadow pass reads one

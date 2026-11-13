@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <exception>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -26,6 +27,7 @@
 #include "audio/mixer.h"
 #include "data/disc.h"
 #include "data/qbkey.h"
+#include "devaids/perf.h"
 #include "game/song_db.h"
 #include "script/globals.h"
 #include "tests/walk.h"
@@ -192,6 +194,8 @@ private:
         uint8_t frets = 0;    // fret keys held
         double from = 0, until = 0;
         bool sustain = false, whammy = false;
+        bool battleWhammy = false, star = false;  // a battle: the Whammy key worked, Star Power (fire) held
+        double firedAt = -1e9;
     } keyBot_;
     void walkKeyBot();
     uint64_t lastFrameNs_ = 0;
@@ -234,6 +238,7 @@ private:
     EnhancedStore enhanced_;
     std::unique_ptr<PortScreens> ports_;
     std::string saveDir_;               // enhanced.json and controllers.json ("" : the pref dir)
+    int frameCap_ = 60;                 // the device's frame cap (Enhanced > Max FPS in a song)
     double mouseMovedMs_ = -1e9;        // the pointer shows for 3 s after the mouse moves
     // After a wheel step, hover waits until the pointer really moves (more
     // than 24 menu units), or a slight nudge would focus the row under it
@@ -296,6 +301,32 @@ void App::walkKeyBot() {
     walk_->keyNotes = judged;
     if (b.frets && now >= b.until) release();
     if (b.sustain && !b.whammy && now >= b.from + (b.until - b.from) / 3) key(SDLK_LSHIFT, true), b.whammy = true;
+    if (m.battleMode()) {
+        // A battle as a player plays it (boss_keys, GD04-120): fire a card a
+        // second after the last (Tab); under a Whammy attack work the Whammy key
+        // (down one frame, up the next); a broken fret is pressed by the notes.
+        const Match::BattleSide& bs = m.battle(0);
+        // Star Power (the keyboard's Select: Tab) fires; held two frames so a 60 Hz step sees it.
+        if (b.star && now - b.firedAt >= 40) key(SDLK_TAB, false), b.star = false;
+        else if (!b.star && !bs.cards.empty() && now - b.firedAt >= 1000) key(SDLK_TAB, true), b.star = true, b.firedAt = now, ++walk_->keyFired;
+        if (bs.whammyLeft > 0) {
+            b.battleWhammy = !b.battleWhammy;
+            if (!b.whammy) key(SDLK_LSHIFT, b.battleWhammy);
+        } else if (b.battleWhammy) {
+            b.battleWhammy = false;
+            if (!b.whammy) key(SDLK_LSHIFT, false);
+        }
+        walk_->keyCards = m.counters().cards[0], walk_->keyReceived = m.counters().received[0];
+        const bool dead = bs.whammyLeft > 0 || bs.brokenMask != 0;
+        if (dead) ++walk_->keyDeadFrames;
+        if (bs.whammyLeft > 0) ++walk_->keyWhammyAttackFrames;
+        walk_->keyWhammyBars = song_->hud2pCounters().whammyBars;
+        if (walk_->keyDeadNow && !dead) {
+            ++walk_->keyRecoveries;
+            walk_->keyNotesAtRecover = walk_->keyNotes, walk_->keyHitsAtRecover = m.player(0).stats().notesHit;
+        }
+        walk_->keyDeadNow = dead;
+    }
     walk_->keyHits = m.player(0).stats().notesHit;
 }
 
@@ -823,55 +854,11 @@ void App::applyEnhanced(const std::string& key) {
             SDL_SetWindowFullscreenMode(window_, dm);
             SDL_SetWindowFullscreen(window_, true);
         }
+        int ww = 0, wh = 0;
+        SDL_GetWindowSizeInPixels(window_, &ww, &wh);
+        SDL_Log("screen mode: %s (the window %dx%d until the system applies it)", m.c_str(), ww, wh);
     }
-    if (is("particles")) VenueStage::particlesOn = enhanced_.get("particles") != "none";
-    {
-        // The picture: Enhanced's chain (render/enhanced_fx) and the world's resolution.
-        auto idx = [&](const char* k, std::initializer_list<const char*> vals) {
-            int i = 0;
-            for (const char* v : vals) {
-                if (enhanced_.get(k) == v) return i;
-                ++i;
-            }
-            return 0;
-        };
-        gfx::PostSettings& ps = VenueStage::post;
-        ps.aa = gfx::PostSettings::AA(idx("antialiasing", {"none", "fxaa", "ssaa", "taa"}));
-        ps.fsr1 = enhanced_.get("ai_upscaling") == "fsr1";
-        ps.fsrScale = 1.0f / std::array<float, 3>{1.5f, 1.7f, 2.0f}[size_t(idx("ai_upscaling_mode", {"quality", "balanced", "performance"}))];
-        // Bloom: None turns GH3's own off; Original is GH3's alone; 2x / 3x add the port's glow over it.
-        ps.gameBloom = enhanced_.get("bloom") != "none";
-        ps.bloom = idx("bloom", {"none", "original", "2x", "3x"});
-        if (ps.bloom == 1) ps.bloom = 0;
-        ps.cinematic = enhanced_.on("cinematic_color");
-        ps.grade = idx("color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"});
-        ps.grain = idx("film_grain", {"none", "light", "medium", "strong", "stronger"});
-        ps.chromatic = idx("chromatic", {"none", "light", "medium", "strong"});
-        Player::forgivingHopos = enhanced_.get("hopo_mode") == "forgiving";
-        Player::easyChords = enhanced_.on("easy_chords");
-        VenueStage::extras.shadowsAll = enhanced_.on("shadows_all");
-        VenueStage::extras.moreLights = idx("more_lights", {"none", "1.5x", "2x", "2.5x"});
-        VenueStage::extras.lightDust = idx("light_dust", {"none", "1.5x", "2x", "2.5x"});
-        TextureCache::sharp = enhanced_.on("sharp_ui");  // from the next start (the textures load at boot)
-        venue::CameraDirector::noShake = enhanced_.on("no_shaky_cam");
-        qs::Vm::cutContent = enhanced_.on("cut_content");
-        ps.ssao = idx("ssao", {"none", "light", "medium", "strong", "stronger"});
-        ps.sharpen = idx("sharpening", {"off", "low", "high"});
-        ps.starBlur = idx("star_blur", {"none", "light", "medium", "strong", "stronger"});
-        ps.bokeh = idx("bokeh", {"none", "light", "medium", "strong", "stronger"});  // 2: GH3's own
-        VenueStage::internalHeight = std::atoi(enhanced_.get("internal_res").c_str());
-        // Remove All Effects: every effect off at once, GH3's own too (its
-        // bloom, depth of field, colour transforms, flashes) and the camera's
-        // shake; the rows keep their values (GDALL-002, gd02's GD02-129).
-        ps.original = !enhanced_.on("no_effects");
-        if (!ps.original) {
-            ps.bloom = ps.grade = ps.grain = ps.chromatic = ps.ssao = ps.sharpen = ps.starBlur = ps.bokeh = 0;
-            ps.cinematic = false;
-            VenueStage::extras.shadowsAll = false;
-            VenueStage::extras.moreLights = VenueStage::extras.lightDust = 0;
-            venue::CameraDirector::noShake = true;
-        }
-    }
+    applyEnhancedGlobals(enhanced_);
     if (is("shake_whammy")) input_.setShakeWhammy(enhanced_.on("shake_whammy"));
     // Rock Band guitars and XInput pads always play (universal_mechanisms.md 1.2.2: everything on by default).
     input_.setRockBand(true), input_.setGamepadPlay(true);
@@ -1376,13 +1363,17 @@ void App::frame() {
             const uint64_t nowNs = SDL_GetTicksNS();
             const double dt = lastFrameNs_ ? double(nowNs - lastFrameNs_) / 1e6 : 0;
             lastFrameNs_ = nowNs;
+            perf::Scope ps(perf::Scripts);
             front_->frame(canvas_, dt);
             if (hooks_) hooks_->draw(canvas_, song_->songMs());
             if (front_->songPaused) pauseSeen_ = pauseSeen_ || front_->flow.paused;
         }
         overlay();
         captureMenuScreenshot(canvas_, double(SDL_GetTicksNS() - startNs_) / 1e6, song_->songMs());
-        canvas_.end();
+        {
+            perf::Scope ps(perf::Present);
+            canvas_.end();
+        }
         if (front_ && front_->songOutro && !front_->songKill) {
             // A request for a song (or a won song's end the scripts never
             // tear down) ends it too [I: GH3's kill_gem_scroller always comes].
@@ -1724,6 +1715,7 @@ int App::run() {
         SDL_Quit();
         return 2;
     }
+    perf::setDevice(&canvas_.renderer().device());
     if (!mixer_.open(error)) SDL_Log("audio: %s (continuing without sound)", error.c_str());
     if (const char* k = SDL_getenv("GD04_KEYS")) keys_ = std::make_unique<MenuKeys>(k);
     // Walks keep their own settings (enhanced.json, controllers.json), fresh
@@ -1893,10 +1885,27 @@ int App::run() {
         if (quitAfter && double(SDL_GetTicksNS() - startNs_) / 1e6 >= std::atof(quitAfter)) running_ = false;
         updatePointer();
         menuRepeat();
-        // Enhanced > In-Game Max FPS (the menus keep the engine's own cap).
+        // Enhanced > Max FPS in a song (the menus keep the engine's own 60).
+        // The device keeps to it (vsync where the display's rate is a whole
+        // multiple of it, its own clock otherwise: setFrameCap); it was only
+        // ever given 60 at start, so 120 / 144 / 240 / Unlimited did nothing
+        // on a 60 Hz display and capped at 60 on a faster one, and this
+        // loop's own wait on top of the vsync could miss a refresh (GD04-118).
+        // Headless runs (no vsync, the device does not pace) wait here.
         const std::string mf = enhanced_.get("max_fps");
-        const uint64_t minNs = !song_ ? kMinFrameNs : mf == "unlimited" ? 0 : uint64_t(1e9 / std::max(30.0, std::atof(mf.c_str())));
+        const int cap = !song_ ? 60 : mf == "unlimited" ? 0 : std::max(30, std::atoi(mf.c_str()));
+        if (cap != frameCap_ && !SDL_getenv("GD04_FPS")) {
+            canvas_.renderer().device().setFrameCap(cap);
+            frameCap_ = cap;
+            SDL_Log("frame cap: %s", cap ? std::to_string(cap).c_str() : "unlimited");
+        }
+        static const bool headless = [] {
+            const char* d = SDL_GetCurrentVideoDriver();
+            return d && std::strcmp(d, "offscreen") == 0;
+        }();
+        const uint64_t minNs = !song_ ? kMinFrameNs : !headless || cap == 0 ? 0 : uint64_t(1e9 / cap);
         const uint64_t spent = SDL_GetTicksNS() - frameStart;
+        perf::frameDone(spent, song_ ? "song" : front_ ? front_->flowState() : "-");
         // GD04_FRAMELOG: every frame over 25 ms, with the screen (owner 1.7).
         static const bool frameLog = [] { const char* v = SDL_getenv("GD04_FRAMELOG"); return v && *v && *v != '0'; }();
         if (frameLog && spent > 25'000'000ull)
@@ -1934,6 +1943,66 @@ int App::run() {
 }
 
 }  // namespace
+
+// The Enhanced options that set the engine's statics (the picture, the
+// rules' switches): every one takes effect at once, from the next frame
+// (Sharper Text & Sprites from the next start, as its help says). App and
+// --enhancedtest (GD04-118) apply them through here.
+void applyEnhancedGlobals(const EnhancedStore& st) {
+    VenueStage::particlesOn = st.get("particles") != "none";
+    Particles::density = st.get("particles") == "2x" ? 2.0f : 1.0f;  // it did nothing before GD04-118
+    // The picture: Enhanced's chain (render/enhanced_fx) and the world's resolution.
+    auto idx = [&](const char* k, std::initializer_list<const char*> vals) {
+        int i = 0;
+        for (const char* v : vals) {
+            if (st.get(k) == v) return i;
+            ++i;
+        }
+        return 0;
+    };
+    gfx::PostSettings& ps = VenueStage::post;
+    ps.aa = gfx::PostSettings::AA(idx("antialiasing", {"none", "fxaa", "ssaa", "taa"}));
+    ps.fsr1 = st.get("ai_upscaling") == "fsr1";
+    ps.fsrScale = 1.0f / std::array<float, 3>{1.5f, 1.7f, 2.0f}[size_t(idx("ai_upscaling_mode", {"quality", "balanced", "performance"}))];
+    // Bloom: None turns GH3's own off; Original is GH3's alone; 2x / 3x add the port's glow over it.
+    ps.gameBloom = st.get("bloom") != "none";
+    ps.bloom = idx("bloom", {"none", "original", "2x", "3x"});
+    if (ps.bloom == 1) ps.bloom = 0;
+    ps.cinematic = st.on("cinematic_color");
+    ps.grade = idx("color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"});
+    ps.grain = idx("film_grain", {"none", "light", "medium", "strong", "stronger"});
+    ps.chromatic = idx("chromatic", {"none", "light", "medium", "strong"});
+    Player::forgivingHopos = st.get("hopo_mode") == "forgiving";
+    Player::easyChords = st.on("easy_chords");
+    VenueStage::extras.shadowsAll = st.on("shadows_all");
+    VenueStage::extras.moreLights = idx("more_lights", {"none", "1.5x", "2x", "2.5x"});
+    VenueStage::extras.lightDust = idx("light_dust", {"none", "1.5x", "2x", "2.5x"});
+    TextureCache::sharp = st.on("sharp_ui");  // from the next start (the textures load at boot)
+    venue::CameraDirector::noShake = st.on("no_shaky_cam");
+    qs::Vm::cutContent = st.on("cut_content");
+    ps.ssao = idx("ssao", {"none", "light", "medium", "strong", "stronger"});
+    ps.sharpen = idx("sharpening", {"off", "low", "high"});
+    ps.starBlur = idx("star_blur", {"none", "light", "medium", "strong", "stronger"});
+    ps.bokeh = idx("bokeh", {"none", "light", "medium", "strong", "stronger"});  // 2: GH3's own
+    // HDR: Emulated runs the chain's auto exposure and filmic tone map over
+    // the venue (render/enhanced_fx). True HDR needs an HDR window surface
+    // gd04 does not make yet (gd03's render/hdr_output): a saved "true" plays
+    // as Emulated. It was not read at all before GD04-118.
+    ps.hdr = st.get("hdr") == "none" ? 0 : 1;
+    ps.hdrPeak = 1;
+    VenueStage::internalHeight = std::atoi(st.get("internal_res").c_str());
+    // Remove All Effects: every effect off at once, GH3's own too (its
+    // bloom, depth of field, colour transforms, flashes) and the camera's
+    // shake; the rows keep their values (GDALL-002, gd02's GD02-129).
+    ps.original = !st.on("no_effects");
+    if (!ps.original) {
+        ps.bloom = ps.grade = ps.grain = ps.chromatic = ps.ssao = ps.sharpen = ps.starBlur = ps.bokeh = 0;
+        ps.cinematic = false;
+        VenueStage::extras.shadowsAll = false;
+        VenueStage::extras.moreLights = VenueStage::extras.lightDust = 0;
+        venue::CameraDirector::noShake = true;
+    }
+}
 
 // Enhanced > Graphics / Audio Backend > Restart Now (universal-menus.md
 // "Backends"): the App ends and starts again in the same process (in the

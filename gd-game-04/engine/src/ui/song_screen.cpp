@@ -17,6 +17,7 @@
 #include "data/band.h"
 #include "data/disc.h"
 #include "data/qbkey.h"
+#include "devaids/perf.h"
 #include "render/band.h"
 #include "render/canvas.h"
 #include "render/texture_cache.h"
@@ -365,7 +366,10 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
         }
         match_->frame(stepMs_, kStepMs, in);
         for (int p = 0; p < match_->players(); ++p) shownHeld_[size_t(p)] = match_->shownInput(p).frets;
-        if (venue_) venue_->update(stepMs_, player_->stats().health, match_->players() == 1 && player_->stats().starPowerActive);
+        if (venue_) {
+            perf::Scope ps(perf::VenueUpdate);
+            venue_->update(stepMs_, player_->stats().health, match_->players() == 1 && player_->stats().starPowerActive);
+        }
         // star_power_on<p>: the player's band member's guitarist_idle handler
         // (handle_star_power) [C scripts guitarist_idle, handle_star_power].
         for (int p = 0; p < match_->players() && p < 2; ++p) {
@@ -470,7 +474,10 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
     if (clockLog && std::floor(now / 1000.0) != std::floor(lastMs_ / 1000.0))
         SDL_Log("clock: wall %llu ms, song %.0f ms", (unsigned long long)SDL_GetTicks(), now);
     lastMs_ = now;
-    tick(now, mixer);
+    {
+        perf::Scope ps(perf::SongTick);
+        tick(now, mixer);
+    }
     draw(canvas, now, textures);
     // GD04_END_AT=<song ms> / GD04_FAIL_AT=<song ms>: end (win) or fail the song then (walk tests).
     static const double endAt = SDL_getenv("GD04_END_AT") ? std::atof(SDL_getenv("GD04_END_AT")) : walkEndMs_;
@@ -555,6 +562,8 @@ Highway2D::Effects SongScreen::effects(int p, double) const {
         const int card = ph < pc.size() ? pc[ph] : -1;
         return card >= 0 && card < int(m->battleData().powerups.size()) ? m->battleData().powerups[size_t(card)].cardTexture : 0;
     };
+    fx.whammyLeft = std::max(0, b.whammyLeft);
+    fx.broken = b.broken;
     // Amp Overload's shake and the hits' / bites' hammer_highway: Highway2D::stepBattle / hammer.
     return fx;
 }
@@ -582,6 +591,7 @@ void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
             venue_->draw(now);
         }
     }
+    perf::Scope perfHighway(perf::Highway);
     const PlayerStats& st = player_->stats();
     char text[160];
     // play_outro: destroy_hud, the gems killed [C script]; a won song's

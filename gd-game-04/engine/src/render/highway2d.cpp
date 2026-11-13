@@ -533,13 +533,16 @@ void Highway2D::drawButtons(Canvas& c, const TextureCache& tex, uint8_t held, bo
     const float slide = float(std::clamp((now - btnSlideAt_) / 150.0, 0.0, 1.0));
     const bool sliding = slide < 1 && btnFrom_ != lefty;
     if (sliding) lefty = btnFrom_;
-    const SDL_Color white{255, 255, 255, 255};
+    // Battle attacks on this player (Effects: whammyLeft, broken) [C scripts animate_whammy_bar, update_broken_button].
+    const bool whammyAttack = fx_.whammyLeft > 0;
+    const float whammyDy = whammyAttack ? -15.0f * float(fx_.whammyLeft) + ((int(now / 150.0) & 1) ? -5.0f : 5.0f) : 0.0f;
+    const SDL_Color white{255, 255, 255, uint8_t(whammyAttack ? 128 : 255)};
     for (int l = 0; l < 5; ++l) {
-        const float p = pixels_[size_t(l)];
+        const float p = fx_.broken[size_t(l)] > 0 ? 5.0f * float(fx_.broken[size_t(l)]) : pixels_[size_t(l)];
         if ((p > 0) != raised) continue;
         float x = endX_[size_t(lefty ? 4 - l : l)];
         if (sliding) x += (endX_[size_t(lefty ? l : 4 - l)] - x) * slide;
-        const float y = playline_;
+        const float y = playline_ + whammyDy;
         const float sxl = lefty ? -nowScaleX_ : nowScaleX_;
         auto at = [&](uint32_t key, float px, float py, float scx, float scy) {
             int tw = 128, th = 64;

@@ -13,6 +13,7 @@
 #include <exception>
 
 #include "data/qbkey.h"
+#include "devaids/perf.h"
 #include "render/gh3_shader.h"
 #include "game/chart.h"
 #include "script/globals.h"
@@ -345,9 +346,19 @@ void VenueStage::starPowerAnim(int p, double) {
 
 void VenueStage::advance(double ms) {
     if (!venue_) return;
-    if (band_) band_->advance(ms);
-    if (crowd_) crowd_->advance(ms);
-    if (particles_) particles_->advance(ms);
+    if (band_) {
+        perf::Scope ps(perf::AdvBand);
+        band_->advance(ms);
+    }
+    if (crowd_) {
+        perf::Scope ps(perf::AdvCrowd);
+        crowd_->advance(ms);
+    }
+    if (particles_) {
+        perf::Scope ps(perf::AdvParticles);
+        particles_->advance(ms);
+    }
+    perf::Scope perfShow(perf::AdvShow);
     cameras_.update(ms, perf_);
     // handle_star_power: at the next camera cut (CameraCuts_StartCallback),
     // the Starpower anim once, cut in, the arms on; then Stance_A's idle
@@ -392,7 +403,8 @@ constexpr float kFarBlend = 3.0f;                   // 8291D710
 constexpr float kNearBlend[2] = {0.5f, 1.0f};       // 8291D708 -> c141.xy
 constexpr float kLispsmN[2] = {4.0f, 16.0f};        // 8291D754
 constexpr float kLightDist = 400, kLightNear = 5, kLightFar = 1000;  // 8291D718..20
-constexpr float kBias[2] = {64.0f / 16777216.0f, 1280.0f / 16777216.0f};  // single_sided x 2^-24
+constexpr float kBias[2] = {64.0f / 16777216.0f, 1280.0f / 16777216.0f};        // single_sided x 2^-24
+constexpr float kBiasDouble[2] = {1200.0f / 16777216.0f, 1600.0f / 16777216.0f};  // double_sided x 2^-24
 constexpr int kCascadeSize[2] = {1024, 512};        // tod_profiles' shadow_map_size
 
 gfx::Vec3 toG(const venue::Vec3& v) { return {v[0], v[1], v[2]}; }
@@ -521,27 +533,53 @@ void VenueStage::shadowPass(double ms, const venue::CamPose& cam) {
         // OpenGL target rows bottom up (their shaders convert the depth).
         gfx::Mat4 flip;
         flip.at(1, 1) = -1;
-        const gfx::Mat4 casterVp = flip * vp;
-        gh3shader::Globals g;
-        g.setMatrix(gh3shader::kRegView, gfx::Mat4::identity(), 4);
-        g.setMatrix(gh3shader::kRegProjection, casterVp, 4);
-        g.setMatrix(gh3shader::kRegViewProj, casterVp, 4);
-        g.setMatrix(gh3shader::kRegInvView, gfx::Mat4::identity(), 4);
-        g.set(gh3shader::kRegDistanceLodScaler, 1, 0, 0, 0);
+        // GH3 biases the casters' depth (the depth-bias render state,
+        // 823DCC48) by GetShadowMapBias's value for the material's sides:
+        // single_sided 64 / 1280, double_sided 1200 / 1600 x 2^-24 [C]. The
+        // band's casters draw cull none (both faces into the map: BandView),
+        // so they take the double_sided values [I: GH3's choice by the
+        // caster's cull state]. With the single-sided 64 on cascade 0 for
+        // them, ~60-85 % of the band's lit surface changed depth by more
+        // than the bias within a texel and shadowed itself in grey stripes
+        // (GD04-119; BandView::AcneProbe, --venuetest). The bias is added to
+        // the casters' depth here (z + b w: + b after the divide), as GH3
+        // does; the receivers compare unbiased.
+        auto casterGlobals = [&](float b) {
+            gfx::Mat4 bias;
+            bias.at(2, 3) = b * biasScale;
+            const gfx::Mat4 m = bias * flip * vp;
+            gh3shader::Globals g;
+            g.setMatrix(gh3shader::kRegView, gfx::Mat4::identity(), 4);
+            g.setMatrix(gh3shader::kRegProjection, m, 4);
+            g.setMatrix(gh3shader::kRegViewProj, m, 4);
+            g.setMatrix(gh3shader::kRegInvView, gfx::Mat4::identity(), 4);
+            g.set(gh3shader::kRegDistanceLodScaler, 1, 0, 0, 0);
+            return g;
+        };
+        const gh3shader::Globals g = casterGlobals(kBias[i]), g2 = casterGlobals(kBiasDouble[i]);
         dev.setTarget(shadow_[size_t(i)]);
         dev.setViewport(0, 0, kCascadeSize[i], kCascadeSize[i]);
         const float white[4] = {1, 1, 1, 1};
         dev.clear(white, true);
-        band_->drawShadow(ms, g, v, lightState_, lights_);
+        // The acne probe (cascade 0, where the skinning happens): GD04_SHADOW_LOG, --venuetest.
+        BandView::AcneProbe probe;
+        const bool probing = i == 0 && band_->view() && (log || acneProbe);
+        if (probing) {
+            probe.vp = vp, probe.size = float(kCascadeSize[i]);
+            probe.bias[0] = kBias[i] * biasScale, probe.bias[1] = kBiasDouble[i] * biasScale, probe.oldBias = kBias[i];
+            band_->view()->setAcneProbe(&probe);
+        }
+        band_->drawShadow(ms, g, v, lightState_, lights_, &g2);
+        if (probing) {
+            band_->view()->setAcneProbe(nullptr);
+            acne.area += probe.area, acne.prone += probe.prone, acne.proneOld += probe.proneOld;
+            if (log && probe.area > 0)
+                SDL_Log("shadow: acne-prone %.1f %% of the band's lit texels (%.1f %% with the old bias)", 100.0 * probe.prone / probe.area,
+                        100.0 * probe.proneOld / probe.area);
+        }
         if (band_->view()) shadowDraws_[size_t(i)] = band_->view()->stats().drawsLastFrame;
-        // GH3 biases the casters' depth (the depth-bias state); the same,
-        // subtracted from the receivers' depth [C: the values; I: the
-        // double_sided ones (1200 / 1600) for double-sided casters are not
-        // applied].
-        gfx::Mat4 bias;
-        bias.at(2, 3) = -kBias[i] * biasScale;
         s.tex[i] = dev.targetDepth(shadow_[size_t(i)]);
-        s.vp[i] = bias * vp;
+        s.vp[i] = vp;
         s.size[i] = float(kCascadeSize[i]);
     }
     dev.setTarget(oldTarget);
@@ -567,6 +605,7 @@ void VenueStage::shadowPass(double ms, const venue::CamPose& cam) {
 
 void VenueStage::draw(double ms) {
     if (!view_) return;
+    perf::Scope perfAll(perf::Venue);
     // This stage's lens shift for every pass of the frame, none after it.
     struct ShiftScope {
         explicit ShiftScope(float x) { VenueView::lensShiftX = x; }
@@ -590,8 +629,12 @@ void VenueStage::draw(double ms) {
     }
     lights_.evaluate(ms, lightState_);
     const venue::CamPose cam = hasFixedCam_ ? fixedCam_ : cameras_.pose(ms);
-    shadowPass(ms, cam);
+    {
+        perf::Scope ps(perf::Shadow);
+        shadowPass(ms, cam);
+    }
     if (crowd_) {
+        perf::Scope ps(perf::Crowd);
         crowd_->render(ms, cam, *venue_, lightState_, lights_);
         for (uint32_t card : hide_) view_->setOverride(card, crowd_->texture(card));
     }
@@ -609,14 +652,27 @@ void VenueStage::draw(double ms) {
         Particles* pt = particles_.get();
         view_->setNodeMotion([pt, ms](uint32_t node, gfx::Mat4& d) { return pt->nodeMotion(node, ms, d); });
     }
-    view_->draw(cam, lightState_, lights_);
-    if (band_) band_->draw(ms, cam, *venue_, lightState_, lights_);
-    if (peds_) peds_->draw(ms, cam, *venue_, lightState_, lights_, particles_.get());
-    static const bool noProjectors = SDL_getenv("GD04_NO_PROJECTORS") != nullptr;  // development aid: compare without them
-    if (!noProjectors) view_->drawProjectors(cam, lights_);
-    view_->drawVolumes(cam, lights_);
-    static const bool noRays = SDL_getenv("GD04_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
-    if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, fx_.depthSnapshot());
+    {
+        perf::Scope ps(perf::VenueMeshes);
+        view_->draw(cam, lightState_, lights_);
+    }
+    if (band_) {
+        perf::Scope ps(perf::Band);
+        band_->draw(ms, cam, *venue_, lightState_, lights_);
+    }
+    if (peds_) {
+        perf::Scope ps(perf::Peds);
+        peds_->draw(ms, cam, *venue_, lightState_, lights_, particles_.get());
+    }
+    {
+        perf::Scope ps(perf::Lights);
+        static const bool noProjectors = SDL_getenv("GD04_NO_PROJECTORS") != nullptr;  // development aid: compare without them
+        if (!noProjectors) view_->drawProjectors(cam, lights_);
+        view_->drawVolumes(cam, lights_);
+        static const bool noRays = SDL_getenv("GD04_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
+        if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, fx_.depthSnapshot());
+    }
+    perf::Scope perfParticles(perf::Particles);
     if (particles_) particles_->draw(cam, ms);
     // gd02's extras (EnhancedLights) work in GH2's space (z up, ~44 units a
     // metre): the band's feet and the camera mapped there, and back by the matrix [I].
@@ -626,6 +682,13 @@ void VenueStage::draw(double ms) {
         gh3shader::Globals g;
         gfx::Mat4 vp;
         VenueView::cameraGlobals(cam, device_->info().clipDepthZeroToOne, ms / 1000.0, g, &vp);
+        // cameraGlobals projects to Direct3D's depth (0..w), which GH3's
+        // shaders convert; the extras' own shader does not: on OpenGL their
+        // depth fell from -1..1 to 0..1 (behind everything nearer than the
+        // far half), so the floor discs (All Band Mates Cast Shadows, the
+        // pools) failed the depth test and the dust nearly all did (GD04-118).
+        if (!device_->info().clipDepthZeroToOne)
+            for (int c = 0; c < 4; ++c) vp.at(2, c) = 2 * vp.at(2, c) - vp.at(3, c);
         gfx::Mat4 back;  // GH2 space -> GH3 world
         back.at(0, 0) = 1 / kU, back.at(1, 1) = 0, back.at(2, 2) = 0, back.at(1, 2) = 1 / kU, back.at(2, 1) = 1 / kU;
         gfx::LightsView lv;
@@ -647,12 +710,25 @@ void VenueStage::draw(double ms) {
     }
     if (extras.any() && band_ && device_) {
         std::vector<gfx::Vec3> feet;
-        for (const Band::Entry& e : band_->members())
-            if (e.placed) feet.push_back(to02({e.root.m[3], e.root.m[7], e.root.m[11]}, kU));
+        for (const Band::Entry& e : band_->members()) {
+            if (!e.placed) continue;
+            // The floor under the member: its toes. The waypoint (the model's
+            // origin) sits below the stage's floor in the venues, so the
+            // extras' floor discs (All Band Mates Cast Shadows, the pools)
+            // drew under it, hidden (GD04-118) [I].
+            venue::Vec3 p{e.root.m[3], e.root.m[7], e.root.m[11]}, toe;
+            float floorY = 1e9f;
+            for (const char* bone : {"Bone_Toe_L", "Bone_Toe_R"})
+                if (e.model && band_->bonePos(e.model->member.object, qbkey::key(bone), toe)) floorY = std::min(floorY, toe[1]);
+            if (floorY < 1e8f) p[1] = floorY;
+            feet.push_back(to02(p, kU));
+        }
         const gfx::LightsView lv = lightsView();
         if (!extras_) extras_ = std::make_unique<gfx::EnhancedLights>(*device_);
         extras_->draw(extras, feet, lv, false, float(ms / 1000.0));
     }
+    perfParticles.stop();
+    perf::Scope perfFx(perf::ScreenFx);  // GH3's screen effects and Enhanced's chain, to the end
     if (fx) {
         // venue_DOF: the shot's dof (a DOF_*_tod_manager's screen_FX[0]), else
         // DOF_Off_TOD_Manager's, set when the cut starts [C CameraCuts_StartCallback].

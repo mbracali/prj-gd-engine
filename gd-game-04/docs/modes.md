@@ -106,6 +106,30 @@ fallback (the character's highway material: M6) [I].
 | Whammy | every fret dead until the whammy passes half 3/4/5/6 times [battle_whammy_attack] |
 | Death Drain | one miss's loss every 0.4/0.3/0.25/0.2 s until the victim dies; a second halves it [battle_death_lick] |
 
+- What the victim sees of the attacks that kill the frets (GD04-120) [C
+  scripts]: a Whammy attack (battle_whammy_attack) runs
+  update_training_whammy_bar: battle_hud_whammy_bar at (610, 700), +
+  (450, 0) for player 2, scale 0.8, just centre bottom, with WHAMMY
+  (text_a4 x 1.2, turned 53) on it; animate_whammy_bar moves it and the
+  five fret buttons' bases (`<colour>_base<p>`) 15 px up per whammy left,
+  bobbing 5 px every 0.15 s (the bar turning -25 / -45), the bases at alpha
+  0.5, until the frets work again. Broken String (update_broken_button)
+  raises the broken fret's button by 5 px per press left
+  (button_up_pixel_array). gd04 had only the attack's name at the top: a
+  player who did not know to whammy kept strumming dead frets "for the rest
+  of the song" (the owner's 11-13 report). render/hud2p.cpp and
+  Highway2D::Effects (whammyLeft, broken) draw them now.
+- The battle meters: player 1's `HUD_2p_battle_frame` has `flags {p1
+  flip_v}`; GH3's flip_v mirrors left-right (flip_h top-bottom, as
+  ui/ui_system.cpp). Hud2P drew it upside down, its card holes over the
+  dial while the card slots (card_default_2/3_p1) are at the p2 ones'
+  mirror image: the power-up icons sat on a wrong frame (GD04-120).
+- Walk `boss_keys` (GD04-120): Slash's battle played on the keys as a
+  player plays it (the notes on the fret keys, a card fired a second after
+  the last with Tab, the Whammy key worked under a Whammy attack): the
+  player gets power-ups from the battle phrases, fires them, Slash's
+  attacks end and the frets hit again afterwards (one run: 9 cards got and
+  fired, 4 attacks received, 133 of 134 notes hit after the last one).
 - Health: `health_change_*_battle`, x1.35 / x0.85 zones, no loss at 0. KO: a
   player at 0 with the healths unequal -> song_failed -> GuitarEvent_SongWon
   battle_win = 1; winner by health [0x8210FD18, GuitarEvent_SongFailed].
