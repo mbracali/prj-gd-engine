@@ -247,7 +247,7 @@ void main() {
     lit *= uDiffuse;
 #endif
 #if GD_PRELIT && GD_NO_COLOR_INPUT
-    vec4 base = vec4(0.0, 0.0, 0.0, 1.0);  // no colour input (skinned): GL's default attribute
+    vec4 base = vec4(1.0);  // no colour input (skinned): white, lit like an unlit vertex colour (GD02-163) [I]
 #elif GD_PRELIT
     vec4 base = aColor;
 #else

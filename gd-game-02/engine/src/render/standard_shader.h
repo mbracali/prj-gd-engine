@@ -48,8 +48,10 @@ constexpr uint32_t UseEnviron = 1u << 30;    // the environment's ambient (else 
 // colour input. GL reads a missing input as (0, 0, 0, 1); Vulkan, D3D12 and
 // Metal leave it undefined (zero on RADV), which drew Pandora's prelit
 // body with alpha 0 (cut away) on the core backends (GD02-161). With this
-// bit the shader uses GL's (0, 0, 0, 1) on every backend [I: GH2's skinned
-// vertex declaration is not traced].
+// bit the shader uses white (1, 1, 1, 1) on every backend: GL's (0, 0, 0, 1)
+// took the prelit ambient away, so Izzy, Axel and Pandora drew much darker
+// than the others on Character Select (GD02-163) [I: GH2's skinned vertex
+// declaration is not traced].
 constexpr uint32_t NoColorInput = 1u << 31;
 
 inline int texGen(uint32_t k) { return int(k >> TexGenShift) & 3; }

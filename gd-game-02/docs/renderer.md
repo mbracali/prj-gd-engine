@@ -38,8 +38,10 @@ in gd02 name the same variant as the disc's file. Bit 31 is gd02's own
 vertices carry bone weights where the colour would be. GL reads the missing
 colour input as (0, 0, 0, 1); Vulkan / D3D12 leave it undefined (zero on
 RADV: Pandora's prelit body, alpha_cut, drew nothing; GD02-161), so with the
-bit the shader uses GL's (0, 0, 0, 1) on every backend [I: GH2's skinned
-vertex declaration is not traced]. `--chartest` checks every playable
+bit the shader uses white (1, 1, 1, 1) on every backend: GL's (0, 0, 0, 1)
+dropped the prelit ambient and left Izzy, Axel and Pandora far darker than
+the others (GD02-163; `--walktest char_luma`) [I: GH2's skinned vertex
+declaration is not traced]. `--chartest` checks every playable
 character's prelit skinned meshes (1104; goth1 131, punk1 3) draw with it. `--shadertest` compiles
 all 585 programs gd02 builds (the 2D program, 545 standard variants, the
 video program and 38 post-process programs).
