@@ -1746,3 +1746,33 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   (0x82226800 region) is not read [I].
 - **Not done:** the freeze frame's name / instrument labels (worldbase.dta
   name_*.lbl), the other track triggers of D100, venue look (GD05-069).
+
+## 2026-11-16: bug-fix wave (GD02-167, GD05-101, 100, 096, 098, 102)
+
+- **Script mod (GD02-167, D101):** Harmonix's Mod wraps into [0, n); the
+  tutorials' previous lesson on the first one ({mod {- 0 1} n}) gave -1.
+  `--selftest`: "script mod: 8 of 8 cases", all charts fully hit.
+- **Builtins (GD05-101, D101):** |=, &=, ~, with, sort, search_replace;
+  `--scripttest` 49 checks passed (6 new). Clip events (handler names such
+  as set_leftarm_true) now reach their CharClip type; events on a clip's
+  first frame fire. Arm events in inbloom / blitzkriegbop (guitar, whole
+  songs): 0 before, 0 after (no clip carrying them was played).
+- **Kick bounce (GD05-100, D102):** inbloom drums 30 s: kick_drummer.trig
+  0 -> 39 (of 39 kicks), camera off its rest in 0 -> 1,584 of 7,014 frames
+  (up to 2.8 units). The intro anim held cameras.grp every frame and hid
+  any bounce. Solo notes: mainoffender 25 s solo_hit / hit_fill 0 -> 85.
+  Found: the bass never reaches 5x / 6x (rulesForInstrument unused), so
+  BassSuperStreak cannot fire.
+- **Camera in the drum kit (GD05-098):** not fixed. coop_d_c07.shot is a
+  world-space keyframe (45.7, -21.0, 59.7), 42 units from the drummer's
+  root, 11 above it, aimed at player_drum0; the band targets are world
+  too (drummer to 6.42, -35.39, 48.94). coop_d_c.shot's keyframes sit at
+  z 33.0 (under the members' 48.8..49.9): check whether RB's BandCamShot
+  keyframes are relative to something (the venue's stage / a parent).
+- **World clock (GD05-102):** the shake and the hair step at the world's
+  paced rate (24 under ProFilm, PostFx::worldFps), was 60
+  (GD05_WORLD_CLOCK_LEGACY=1). inbloom 30 s: shake steps 2,059 -> 823,
+  camera shake motion 9.44 -> 3.66 units and 0.133 -> 0.052 rad per 1,000
+  frames (amplitude about the same: 0.41 -> 0.45 units). Grain already
+  uses the PostProc's noise_intensity; the pacing already takes each
+  PostProc's own emulate_fps (there is no world-FPS option to skip).
