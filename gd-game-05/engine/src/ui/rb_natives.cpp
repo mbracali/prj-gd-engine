@@ -449,7 +449,34 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         for (ScriptObject* o : sinks) ui.callScript(o, "start_loading_msg");
         return Value::integer(0);
     });
-    session->quiet({"update_game_data", "send_to_all", "send_to_player", "set_all_local_ready_status", "set_invites_allowed", "ignore_remote_messages", "done_loading"});
+    session->quiet({"update_game_data", "send_to_all", "send_to_player", "set_invites_allowed", "ignore_remote_messages", "done_loading"});
+    // {session end_game kQuit} (pause.dta's exit_new_song / exit_change_band
+    // / exit_new_section, before their meta_loading screen): a local session
+    // has no sinks for it (pause_panel adds itself only online); the
+    // meta_loading screen that follows clears the song [I: Session EndGame
+    // not read]. It was logged unhandled on pause > New Song (GD05-114).
+    session->quiet({"end_game"});
+    // GD05-114: Session SetAllLocalReadyStatus (RB 0x82372F30) [C]: every
+    // local player whose ready flag differs gets the new one (0x8236EEC8).
+    // seldiff's panels send it FALSE as they unload (SELDIFF_PANEL_HANDLERS);
+    // the port ignored it, so the next song's part / difficulty screen came
+    // back with player 0 still ready: it went straight on to loading with no
+    // part picked (track none: the song's first instrument, the drums).
+    // GD05_READYRESET_LEGACY=1: ignored as before.
+    if (SDL_getenv("GD05_READYRESET_LEGACY")) {
+        session->quiet({"set_all_local_ready_status"});
+    } else {
+        session->on("set_all_local_ready_status", [&ui](std::vector<Value>& a) {
+            const bool ready = !a.empty() && a[0].truthy();
+            Interp& in = ui.interp();
+            for (int p = 0; p < 4; ++p) {
+                if (!ui.session().joined(p)) continue;
+                const Value cfg = in.send("game", "get_player_config", {Value::integer(p)});
+                if (cfg.object && in.send(cfg.object, "is_ready", {}).truthy() != ready) in.send(cfg.object, "set_ready", {Value::integer(ready ? 1 : 0)});
+            }
+            return Value::integer(0);
+        });
+    }
     RbHost* platform = add(std::make_unique<RbHost>(ui, "platform_mgr"));
     // Signed in: every local player has the port's profile (rb_profile.json,
     // ui/rb_meta.cpp), never a guest; the Xbox save screens stay skipped

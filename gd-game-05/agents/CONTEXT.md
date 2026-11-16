@@ -263,3 +263,11 @@ RB focus 11-16 (GD05-107 cameras):
   event - zero_time; counters rb_camsim_*, rb_cut_aim_*. GD05_VENUE picks
   the venue (big_club_11 lists 34 disabled shots, arena_07 19).
   GD05_CAMRULES_LEGACY=1 runs the camera of 1.1.15 (D105-D107).
+
+RB focus 11-16 (GD05-114 New Song part):
+- `--walktest rb_newsong_part` (keyboard) / `rb_newsong_part_pad` (an Xbox
+  360 pad works the menus): solo quick play, a song, pause > NEW SONG >
+  yes, another song: `newsong_part first|again|game` print player 0's
+  controller, track, character, slot and ready flag; the part / difficulty
+  screen must come up not ready in the guitar slot, the song played on the
+  guitar. GD05_READYRESET_LEGACY=1 fails (D116).

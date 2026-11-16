@@ -2003,3 +2003,26 @@ pattern). Each says what, why and how to undo it.
   item 1): RB's gem instance transform still not traced (gem_smasher%d
   0x82817D28 only finds the smashers).
 
+
+## D116
+- **What (2026-11-16, GD05-114):** the part / difficulty screen's ready flags
+  are cleared when it is left. seldiff.dta's panels (SELDIFF_PANEL_HANDLERS,
+  hth_split_seldiff_panel) send `{session set_all_local_ready_status FALSE}`
+  on unload; Session SetAllLocalReadyStatus (RB 0x82372F30) sets every local
+  player whose flag differs (0x8236EEC8) [C]. The port keeps its panels
+  loaded (never runs their unload) and quieted the message, so after a song
+  player 0 stayed ready: pause > New Song > a song > qp_seldiff_solo_screen
+  saw every slot ready and went straight to loading, with no part picked
+  (track kTrackNone: the game took the song's first instrument, the drums).
+  Any controller (keyboard, pad, guitar). Now the session message sets the
+  flags, and the seldiff panels' unload handler runs when the next screen
+  does not hold them [I: only these panels' unload; the others' (game,
+  loading, shop, charcreator) still never run]. Also `{session end_game
+  kQuit}` (pause's exit_new_song) is handled quietly (local session: no
+  sinks) instead of logged unhandled [I].
+- **Measured (walks rb_newsong_part keyboard / rb_newsong_part_pad,
+  `newsong_part` lines):** the second qp_seldiff_solo_screen: player 0 ready
+  1 -> 0, the song then played on track drum -> guitar (2); the first
+  screen unchanged (ready 0, guitar slot, part select) both ways.
+  rb_pause_quit, rb_qp_locked OK.
+- **Undo:** GD05_READYRESET_LEGACY=1.

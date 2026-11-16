@@ -2446,6 +2446,64 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             check("kb_hits");
         }
         expect_ = {"main_screen", "main_solomode_screen", "qp_selsong_screen", "qp_seldiff_solo_screen", "game_screen", "pause_screen", "game_screen"};
+    } else if (scenario == "rb_newsong_part" || scenario == "rb_newsong_part_pad") {
+        // GD05-114, owner: "selected the option new song ... the game forced
+        // me to go into drums and did not even allow me to select guitar or
+        // bass (I'm using a keyboard ...)". Solo quick play with the keyboard
+        // (rb_newsong_part_pad: an Xbox 360 pad), a song, pause, NEW SONG,
+        // another song: qp_seldiff_solo_screen must offer the guitar slot's
+        // part select again, as on the first time (newsong_part).
+        const bool pad = scenario == "rb_newsong_part_pad";
+        // The pad works every menu itself (A, Start, the d-pad).
+        auto dev = [&](const std::string& what) { check(("dev_set " + what + " 1").c_str()), wait(90), check(("dev_set " + what + " 0").c_str()), wait(220); };
+        auto ok = [&] { if (pad) dev("b0"); else key(SDLK_RETURN); };
+        auto down = [&] { if (pad) dev("b12"); else key(SDLK_DOWN); };  // SDL_GAMEPAD_BUTTON_DPAD_DOWN
+        auto up = [&] { if (pad) dev("b11"); else key(SDLK_UP); };
+        if (pad) check("dev_attach 045e:028e", 10000);
+        at("splash_screen", 30000);
+        check("unlock_all_songs");
+        wait(500);
+        ok();
+        at("main_screen");
+        wait(1500);
+        ok();  // SOLO
+        at("main_solomode_screen");
+        ok();  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(500);
+        down(), wait(300);
+        ok();
+        at("qp_seldiff_solo_screen");
+        wait(800);
+        check("newsong_part first");
+        ok();  // guitar
+        wait(1500);
+        ok();  // the difficulty
+        at("game_screen", 60000);
+        wait(4000);
+        if (pad) dev("b6"); else key(SDLK_ESCAPE);  // pause
+        at("pause_screen", 10000);
+        wait(800);
+        for (int i = 0; i < 3; ++i) down(), wait(250);  // resume, restart, lefty, NEW SONG
+        check("print_focus");
+        ok();  // NEW SONG
+        at("confirm_quit_screen", 10000);
+        wait(800);
+        up(), wait(300);  // no.btn -> yes.btn
+        ok();  // yes
+        at("qp_selsong_screen", 40000);
+        wait(1000);
+        down(), wait(300);
+        ok();
+        at("qp_seldiff_solo_screen");
+        wait(800);
+        check("newsong_part again");
+        ok();  // guitar
+        wait(1500);
+        ok();  // the difficulty
+        at("game_screen", 60000);
+        wait(2000);
+        check("newsong_part game");
     } else if (scenario == "rb_guitar_play" || scenario == "rb_guitar_none" || scenario == "rb_pad_play" || scenario == "rb_owner_guitar") {
         // GD05-056: a song played with a device's own SDL events (a virtual
         // joystick that is the owner's Harmonix Rock Band Guitar 1bad:0002:
@@ -5682,6 +5740,36 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     }
     if (s.screen == "restart_app") {  // the game starts again in the same process (runApp): the walk goes on as <walk>_restarted
         ui.host().setEnhancedValue("restart_now", "1");
+        return pass();
+    }
+    if (s.screen.rfind("newsong_part ", 0) == 0) {
+        // rb_newsong_part (GD05-114): player 0's config on qp_seldiff_solo_screen
+        // ("first" / "again"): a guitar controller, a guitar character, no
+        // track yet, so seldiff.dta's guitar slot shows its part select
+        // (guitar.btn / bass.btn); "game": the song is played on the guitar.
+        const std::string when = s.screen.substr(13);
+        Interp& in = ui.interp();
+        const Value cfg = in.send("game", "get_player_config", {Value::integer(0)});
+        if (!cfg.object) return fail("no player config");
+        const int ctrl = in.send(cfg.object, "get_controller_type", {}).integerValue();
+        const int track = in.send(cfg.object, "get_track_type", {}).integerValue();
+        const Value ch = in.send(cfg.object, "get_char", {});
+        const std::string inst = ch.object ? in.send(ch.object, "get_instrument", {}).str() : std::string("-");
+        const std::string name = ch.object ? ch.object->name() : std::string("-");
+        const ui::Session::PlayerCfg& pc = ui.session().players[0];
+        // The screen's slot of player 0 (seldiff.dta's player_panels).
+        std::string slotName = "-";
+        for (auto& sl : ui.playerSlots())
+            if (sl && sl->playerNum() == 0) slotName = sl->getProp(in, "slot").str();
+        const bool ready = in.send(cfg.object, "is_ready", {}).truthy();
+        std::printf("  newsong_part %s: controller %d track %d char %s (%s, session %s) slot %d %s ready %d\n", when.c_str(), ctrl, track,
+                    name.c_str(), inst.c_str(), pc.character.c_str(), pc.slot, slotName.c_str(), int(ready));
+        if (when == "game") return track == 2 ? pass() : fail("the song is not played on the guitar (track " + std::to_string(track) + ")");
+        if (ctrl != 1) return fail("player 0 is not on a guitar controller (" + std::to_string(ctrl) + ")");
+        if (inst != "guitar") return fail("player 0's character plays " + inst);
+        if (track != 4) return fail("player 0's part already set (track " + std::to_string(track) + ")");
+        if (ready) return fail("player 0 already ready: the screen goes on to loading");
+        if (slotName != "guitar") return fail("player 0 is not in the guitar slot (" + slotName + "): no part select");
         return pass();
     }
     if (s.screen == "print_focus") {
