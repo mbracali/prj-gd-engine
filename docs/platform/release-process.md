@@ -38,27 +38,36 @@ pull requests or branches, no bots).
      Latest; its notes carry the `## X.Y.Z` section of
      `gd-engine-launcher/CHANGELOG.md`, so write the Highlights there first)
      with:
-     - `gdul-<v>-linux-x86_64.tar.gz` (Ubuntu 22.04, SDL3 included:
-       `gd-engine-launcher/scripts/build_linux_portable.sh`)
-     - `gdul-<v>-x86_64.AppImage` and `gdul-<v>-x86_64.AppImage.zsync` (#83:
-       the same Linux build in one file,
+     - `gdul-<v>-linux-x86_64.AppImage`, `gdul-<v>-linux-x86_64.AppImage.zsync`
+       and `recomplauncher.json` (#83, GDUL-032: the Linux download, the
+       Linux build (Ubuntu 22.04, SDL3 included:
+       `gd-engine-launcher/scripts/build_linux_portable.sh`) in one file,
        `gd-engine-launcher/scripts/build_appimage.sh`, with pinned
        appimagetool and runtime, SHA-256 checked, cached in
        `~/.cache/gd-engine/appimage/`). Its update information is
        `gh-releases-zsync|mbracali|prj-gd-engine|latest|gdul-*-x86_64.AppImage.zsync`,
-       so AppImageUpdate and AppManager update it from the Latest release.
-       Inside it the launcher looks for discs next to the `.AppImage` file
-       (`$APPIMAGE`: beside it and in `original_isos/` there), saves in the
-       usual XDG folder and loads the modules from the mount. The site's
-       Linux button keeps the `.tar.gz` ("linux-x86_64" is not in the
-       AppImage's name); its AppImage button matches "x86_64.AppImage",
-       never the `.zsync`. Locally: `build.sh appimage` (or `linux appimage`)
+       so AppImageUpdate and AppManager update it from the Latest release;
+       the pattern matches the AppImage's name up to 1.1.15
+       (`gdul-<v>-x86_64.AppImage`) and after, so an installed older
+       AppImage still finds the newer one. Inside it the launcher looks for
+       discs next to the `.AppImage` file (`$APPIMAGE`: beside it and in
+       `original_isos/` there), saves in the usual XDG folder and loads the
+       modules from the mount. `recomplauncher.json` is the one inside it,
+       published beside it for RecompLauncher (which picks the file with
+       the system and processor in its name: only the AppImage has
+       "linux"). The site's Linux button matches "x86_64.AppImage", never
+       the `.zsync`. Locally: `build.sh appimage` (or `linux appimage`)
        makes `local_builds/gdul-<v>-appimage-x86_64/`.
+     - `gdul-<v>-portable-x86_64.tar.gz` (the same Linux build as a folder,
+       `gdul-<v>-linux-x86_64/` inside; `gdul-<v>-linux-x86_64.tar.gz` up
+       to 1.1.15, renamed so RecompLauncher never takes it for the Linux
+       download; the site's "Linux .tar.gz" button takes either name)
      - `gdul-<v>-steamdeck-x86_64.tar.gz` (the Steam Deck download: built in
        Valve's Steam Runtime 3 "sniper" SDK container,
        `gd-engine-launcher/scripts/build_steamdeck.sh`, every module with
        its Steam Deck defaults, `STEAM-DECK.txt` inside; the site's Steam
-       Deck button picks the asset with "steamdeck" in its name)
+       Deck button picks the asset with "steamdeck" in its name; no
+       "linux" in it, so RecompLauncher does not take it for Linux)
      - `gdul-<v>-windows-x86_64.zip` (MinGW-w64)
      - `gdul-<v>-macos-arm64.zip` (when that build succeeds; ad-hoc signed)
      - `gdul-<v>-android-arm64.apk` (signed with the gdul release key)

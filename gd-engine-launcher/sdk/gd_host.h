@@ -129,6 +129,12 @@ typedef struct GdHost {
 // 60 FPS, lighter effects, handheld controls). The player's own saved
 // settings still win; nothing is locked.
 #define GD_HOST_HANDHELD 0x1u
+// (GDUL-032) Full screen (RecompLauncher's Big Picture mode,
+// RECOMPLAUNCHER_MODE=bigpicture): the launcher's window is full screen when
+// the game starts, and a module keeps it so: its Windowed screen mode counts
+// as Full Screen (No Border) for this run; Full Screen stays Full Screen. The
+// saved setting is not changed.
+#define GD_HOST_FULLSCREEN 0x2u
 // The flags of a host, 0 when it is older than the field.
 #define GD_HOST_FLAGS(h) ((h)->size >= offsetof(GdHost, flags) + sizeof(uint32_t) ? (h)->flags : 0u)
 

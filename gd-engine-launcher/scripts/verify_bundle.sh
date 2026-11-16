@@ -14,11 +14,12 @@
 # GDUL_REQUIRE_DLSS=1 (or CI=true): gd01's DLSS library must be in a Linux download.
 # CI=true: a module whose exports cannot be read (no nm/objdump) fails too.
 # An .AppImage (Linux): unpacked with its own --appimage-extract; its update
-# information and the .zsync next to it are checked too.
+# information, the .zsync and recomplauncher.json next to it (the same as
+# the one inside: the release publishes it beside the AppImage) are checked too.
 set -euo pipefail
 shopt -s inherit_errexit nullglob
 here="$(cd "$(dirname "$0")" && pwd)"
-[ $# -ge 1 ] || { sed -n '4,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] || { sed -n '4,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 target="$1" os="${2:-}"
 if [ -t 1 ]; then G=$'\e[32m' R=$'\e[31m' Y=$'\e[33m' N=$'\e[0m'; else G="" R="" Y="" N=""; fi
 problems=0
@@ -96,6 +97,9 @@ case "$os" in
       [ -s "$target.zsync" ] || fail "$(basename "$target").zsync next to it (AppImageUpdate needs it)"
       [ ! -s "$target.zsync" ] || grep -aqx "Filename: $(basename "$target")" "$target.zsync" ||
         fail "$(basename "$target").zsync is not for $(basename "$target")"
+      beside="$(dirname "$target")/recomplauncher.json"
+      if [ ! -s "$beside" ]; then fail "recomplauncher.json next to $(basename "$target") (RecompLauncher reads it there)"
+      elif ! cmp -s "$beside" "$bundle/recomplauncher.json"; then fail "recomplauncher.json next to $(basename "$target") is not the one inside it"; fi
     fi ;;
   macos) nonempty "$bundle/../MacOS/$exe" ;;
   android)

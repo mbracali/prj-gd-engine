@@ -164,8 +164,8 @@
             <div class="links">
               <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="windows-x86_64"><b>Windows</b><span class="file">Windows 10 / 11 (64-bit)</span></a>
               <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="macos-arm64"><b>macOS</b><span class="file">Apple silicon</span></a>
-              <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="linux-x86_64"><b>Linux</b><span class="file">Any distribution from 2022 on</span></a>
-              <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="x86_64.AppImage"><b>Linux AppImage</b><span class="file">One file, updates with AppImageUpdate</span></a>
+              <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="x86_64.AppImage"><b>Linux</b><span class="file">AppImage, any distribution from 2022 on</span></a>
+              <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="portable-x86_64.tar.gz|linux-x86_64.tar.gz"><b>Linux .tar.gz</b><span class="file">The same files, as a folder</span></a>
             </div>
           </div>
           <div class="dlcard" style="--c:var(--green)">
@@ -320,13 +320,17 @@
 
   // Download buttons: the newest launcher release's files (GitHub API; the
   // buttons keep pointing at the latest release page if the API is out of reach).
+  // data-asset: a part of the file's name, or several separated by "|" (the
+  // first that matches wins: the Linux .tar.gz was gdul-<v>-linux-x86_64.tar.gz
+  // up to 1.1.15, gdul-<v>-portable-x86_64.tar.gz after).
   fetch("https://api.github.com/repos/mbracali/prj-gd-engine/releases/latest")
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
     .then(rel => {
       if (!/^gdul\//.test(rel.tag_name || "")) return;
       document.getElementById("ver").textContent = `Universal Launcher ${rel.tag_name.replace(/^gdul\/v/, "")} is out. Free. Bring your own discs.`;
       for (const a of document.querySelectorAll(".dlcard a[data-asset]")) {
-        const f = (rel.assets || []).find(x => x.name.includes(a.dataset.asset) && !x.name.endsWith(".zsync") && (a.dataset.asset === "steamdeck" || !x.name.includes("steamdeck")));
+        const fit = part => (rel.assets || []).find(x => x.name.includes(part) && !x.name.endsWith(".zsync") && (part === "steamdeck" || !x.name.includes("steamdeck")));
+        const f = a.dataset.asset.split("|").map(fit).find(x => x);
         if (f) { a.href = f.browser_download_url; a.querySelector(".file").textContent = f.name; }
       }
     })

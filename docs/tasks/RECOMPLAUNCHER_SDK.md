@@ -14,7 +14,8 @@ need new code is listed under "Suggestions" for the owner to decide.
 - The file: [gd-engine-launcher/package/recomplauncher.json](../../gd-engine-launcher/package/recomplauncher.json),
   copied by `scripts/build.sh` to the top of every desktop download (Linux,
   Steam Deck, Windows, macOS; the AppImage carries it inside, as it carries
-  the Linux folder). Not in the APK (RecompLauncher is a desktop app).
+  the Linux folder, and the release publishes it next to the AppImage too).
+  Not in the APK (RecompLauncher is a desktop app).
 - `scripts/verify_bundle.sh` (every build, every release archive) checks it:
   exactly one on top of a desktop download, valid JSON, `format` 1, a
   `start.program` that is in the download, every `--play gdNN` a ready game.
@@ -70,7 +71,7 @@ need new code is listed under "Suggestions" for the owner to decide.
 | `repo` | yes | mbracali/prj-gd-engine |
 | `start.program` | yes | the three program paths (Windows, Linux, macOS app); the first that exists runs |
 | `start.args` | yes, empty | no args: an older RecompLauncher (one tile) opens gdul's own list |
-| `start.env` | no | nothing of ours reads an env var for this |
+| `start.env` | no | not needed: RecompLauncher sets `RECOMPLAUNCHER_MODE` itself, and gdul reads it (Big Picture, below) |
 | `games` (6) | yes | gd01, gd02, gd03, gd04, gd05, gd10: `--play gdNN --exit-after --iso {input:gdNN}` (existing options); `title_id` for the four X360 games; per-game `saves` |
 | `inputs` (6) | yes | one per game, role game, .iso / .chd files; each game's tile asks only for its own disc |
 | `game` (+ `check`, `dumps`) | no | one legacy copy for the whole release: six games need six discs, and `inputs` has no `check` / `dumps`. gdul checks the disc itself (content signature) when the game starts |
@@ -110,28 +111,92 @@ leave `--iso` without a value (exit 2): that's why the inputs are required
 
 ## Release names
 
-RecompLauncher picks the file with the system and processor in its name
-(`-Windows-x64.zip`, `-Linux-x64.AppImage`; the standards page also shows
-`-linux-x86_64`). Ours, as `gdul-release.yml` publishes them:
+Owner 11-16: "The Linux release should be the AppImage."
 
-| File | OK? |
+RecompLauncher picks one file per system and processor from the words in
+its name (guide: "Put the system and the processor in the name:
+`MyRecomp-v1.2.0-Windows-x64.zip`, `MyRecomp-v1.2.0-Linux-x64.AppImage`";
+its release standards: `-linux-x86_64.AppImage`). On Linux it takes "an
+AppImage or a `.tar.gz`", and the guide does not say which wins when there
+are both. So only the AppImage carries "linux" now: the other Linux-built
+files have no system word, and nothing can tie with it.
+
+| File (`gdul-release.yml`) | For RecompLauncher |
 |---|---|
-| `gdul-<v>-windows-x86_64.zip` | yes |
-| `gdul-<v>-macos-arm64.zip` | yes |
-| `gdul-<v>-linux-x86_64.tar.gz` | yes (x86_64, not x64; the standards page uses it) |
-| `gdul-<v>-steamdeck-x86_64.tar.gz` | unclear: no "linux" in the name; a second x86_64 .tar.gz beside the Linux one |
-| `gdul-<v>-x86_64.AppImage` (+ .zsync) | unclear: no "linux" in the name; a second Linux candidate; the manifest is inside the AppImage, not next to it |
-| `gdul-<v>-android-arm64.apk`, `SHA256SUMS.txt` | not for RecompLauncher (no desktop system in the name) |
+| `gdul-<v>-windows-x86_64.zip` | the Windows pick |
+| `gdul-<v>-macos-arm64.zip` | the macOS pick |
+| `gdul-<v>-linux-x86_64.AppImage` (was `gdul-<v>-x86_64.AppImage`) | the Linux pick: system and processor, the guide's own example form |
+| `gdul-<v>-linux-x86_64.AppImage.zsync` | not a program (AppImageUpdate's file) |
+| `recomplauncher.json` (new release asset) | the manifest next to the AppImage (no system / processor in the name, so never picked as the game) |
+| `gdul-<v>-portable-x86_64.tar.gz` (was `gdul-<v>-linux-x86_64.tar.gz`) | not picked: no system word (same files as the AppImage; `gdul-<v>-linux-x86_64/` inside) |
+| `gdul-<v>-steamdeck-x86_64.tar.gz` (unchanged) | not picked: no system word ("steamdeck" is not "linux") |
+| `gdul-<v>-android-arm64.apk`, `SHA256SUMS.txt` | not for RecompLauncher |
 
-Every archive has one top folder (`gdul-<v>-<os>-<arch>/`), which
-RecompLauncher unwraps. Not renamed: the AppImage name is in its zsync
-update information (GDREL-009) and the Steam Deck name is the owner's.
-Owner's call: ask RecompLauncher which Linux file it takes, or rename.
+Why `portable` and not `linux` for the .tar.gz: with "linux" in both names
+the guide leaves the choice to RecompLauncher. The processor stays in both
+.tar.gz names for people; without the system word they can only rank below
+the AppImage.
+
+**The manifest for the AppImage.** The guide only says "`recomplauncher.json`
+at the top of the zip, next to your program"; it does not say whether it
+looks inside an AppImage. So both: it is at the top of the AppImage's
+AppDir (as in the .tar.gz) and published next to it as a release asset
+(`build_appimage.sh` copies it beside the AppImage, `verify_bundle.sh`
+checks it is there and the same as the one inside). Open point for
+RecompLauncher: with the AppImage installed, `start.program` lists
+`Guitar Dream Universal Launcher` (the program inside the AppImage); the
+guide does not say how it starts an AppImage (it has a version in its
+name). Check it in Developer tools, or ask them.
+
+**AppImage updates.** The update information inside every AppImage is
+`gh-releases-zsync|mbracali|prj-gd-engine|latest|gdul-*-x86_64.AppImage.zsync`
+(unchanged): the `*` matches `1.1.15` (old name) and `<v>-linux` (new
+name), so an installed older AppImage finds the newer `.zsync` and updates
+(the `.zsync` carries the new file name). gdul has no other updater
+(GDUL-031 is open). The site's buttons take both the old and the new
+.tar.gz name, so they work before and after the first release with the
+new names. `gdul-release.yml` unpacks the previous release's Linux
+download by either name (module reuse).
+
+## Big Picture mode (full screen)
+
+Owner 11-16: "Start full screen" in Big Picture.
+
+RecompLauncher sets `RECOMPLAUNCHER=1` and `RECOMPLAUNCHER_MODE`
+(`bigpicture` | `desktop`) on every program it starts. With
+`RECOMPLAUNCHER_MODE=bigpicture` (`platform::bigPicture`, not Android):
+
+- the launcher's window is full screen (the desktop's own mode, no border)
+  from the start and again after a game, instead of always a window;
+- the game started (`--play`, or from the list) gets `GD_HOST_FULLSCREEN` in
+  `GdHost::flags`; each module (gd01's in `modules/gd01`, gd02 .. gd10's
+  `module_entry.cpp`) sets `GDNN_FULLSCREEN=1`, and the game's screen mode
+  (Enhanced Options, `screen_mode`) treats Windowed as Full Screen (No
+  Border) for that run, as the Android builds already do. Full Screen stays
+  Full Screen; the saved setting is not changed.
+
+`desktop`, or no variable: nothing changes. Log lines: `gdul: window
+fullscreen|windowed WxH` (launcher), `gdNN: full screen (RecompLauncher Big
+Picture): Windowed is not used this run` (game), `gdul: <game> ended, window
+fullscreen|windowed WxH`.
+
+Checked 11-16 (Linux build, `SDL_VIDEO_DRIVER=offscreen`):
+
+- launcher alone, `bigpicture`: `gdul: window fullscreen`; `desktop` and no
+  variable: `gdul: window windowed`.
+- `--play gd10 --exit-after` (saved screen mode: default Windowed) and
+  `--play gd05` (the same), `bigpicture`: `window: made again for Vulkan
+  (..., full screen)`, `gdNN: full screen (RecompLauncher Big Picture)`,
+  `gd-game-NN ended, window fullscreen`, the launcher full screen after;
+  no variable: windowed all the way, as before.
+- Build: `verify_bundle.sh` passes on the AppImage with `recomplauncher.json`
+  beside it and fails without it; the `.zsync` says
+  `Filename: gdul-1.1.15-linux-x86_64.AppImage`.
 
 ## Suggestions (would need new code; not done)
 
-- Read `RECOMPLAUNCHER_MODE=bigpicture` (full screen, controller first) and
-  `RECOMPLAUNCHER_PAD` (button glyphs) in the launcher / games.
+- Read `RECOMPLAUNCHER_PAD` (button glyphs) in the launcher / games.
+  (`RECOMPLAUNCHER_MODE=bigpicture`: done, full screen, above.)
 - `--iso=<file>` (one argument), or the standards' `--game <path>`, so an
   optional input can never leave a bare `--iso`.
 - A settings file RecompLauncher can edit: one shared format for the games'

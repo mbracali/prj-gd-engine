@@ -23,6 +23,9 @@ extern "C" GD_MODULE_EXPORT int gd_game_run(const GdHost* host) {
     // fails. In the launcher, SDL and OpenGL started long before: keep the
     // launcher's GPU, never restart the launcher's process.
     gdshim_setenv("GD01_GPU", "system");
+    // RecompLauncher's Big Picture mode (GD_HOST_FULLSCREEN): Windowed counts
+    // as Full Screen (No Border) for this run (App's screen mode).
+    gdshim_setenv("GD01_FULLSCREEN", (GD_HOST_FLAGS(host) & GD_HOST_FULLSCREEN) ? "1" : "0");
     std::vector<std::string> args(host->argv, host->argv + host->argc);
     if (args.empty()) args.emplace_back("gd01");
     std::vector<char*> argv;
