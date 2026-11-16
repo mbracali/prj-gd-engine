@@ -784,7 +784,7 @@ void Band::setupFace(Member& m, scene::Object* servo) {
             if (m.type != "rb_vocals" && !blinkLegacy) m.lip->setLoop(true, faceRng_.real(0.0f, 1000.0f));
             m.character->setRbFace(set, names);
             m.character->attachFace(m.lip.get());
-            if (log) SDL_Log("band: %s face %s, %zu visemes, %s", m.slot.c_str(), fac.c_str(), names.size(), voc.c_str());
+            if (log) SDL_Log("band: %s face %s, %zu visemes (%s), %s", m.slot.c_str(), fac.c_str(), names.size(), set ? set->path().c_str() : "-", voc.c_str());
         } catch (const std::exception& e) {
             SDL_Log("band: %s lip.servo: %s", m.slot.c_str(), e.what());
         }

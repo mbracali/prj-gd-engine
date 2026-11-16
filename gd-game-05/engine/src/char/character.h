@@ -215,6 +215,9 @@ public:
 
     // Stats.
     int outfitObjects() const { return outfitObjects_; }
+    // The local place an outfit gave each of its parented bones (the head's
+    // face rig, GD05-116), for the bandcheck.
+    const std::map<std::string, scene::Xfm>& outfitBoneLocals() const { return outfitBoneLocal_; }
     std::vector<std::string> unresolvedBones() const;
 
 private:
@@ -252,6 +255,7 @@ private:
     const scene::Group* outfitShadow_ = nullptr;  // an outfit's, when the character has none
     int lod_ = -1;
     int outfitObjects_ = 0;
+    std::map<std::string, scene::Xfm> outfitBoneLocal_;
     int meshHidden_ = 0;
     // The servo: channel -> bone (skeleton index), and the root channels.
     std::vector<int> channelBone_;

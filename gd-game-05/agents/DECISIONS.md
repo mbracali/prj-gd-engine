@@ -2147,3 +2147,36 @@ pattern). Each says what, why and how to undo it.
   audio track, so no measurement from it.
 - **Undo:** GD05_CROWDSTREAMS_LEGACY=1.
 
+## D121
+- **What (2026-11-16, GD05-116, owner: the singer's eyes pop out of the
+  skull on Mississippi Queen):** each head outfit (outfits/heads/gen/
+  head_<n>.milo) carries its own face rig, placed for its own skull [C
+  data]: on heads 2..6, 41 of its 55 bones differ from the base character's
+  (built on head_1) by up to 1.1 units (head_3's bone_L-eye 2.24 3.87 1.23
+  under bone_head.mesh, the base's 2.64 4.33 1.51); the body pieces' bones
+  all match the base's. The port kept the base character's bone for every
+  duplicate, so the head's meshes (eye-L / eye-R, eyebrows, head<n>) hung on
+  head_1's places. The viseme set's Base (male_viseme_head_<n>) poses the
+  brows, lids and lips but never the eyes, so the eyeballs sat 0.2..0.7
+  units forward and out of the sockets, in front of the lids: huge white
+  eyes, brows looking detached. Now a head piece's bone under the same
+  parent as the character's gives it its local place (parentless stubs,
+  bone_spine2 / bone_head_nod, stay the character's); the instruments' and
+  kits' bones stay as before [I: RB's outfit merge not read; heads only,
+  the faces fit only this way]. Characters on head_1 were unaffected,
+  hence "not every character".
+- **Measured (new bandcheck line "eyes on the head's rig": either eye's
+  local position against its head outfit's, missqueen to 15.5 s):** singer
+  vocals19 (head_3) 0.674 -> 0, guitar0 (head_2) 0.393 -> 0; prefab
+  drummers drum13 / drum11 / drum12 / drum8 / drum0 (heads 2 f, 4, 6, 4 f,
+  5) 0.367 / 0.221 / 0.667 / 0.308 / 0.647 -> 0, guitar15 (head_6 f)
+  0.528 -> 0, vocals16 (head_5 f) 0.126 -> 0; head_1 members 0 both ways.
+  No other bandcheck line changes. Close shots (GD05_FACE_CAM
+  player_vocals0:25:f, :16:f:bone_forehead.mesh): the eyes now sit behind
+  the lids in the sockets, the brows on the brow ridge.
+  Not changed: a crease on head_3's forehead (right side) stays with the
+  bones at the head's own rest and no expression; neither the normal,
+  spec nor skin texture has it, so it is the mesh's shape [I]; the brow
+  mesh draws opaque (eyebrows.mat blend 1, kBlendSrc on the disc).
+- **Undo:** GD05_HEADBONES_LEGACY=1.
+

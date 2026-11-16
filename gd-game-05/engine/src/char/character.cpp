@@ -342,6 +342,36 @@ void Character::loadOutfit(const GameData& data, const std::string& outfitPath) 
                 if (auto* og = o->as<scene::Group>())
                     for (const auto& n : og->objects)
                         if (std::find(g->objects.begin(), g->objects.end(), n) == g->objects.end()) g->objects.push_back(n);
+            // The head's face rig (GD05-116, D121): each head outfit
+            // (outfits/heads/gen/head_<n>.milo) carries its own facial
+            // bones, placed for its own skull [C data: head_3's
+            // bone_L-eye.mesh at 2.24 3.87 1.23 under bone_head.mesh, the
+            // base character's (head_1's) at 2.64 4.33 1.51; 41 of the
+            // head's 55 bones differ on heads 2..6, by up to 1.1 units; the
+            // body pieces' bones all match the base's]. Its meshes (eye-L,
+            // eyebrows, head<n>) are skinned to those places, and the viseme
+            // set's Base poses the brows, lids and lips but never the eyes,
+            // so a head on the base's bones wore its eyeballs 0.4..0.7 units
+            // forward and out of the sockets (the singer's eyes "popping out
+            // of the skull"). A head piece's bone under the same parent as
+            // the character's gives it its place; a parentless one is the
+            // piece's stub of the chain (bone_spine2, bone_head_nod) and stays
+            // the character's [I: RB's outfit merge not read; the faces only
+            // fit this way]. Only the heads: the instruments' and the kits'
+            // bones (strings, nut, cymbals) stay as the port had them.
+            // GD05_HEADBONES_LEGACY=1: every bone the character's.
+            static const bool headBonesLegacy = [] {
+                const char* e = SDL_getenv("GD05_HEADBONES_LEGACY");
+                return e && *e && *e != '0';
+            }();
+            static const std::string kHeads = "/outfits/heads/";
+            const bool headPiece = outfitPath.find(kHeads) != std::string::npos;
+            const scene::Trans* ot = gfx::transOf(o.get());
+            auto* et = const_cast<scene::Trans*>(gfx::transOf(existing));
+            if (headPiece && ot && et && !ot->parent.empty() && ot->parent == et->parent) {
+                outfitBoneLocal_[o->name] = ot->local;  // for the bandcheck's face line
+                if (!headBonesLegacy) et->local = ot->local, et->world = ot->world;
+            }
             continue;  // kKeep: the character's bone
         }
         const scene::Trans* t = gfx::transOf(o.get());

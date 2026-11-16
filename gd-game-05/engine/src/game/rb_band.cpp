@@ -952,6 +952,11 @@ struct Band::RbCheck {
         // its look-at's limits (degrees), and the frames each went wrong.
         float eyePosMax = 0, eyeOutMax = 0;
         int eyePosFrames = 0, eyeOutFrames = 0;
+        // Head rig (GD05-116): either eye's local position off the place
+        // its head outfit gives it (head_<n>.milo's bone_L-eye / _R-eye), and
+        // the brows' (bone_*brow*), the most per frame; frames over 0.05.
+        float headEyeMax = 0, headBrowMax = 0;
+        int headEyeFrames = 0, headFrames = 0;
         double eyePosMs = 0, eyeOutMs = 0;
         // The upper lid following the eye (RB 0x82329588): per frame with
         // the Blink weight under 0.3, the eye's vertical turn (its look's x,
@@ -1287,6 +1292,20 @@ void Band::rbCheckFrame() {
                 if (ang > 2) ++f.eyeMoved;
             }
             if (lid >= 0) f.lidMax = std::max(f.lidMax, angleBetween(sk.local(lid).rot, sk.bind(lid).rot));
+            if (const auto& placed = c.outfitBoneLocals(); !placed.empty()) {
+                float eyeOff = 0, browOff = 0;
+                for (const auto& [name, x] : placed) {
+                    const bool eye = name == "bone_L-eye.mesh" || name == "bone_R-eye.mesh", brow = name.find("brow") != std::string::npos;
+                    const int b = (eye || brow) ? sk.find(name) : -1;
+                    if (b < 0) continue;
+                    const auto& p = sk.local(b).pos;
+                    const float d = std::sqrt((p[0] - x.pos[0]) * (p[0] - x.pos[0]) + (p[1] - x.pos[1]) * (p[1] - x.pos[1]) + (p[2] - x.pos[2]) * (p[2] - x.pos[2]));
+                    (eye ? eyeOff : browOff) = std::max(eye ? eyeOff : browOff, d);
+                }
+                f.headEyeMax = std::max(f.headEyeMax, eyeOff), f.headBrowMax = std::max(f.headBrowMax, browOff);
+                f.headEyeFrames += eyeOff > 0.05f;
+                ++f.headFrames;
+            }
             {
                 // Eye in socket (GD05-112): each eye look-at's source (its
                 // pivot when it has none, RB 0x82321A48): the local position
@@ -1596,6 +1615,13 @@ void Band::rbCheckReport() {
         SDL_snprintf(buf, sizeof buf, "face %s eye in socket: off its bind spot up to %.3f units (%d frames over 0.05, worst at %.0f ms), past the look-at limits up to %.1f deg (%d frames over 1, worst at %.0f ms), of %d frames",
                      m.slot.c_str(), double(f.eyePosMax), f.eyePosFrames, f.eyePosMs, double(f.eyeOutMax), f.eyeOutFrames, f.eyeOutMs, f.eyeFrames);
         line(f.eyePosFrames * 1000 <= f.eyeFrames && f.eyeOutFrames * 1000 <= f.eyeFrames, buf);
+        // Head rig (GD05-116): fails when an eye sits off its head's own
+        // place (over 0.05 units) on any frame: the eyeball out of the socket.
+        if (f.headFrames > 0) {
+            SDL_snprintf(buf, sizeof buf, "face %s eyes on the head's rig: off the head outfit's eye place up to %.3f units (%d of %d frames over 0.05); brows off the head's up to %.3f (info: the visemes' Base poses them)",
+                         m.slot.c_str(), double(f.headEyeMax), f.headEyeFrames, f.headFrames, double(f.headBrowMax));
+            line(f.headEyeFrames == 0, buf);
+        }
         if (f.lidN > 0) {
             const double n = f.lidN, var = f.lidSxx / n - (f.lidSx / n) * (f.lidSx / n);
             const double slope = var > 1e-6 ? (f.lidSxy / n - (f.lidSx / n) * (f.lidSy / n)) / var : 0;
