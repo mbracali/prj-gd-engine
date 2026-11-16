@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "audio/audio_source.h"
+#include "gd/core/audio/time_stretch.h"
 #include "audio/vgs_stream.h"
 
 // Plays a song's multitrack audio and owns the song clock. The clock and
@@ -89,6 +90,12 @@ public:
     // beatmatcher's speed, PS2 0x001224f0) [C]; set after play(), stop()
     // resets it.
     void setClock(double scale, double offsetMs) { clockScale_ = scale > 0 ? scale : 1, clockOffsetMs_ = offsetMs; }
+    // Enhanced > Song Speed (GDALL-053): the song plays `tempo` x as fast
+    // with its pitch kept (gd-engine-core's TimeStretch, WSOLA) and the song
+    // clock runs at the tempo, so the chart follows. 1 = off (the original
+    // path, untouched). Set after play(); stop() resets it to 1.
+    void setTempo(double tempo);
+    double tempo() const { return tempo_.load(); }
     // Song time in ms at `ticksNs` (SDL_GetTicksNS clock), or now if 0.
     double songTimeMs(uint64_t ticksNs = 0) const;
     // The clock for drawing a frame: songTimeMs advanced by the wall clock and
@@ -148,6 +155,11 @@ private:
     std::atomic<int64_t> leadIn_{0};
     std::atomic<bool> paused_{false};
     double clockScale_ = 1, clockOffsetMs_ = 0;
+    // Song Speed: the stretcher (audio thread once set), its tempo and its output per channel.
+    gd::core::audio::TimeStretch stretch_;
+    std::atomic<double> tempo_{1};
+    std::vector<std::vector<float>> stretched_;
+    std::vector<float*> stretchPtrs_;
     std::atomic<float> speed_{1};
     // Pitch correction (setPitchCorrect): set before the callback reads it
     // (play / setClock time, under the stream's start); the grains are the

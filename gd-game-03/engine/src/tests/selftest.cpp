@@ -20,6 +20,8 @@
 #include "data/game_data.h"
 #include "data/midi.h"
 #include "game/autoplay.h"
+#include "gd/core/audio/speed_options.h"
+#include "gd/core/audio/time_stretch.h"
 #include "game/band_performer.h"
 #include "game/key_script.h"
 #include "game/song_db.h"
@@ -815,6 +817,117 @@ static int checkCalibration(const GameData& data, const std::vector<SongInfo>& s
     return 1;
 }
 
+// GDALL-053 / 054: Enhanced > Song Speed and Track Speed. The stretcher
+// keeps the pitch and length / tempo; a song at 150 % played on a clock at
+// 1.5 x real time ends at its length / 1.5 with every gem hit by autoplay
+// (the frames 16.7 ms of real time apart); above 100 % the hit window grows
+// (125 ms late hits at 150 %, not at 100 %); a song not at 100 % saves no
+// record; the panel takes every value of speed_options.h.
+static int checkSongSpeed(const GameData& data, const std::vector<SongInfo>& songs, const Rules& rules) {
+    namespace sp = gd::core::speed;
+    int failures = 0;
+    auto check = [&](const char* what, bool ok) {
+        std::printf("song speed: %s%s\n", what, ok ? "" : " FAILED");
+        failures += !ok;
+    };
+    // The stretcher on a 10 s, 440 Hz tone: 50 %, 150 % and 200 %.
+    for (double tempo : {0.5, 1.5, 2.0}) {
+        gd::core::audio::TimeStretch ts;
+        ts.reset(2, 44100);
+        ts.setTempo(tempo);
+        const int64_t n = 441000;
+        int64_t src = 0, endOut = -1, out = 0, crossings = 0, from = -1, to = 0;
+        double energy = 0;
+        std::vector<float> l(512), r(512);
+        float* o[2] = {l.data(), r.data()};
+        float last = 0;
+        while (out < int64_t(double(n) / tempo) + 22050) {
+            ts.process(o, 512, [&](float* const* d, int want) {
+                const int got = int(std::min<int64_t>(want, n - src));
+                for (int i = 0; i < got; ++i) d[0][i] = d[1][i] = 0.5f * float(std::sin(2 * 3.14159265358979 * 440 * double(src + i) / 44100));
+                src += got;
+                if (got == 0 && endOut < 0) endOut = out;
+                return got;
+            });
+            for (int i = 0; i < 512; ++i) {
+                const int64_t k = out + i;
+                if (k >= 44100 && k < int64_t(double(n) / tempo) - 44100) {
+                    if (from < 0) from = k;
+                    crossings += (last < 0) != (l[size_t(i)] < 0), to = k, energy += double(l[size_t(i)]) * l[size_t(i)];
+                }
+                last = l[size_t(i)];
+            }
+            out += 512;
+        }
+        const double hz = double(crossings) / 2 / (double(to - from) / 44100), rms = std::sqrt(energy / double(to - from));
+        const double len = double(endOut) / 44100, want = 10.0 / tempo;
+        char what[200];
+        std::snprintf(what, sizeof what, "%.0f %%: a 10 s tone lasts %.2f s (want %.2f), %.1f Hz (440), level %.3f (0.354)", tempo * 100,
+                      len, want, hz, rms);
+        check(what, std::abs(len - want) < 0.15 && std::abs(hz - 440) < 2 && std::abs(rms - 0.3536) < 0.01);
+    }
+    // A chart at 150 % and 200 %: every gem hit on the song clock (1.5 x real time).
+    for (const SongInfo& info : songs) {
+        Song song;
+        try {
+            song = loadChart(data, info, rules);
+        } catch (const std::exception&) {
+            continue;
+        }
+        if (!song.hasPart[size_t(Part::Guitar)]) continue;
+        for (double speed : {1.5, 2.0}) {
+            Rules play = rules;
+            play.slopMs = sp::slopMs(rules.slopMs, speed);
+            Player p(song, Part::Guitar, Difficulty::Expert, play, ControllerMode::Guitar, true);
+            Autoplay bot(p.chart());
+            double real = -1000, endReal = -1;
+            for (;; real += 1000.0 / 60) {
+                const float t = float(real * speed);
+                bot.feed(p, t), p.update(t);
+                if (endReal < 0 && t >= song.endMs) endReal = real;
+                if (t > song.endMs + 2000) break;
+            }
+            const int total = int(p.chart().gems.size());
+            char what[200];
+            std::snprintf(what, sizeof what, "%s at %.0f %%: %d/%d hit, ends at %.0f ms real (length %.0f / %.1f = %.0f)", info.id.c_str(),
+                          speed * 100, p.notesHit(), total, endReal, double(song.endMs), speed, double(song.endMs) / speed);
+            check(what, p.notesHit() == total && std::abs(endReal - double(song.endMs) / speed) <= 1000.0 / 60);
+        }
+        auto lateHits = [&](const Rules& rr) {
+            Player p(song, Part::Guitar, Difficulty::Easy, rr, ControllerMode::Guitar, true);
+            Autoplay bot(p.chart());
+            bot.delay(125);
+            for (float t = -1000; t < song.endMs + 5000; t += 4) bot.feed(p, t), p.update(t);
+            return std::make_pair(p.notesHit(), int(p.chart().gems.size()));
+        };
+        Rules wide = rules;
+        wide.slopMs = sp::slopMs(rules.slopMs, 1.5);
+        const auto [hitWide, total] = lateHits(wide);
+        const int hitNormal = lateHits(rules).first;
+        char what[200];
+        std::snprintf(what, sizeof what, "hit window %.0f ms at 150 %% (%.0f at 100 %%, %.0f at 50 %%): Easy played 125 ms late %d/%d hit, at 100 %% %d",
+                      double(wide.slopMs), double(rules.slopMs), double(sp::slopMs(rules.slopMs, 0.5)), hitWide, total, hitNormal);
+        // The late presses near the next gem go to it (the nearest gem), so not all: at least 85 %, against none.
+        check(what, hitWide * 100 >= total * 85 && hitNormal == 0 && sp::slopMs(rules.slopMs, 0.5) == rules.slopMs);
+        break;
+    }
+    check("records saved only at 100 % (50 / 150 / 200 % are practice)",
+          sp::savesRecords(sp::songSpeed("100")) && !sp::savesRecords(sp::songSpeed("50")) && !sp::savesRecords(sp::songSpeed("150")) &&
+              !sp::savesRecords(sp::songSpeed("200")) && sp::songSpeed("bogus") == 1.0);
+    check("track speed: Expert 1.4 x 2 / 1.5 = 1.87; 1 x 1 / 1 = 1",
+          std::abs(sp::scrollSpeed(1.4f, sp::trackSpeedFactor("2"), 1.5) - 1.8667f) < 1e-3f && sp::scrollSpeed(1, 1, 1) == 1.0f);
+    bool panel = true;
+    for (const char* k : {"song_speed", "track_speed"}) {
+        const ui::EnhancedSetting* s = ui::enhancedSetting(k);
+        panel = panel && s && std::string(s->values.front()) == (std::string(k) == "song_speed" ? sp::kSongSpeedDefault : sp::kTrackSpeedDefault);
+        for (const char* v : std::string(k) == "song_speed" ? std::vector<const char*>(std::begin(sp::kSongSpeeds), std::end(sp::kSongSpeeds))
+                                                             : std::vector<const char*>(std::begin(sp::kTrackSpeeds), std::end(sp::kTrackSpeeds)))
+            panel = panel && s && ui::enhancedValid(*s, v);
+    }
+    check("the Enhanced panel takes every Song / Track Speed value, defaults 100 % and 1x", panel);
+    return failures;
+}
+
 int runSelfTest(const std::string& dataPath) {
     try {
         GameData data(dataPath);
@@ -905,12 +1018,13 @@ int runSelfTest(const std::string& dataPath) {
         const int inputFailures = runInputChecks();
         std::printf(inputFailures ? "%d input check(s) failed\n" : "all input checks passed\n", inputFailures);
         const int calibrationFailures = checkCalibration(data, songs, rules);
+        const int speedFailures = checkSongSpeed(data, songs, rules);
         const int wordingFailures = checkPcWording(data);
         std::printf(wordingFailures ? "%d string(s) still name the PS2 or a console\n" : "PC wording: no PS2 or console in any language\n",
                     wordingFailures);
         std::printf("%d song audio file(s) with problems, %d script(s) not decoded\n", audioFailures, scriptFailures);
         std::printf(chartFailures ? "%d chart(s) not fully hit\n" : "all charts fully hit\n", chartFailures);
-        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || wordingFailures || calibrationFailures ? 1 : 0;
+        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || wordingFailures || calibrationFailures || speedFailures ? 1 : 0;
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;
