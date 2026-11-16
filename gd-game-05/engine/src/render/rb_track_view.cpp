@@ -130,6 +130,7 @@ void RbTrackView::load(const GameData& data, scene::MiloLibrary& library, const 
         if (owner == (drums_ ? "smasher_plate_drum" : "smasher_plate_guitar")) smasherGroup_ = d->get("draw_order.grp") ? d->get("draw_order.grp")->as<scene::Group>() : nullptr;
     loadFx();
     colorSmashers();
+    if (SDL_getenv("GD05_GEMCURVE_LOG")) gemCurveCheck();
     // The sustain tails' template and materials (track/gem_tail.milo) [C data].
     try {
         tails_ = &library.load("track/gen/gem_tail.milo_xbox");
@@ -243,7 +244,7 @@ int RbTrackView::drawNowBarGems(gfx::Renderer& r, gfx::SceneCache& cache) {
     for (int f = drums_ ? 1 : 0; f < 5; ++f) {
         const scene::TrackWidget* w = sets_[size_t(f)].normal;
         if (!w) continue;
-        drawWidget(mr, cache, w, !drums_ ? slotX(f) : drumX_[size_t(f)], 0, f);
+        drawWidget(mr, cache, w, !drums_ ? slotX(f) : drumX_[size_t(f)], 0, f, f);
         ++lanes;
     }
     if (sub) r.device().setViewport(vx, vy, vw, vh);
@@ -414,8 +415,28 @@ void RbTrackView::colorSmashers() {
             if (!d || o2.rfind("gem_smasher", 0) != 0 || o2.size() != 12) continue;
             const int slot = o2[11] - '0';
             if (slot < 0 || slot > 4) continue;
-            if (drums_)
-                if (const scene::Object* holder = plate->get(o2)) drumX_[size_t(slot)] = pose_.world(holder).pos[0];
+            if (const scene::Object* holder = plate->get(o2)) {
+                const scene::Xfm wx = pose_.world(holder);
+                if (drums_) drumX_[size_t(slot)] = wx.pos[0];
+                // RB's gem manager (RB 0x828167F0, at its set-up 0x82816BB0)
+                // [C]: each slot's TrackDir slot is its smasher's world (x, z)
+                // (0x82251F28), and the euler y of its world matrix (0x8238E000)
+                // the slot's roll; a gem's transform is then MakeSecondsXfm
+                // (0x822509D8: identity, x = slot x, z = slot z, y = y_per_second
+                // x seconds) turned by that roll (0x8238EA48), in the gem add
+                // 0x82818B68. The smashers stand on flat_curve.mesh's curve
+                // (z -0.0044 x^2, rolled), so the outer gems do too.
+                SlotCurve& c = slotCurve_[size_t(slot)];
+                c.set = true, c.x = wx.pos[0], c.z = wx.pos[2];
+                // The roll alone (RB keeps the euler y, drops x / z).
+                const float roll = std::atan2(wx.rot[2], wx.rot[0]);
+                c.rot = {std::cos(roll), 0, std::sin(roll), 0, 1, 0, -std::sin(roll), 0, std::cos(roll)};
+                static const bool log = SDL_getenv("GD05_GEMCURVE_LOG") != nullptr;
+                if (log)
+                    SDL_Log("RB track: gem curve %s slot %d smasher x %.3f z %.3f roll %.4f (rot %.4f %.4f %.4f) data slot x %.3f", part_.c_str(),
+                            slot, double(c.x), double(c.z), double(roll), double(wx.rot[0]), double(wx.rot[1]), double(wx.rot[2]),
+                            double(slotX_[size_t(slot)]));
+            }
             std::string color = drums_ ? (slot == 0 ? "orange" : slot == 1 ? "red" : slot == 2 ? "yellow" : slot == 3 ? "blue" : "green") : slotColors_[size_t(slot)];
             int index = 0;
             for (int i = 0; i < 5; ++i)
@@ -1072,14 +1093,76 @@ const scene::Mat* RbTrackView::slotMat(const scene::Mesh& m, int slot) const {
     return track_->root().resolve<scene::Mat>(name);
 }
 
-void RbTrackView::drawWidget(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::TrackWidget* w, float x, float y, int colorSlot) {
+// GD05_GEMCURVE_LOG=1: each lane's gem at the now line (y 0) against its
+// smasher, in the smasher's own frame: the gem mesh's bounding-box centre and
+// its two ends' height. RB puts every gem on its smasher the same way, so the
+// offsets must be equal across the lanes (spread under 0.01 units).
+void RbTrackView::gemCurveCheck() {
+    float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f}, endLo = 1e9f, endHi = -1e9f;
+    for (int f = drums_ ? 1 : 0; f < 5; ++f) {
+        const scene::TrackWidget* w = sets_[size_t(f)].normal;
+        const SlotCurve& c = slotCurve_[size_t(f)];
+        if (!w || !w->dir || !c.set || w->meshes.empty()) continue;
+        const scene::Mesh* m = gfx::meshGeometry(w->dir->resolve<scene::Mesh>(w->meshes.front()));
+        if (!m || m->verts.empty()) continue;
+        const scene::Mesh* owner = w->dir->resolve<scene::Mesh>(w->meshes.front());
+        scene::Xfm inst;
+        inst.pos = {!drums_ ? slotX_[size_t(f)] : drumX_[size_t(f)], 0, 0};
+        if (!gemCurveLegacy()) inst.pos = {c.x, 0, c.z}, inst.rot = c.rot;
+        scene::Xfm x0;
+        if (w->allowRotation) x0.rot = pose_.local(owner).rot;
+        x0 = scene::compose(x0, inst);
+        float bl[3] = {1e9f, 1e9f, 1e9f}, bh[3] = {-1e9f, -1e9f, -1e9f};
+        for (const auto& v : m->verts)
+            for (int k = 0; k < 3; ++k) bl[k] = std::min(bl[k], v.pos[k]), bh[k] = std::max(bh[k], v.pos[k]);
+        // A local point -> world -> the smasher's frame (rows are its axes).
+        auto toSmasher = [&](float px, float py, float pz, float out[3]) {
+            float wpt[3];
+            for (int j = 0; j < 3; ++j) wpt[j] = x0.pos[j] + px * x0.rot[j] + py * x0.rot[3 + j] + pz * x0.rot[6 + j];
+            const float d[3] = {wpt[0] - c.x, wpt[1], wpt[2] - c.z};
+            for (int i = 0; i < 3; ++i) out[i] = d[0] * c.rot[i * 3] + d[1] * c.rot[i * 3 + 1] + d[2] * c.rot[i * 3 + 2];
+        };
+        float ctr[3], l[3], r[3];
+        toSmasher(0.5f * (bl[0] + bh[0]), 0.5f * (bl[1] + bh[1]), 0.5f * (bl[2] + bh[2]), ctr);
+        toSmasher(bl[0], 0.5f * (bl[1] + bh[1]), bl[2], l);
+        toSmasher(bh[0], 0.5f * (bl[1] + bh[1]), bl[2], r);
+        const float endDiff = r[2] - l[2];  // the base's tilt across the gem against the smasher's
+        for (int k = 0; k < 3; ++k) lo[k] = std::min(lo[k], ctr[k]), hi[k] = std::max(hi[k], ctr[k]);
+        endLo = std::min(endLo, endDiff), endHi = std::max(endHi, endDiff);
+        SDL_Log("RB track: gem curve check %s lane %d gem centre - smasher (smasher frame) x %+.3f y %+.3f z %+.3f, base ends dz %+.3f%s", part_.c_str(), f,
+                double(ctr[0]), double(ctr[1]), double(ctr[2]), double(endDiff), gemCurveLegacy() ? " (legacy)" : "");
+    }
+    const float spread = std::max({hi[0] - lo[0], hi[2] - lo[2], endHi - endLo});
+    SDL_Log("RB track: gem curve check %s spread across lanes: centre x %.3f z %.3f, ends %.3f -> %s", part_.c_str(), double(hi[0] - lo[0]),
+            double(hi[2] - lo[2]), double(endHi - endLo), spread < 0.01f ? "ok" : "FAIL");
+}
+
+bool RbTrackView::gemCurveLegacy() {
+    static const bool legacy = SDL_getenv("GD05_GEMCURVE_LEGACY") != nullptr;
+    return legacy;
+}
+
+void RbTrackView::drawWidget(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::TrackWidget* w, float x, float y, int colorSlot,
+                             int curveSlot) {
     if (!w || !w->dir) return;
+    // A gem on its smasher's curve (see colorSmashers) [C];
+    // GD05_GEMCURVE_LEGACY=1: flat at z 0, the data's slot x.
+    const SlotCurve* curve = curveSlot >= 0 && curveSlot < 5 && !gemCurveLegacy() && slotCurve_[size_t(curveSlot)].set
+                                 ? &slotCurve_[size_t(curveSlot)]
+                                 : nullptr;
+    scene::Xfm inst;
+    inst.pos = {x, y, 0};
+    if (curve) {
+        inst.pos = {lefty_ ? -curve->x : curve->x, y, curve->z};
+        inst.rot = curve->rot;
+        if (lefty_) inst.rot[2] = -inst.rot[2], inst.rot[6] = -inst.rot[6];  // mirrored roll
+    }
     for (const std::string& n : w->meshes) {
         const scene::Mesh* m = w->dir->resolve<scene::Mesh>(n);
         if (!m || !pose_.showing(m)) continue;
         scene::Xfm x0;
         if (w->allowRotation) x0.rot = pose_.local(m).rot;
-        x0.pos = {x, y, 0};
+        x0 = scene::compose(x0, inst);
         // RB colours the gems by the meshes themselves (each slot's mesh maps
         // its colour of prism_gems.tex): the slot colours swap materials only
         // for the tails (0x82819A48, called by the TailBuilder 0x8281A970)
@@ -1143,7 +1226,7 @@ void RbTrackView::drawGems(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, co
             // The drums' pads where the drum smashers stand (-7.5 -2.5 2.5
             // 7.5) [C data]; wave 01 put them at -6 -2 2 6 [I].
             const float x = !drums_ ? slotX(f) : (lefty_ ? -drumX_[size_t(f)] : drumX_[size_t(f)]);
-            drawWidget(mr, cache, w, x, y, color);
+            drawWidget(mr, cache, w, x, y, color, f);
         }
     }
 }

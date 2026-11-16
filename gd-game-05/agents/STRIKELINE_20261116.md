@@ -64,3 +64,10 @@ taller hood measured above), so the "matches the mesh" rows describe the
 wrong mesh. Now fixed (GD05_GEOMOWNER_LEGACY=1 for the old look). Item 1
 (the gems on the curve) is still open.
 
+## Follow-up 2 (same day, D129)
+
+Item 1 confirmed in the XEX and fixed: RB's gem manager sets each TrackDir
+slot to its smasher's world (x, z) and the smasher's roll (RB 0x828167F0),
+and builds every gem from that slot (0x822509D8 turned by the roll,
+0x82818B68). GD05_GEMCURVE_LEGACY=1 for the flat gems. Tails still flat.
+

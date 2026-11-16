@@ -139,7 +139,8 @@ private:
     float slotX(int slot) const;
     void setEnv(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Environ* env);
     void drawGroup(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Group* g, const scene::Environ* env, int depth = 0);
-    void drawWidget(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::TrackWidget* w, float x, float y, int colorSlot = -1);
+    void drawWidget(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::TrackWidget* w, float x, float y, int colorSlot = -1,
+                    int curveSlot = -1);
     // The slot's colour of a gem material (prism_mat.mat -> prism_mat_green.mat), or null.
     const scene::Mat* slotMat(const scene::Mesh& m, int slot) const;
     void drawBeatLines(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Song& song, float nowMs);
@@ -167,6 +168,16 @@ private:
     // The drums' lanes: the kick (0) and the pads where smasher_plate_drum's
     // gem_smasher0..4 stand [C data].
     std::array<float, 5> drumX_{0, -7.5f, -2.5f, 2.5f, 7.5f};
+    // A slot's gem placement as RB's (GD05-111 follow-up, D129): the slot's
+    // smasher's world x / z and its roll (RB 0x828167F0 [C]); unset (legacy).
+    struct SlotCurve {
+        bool set = false;
+        float x = 0, z = 0;
+        std::array<float, 9> rot{1, 0, 0, 0, 1, 0, 0, 0, 1};
+    };
+    std::array<SlotCurve, 5> slotCurve_{};
+    static bool gemCurveLegacy();
+    void gemCurveCheck();
     std::array<float, 4> layout_{0, 0, 1, 1};
     bool hasLayout_ = false;
     std::array<SlotSet, 5> sets_{};

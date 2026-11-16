@@ -2365,3 +2365,28 @@ pattern). Each says what, why and how to undo it.
   with GD05_SELFTEST_PHRASE_LEGACY=1 (pitch 103, 0.25) 4 FAIL, exit 1.
 - **Undo:** GD05_SELFTEST_PHRASE_LEGACY=1 (the old songs' pitch and
   phrase value), GD05_SELFTEST_COUNT_LEGACY=1 (not counted).
+
+## D129
+- **What (2026-11-16, GD05-111 follow-up, STRIKELINE item 1):** the gems
+  sit on their smashers' curve. RB's gem manager, at its set-up (RB
+  0x82816BB0 -> 0x828167F0) [C]: for each slot 0..4 it takes the smasher's
+  world matrix (its +0xb4), writes the TrackDir slot as (x, z) of its
+  translation (0x82251F28) and keeps the euler y of the matrix (0x8238E000)
+  as the slot's roll (a map at +0x134). A gem's transform (gem add
+  0x82818B68) is TrackDir MakeSecondsXfm (0x822509D8: identity, x = slot x,
+  z = slot z, y = y_per_second x seconds) turned by the roll
+  (0x8238EA48). The smashers stand on flat_curve.mesh's curve (guitar z
+  0 / -0.075 / -0.281, roll 0 / 0.044 / 0.073 rad; drums -0.036 / -0.239,
+  0.015 / 0.073); the port drew every gem flat at z 0, so the outer gems
+  floated and stood level over tilted smashers.
+- **Measured (GD05_GEMCURVE_LOG=1: each lane's gem at the now line, bounding
+  centre minus the smasher's centre in the smasher's frame, and the tilt of
+  the gem's base against it; inbloom):** guitar spread across the lanes
+  centre z 0.279 -> 0.000, x 0.120 -> 0.000, base tilt 0.574 -> 0.000
+  (FAIL -> ok); drums z 0.200 -> 0.000, tilt 0.709 -> 0.000 (FAIL -> ok).
+  Shots at 19991 ms (green / yellow gems on the line): the green gem no
+  longer stands above its smasher's rim and leans with it.
+- **Not done:** the sustain tails are still built flat at z 0 (the
+  TailBuilder's slot read, 0x8281C4A0, not traced).
+- **Undo:** GD05_GEMCURVE_LEGACY=1.
+
