@@ -2291,3 +2291,43 @@ pattern). Each says what, why and how to undo it.
   club): "Say It Ain't So", "In Bloom", "I Think I'm Paranoid", "Make a
   Setlist", "Mystery Requests"; before: blank rows.
 - **Undo:** GD05_EVENTLBL_LEGACY=1.
+
+## D126
+- **What (2026-11-16, GD05-121, owner: "In the enhanced menu, I want a
+  shot that captures the singer, the drummer at the back and the guitar
+  player at the right side of the singer. Use as example the shot we have
+  in Guitar Hero 1"):** gd01's backdrop (drawMenuBackdrop) is a fixed
+  camera 215 in front of its singer, his partner beside him, the singer at
+  0.75 / 0.3 of the picture, the right half (the Enhanced boxes cover the
+  left). The port showed the venue band shot that scored most heads in the
+  free area (D31): in small_club_01 coop_bgv_n09, a far shot with the crowd
+  over the band. No RB shot frames the composition (the singer, drummer and
+  guitarist heads in x 0.53..0.95, y 0.04..0.62, guitarist right of the
+  singer, drummer between them, singer head to feet over 0.2 of the height,
+  bassist out of the right half): 0 of 197 / 250 / 440 / 269 shots in
+  small_club_01 / big_club_03 / arena_04 / theater_02, with each shot's
+  own band places. So a fixed camera as gd01's: stage axes from the band
+  (back: singer to drummer, right: toward the guitarist), the eye searched
+  from gd01's place back and up (within 250 of one of RB's camera places,
+  inside the venue), with the band where it stands or where an RB
+  whole-band shot (NORMAL1111 / directed_all) puts it; turned so a point
+  beside the singer sits at 0.76 / 0.3; field of view for a singer 0.4 of
+  the height, widened until it fits; the fewest sight lines (3 heads, the
+  singer's shoulders) through the audience's placements (upright capsules,
+  raised hands 90 up), then lowest and nearest gd01's. The forced shot (the
+  one that places the band, else the whole-band shot whose eye is nearest)
+  gives the PostProc and its 3D crowd rows; the depth of field focuses on
+  the singer; the camera is aimed again once that shot's clips posed the
+  band. [I: a port feature; no RB behaviour.]
+- **Found:** from RB's own coop_dir-all eye (small_club_01, 200 in front
+  at head height) the crowd's raised hands cover the band in a still: a
+  moving shot hides it, a still does not.
+- **Measured (GD05_UILOG `backdrop composition` line, walk rb_enhanced,
+  GD05_BACKDROP_VENUE for the others):** composition FAIL -> ok in all 4
+  venues; crowd-blocked sight lines 4 / 1 / 0 / 0 -> 0 / 0 / 0 / 0; singer
+  head x 0.53 / 0.50 / 0.50 / 0.53 -> 0.57 / 0.55 / 0.63 / 0.61, guitarist
+  0.69 / 0.66 / 0.55 / 0.66 -> 0.90 / 0.88 / 0.94 / 0.95. Screenshots
+  checked in the 4 venues.
+- **Undo:** GD05_BACKDROPCAM_LEGACY=1 (the same picture as before, byte for
+  byte in small_club_01). Development aids: GD05_BACKDROP_VENUE,
+  GD05_BACKDROP_CAM, GD05_BACKDROP_SHOTS.

@@ -886,7 +886,17 @@ private:
         float fromMs = 0;
         bool framed = false;  // the band shot is picked (updateBackdrop)
         int lightPart = -1;
+        bool fixedCam = false;  // D126: the singer / drummer / guitarist camera, not the shot's
+        gfx::Camera cam;
+        float focus = 0;  // the singer's distance (the depth of field's focus)
+        bool noTeleport = false;  // D126: its shot leaves the band at the venue's places
+        float reaimMs = -1;       // D126: simMs to aim the camera again (-1: no)
     };
+    // Pick: the camera and its shot; Reaim: the same eye, aimed again once the
+    // shot's clips have posed the band; Measure: the composition logged.
+    enum class BackdropCam { Pick, Reaim, Measure };
+    const scene::CamShot* frameBackdropBand(BackdropCam mode = BackdropCam::Pick);
+    void forceBackdropShot(const scene::CamShot* shot);
     std::unique_ptr<Backdrop> backdrop_;
     // Shown by Enhanced Options; loaded at startup and kept in the menus (a
     // song's venue replaces it), so the screen opens on the next frame.
@@ -3564,7 +3574,7 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
             }
             static const bool legacy = SDL_getenv("GD05_INTRO_LEGACY") != nullptr, noTeleport = SDL_getenv("GD05_NO_TELEPORT") != nullptr;
             if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(&s); bs && band_ && !rbShots_.empty() && (!legacy || rbShotsPicking_))
-                band_->rbShotStart(*bs, !noTeleport);
+                band_->rbShotStart(*bs, !noTeleport && !(backdrop_ && backdrop_->noTeleport));
         };
         director_->onShotOver = [this](const scene::CamShot& s) { rbCamshotEnd(s); };
         world_->crowd().audio().open();
@@ -3614,7 +3624,10 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
                 }
                 const CameraDirector::Dof& d = director_->dof();
                 const gfx::Camera& c = director_->camera();
-                if (d.on && d.maxBlur > 0) r.post().setDof(gfx::DofState::fromShot(d.focus, d.blurDepth, d.maxBlur, c.nearPlane, c.farPlane));
+                // The Enhanced backdrop's own camera (D126): the shot's blur, focused on the singer.
+                if (backdrop_ && backdrop_->fixedCam && d.on && d.maxBlur > 0)
+                    r.post().setDof(gfx::DofState::fromShot(backdrop_->focus, d.blurDepth, d.maxBlur, backdrop_->cam.nearPlane, backdrop_->cam.farPlane));
+                else if (d.on && d.maxBlur > 0) r.post().setDof(gfx::DofState::fromShot(d.focus, d.blurDepth, d.maxBlur, c.nearPlane, c.farPlane));
                 else r.post().clearDof();
             } else if (venuePostOn_) {
                 r.post().select(venuePost_);
@@ -5473,7 +5486,9 @@ void App::menuBackdrop(bool on) {
 void App::loadBackdrop() {
     if (backdrop_ || player_ || !data_ || songs_.empty() || !ui_ || ui_->headless()) return;
     const uint64_t t0 = SDL_GetTicksNS();
-    const std::string venue = venues::names()[1];
+    std::string venue = venues::names()[1];
+    // GD05_BACKDROP_VENUE=<name> (development aid): another venue's backdrop.
+    if (const char* v = SDL_getenv("GD05_BACKDROP_VENUE"); v && *v) venue = v;
     auto b = std::make_unique<Backdrop>();
     for (const SongInfo& s : songs_)
         if (venues::forSong(*data_, s) == venue) {
@@ -5501,9 +5516,10 @@ void App::loadBackdrop() {
     // shot; then nothing moves again (gd01's backdrop). A band that has not
     // shown its singer yet gets up to 5 s more: the backdrop must always
     // show the band (GD02-074).
-    for (int i = 0; backdrop_ && (i < 45 || (!backdrop_->framed && i < 195)); ++i) updateBackdrop();
+    for (int i = 0; backdrop_ && (i < 45 || ((!backdrop_->framed || backdrop_->reaimMs >= 0) && i < 195)); ++i) updateBackdrop();
     if (!band_) SDL_Log("enhanced options: backdrop %s has no band", venue.c_str());
     else if (backdrop_ && !backdrop_->framed) SDL_Log("enhanced options: backdrop %s: no band shot", venue.c_str());
+    if (const char* l = SDL_getenv("GD05_UILOG"); backdrop_ && l && *l && *l != '0') frameBackdropBand(BackdropCam::Measure);
     if (backdrop_) backdrop_->frozen = true, backdropWarm_ = !backdropShown_;
     if (const char* l = SDL_getenv("GD05_UILOG"); l && *l && *l != '0')
         SDL_Log("ui: menu backdrop loaded in %.1f ms", double(SDL_GetTicksNS() - t0) / 1e6);
@@ -5587,26 +5603,270 @@ void App::updateBackdrop() {
             }
             if (bestScore >= int(heads.size()) * 3) break;
         }
+        // D126: the band's own camera (frameBackdropBand), under the shot
+        // nearest to it.
+        static const bool camLegacy = envOn("GD05_BACKDROPCAM_LEGACY");
+        if (!camLegacy)
+            if (const scene::CamShot* near = frameBackdropBand()) best = near, b.reaimMs = b.simMs + 900;
         if (best) {
-            if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(best)) {
-                std::vector<std::pair<std::string, std::string>> groups;
-                std::vector<std::pair<std::string, scene::Xfm>> moves;
-                for (const auto& tg : bs->bandTargets) {
-                    if (!tg.anim.empty()) groups.emplace_back(tg.target, tg.anim);
-                    if (tg.teleport) moves.emplace_back(tg.target, tg.to);
-                }
-                band_->rbShotTargets(groups, moves);
-            }
-            director_->forceShot(best);
+            forceBackdropShot(best);
             SDL_Log("enhanced options: backdrop on %s, shot %s (%s), score %d", b.info->id.c_str(), best->name.c_str(), best->category.c_str(), bestScore);
             b.framed = true;
         }
     }
+    if (b.framed && b.reaimMs >= 0 && b.simMs >= b.reaimMs) b.reaimMs = -1, frameBackdropBand(BackdropCam::Reaim);
     if (b.framed && director_) {
         director_->update();
-        if (director_->hasCamera()) venueView_->setCamera(director_->camera());
+        if (b.fixedCam) venueView_->setCamera(b.cam);
+        else if (director_->hasCamera()) venueView_->setCamera(director_->camera());
     }
     venueView_->update();
+}
+
+// The backdrop's shot, as a song's: its band targets' clips and places, then the director.
+void App::forceBackdropShot(const scene::CamShot* shot) {
+    if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(shot)) {
+        std::vector<std::pair<std::string, std::string>> groups;
+        std::vector<std::pair<std::string, scene::Xfm>> moves;
+        for (const auto& tg : bs->bandTargets) {
+            if (!tg.anim.empty()) groups.emplace_back(tg.target, tg.anim);
+            if (tg.teleport && !backdrop_->noTeleport) moves.emplace_back(tg.target, tg.to);
+        }
+        band_->rbShotTargets(groups, moves);
+    }
+    director_->forceShot(shot);
+}
+
+// The Enhanced Options backdrop's camera (D126, owner: "a shot that captures
+// the singer, the drummer at the back and the guitar player at the right side
+// of the singer", as gd01's): the singer in front, the drummer behind him, the
+// guitarist to his right on the screen, in the picture's free right half (the
+// boxes cover the left half; gd01 sets its singer at 0.75 / 0.3). RB has no
+// such shot: its band shots frame the band across the whole picture
+// (counted below with each shot's band targets' places; GD05_BACKDROP_SHOTS=1
+// logs each one). So a fixed camera from the venue's places of the members,
+// as gd01's drawMenuBackdrop. Returns the venue's band shot whose eye is
+// nearest (its PostProc and its 3D crowd rows, the ones RB shows from
+// there), forced without moving the band. GD05_BACKDROPCAM_LEGACY=1: the
+// shot picked as before (D31), with its camera.
+const scene::CamShot* App::frameBackdropBand(BackdropCam mode) {
+    if (!backdrop_ || !band_ || !world_ || !director_) return nullptr;
+    Backdrop& b = *backdrop_;
+    auto member = [&](const char* part, const char* bone, gfx::Vec3& out) {
+        for (const auto& m : band_->members())
+            if (m->slot.find(part) != std::string::npos)
+                if (scene::Xfm x; band_->objectXfm(m->slot, bone, x)) return out = {x.pos[0], x.pos[1], x.pos[2]}, true;
+        return false;
+    };
+    gfx::Vec3 v, g, d, bs, feet, rg, rd, rb;
+    const bool hasBass = member("bass", "bone_head.mesh", bs) && member("bass", "", rb);
+    if (!member("vocals", "bone_head.mesh", v) || !member("guitar", "bone_head.mesh", g) || !member("drum", "bone_head.mesh", d) ||
+        !member("vocals", "", feet) || !member("guitar", "", rg) || !member("drum", "", rd)) {
+        SDL_Log("enhanced options: backdrop camera: singer, guitarist or drummer missing; the shot's camera");
+        return nullptr;
+    }
+    const gfx::Vec3 v0 = v, g0 = g, d0 = d, bs0 = bs, feet0 = feet;
+    // Where a shot's band targets put the members (its teleports move each
+    // root; the head keeps its offset).
+    auto placeFor = [&](const scene::CamShot* c) {
+        v = v0, g = g0, d = d0, bs = bs0, feet = feet0;
+        if (const auto* bc = dynamic_cast<const scene::BandCamShot*>(c))
+            for (const auto& tg : bc->bandTargets) {
+                if (!tg.teleport) continue;
+                const gfx::Vec3 to{tg.to.pos[0], tg.to.pos[1], tg.to.pos[2]};
+                if (tg.target.find("vocals") != std::string::npos) v = v0 + (to - feet0), feet = to;
+                else if (tg.target.find("guitar") != std::string::npos) g = g0 + (to - rg);
+                else if (tg.target.find("drum") != std::string::npos) d = d0 + (to - rd);
+                else if (tg.target.find("bass") != std::string::npos && hasBass) bs = bs0 + (to - rb);
+            }
+    };
+    auto at = [](const gfx::Camera& cam, gfx::Vec3 p, float& x, float& y) {
+        const gfx::Mat4 vp = cam.viewProj(false);
+        float q[4];
+        for (int r = 0; r < 4; ++r) q[r] = vp.at(r, 0) * p.x + vp.at(r, 1) * p.y + vp.at(r, 2) * p.z + vp.at(r, 3);
+        if (q[3] <= 0) return false;
+        x = (q[0] / q[3] + 1) * 0.5f, y = (1 - q[1] / q[3]) * 0.5f;
+        return true;
+    };
+    // The composition: the three heads in x 0.53..0.95 (clear of the boxes'
+    // edge at 0.5), y 0.04..0.62, the guitarist right of the singer, the
+    // drummer from the singer to the guitarist, the singer head to feet over
+    // 0.2 of the height (gd01 0.37; RB's arenas are wide), the bassist not in
+    // the right half.
+    auto fits = [&](const gfx::Camera& cam) {
+        float xv, yv, xg, yg, xd, yd, xf, yf, xb = 0, yb = 0;
+        if (!at(cam, v, xv, yv) || !at(cam, g, xg, yg) || !at(cam, d, xd, yd) || !at(cam, feet, xf, yf)) return false;
+        for (auto [x, y] : {std::pair{xv, yv}, {xg, yg}, {xd, yd}})
+            if (x < 0.53f || x > 0.95f || y < 0.04f || y > 0.62f) return false;
+        if (hasBass && at(cam, bs, xb, yb) && xb > 0.5f && xb < 1 && yb > 0 && yb < 1) return false;
+        return yf - yv > 0.2f && xg > xv + 0.08f && xd > xv - 0.02f && xd < xg + 0.02f;
+    };
+    const bool shotLog = envOn("GD05_BACKDROP_SHOTS");
+    int shots = 0, fitting = 0;
+    for (const auto& [cat, list] : rbShots_)
+        for (const scene::CamShot* c : list) {
+            const gfx::Camera cam = CameraDirector::evaluate(*world_, *c, 0);
+            placeFor(c);
+            ++shots, fitting += fits(cam);
+            if (shotLog) {
+                const gfx::Vec3 e = cam.position();
+                float xv = -9, yv = -9, xg = -9, yg = -9, xd = -9, yd = -9;
+                at(cam, v, xv, yv), at(cam, g, xg, yg), at(cam, d, xd, yd);
+                SDL_Log("backdrop shot %s %s eye %.0f %.0f %.0f singer %.2f %.2f guitarist %.2f %.2f drummer %.2f %.2f%s", cat.c_str(), c->name.c_str(), e.x,
+                        e.y, e.z, xv, yv, xg, yg, xd, yd, fits(cam) ? " fits" : "");
+            }
+        }
+    placeFor(nullptr);
+    // The audience as upright capsules (a placement is its card's middle,
+    // the feet half the card's height below, CrowdView's 3D placement; raised
+    // hands reach 90 over the feet): a sight line from the eye to a head or
+    // the singer's shoulders passing within 22 of one (arms out) is blocked
+    // (gd01's crowd covers its singer's legs too).
+    struct Body {
+        gfx::Vec3 mid;
+        float h;
+    };
+    std::vector<Body> crowd;
+    for (const Crowd::State& st : world_->crowd().crowds())
+        for (const Crowd::Archetype& a : st.archetypes)
+            for (const scene::Xfm& p : a.placements) crowd.push_back({{p.pos[0], p.pos[1], p.pos[2]}, a.height});
+    auto blocked = [&](gfx::Vec3 eye) {
+        int n = 0;
+        const gfx::Vec3 chest = v * 0.75f + feet * 0.25f;  // the shoulders
+        for (gfx::Vec3 p : {v, chest, g, d}) {
+            bool hit = false;
+            for (const Body& c : crowd) {
+                const float z0 = c.mid.z - c.h * 0.5f, z1 = z0 + 90;  // feet, raised hands
+                // The closest point of the sight line to the capsule's axis, in the ground plane.
+                const gfx::Vec3 dir = p - eye;
+                const float dd = dir.x * dir.x + dir.y * dir.y;
+                if (dd < 1e-6f) continue;
+                const float t = std::clamp(((c.mid.x - eye.x) * dir.x + (c.mid.y - eye.y) * dir.y) / dd, 0.0f, 0.97f);
+                const gfx::Vec3 q = eye + dir * t;
+                if (std::hypot(q.x - c.mid.x, q.y - c.mid.y) < 22 && q.z > z0 && q.z < z1) hit = true;
+            }
+            n += hit;
+        }
+        return n;
+    };
+    // The check (GD05_UILOG, after the backdrop froze, either way): the picture's composition.
+    if (mode == BackdropCam::Measure) {
+        const gfx::Camera& cam = venueView_->camera();
+        float x[5] = {-1, -1, -1, -1, -1}, y[5] = {-1, -1, -1, -1, -1};
+        at(cam, v, x[0], y[0]), at(cam, g, x[1], y[1]), at(cam, d, x[2], y[2]), at(cam, bs, x[3], y[3]), at(cam, feet, x[4], y[4]);
+        SDL_Log("enhanced options: backdrop composition %s, sight lines blocked by the crowd %d of 4; heads singer %.2f %.2f guitarist %.2f %.2f "
+                "drummer %.2f %.2f bassist %.2f %.2f, singer's feet %.2f %.2f",
+                fits(cam) ? "ok" : "FAIL", blocked(cam.position()), x[0], y[0], x[1], y[1], x[2], y[2], x[3], y[3], x[4], y[4]);
+        return nullptr;
+    }
+    // The RB shots' eyes: where Harmonix put cameras (inside the venue, clear of its walls).
+    std::vector<gfx::Vec3> rbEyes;
+    for (const auto& [cat, list] : rbShots_)
+        for (const scene::CamShot* c : list) rbEyes.push_back(CameraDirector::evaluate(*world_, *c, 0).position());
+    // The camera: turned so a point beside the singer sits at the focus point
+    // (0.76 / 0.3; gd01 shifts its projection there), its field of view
+    // making the singer 0.4 of the picture's height (gd01's 0.37), widened
+    // until the composition fits. The stage's axes from the band (back:
+    // singer to drummer, right: toward the guitarist); distances grow with
+    // the band's spacing past small_club_01's (singer-guitarist 80).
+    std::array<float, 9> k{30, -260, 80, 38, 32, -6, 0.76f, 0.3f, 0};
+    // GD05_BACKDROP_CAM="eye_right eye_back eye_up target_right target_back target_up focus_x focus_y y_fov" (development aid; y_fov 0: fitted).
+    const char* devCam = SDL_getenv("GD05_BACKDROP_CAM");
+    if (devCam) std::sscanf(devCam, "%f %f %f %f %f %f %f %f %f", &k[0], &k[1], &k[2], &k[3], &k[4], &k[5], &k[6], &k[7], &k[8]);
+    const gfx::Vec3 up{0, 0, 1};
+    gfx::Vec3 back, right, target;
+    float sc = 1;
+    auto axes = [&] {
+        back = normalize(gfx::Vec3{d.x - v.x, d.y - v.y, 0});
+        right = {back.y, -back.x, 0};
+        if (dot(g - v, right) < 0) right = right * -1.0f;
+        sc = std::clamp(std::hypot(g.x - v.x, g.y - v.y) / 80.6f, 1.0f, 3.0f);
+        target = v + (right * k[3] + back * k[4] + up * k[5]) * sc;
+    };
+    auto build = [&](gfx::Vec3 eye, float fov) {
+        const float t = std::tan(fov * 0.5f), sx = (k[6] * 2 - 1) * t * (16.0f / 9.0f), sz = (1 - k[7] * 2) * t;
+        const gfx::Vec3 f = normalize(target - eye);
+        const float yaw = std::atan2(f.x, f.y) - std::atan(sx / std::hypot(1.0f, sz)), pitch = std::atan2(f.z, std::hypot(f.x, f.y)) - std::atan(sz);
+        gfx::Camera c = gfx::Camera::lookAt(eye, eye + gfx::Vec3{std::sin(yaw) * std::cos(pitch), std::cos(yaw) * std::cos(pitch), std::sin(pitch)});
+        c.yFov = fov, c.nearPlane = 5, c.farPlane = 10000;
+        return c;
+    };
+    auto fitted = [&](gfx::Vec3 eye) {
+        const float dist = std::sqrt(dot(v - eye, v - eye));
+        float fov = k[8] > 0 ? k[8] : std::min(1.0f, 2 * std::atan((v.z - feet.z) / (2 * 0.4f * std::max(dist, 1.0f))));
+        gfx::Camera c = build(eye, fov);
+        for (; k[8] <= 0 && !fits(c) && fov < 1.2f; fov += 0.05f) c = build(eye, fov);
+        return c;
+    };
+    // The band where it stands, or where one of RB's whole-band shots
+    // (NORMAL1111, directed_all: none of the band hidden) puts it; for each,
+    // gd01's eye (215 in front, 32 over the mouth, beside him) and others
+    // back and up from there, each within 250 of one of RB's camera places;
+    // the camera that fits with the fewest blocked sight lines, then the
+    // nearest to gd01's.
+    std::vector<const scene::CamShot*> places{nullptr};
+    for (const auto& [cat, list] : rbShots_)
+        if (cat == "NORMAL1111" || cat == "directed_all")
+            for (const scene::CamShot* c : list)
+                if (dynamic_cast<const scene::BandCamShot*>(c)) places.push_back(c);
+    placeFor(nullptr);
+    axes();
+    gfx::Vec3 eye = mode == BackdropCam::Reaim ? b.cam.position() : v + (right * k[0] + back * k[1]) * sc + up * k[2];
+    gfx::Camera cam = fitted(eye);
+    int eyeBlocked = blocked(eye), tried = 0;
+    const scene::CamShot* placedBy = nullptr;
+    if (mode == BackdropCam::Reaim) {
+        b.cam = cam;
+        SDL_Log("enhanced options: backdrop camera: aimed again at the posed band, field of view %.2f, composition %s", double(cam.yFov), fits(cam) ? "ok" : "FAIL");
+        return nullptr;
+    }
+    if (!devCam) {
+        float bestCost = 1e30f;
+        for (const scene::CamShot* pl : places) {
+            placeFor(pl);
+            axes();
+            for (float bk : {215.0f, 260.0f, 320.0f, 400.0f, 500.0f, 650.0f})
+                for (float upz : {32.0f, 60.0f, 90.0f, 130.0f, 170.0f})
+                    for (float rt : {-30.0f, 0.0f, 30.0f, 60.0f}) {
+                        const gfx::Vec3 e = v + (right * rt - back * bk) * sc + up * upz;
+                        float nearRb = 1e30f;
+                        for (const gfx::Vec3& r : rbEyes) nearRb = std::min(nearRb, std::sqrt(dot(r - e, r - e)));
+                        if (nearRb > 250 * sc) continue;
+                        const gfx::Camera c = fitted(e);
+                        ++tried;
+                        if (!fits(c)) continue;
+                        const int bl = blocked(e);
+                        // Low eyes first: the lighting rigs hang above.
+                        const float cost = float(bl) * 1000 + std::fabs(bk - 215) * 0.5f + std::fabs(upz - 32) * 2 + std::fabs(rt - 30) * 0.5f;
+                        if (cost < bestCost) bestCost = cost, eye = e, cam = c, eyeBlocked = bl, placedBy = pl;
+                    }
+        }
+        placeFor(placedBy);
+    }
+    // Under the chosen places' shot (its band targets, PostProc and 3D crowd
+    // rows); the band where it stands: the whole-band shot whose eye is
+    // nearest, the band left in place.
+    const scene::CamShot* under = placedBy;
+    if (!under) {
+        float nearDist = 1e30f;
+        for (const scene::CamShot* c : places)
+            if (c) {
+                const gfx::Vec3 e = CameraDirector::evaluate(*world_, *c, 0).position() - eye;
+                if (dot(e, e) < nearDist) under = c, nearDist = dot(e, e);
+            }
+    }
+    b.fixedCam = true, b.cam = cam, b.focus = std::sqrt(dot(v - eye, v - eye)), b.noTeleport = !placedBy;
+    SDL_Log("enhanced options: backdrop camera: %d of the venue's %d shots frame it; fixed, eye %.0f %.0f %.0f (of %d places), field of view %.2f, "
+            "band placed by %s, under %s; composition %s, sight lines blocked by the crowd %d of 4",
+            fitting, shots, eye.x, eye.y, eye.z, tried, double(cam.yFov), placedBy ? placedBy->name.c_str() : "the venue", under ? under->name.c_str() : "-",
+            fits(cam) ? "ok" : "FAIL", eyeBlocked);
+    if (const char* l = SDL_getenv("GD05_UILOG"); l && *l && *l != '0')
+        for (auto [n, p] : {std::pair{"singer", v}, {"guitarist", g}, {"drummer", d}, {"bassist", bs}}) {
+            float x = -1, y = -1;
+            if (std::string(n) != "bassist" || hasBass) at(cam, p, x, y);
+            SDL_Log("enhanced options: backdrop %s head at %.2f %.2f of the picture (%.0f %.0f %.0f)", n, double(x), double(y), p.x, p.y, p.z);
+        }
+    return under;
 }
 
 // One frame of the song screen without the menus (--song, the debug list):
