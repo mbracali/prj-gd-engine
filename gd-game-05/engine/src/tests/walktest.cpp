@@ -303,6 +303,40 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("main_solomode_screen");
         wait(1000);
         check("no_black");  // title > main > solo > song list > back: no black frame
+    } else if (scenario == "rb_loading_icons") {
+        // GD05-105: quick play's first song; through the loading screens every
+        // band icon changes frames (loading_icon_frames).
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(800);
+        press(kX);  // the first entry
+        at("qp_seldiff_solo_screen");
+        press(kX);
+        wait(1500);
+        press(kX);
+        check("loading_icon_frames");
+    } else if (scenario == "rb_songlist_tiers") {
+        // GD05-109, owner: "the songs are organized in a wrong way. In the
+        // original game each song is part of a section". The quick play list
+        // (every song) with a guitar and with a drum kit: each song under the
+        // tier RB gives its rank for that instrument (song_tiers).
+        // GD05_SONGTIERS_LEGACY=1 (the band rank in nine equal groups) fails.
+        at("splash_screen", 30000);
+        check("unlock_all_songs");
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(1000);
+        check("song_tiers:1:guitar");
+        check("song_tiers:0:drum");
     } else if (scenario == "rb_songlist_text") {
         // GD05-063, owner report: "the list of musics have wrong sizes for
         // the letters". Every text the song list draws (into its RenderDir's
@@ -5737,6 +5771,55 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::printf("  black frames: %d\n", Canvas::blackFrames);
         return Canvas::blackFrames == 0 ? pass() : fail(std::to_string(Canvas::blackFrames) + " black frames presented");
     }
+    if (s.screen == "loading_icon_frames") {
+        // GD05-105, owner: "In the loading screen ... one icon is not moving".
+        // For 3 s of the loading screens, each band icon's material texture
+        // as the panel's pose sets it every frame (the MatAnims' texture
+        // swaps the AnimFilters / enter.trg play): each icon must show more
+        // than one of its frames.
+        static double t0 = -1;
+        static std::map<std::string, std::set<std::string>> seen;
+        static std::map<std::string, int> changes;
+        static std::map<std::string, std::string> last;
+        static std::map<std::string, float> xs;
+        if (t0 < 0) t0 = nowMs, seen.clear(), changes.clear(), last.clear(), xs.clear();
+        static const std::array<std::array<const char*, 3>, 4> kIcons = {{{"load_icon_guitar", "guitar.mesh", "guitar.mat"},
+                                                                           {"load_icon_vox", "vox.mesh", "vox.mat"},
+                                                                           {"load_icon_drum", "drummer.mesh", "drummer.mat"},
+                                                                           {"load_icon_bass", "bass.mesh", "bass.mat"}}};
+        ui::PanelObj* p = ui.panel("loading_panel");
+        if (p && p->view)
+            for (const auto& [d, mesh, mat] : kIcons) {
+                const scene::Object* m = p->view->findIn(d, mat);
+                const auto* st = m ? p->view->pose().mat(static_cast<const scene::Mat*>(m)) : nullptr;
+                const std::string tex = st && st->tex ? st->tex->name : "(none)";
+                if (!last[d].empty() && last[d] != tex) ++changes[d];
+                last[d] = tex, seen[d].insert(tex);
+                if (const scene::Object* o = p->view->findIn(d, mesh)) xs[d] = p->view->pose().world(o).pos[0];
+            }
+        // GD05_WALK_SHOTS: a shot every 100 ms (the icons' pixels compared offline).
+        static int shots = 0;
+        if (nowMs - t0 < 50) shots = 0;
+        if (const char* dir = SDL_getenv("GD05_WALK_SHOTS"); dir && p && shots < 30 && nowMs - t0 >= shots * 100.0)
+            ui.host().saveScreenshot(std::string(dir) + "/loading_icons_" + std::to_string(shots++) + ".bmp");
+        if (nowMs - t0 < 3000) return;
+        t0 = -1;
+        if (seen.empty()) return fail("no loading_panel view during the loading screens");
+        int frozen = 0;
+        std::vector<std::pair<float, std::string>> order;
+        for (const auto& [d, mesh, mat] : kIcons) {
+            std::printf("  %s (x %.1f): %zu textures, %d changes in 3 s:", d, double(xs[d]), seen[d].size(), changes[d]);
+            for (const std::string& t : seen[d]) std::printf(" %s", t.c_str());
+            std::printf("\n");
+            frozen += seen[d].size() < 2;
+            order.push_back({xs[d], d});
+        }
+        std::sort(order.begin(), order.end());
+        std::printf("  left to right:");
+        for (const auto& [x, d] : order) std::printf(" %s", d.c_str());
+        std::printf("\n");
+        return frozen ? fail(std::to_string(frozen) + " band icon(s) not moving") : pass();
+    }
     if (s.screen == "loading_icons") {
         // Wave 04 (GD05-026): loading.milo's band, four inline icon
         // directories from their proxy files (load_icon_*.milo, root
@@ -5845,6 +5928,101 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::printf("  Overdrive drain: %.2f beats, meter %.3f -> %.3f: lost %.3f, want %.3f (beats / 32)\n", beats, double(odStartMeter_), double(now), lost, want);
         odDrainErrPct_ = std::max(odDrainErrPct_, want > 0 ? int(std::lround(std::fabs(lost - want) / want * 100)) : 100);
         if (beats < 2 || std::fabs(lost - want) > 0.12 * want + (odVocal_ ? 0.015 : 0.006)) return fail("the Overdrive drain is off");
+        return pass();
+    }
+    if (s.screen.rfind("song_tiers:", 0) == 0) {
+        // rb_songlist_tiers (GD05-109): "song_tiers:<controller type>:<instrument>"
+        // with player 0 on that controller, the song list ranks by the
+        // instrument and puts each song under its tier's heading, recomputed
+        // here from the data alone: SongMgr's tiers (RB 0x82434020, the
+        // ranked songs neither downloaded nor unlockable cut into the nine
+        // song_groupings tiers by count, the remainder to the last tiers),
+        // a song's tier the first whose top rank is at least its rank
+        // (0x82431958), the order by rank then symbol (0x82400348).
+        const int ctrl = std::atoi(s.screen.c_str() + 11);
+        const std::string inst = s.screen.substr(s.screen.find(':', 11) + 1);
+        Interp& in = ui.interp();
+        const Value cfg = in.send("game", "get_player_config", {Value::integer(0)});
+        // The player as main.dta's session_ready_complete_msg leaves a solo
+        // player on that controller: set_char {available_prefab ... {get_controller_sym}}.
+        const int ctrlBefore = cfg.object ? in.send(cfg.object, "get_controller_type", {}).integerValue() : 1;
+        const Value charBefore = cfg.object ? in.send(cfg.object, "get_char", {}) : Value::integer(0);
+        if (cfg.object) {
+            in.send(cfg.object, "set_controller_type", {Value::integer(ctrl)});
+            const std::string sym = in.send(cfg.object, "get_controller_sym", {}).str();
+            if (ScriptObject* pre = in.findObject("prefab_" + sym)) in.send(cfg.object, "set_char", {Value::obj(pre)});
+        }
+        in.send("song_provider", "set_song_mode", {Value::symbol("game")});
+        auto* sp = dynamic_cast<ui::ListProvider*>(in.findObject("song_provider"));
+        const std::string got = in.send("song_provider", "get_instrument", {}).str();
+        std::vector<gfx::UiView::ListRow> rows;
+        int selRow = 0;
+        if (sp) sp->rows(rows, 0, selRow);
+        if (cfg.object) in.send(cfg.object, "set_controller_type", {Value::integer(ctrlBefore)}), in.send(cfg.object, "set_char", {charBefore});
+        in.send("song_provider", "set_song_mode", {Value::symbol("game")});
+        if (!sp) return fail("no song_provider");
+        const DataNode* g = ui.bootTree() ? ui.bootTree()->find("song_groupings") : nullptr;
+        const DataNode* rk = g ? g->find("rank") : nullptr;
+        if (!rk || rk->children.size() < 2) return fail("no song_groupings rank in band.dta");
+        const int numTiers = int(rk->children.size()) - 1;
+        std::vector<int> ranks;
+        std::vector<const SongInfo*> listed;
+        for (const SongInfo& si : ui.host().songs()) {
+            if (si.tutorial || !si.rank.count(inst)) continue;
+            if (!si.unlockable) ranks.push_back(si.rank.at(inst));
+        }
+        std::sort(ranks.begin(), ranks.end());
+        std::vector<int> tops;
+        for (int i = 0, start = 0, n = int(ranks.size()); i < numTiers && n; ++i) {
+            start += n / numTiers + (i >= numTiers - n % numTiers ? 1 : 0);
+            tops.push_back(ranks[size_t(start - 1)]);
+        }
+        auto tierOf = [&](int r) {
+            for (size_t i = 0; i < tops.size(); ++i)
+                if (r <= tops[i]) return int(i);
+            return int(tops.size()) - 1;
+        };
+        auto heading = [&](int t) {
+            const DataNode* e = rk->children[size_t(t) + 1].find(inst);
+            return e && e->children.size() > 1 ? ui.localize(e->children[1].s) : std::string("?");
+        };
+        // The rows as the list draws them: headings and song names.
+        std::map<std::string, const SongInfo*> byName;
+        for (const SongInfo& si : ui.host().songs()) byName[si.name] = &si;
+        std::string curHeading, problem;
+        int songsSeen = 0, headings = 0, wrongTier = 0, wrongOrder = 0, prevRank = -1;
+        std::string prevId, line;
+        std::printf("  %s list (controller %d): list instrument '%s'; tier tops", inst.c_str(), ctrl, got.c_str());
+        for (int t : tops) std::printf(" %d", t);
+        std::printf("\n");
+        for (const gfx::UiView::ListRow& r : rows) {
+            if (r.header) {
+                if (!line.empty()) std::printf("%s\n", line.c_str());
+                curHeading = r.texts.count("heading.lbl") ? r.texts.at("heading.lbl") : "";
+                ++headings;
+                line = "    " + curHeading + ":";
+                continue;
+            }
+            const std::string name = r.texts.count("list.lbl") ? r.texts.at("list.lbl") : "";
+            auto it = byName.find(name);
+            if (it == byName.end()) continue;  // random_song
+            const SongInfo* si = it->second;
+            const int rank = si->rank.count(inst) ? si->rank.at(inst) : -1;
+            const int t = tierOf(rank);
+            line += " " + si->id + "(" + std::to_string(rank) + (si->unlockable ? "*" : "") + ")";
+            ++songsSeen;
+            if (curHeading.rfind(heading(t), 0) != 0) {
+                ++wrongTier;
+                if (problem.empty()) problem = si->id + " (rank " + std::to_string(rank) + ") under '" + curHeading + "', expected '" + heading(t) + "'";
+            }
+            if (rank < prevRank || (rank == prevRank && si->id < prevId)) ++wrongOrder;
+            prevRank = rank, prevId = si->id;
+        }
+        if (!line.empty()) std::printf("%s\n", line.c_str());
+        std::printf("  %s: %d songs under %d headings, %d under a wrong heading, %d out of order\n", inst.c_str(), songsSeen, headings, wrongTier, wrongOrder);
+        if (got != inst) return fail("the list ranks by '" + got + "', expected '" + inst + "'");
+        if (!songsSeen || int(tops.size()) != numTiers) return fail("no songs / tiers");
+        if (wrongTier || wrongOrder) return fail(problem.empty() ? "songs out of order" : problem);
         return pass();
     }
     if (s.screen == "unlock_all_songs") {  // long_cheats.dta's code: every song listed (walks that scroll a long list)

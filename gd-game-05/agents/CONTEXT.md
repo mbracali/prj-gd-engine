@@ -225,3 +225,15 @@ Wave G06 lobby, shops, deform, menu characters (GD05-082 / 083 / 084, D80..D83):
   and without it, RbCharPreview::hidden).
 - `agents/scratch/car8/gate_par.sh [jobs]` (git-ignored; WALKS="..."
   for a subset, B_OVERRIDE=<binary>).
+
+RB focus 11-16 (GD05-105 / GD05-109):
+- `--walktest rb_songlist_tiers`: the quick play list (every song) with
+  player 0 on a guitar, then on a drum kit (`song_tiers:<controller
+  type>:<instrument>`): prints each section and its songs (rank, * bonus),
+  each song's section recomputed from the data (D103).
+  GD05_SONGTIERS_LEGACY=1 fails.
+- `--walktest rb_loading_icons`: quick play's first song; through 3 s of
+  the loading screens each band icon's texture (`loading_icon_frames`):
+  every icon must change frames; GD05_WALK_SHOTS=<dir> also saves a shot
+  every 100 ms (loading_icons_<n>.bmp; the icons sit at about x 1170-1600,
+  y 820-970 of 1920 x 1080). GD05_LOADICON_LEGACY=1 fails (D104).

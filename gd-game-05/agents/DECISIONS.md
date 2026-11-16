@@ -59,6 +59,7 @@ pattern). Each says what, why and how to undo it.
 - **Why:** the original's grouping (RB 0x82404A10 -> 0x824024F0) is not
   read yet; the data has the ranks and the tier names [C data], not the cut.
 - **Undo:** `engine/src/ui/rb_natives.cpp` (RbSongProvider).
+- **Superseded (2026-11-16):** by D103 (RB's tiers); GD05_SONGTIERS_LEGACY=1 brings this back.
 
 ## D6. Drums played through GH2's joypad watcher in wave 01 (2026-11-09)
 - **What:** with the drum part, the player is gd02's `Player` in joypad
@@ -1722,3 +1723,44 @@ pattern). Each says what, why and how to undo it.
   particles launched 1,188 -> 1,528.
 - **Undo:** GD05_KICK_LEGACY=1 (kick and the intro hold), GD05_TRACKFX_LEGACY=1
   (solo notes, super streak).
+
+## D103
+- **What (2026-11-16, GD05-109):** the song list's rank sections are RB's
+  (supersedes D5). SongMgr (RB 0x82434020) [C] cuts each instrument's ranked
+  list (the songs neither downloaded nor (unlockable TRUE): 45 on the disc)
+  into band.dta's nine song_groupings rank tiers by count (n / 9 each, the
+  last n % 9 tiers one more), each tier's top the rank of its last song; the
+  list (0x82404A10) sorts the available songs by the instrument's rank, equal
+  ranks by symbol (0x82400348), and puts a heading wherever the tier changes,
+  a song's tier the first whose top is at least its rank (0x82431958; the
+  bonus songs land by the same tops, so sections hold 5 to 8 songs), the
+  heading the tier's (<instrument> generic_tierN) entry. The instrument
+  (0x824024F0): the leader's character's in a solo mode or outside a band
+  arrangement (guitar for a bass character), else band; band in the
+  leaderboards [I: their own instrument is not in the port].
+- **Measured:** walk `rb_songlist_tiers` (every song, recomputed from the
+  data): guitar tops 130 170 220 250 280 315 350 380 500, drums 130 170 200
+  250 300 340 380 450 500; 58 songs under 9 headings, 0 under a wrong
+  heading, 0 out of order on both (D5's split: 40 wrong on guitar).
+- **Not changed:** song_db rankedSongs (the unlocks, tours) keeps file order
+  among equal ranks; RB's 0x82434020 sorts them by symbol too (same
+  comparator). Only the choice at a tie of the 10th song differs.
+- **Undo:** GD05_SONGTIERS_LEGACY=1 (D5's band-rank split in nine equal groups).
+
+## D104
+- **What (2026-11-16, GD05-105):** a UITrigger anim without its own range
+  (enable FALSE) plays: RB's EventTrigger (0x8220E3A0) calls
+  RndAnimatable::Animate(blend, wait, delay) (0x8221BCE8) for it [C]: the
+  anim's own range at its own rate, looping as the anim's Loop() says. The
+  port skipped them, so loading.milo's enter.trg never played
+  loading_text.filt (load_icon_guitar, 0..15 looping: the guitarist's
+  windmill, the leftmost icon) and it stood still. Applied to AnimFilters
+  only [I: AnimFilter's Loop is its type Loop]; the other ~450 such anims of
+  the menus' triggers (main.milo's button flights, dialog popups) stay
+  skipped as before (a follow-up to check one by one).
+- **Measured:** walk `rb_loading_icons` (each icon's texture through 3 s of
+  the loading screens): guitar 1 texture, 0 changes -> 5 textures, 24
+  changes; vox / drum / bass unchanged (5 / 4 / 5 textures). Shots
+  (GD05_WALK_SHOTS), the guitarist's crop over 16 shots (1.6 s): 1 distinct
+  image -> 4, up to 1,073 pixels changed between two shots.
+- **Undo:** GD05_LOADICON_LEGACY=1.

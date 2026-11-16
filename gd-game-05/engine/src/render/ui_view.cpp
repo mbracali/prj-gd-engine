@@ -382,7 +382,34 @@ std::vector<UiView::Trigger> UiView::triggers(const std::string& event) const {
             for (const scene::UITrigger::Anim& an : t->anims) {
                 const scene::Object* a = t->dir ? t->dir->resolve(an.name) : nullptr;
                 if (!a) a = find(an.name);
-                if (!a || !an.enable) continue;
+                if (!a) continue;
+                if (!an.enable) {
+                    // An anim without its own range (enable FALSE): RB's
+                    // EventTrigger (0x8220E3A0) plays it through
+                    // RndAnimatable::Animate(blend, wait, delay) (0x8221BCE8)
+                    // [C]: the anim's own range at its own rate, looping as
+                    // the anim says (vtable slot 0). Only AnimFilters so far
+                    // (loading.milo's loading_text.filt: the guitarist's
+                    // windmill, 0..15 looping; GD05-105) [I: AnimFilter's
+                    // Loop is its type Loop]; the other 450 such anims of the
+                    // menus stay skipped as before. GD05_LOADICON_LEGACY=1:
+                    // skipped too.
+                    static const bool legacy = SDL_getenv("GD05_LOADICON_LEGACY") != nullptr;
+                    const auto* f = a->as<scene::AnimFilter>();
+                    if (legacy || !f) continue;
+                    Trigger tr;
+                    tr.anim = a;
+                    tr.blockTransition = t->blockTransition;
+                    tr.startFrame = 0, tr.endFrame = ScenePose::endFrame(a);
+                    tr.loop = f->type == 1;
+                    tr.rate = int(f->animatable.rate);
+                    tr.fps = f->animatable.rate == 1 ? 480.0f : 30.0f;
+                    tr.delay = an.delay;
+                    tr.wait = an.wait;
+                    tr.blockSeconds = block;
+                    out.push_back(tr);
+                    continue;
+                }
                 // RndAnimatable::Animate (RB 0x8221BE38) [C]: start and end as
                 // the record gives them (start: the current frame for dest);
                 // fps = |end - start| / period, or the rate's fps (30 for
