@@ -579,3 +579,42 @@ Why: misc_fx.qb / bg_screenfx.qb / guitar_cameras.qb [C]; the blend's curve
 is the engine's (not read) [I]. A note at its own shot's cut is dropped
 with the cut (the original kills it a game frame later).
 Undo: the cameraNoteFx call in VenueStage::draw.
+
+## D112. The in-game perm anims: perm_anims_in_game.pak too [C script, data] (2026-11-16, world agent)
+
+What: band::Library reads perm_anims.pak and perm_anims_in_game.pak
+(load_perm_ingame_anims, guitar_gems.qb, loads it for a song); the two
+share no clip. The second holds every GH3xp1_Crowd_* dance the crowd
+peds' anim sets name (and the band's short intros).
+Why: GD10-064: with perm_anims.pak alone every crowd pick was missing
+(756 of 756 in a Battery run), so the peds stood in their bind pose and
+the cards never changed.
+Undo: GD10_CROWD_ANIMS_LEGACY=1 (data/band.cpp Library::load).
+
+## D113. A Band_PlayClip clip plays on its startnodes [data; C scripts; I the teleport] (2026-11-16, world agent)
+
+What: each clip struct names startnodes.<member> ('drummer_start', ...:
+<zone>_TRG_Waypoint_<node>); while the clip plays the member stands on that
+node, a game frame after it ends on its own start node again
+(end_moment_anim / return_characters_to_idle_at_song_time:
+band_movetostartnode after a gameframe wait) [C scripts]. That
+Band_PlayClip_Finish_CFunc (a gameframe after the clip starts) is what
+moves the member is [I]; the port moves it with the clip's start.
+Why: GD10-065: the clips' root motion is relative to that node; 97 clips
+(Battery, Creeping Death, For Whom the Bell Tolls, Master of Puppets, Seek
+and Destroy, The Unforgiven) put the guitarist, bassist and singer on
+drummer_start. Played from their own nodes they walked up to 3.5 m past the
+stage's front and into each other (the clips' cameras, on their own nodes,
+framed empty stage). Now: 0..51 samples > 1 m past the front waypoint (was
+3395..6964), 0..6 member pairs < 0.5 m apart (was 48..341) in z_mop.
+Undo: GD10_BAND_STARTNODES_LEGACY=1 (render/band_anim.cpp moveToNode).
+
+## D114. Soft particles read the depth copy's mirrored row [I] (2026-11-16, world agent)
+
+What: the particles' soft edge reads ScreenFx::depthSnapshot at v = 1 -
+gl_FragCoord.y / h: copyDepth stores the rows reversed (for GH3's own
+shaders, which read a screen texture at v = 0.5 - 0.5 y).
+Why: GD10-066: read at gl_FragCoord.y, the smoke faded by the depth of the
+mirrored row: holes in the smoke and dark copies shaped like the band (and
+the drums, sticks, trusses) upside down. Same on local, opengl3 and vulkan.
+Undo: GD10_SOFT_DEPTH_LEGACY=1 (render/particles.cpp, uSoft.w).

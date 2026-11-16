@@ -104,16 +104,10 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
         if (!e.anim.init(s, error)) return false;
         // The waypoint: position and facing (obj_setorientation dir =
         // GetWaypointDir) [C script create_band_member; I: the model faces its +z].
-        bandanim::Xf root;
-        if (v)
-            if (const venue::Node* n = v->node(v->key(waypointName(m.role)))) {
-                root.t = {n->pos[0], n->pos[1], n->pos[2]};
-                root.q = {n->rot[0], n->rot[1], n->rot[2], n->rot[3]};
-                e.placed = true;
-            }
-        e.root = bandanim::matOf(root);
-        for (int i = 0; i < 3; ++i)
-            for (int j = 0; j < 3; ++j) e.root.m[i * 4 + j] *= m.scale;
+        e.venue = v;
+        e.scale = m.scale;
+        e.placed = nodeRoot(v, waypointName(m.role), m.scale, e.root);
+        e.home = e.root;
         // The physics world's gravity (0, -9.8, 0) [C 82253B10: 8200E4E4] in
         // model space: R^T (0, -9.8, 0). GH3 places the ragdoll with the
         // object's rotation and position at scale 1 [C 823FF100], so only the
@@ -244,8 +238,34 @@ void Band::evaluate(double ms) {
     for (Entry& e : members_) evaluateEntry(e, ms);
 }
 
+bool Band::nodeRoot(const venue::Venue* v, const std::string& suffix, float scale, bandanim::Mat34& out) {
+    bandanim::Xf root;
+    bool found = false;
+    if (v)
+        if (const venue::Node* n = v->node(v->key(suffix))) {
+            root.t = {n->pos[0], n->pos[1], n->pos[2]};
+            root.q = {n->rot[0], n->rot[1], n->rot[2], n->rot[3]};
+            found = true;
+        }
+    out = bandanim::matOf(root);
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) out.m[i * 4 + j] *= scale;
+    return found;
+}
+
 void Band::evaluateEntry(Entry& e, double ms) {
     if (e.evaluatedAt == ms) return;
+    // The node it stands on now: its own start node, or a playing clip's
+    // startnodes.<member> (Animator::startNodeAt; GD10-065).
+    if (const std::string& node = e.anim.startNodeAt(ms); node != e.rootNode) {
+        e.rootNode = node;
+        e.root = e.home;
+        bandanim::Mat34 r;
+        if (!node.empty()) {
+            if (nodeRoot(e.venue, "_TRG_Waypoint_" + node, e.scale, r)) e.root = r;
+            else SDL_Log("band: %s: no start node %s", e.model->member.profileName.c_str(), node.c_str());
+        }
+    }
     e.anim.evaluate(ms, e.world, e.skin);
     if (e.acc) {
         const bandanim::Animator& an = e.anim;

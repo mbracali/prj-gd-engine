@@ -26,3 +26,6 @@ Saved here so it survives context loss.
 
 ## Progress
 
+- GD10-064 (world agent): the crowd's dances live in perm_anims_in_game.pak, never read; now read (D112). Peds' farthest bone 0.000 -> 0.130 m per 100 ms. Owner: any song; the crowd cards should dance (GD10_CROWD_ANIMS_LEGACY=1: the old still crowd).
+- GD10-065 (world agent): Band_PlayClip clips play on their startnodes (97 Metallica clips on drummer_start) (D113). z_mop, six Metallica songs: > 1 m past the front 3395..6964 samples -> 0..51; pairs < 0.5 m 48..341 -> 0..6. Owner: Battery or Master of Puppets in a Metallica venue (GD10_BAND_STARTNODES_LEGACY=1: the old walk).
+- GD10-066 (world agent): the upside-down band was in the smoke: soft particles faded by the mirrored depth row (D114); local, opengl3, vulkan. Owner: a smoky Metallica song (Battery, z_mop), close shots of Lars / James (GD10_SOFT_DEPTH_LEGACY=1: the old look).

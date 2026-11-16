@@ -17,6 +17,7 @@
 #include "data/qbkey.h"
 #include "data/venue.h"
 #include "game/chart.h"
+#include "render/core_backend.h"
 #include "render/renderer.h"
 #include "render/venue_stage.h"
 #include "script/globals.h"
@@ -128,7 +129,14 @@ int runVenueTest(const std::string& discPath) {
         std::printf("venuetest: cannot start video: %s\n", SDL_GetError());
         return 2;
     }
-    SDL_Window* window = SDL_CreateWindow("gd10 venue test", 1280, 720, gfx::prepareWindow() | SDL_WINDOW_HIDDEN);
+    // GD10_WINDOW_SIZE=<w>x<h>: another window (the screen effects' quarter
+    // takes its resample path off 1280 x 720: GD10-066).
+    int winW = 1280, winH = 720;
+    if (const char* ws = SDL_getenv("GD10_WINDOW_SIZE")) std::sscanf(ws, "%dx%d", &winW, &winH);
+    // GD10_GRAPHICS_BACKEND=<id>: draw on that backend (local's OpenGL by default).
+    const gfx::Backend backend = SDL_getenv("GD10_GRAPHICS_BACKEND") ? gfx::chosenBackend("") : gfx::Backend::Local;
+    gfx::setRendererBackend(backend);
+    SDL_Window* window = SDL_CreateWindow("gd10 venue test", winW, winH, gfx::prepareWindowFor(backend) | SDL_WINDOW_HIDDEN);
     gfx::Renderer renderer;
     if (!window || !renderer.init(window, error)) {
         std::printf("venuetest: no renderer: %s\n", window ? error.c_str() : SDL_GetError());
@@ -144,6 +152,89 @@ int runVenueTest(const std::string& discPath) {
             std::printf("venuetest %s: FAIL %s\n", zone.c_str(), why.c_str());
             ++failures;
         };
+        // GD10_VENUETEST_BAND=1: only where the band stands (GD10-065): every
+        // 100 ms of the song, each member's pelvis against the xz box of the
+        // zone's TRG_Waypoint nodes (how far outside) and the closest two
+        // members (pelvis to pelvis, xz).
+        if (SDL_getenv("GD10_VENUETEST_BAND")) {
+            VenueStage s;
+            if (!s.start(*disc, g, zone, chart, songKey, kLeadInMs, nullptr, error) || !s.band()) {
+                fail(error.empty() ? "no band" : error);
+                continue;
+            }
+            float lo[2] = {1e9f, 1e9f}, hi[2] = {-1e9f, -1e9f};
+            for (const venue::Node& n : s.venue().nodes)
+                if (qbkey::names().get(n.name).find("TRG_Waypoint") != std::string::npos)
+                    for (int c = 0; c < 2; ++c) {
+                        lo[c] = std::min(lo[c], n.pos[c * 2]);
+                        hi[c] = std::max(hi[c], n.pos[c * 2]);
+                    }
+            Band& band = *s.band();
+            const size_t nm = band.members().size();
+            std::vector<float> worstOut(nm, 0.0f);
+            std::vector<double> worstOutAt(nm, 0);
+            float closest = 1e9f;
+            double closestAt = 0;
+            std::string closestWho;
+            long samples = 0, outside = 0, tooClose = 0, pastFront = 0;
+            float front = 0;  // the farthest any member gets past the front-most waypoint (+z, toward the crowd)
+            double step = -kLeadInMs;
+            for (double t = 0; t <= songEnd; t += 100.0) {
+                while (step + kStepMs <= t) {
+                    step += kStepMs;
+                    s.update(step, healthAt(step));
+                }
+                s.advance(t);
+                band.evaluate(t);
+                std::vector<venue::Vec3> at(nm);
+                std::vector<bool> ok(nm, false);
+                for (size_t m = 0; m < nm; ++m) {
+                    const auto& e = band.members()[m];
+                    ok[m] = band.bonePos(e.model->member.object, qbkey::key("bone_pelvis"), at[m]);
+                    if (!ok[m]) continue;
+                    float out = 0;
+                    for (int c = 0; c < 2; ++c) out = std::max({out, lo[c] - at[m][c * 2], at[m][c * 2] - hi[c]});
+                    if (out > 0.25f) ++outside;
+                    if (out > worstOut[m]) worstOut[m] = out, worstOutAt[m] = t;
+                    front = std::max(front, at[m][2] - hi[1]);
+                    if (at[m][2] - hi[1] > 1.0f) ++pastFront;
+                }
+                for (size_t i = 0; i < nm; ++i)
+                    for (size_t j = i + 1; j < nm; ++j) {
+                        if (!ok[i] || !ok[j]) continue;
+                        const float dx = at[i][0] - at[j][0], dz = at[i][2] - at[j][2];
+                        const float d = std::sqrt(dx * dx + dz * dz);
+                        if (d < 0.5f) ++tooClose;
+                        if (d < closest) {
+                            closest = d, closestAt = t;
+                            closestWho = band.members()[i].model->member.profileName + "/" + band.members()[j].model->member.profileName;
+                        }
+                    }
+                ++samples;
+                if (std::atoi(SDL_getenv("GD10_VENUETEST_BAND")) >= 2 && std::fmod(t, 1000.0) < 1.0) {
+                    std::printf("  %6.0f", t);
+                    for (size_t m = 0; m < nm; ++m) {
+                        const auto& e = band.members()[m];
+                        const std::string& node = e.anim.startNodeAt(t);
+                        std::printf("  %s(%s) %.2f %.2f %.2f", e.model->member.profileName.c_str(), node.empty() ? "own" : node.c_str(),
+                                    double(at[m][0]), double(at[m][1]), double(at[m][2]));
+                    }
+                    std::printf("\n");
+                }
+            }
+            if (std::atoi(SDL_getenv("GD10_VENUETEST_BAND")) >= 2)
+                for (const venue::Node& n : s.venue().nodes)
+                    if (qbkey::names().get(n.name).find("TRG_Waypoint") != std::string::npos)
+                        std::printf("  node %s %.2f %.2f %.2f angles %.1f %.1f %.1f\n", qbkey::names().get(n.name).c_str(), double(n.pos[0]),
+                                    double(n.pos[1]), double(n.pos[2]), double(n.angles[0]), double(n.angles[1]), double(n.angles[2]));
+            for (size_t m = 0; m < nm; ++m)
+                std::printf("venuetest band %s: %s at most %.2f m outside the waypoints' box (at %.0f ms)\n", zone.c_str(),
+                            band.members()[m].model->member.profileName.c_str(), double(worstOut[m]), worstOutAt[m]);
+            std::printf("venuetest band %s: %ld samples; %ld member samples > 0.25 m outside the box, %ld > 1 m past its front "
+                        "(farthest %.2f m); %ld pairs < 0.5 m apart; closest %.2f m (%s at %.0f ms)\n",
+                        zone.c_str(), samples, outside, pastFront, double(front), tooClose, double(closest), closestWho.c_str(), closestAt);
+            continue;
+        }
         // 1. The whole song without drawing, at 60 and at 240 fps.
         VenueStage a, b;
         if (!a.start(*disc, g, zone, chart, songKey, kLeadInMs, nullptr, error) ||
