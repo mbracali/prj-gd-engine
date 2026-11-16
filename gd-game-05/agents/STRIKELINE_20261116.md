@@ -54,3 +54,13 @@ None of the differences is both confirmed and small. Item 1 changes where every 
 - XEX: find where RB builds a gem widget instance's transform: the gem manager's add-instance, near the track code at RB 0x8281xxxx (TailBuilder 0x8281A970; gem_smasher%d at 0x82817D28). Check whether z / roll come from the slot x on the track's curve, or whether gems stay at z = 0 (then the port is right and item 1 is RB's own look). Do the same for the tails (0x8281C4A0's row z).
 - If confirmed: in drawGems, offset z by the curve at the slot's x (the smasher TransAnims' z: guitar 0 / -0.075 / -0.281, drums -0.035 / -0.237) and roll by its tangent. Put the old flat placement behind `GD05_GEMCURVE_LEGACY=1`. Check: gem centre minus smasher centre at hit time is the same in every lane (today green 17 px measured; yellow about 8 px predicted, not measured: inbloom has no yellow guitar gem near 20 s).
 - Ask the owner which part he means, showing the guitar crops (gem at the line in the green lane vs the yellow lane) next to Screen_2's black smashers.
+
+## Follow-up (same day, GD05-111, D115)
+
+Difference 3 was a port bug after all. square_smasher_plate.mesh names
+black_smasher.mesh as its geom_owner, and RB draws a mesh's geometry
+through the owner [C]. The port drew the mesh's own 471 vertices (the
+taller hood measured above), so the "matches the mesh" rows describe the
+wrong mesh. Now fixed (GD05_GEOMOWNER_LEGACY=1 for the old look). Item 1
+(the gems on the curve) is still open.
+

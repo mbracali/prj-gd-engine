@@ -636,11 +636,18 @@ std::vector<float> packVertices(const scene::Mesh& m) {
     return out;
 }
 
+const scene::Mesh* meshGeometry(const scene::Mesh* m) {
+    static const bool legacy = SDL_getenv("GD05_GEOMOWNER_LEGACY") != nullptr;
+    if (!m || m->geomOwner.empty() || m->geomOwner == m->name || !m->dir) return m;
+    if (legacy && !m->verts.empty()) return m;
+    auto* owner = m->dir->resolve<scene::Mesh>(m->geomOwner);
+    if (!owner || !owner->decoded || owner->verts.empty()) return m;
+    return owner;
+}
+
 const GpuMesh* SceneCache::mesh(const scene::Mesh* m) {
     if (!m || !m->decoded) return nullptr;
-    const scene::Mesh* geom = m;
-    if (m->verts.empty() && !m->geomOwner.empty() && m->dir)
-        if (auto* owner = m->dir->resolve<scene::Mesh>(m->geomOwner)) geom = owner;
+    const scene::Mesh* geom = meshGeometry(m);
     if (auto it = meshes_.find(geom); it != meshes_.end()) {
         if (!stale(geom)) return it->second.get();
         meshes_.erase(it);  // its buffers stay in buffers_ until the cache goes

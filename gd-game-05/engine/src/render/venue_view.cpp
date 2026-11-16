@@ -397,9 +397,7 @@ void VenueView::drawMesh(gfx::MaterialRenderer& mr, const scene::Mesh& m, const 
     const gfx::GpuMesh* cached = cache_.mesh(&m);
     if (!cached || !m.dir) return;
     gfx::GpuMesh g = *cached;
-    const scene::Mesh* geom = &m;
-    if (m.verts.empty() && !m.geomOwner.empty())
-        if (auto* owner = m.dir->resolve<scene::Mesh>(m.geomOwner)) geom = owner;
+    const scene::Mesh* geom = gfx::meshGeometry(&m);
     // MeshAnim vertices.
     if (const gfx::ScenePose::MeshAnimState* ma = pose.meshAnim(&m); ma && ma->anim) {
         const std::vector<float> v = gfx::meshAnimVertices(*geom, *ma->anim, ma->frame);

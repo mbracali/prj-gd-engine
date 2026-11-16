@@ -1967,3 +1967,39 @@ pattern). Each says what, why and how to undo it.
   drums 62.9 / vocals 61, 0 both ways. Close shot at 16.47 s: the fret
   arm's flattened, wrung forearm is round again.
 - **Undo:** GD05_POLLSORT_LEGACY=1.
+
+## D115
+- **What (2026-11-16, GD05-111):** a mesh draws its geom_owner's vertices and
+  faces even when it stores its own. RB reads a mesh's geometry through the
+  owner pointer (mesh +0x10c, then the owner's vertices +0xe0 / faces +0xf8:
+  RB 0x82205658, 0x82206000, 0x822B06F0; RndMesh::Load 0x821A02F8 sets the
+  owner to the mesh itself when none is named) [C]. The port took the owner
+  only for meshes with no vertices. gfx::meshGeometry (render/scene_gpu)
+  is now the one rule for the scene cache, band, venue, HUD and explorer.
+- **The strike line:** each smasher's square_smasher_plate.mesh keeps 471
+  vertices of its own (an older, taller hood whose top maps v 0.79-0.92 of
+  black_smasher_<colour>_nomip.tex: the grey V of the smasher's front) but
+  names black_smasher.mesh (237 vertices, a low dome y -3.1..3.1, z <= 0.36)
+  as its owner. The port drew the hood: the bright, wavy "chrome" band above
+  each coloured frame (owner's report: "the higher part of the notes is
+  wrong"). Now the top above the rim is the texture's dark strip and the row
+  is flush, as in Screen_2.
+- **Other meshes this changes (inbloom guitar / drums, venue big_club_11):**
+  the drum smashers' square_smasher_plate (59 own vertices), drum_slots_new
+  -> drum_slots_narrow (the drum track's lane lines now show, as in the
+  retail Wikipedia shot), guitar_rails -> trackslots_guitar_narrow (no
+  visible change), kick_smasher_back -> kick_smasher_base, phrase_marker ->
+  now_bar, the venue's stool15..35 -> stool01.
+- **Measured (1920 x 1080, inbloom 20.15 s, yellow lane column x 915-925):**
+  band above the rim, mean luma of the rows above it: 112.7 -> 9.9 (Screen_2
+  24.4, a lit blue board behind it); bright rows above the rim 16 (856-871)
+  -> 0; front below the rim / rim height 0.72 -> 0.70 (Screen_2 0.70). Left:
+  the rim's height / width is 0.225 against Screen_2's 0.16-0.18 (the old
+  hood hid the rim's top: 0.160); Screen_2 is a 1280 x 629 crop of an
+  unknown build, not checked further.
+- **Undo:** GD05_GEOMOWNER_LEGACY=1 (the owner only for meshes without
+  vertices).
+- **Not done:** the outer-lane gems on the plate's curve (STRIKELINE study
+  item 1): RB's gem instance transform still not traced (gem_smasher%d
+  0x82817D28 only finds the smashers).
+
