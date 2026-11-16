@@ -209,6 +209,8 @@ public:
     MidiParserSet* parsers() { return parsers_.get(); }
     // Messages that fired a member's EventTriggers (the drum kit), by event.
     const std::map<std::string, int>& triggerCounts() const { return triggerCounts_; }
+    // Clip events sent to their clip's type handlers, by event (set_leftarm_true...).
+    const std::map<std::string, int>& clipEventCounts() const { return clipEventCounts_; }
     const std::vector<std::string>& problems() const { return problems_; }
     double beat() const { return beat_; }
 
@@ -299,6 +301,10 @@ private:
     std::vector<std::unique_ptr<ScriptObject>> parts_;  // scoped sub-objects (main.drv...)
     std::array<std::unique_ptr<ScriptObject>, 2> players_;  // {$this player}
     std::map<std::string, DataNode> scripts_;            // parsed clip scripts
+    // The clips' script objects (a CharClip type's handlers, [flags] the
+    // clip's own): a clip event names one of its handlers (GD05-101).
+    std::map<const scene::CharClipSamples*, std::unique_ptr<ScriptObject>> clipObjs_;
+    std::map<std::string, int> clipEventCounts_;
     const DataNode* objects_ = nullptr;
     chr::Random rng_;
     std::vector<std::string> problems_;

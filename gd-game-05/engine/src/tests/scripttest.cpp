@@ -197,7 +197,12 @@ void checkLanguage(Checker& c) {
         "{set $n {has_substr walk_left walk_}}"
         "{set $o {find ((a (b 1)) (c 2)) a b}}"
         "{set $p {/ 7 2}}"
-        "{set $q {mod 7 3}}");
+        "{set $q {mod 7 3}}"
+        "{set $q2 {elem (a b c) {mod {- 0 1} 3}}}"  // tutorial_state.dta get_prev_state on the first lesson
+        "{set $fl 4} {|= $fl 3} {set $bo $fl} {&= $fl {~ 1}} {set $ba $fl}"
+        "{set $srt2 (3 1 2)} {sort $srt2} {set $srt3 ((b 1) (a 2))} {sort $srt3}"
+        "{set $sr {search_replace song_short \"_short\" \"\" $srout}}"
+        "{set $sr2 {search_replace song \"_short\" \"\" $srout2}}");
     c.equal(s.v("a").str(), "two_or_three", "switch with a list of keys");
     c.equal(s.v("b").str(), "other", "switch default");
     c.equal(s.v("c").str() + " " + s.v("d").str(), "second third", "cond and its default");
@@ -211,6 +216,14 @@ void checkLanguage(Checker& c) {
     c.equal(s.v("m").str() + s.v("n").str(), "11", "strneq / has_substr");
     c.equal(s.v("o").str(), "(b 1)", "find path");
     c.equal(s.v("p").str() + " " + s.v("q").str(), "3.5 1", "division and mod");
+    c.equal(s.v("q2").str(), "c", "mod wraps into [0, n) (Harmonix's Mod: the tutorials' previous lesson)");
+    c.equal(s.v("bo").str() + " " + s.v("ba").str(), "7 6", "|= / &= / ~ (the arm flags)");
+    c.equal(s.v("srt2").str() + " " + s.v("srt3").str(), "(1 2 3) ((a 2) (b 1))", "sort numbers / lists by their first element");
+    c.equal(s.v("sr").str() + " " + s.v("srout").str() + " " + s.v("sr2").str() + " " + s.v("srout2").str(), "1 song 0 song",
+            "search_replace");
+    s.run("{new Object armclip (flags 4) (arm {with armclip {|= [flags] 1}})} {armclip arm} {set $wf {armclip get flags}}"
+          "{set $wt {with armclip $this}}");
+    c.equal(s.v("wf").str() + " " + s.v("wt").str(), "5 armclip", "with sets $this ([flags] through |=)");
 
     // Objects: new, handlers with $this and [props], handle, the L1 report.
     s.run(

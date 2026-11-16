@@ -17,6 +17,8 @@
 
 #include "audio/vorbis_stream.h"
 #include "data/dta.h"
+#include "script/script.h"
+#include <iterator>
 #include "data/game_data.h"
 #include "data/midi.h"
 #include "game/autoplay.h"
@@ -816,8 +818,30 @@ int checkPcWording(const GameData& data) {
     return failures;
 }
 
+namespace {
+// The script's {mod a b} as Harmonix's Mod (GD02-167, gd01's GD01-319):
+// wrapped into [0, b); {mod {+ idx -1} n} on the first item gives n - 1.
+int scriptModSelfTest() {
+    Interp in;
+    int failures = 0;
+    const struct { const char* code; float want; bool real; } cases[] = {
+        {"{mod -1 5}", 4, false}, {"{mod {+ 0 -1} 7}", 6, false}, {"{mod 7 5}", 2, false}, {"{mod -6 5}", 4, false},
+        {"{mod -5 5}", 0, false}, {"{mod 0 5}", 0, false}, {"{mod 5.5 2}", 1.5f, true}, {"{mod -0.5 2}", 1.5f, true},
+    };
+    for (const auto& c : cases) {
+        const DataNode tree = parseDtaText(c.code);
+        const Value v = tree.children.empty() ? Value() : in.eval(tree.children[0]);
+        const bool ok = std::fabs(v.number() - c.want) < 1e-4f && (v.type == Value::Type::Float) == c.real;
+        if (!ok) std::printf("  FAIL script mod: %s = %g, want %g\n", c.code, double(v.number()), double(c.want)), ++failures;
+    }
+    std::printf("script mod: %d of %zu cases\n", int(std::size(cases)) - failures, std::size(cases));
+    return failures;
+}
+}  // namespace
+
 int runSelfTest(const std::string& dataPath) {
     try {
+        const int modFailures = scriptModSelfTest();
         GameData data(dataPath);
         std::printf("%s\n", data.description().c_str());
         int scriptFailures = checkScripts(data);
@@ -1051,7 +1075,7 @@ int runSelfTest(const std::string& dataPath) {
         std::printf("%d song audio file(s) with problems, %d script(s) not decoded\n", audioFailures, scriptFailures);
         std::printf(chartFailures ? "%d chart(s) not fully hit\n" : "all charts fully hit\n", chartFailures);
         // RB's PC wording (scene/pc_strings.cpp, wave 02): counted.
-        return wordingFailures || chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || bassFailures ? 1 : 0;
+        return modFailures || wordingFailures || chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || bassFailures ? 1 : 0;
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;
