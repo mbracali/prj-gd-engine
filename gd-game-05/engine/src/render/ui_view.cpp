@@ -516,6 +516,11 @@ std::string UiView::labelString(const scene::UILabel& l) const {
     return l.text;
 }
 
+std::string UiView::text(const scene::Object* o) const {
+    const auto* l = o ? o->as<scene::UILabel>() : nullptr;
+    return l ? labelString(*l) : std::string();
+}
+
 std::string UiView::text(const std::string& component) const {
     const scene::Object* o = find(component);
     if (const auto* l = o ? o->as<scene::UILabel>() : nullptr) return labelString(*l);

@@ -5770,6 +5770,34 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (track != 4) return fail("player 0's part already set (track " + std::to_string(track) + ")");
         if (ready) return fail("player 0 already ready: the screen goes on to loading");
         if (slotName != "guitar") return fail("player 0 is not in the guitar slot (" + slotName + "): no part select");
+        // The part select's labels (owner 11-16: "the labels of the guitar
+        // and bass were MISSING" after New Song): the slot's selpart.grp,
+        // guitar.grp / bass.grp, guitar.btn / bass.btn and their icon labels
+        // guitar.lbl / bass.lbl shown, the labels and buttons with text.
+        ui::PlayerSlotObj* slot = nullptr;
+        for (auto& sl : ui.playerSlots())
+            if (sl && sl->playerNum() == 0) slot = sl.get();
+        if (!slot) return fail("no slot for player 0");
+        int hidden = 0, empty = 0;
+        std::string line;
+        for (const char* n : {"selpart.grp", "guitar.grp", "bass.grp", "guitar.btn", "bass.btn", "guitar.lbl", "bass.lbl"}) {
+            const Value cv = in.send(slot, "find", {Value::symbol(n)});
+            auto* c = dynamic_cast<ui::ComponentObj*>(cv.object);
+            if (!c) {
+                line += std::string(" ") + n + " missing";
+                ++hidden;
+                continue;
+            }
+            const bool shown = c->getProp(in, "showing").truthy();
+            const std::string n2 = n;
+            const bool hasText = n2.find(".grp") == std::string::npos;
+            const std::string text = hasText && c->panel->view ? (c->object ? c->panel->view->text(c->object) : c->panel->view->text(c->key)) : std::string();
+            line += " " + n2 + (shown ? " shown" : " HIDDEN") + (hasText ? " '" + text + "'" : std::string());
+            hidden += !shown;
+            empty += hasText && text.empty();
+        }
+        std::printf("  newsong_part %s labels:%s (hidden %d, empty %d)\n", when.c_str(), line.c_str(), hidden, empty);
+        if (hidden || empty) return fail("the part select's labels are not all shown with text (" + std::to_string(hidden) + " hidden, " + std::to_string(empty) + " empty)");
         return pass();
     }
     if (s.screen == "print_focus") {

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 
 #include "audio/audio_device.h"
 #include "audio/vorbis_stream.h"
@@ -14,7 +15,6 @@ namespace {
 
 constexpr int kRate = 44100;
 constexpr double kCrowdAudioDelay = 1.0;  // config/sound.dta (crowd_audio_delay 1) [C data]; +0x34
-constexpr float kCrowdVolumeDb = -2.0f;   // config/sound.dta (crowd_volume -2) [C data]; +0x30
 
 const char* const kLevelNames[] = {"kExcitementBoot", "kExcitementBad", "kExcitementOkay", "kExcitementGreat", "kExcitementPeak"};
 
@@ -28,12 +28,56 @@ CrowdAudio::Entry entryOf(const DataNode& e) {
     return r;
 }
 
+// GD05_CROWDSTREAMS_LEGACY=1: no crowd streams in Rock Band (before GD05-115):
+// the venues' WorldDir types have no GH2 (sound (crowd ...)), so the crowd
+// was silent until the song's own crowd channels and reactions.
+bool crowdStreamsLegacy() {
+    static const bool on = [] {
+        const char* e = SDL_getenv("GD05_CROWDSTREAMS_LEGACY");
+        return e && *e == '1';
+    }();
+    return on;
+}
+
 }  // namespace
 
 CrowdAudio::CrowdAudio(const GameData& data, const std::string& venue, const DataNode* sound) : venue_(venue) {
-    if (!sound) return;
-    if (const DataNode* b = sound->find("bank"); b && b->children.size() > 1) bank_ = b->textAt(1);
-    const DataNode* crowd = sound->find("crowd");
+    if (sound)
+        if (const DataNode* b = sound->find("bank"); b && b->children.size() > 1) bank_ = b->textAt(1);
+    const DataNode* crowd = sound ? sound->find("crowd") : nullptr;
+    std::string root = "world/" + venue + "/streams";
+    // GD05-115: Rock Band's CrowdAudio (ctor 0x8243B660) [C]: the type is
+    // the venue's name up to its last '_' (0x8241F3E8: big_club_11 ->
+    // big_club), from config/crowd_audio.dta's (CrowdAudio (types (<type>
+    // (streams (root world/<type>/streams) (intro dB file) (levels ...))))),
+    // the volume config/sound.dta's crowd_volume (-4 dB, +0x30). Its
+    // play_intro (0x8243A2E8, intro_start: game.dta pick_intro, before the
+    // count-in) plays the intro stream: the crowd cheers from the venue's
+    // first shot, not only once the song's crowd channels start.
+    DataNode rbConfig, rbSound;
+    if (!crowd && !crowdStreamsLegacy() && data.exists("config/gen/crowd_audio.dtb")) {
+        try {
+            rbConfig = parseDtb(data.read("config/gen/crowd_audio.dtb"));
+            if (data.exists("config/gen/sound.dtb")) {
+                rbSound = parseDtb(data.read("config/gen/sound.dtb"));
+                if (const DataNode* v = rbSound.find("crowd_volume"); v && v->children.size() > 1) crowdVolumeDb_ = v->floatAt(1);
+            }
+        } catch (const std::exception& e) {
+            SDL_Log("crowd audio: config/gen/crowd_audio.dtb: %s", e.what());
+        }
+        const size_t us = venue.rfind('_');
+        const std::string type = us == std::string::npos ? venue : venue.substr(0, us);
+        const DataNode* ca = rbConfig.find("CrowdAudio");
+        const DataNode* types = ca ? ca->find("types") : nullptr;
+        const DataNode* t = types ? types->find(type) : nullptr;
+        const DataNode* dis = t ? t->find("disable") : nullptr;
+        const bool disabled = dis && dis->children.size() > 1 && (dis->children[1].isText() ? dis->children[1].s == "TRUE" : dis->intAt(1) != 0);
+        if (t && !disabled) crowd = t->find("streams");
+        if (crowd)
+            if (const DataNode* r = crowd->find("root"); r && r->children.size() > 1) root = r->textAt(1);
+        static const bool log = [] { const char* l = SDL_getenv("GD05_SFXLOG"); return l && *l && *l != '0'; }();
+        if (log) SDL_Log("crowd audio: %s: type %s, %s, crowd_volume %.1f dB", venue.c_str(), type.c_str(), crowd ? root.c_str() : "no streams", double(crowdVolumeDb_));
+    }
     if (!crowd) return;
     if (const DataNode* i = crowd->find("intro")) entries_[kIntro] = entryOf(*i);
     if (const DataNode* i = crowd->find("encore_intro")) entries_[kEncoreIntro] = entryOf(*i);
@@ -51,7 +95,7 @@ CrowdAudio::CrowdAudio(const GameData& data, const std::string& venue, const Dat
     // shared with threads); decoded on the worker.
     for (size_t s = 0; s < kStreams; ++s) {
         if (entries_[s].file.empty()) continue;
-        const std::string path = "world/" + venue + "/streams/" + entries_[s].file + ".mogg";
+        const std::string path = root + "/" + entries_[s].file + ".mogg";
         try {
             files_[s] = data.read(path);
         } catch (const std::exception& e) {
@@ -169,7 +213,7 @@ void CrowdAudio::mix(float* out, int frames) {
 
 // 0x822DF2F8: fx volume + crowd_volume + set_volume + the entry's dB.
 float CrowdAudio::gainOf(Stream s) const {
-    return std::pow(10.0f, (fxDb_ + kCrowdVolumeDb + volumeDb_ + entries_[size_t(s)].db) / 20.0f);
+    return std::pow(10.0f, (fxDb_ + crowdVolumeDb_ + volumeDb_ + entries_[size_t(s)].db) / 20.0f);
 }
 
 // 0x822DF860 [C]: while enabled, the old stream is deleted and the new one
@@ -214,6 +258,8 @@ void CrowdAudio::update(double now) {
         const int level = pending_.front().second;
         pending_.erase(pending_.begin());
         play(Stream(kBoot + level), true);
+        static const bool log = [] { const char* l = SDL_getenv("GD05_SFXLOG"); return l && *l && *l != '0'; }();
+        if (log) SDL_Log("crowd timing: excitement_loop %d at song %.0f ms, stream %d", level, now * 1000.0, playing_.load());
     }
 }
 

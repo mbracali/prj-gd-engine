@@ -25,6 +25,15 @@ std::string textOf(Interp& in, const Value& v) {
 // GD05_CROWD_LEGACY=1: the crowd as before GD05-071 (no intro_start, no
 // BandCamShot crowd part, play_group_flags a stub): the archetypes keep
 // their bind pose, lying on the floor; the rb_crowd walk's before numbers.
+// GD05_CROWDSTREAMS_LEGACY=1: no RB crowd streams, crowd_begin at every intro (GD05-115).
+bool crowdStreamsLegacy() {
+    static const bool on = [] {
+        const char* e = SDL_getenv("GD05_CROWDSTREAMS_LEGACY");
+        return e && *e == '1';
+    }();
+    return on;
+}
+
 bool crowdLegacy() {
     static const bool on = [] {
         const char* e = SDL_getenv("GD05_CROWD_LEGACY");
@@ -626,8 +635,19 @@ void Crowd::listen(Interp& in, const std::string& msg, const std::vector<Value>&
     if (msg == "intro_start_msg") {
         // 0x822DFCA8 [C]: crowd_begin (+0x64) whatever $encore, then the stream.
         const bool fast = arg(0).truthy(), encore = arg(1).truthy();
-        reactionSound("crowd_begin");
-        audio_->introStart(fast, encore);
+        // RB's CROWD_AUDIO_HANDLERS intro_start (config/crowd_audio.dta) [C
+        // data]: crowd_begin and play_intro only when want_intro: no tour
+        // performer, or its first song of the set (GD05-115).
+        bool wantIntro = true;
+        if (!crowdStreamsLegacy() && in.findObject("tour"))
+            if (ScriptObject* perf = in.send("tour", "performer", {}).object) wantIntro = in.send(perf, "first_song", {}).truthy();
+        if (wantIntro) {
+            reactionSound("crowd_begin");
+            audio_->introStart(fast, encore);
+        }
+        // GD05-115 timing check (GD05_SFXLOG=1): the stream at the intro's start.
+        static const bool log = [] { const char* l = SDL_getenv("GD05_SFXLOG"); return l && *l && *l != '0'; }();
+        if (log) SDL_Log("crowd timing: intro_start_msg at song %.0f ms, stream %d", now * 1000.0, int(audio_->playing()));
         // Rock Band's crowd.dta waits for intro_start instead: the game panel's
         // start (RB 0x8242E520) runs game.dta pick_intro, whose {handle ($this
         // intro_start)} reaches the game's sinks, the crowd's among them
@@ -641,6 +661,8 @@ void Crowd::listen(Interp& in, const std::string& msg, const std::vector<Value>&
             for (State& s : crowds_) setFullness(s, encore ? 1.0f : 0.5f, encore ? 1.0f : 0.5f);
     } else if (msg == "music_start") {
         reactionSound(audio_->musicStart(excitement_, now));
+        static const bool log = [] { const char* l = SDL_getenv("GD05_SFXLOG"); return l && *l && *l != '0'; }();
+        if (log) SDL_Log("crowd timing: music_start at song %.0f ms, stream %d", now * 1000.0, int(audio_->playing()));
     } else if (msg == "excitement") {
         const int level = arg(0).integerValue();
         excitement_ = level;

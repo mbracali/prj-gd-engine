@@ -2101,3 +2101,49 @@ pattern). Each says what, why and how to undo it.
   the jacket collar; now they lie outside on the shoulders.
 - **Undo:** GD05_HAIRCOLLIDE_LEGACY=1, GD05_HAIRGRAVITY_LEGACY=1,
   GD05_HAIRSLACK_LEGACY=1, GD05_HAIRRESET_LEGACY=1.
+
+
+## D119
+- **What (2026-11-16, GD05-114 reopened):** the part / difficulty panels
+  (seldiff_panel, seldiff_solo_panel, hth_split_seldiff_panel) are really
+  unloaded when the next screen does not hold them (their unload handler,
+  then the milo freed), as RB's UIPanel Unload does; the next part select
+  loads a fresh seldiff milo. D116 ran only the handler and kept the panel:
+  once player 0 was ready the slot's update hid every BandButton but the
+  chosen difficulty ({$this iterate BandButton $b ... {$b set_showing {!
+  $ready}}}, seldiff.dta SELDIFF_SCREEN_PANELS [C data]), guitar.btn /
+  bass.btn among them, and nothing shows them again (only selpart.grp /
+  guitar.grp / bass.grp are re-shown): pause > New Song's part select came
+  up with no GUITAR / BASS labels. PanelObj::unload also drops the slots'
+  components, focus and disabled set (they pointed into the freed view).
+- **Measured (walks rb_newsong_part / rb_newsong_part_pad, new
+  `newsong_part <when> labels` line: selpart.grp, guitar.grp, bass.grp,
+  guitar.btn, bass.btn, guitar.lbl, bass.lbl shown and with text):** second
+  visit hidden 2 (guitar.btn, bass.btn) -> 0, empty 0 -> 0; first visit
+  0 / 0 both ways; ready reset unchanged (ready 0, game on track 2).
+  rb_pause_quit, rb_qp_locked, rb_band_start OK.
+- **Undo:** GD05_SELDIFFRELOAD_LEGACY=1 (handler only, as D116).
+
+## D120
+- **What (2026-11-16, GD05-115):** Rock Band's crowd streams. RB's
+  CrowdAudio (ctor 0x8243B660) [C] takes its type from the venue's name up
+  to the last '_' (0x8241F3E8: big_club_11 -> big_club) in
+  config/crowd_audio.dta ((streams (root world/<type>/streams) (intro dB
+  file) (levels ...))) and crowd_volume from config/sound.dta (-4 dB). Its
+  intro_start handler (CROWD_AUDIO_HANDLERS: crowd_begin and play_intro
+  when want_intro: no tour performer or its first song; play_intro
+  0x8243A2E8 plays the intro stream) runs at game.dta pick_intro, the
+  venue's first intro shot; music_start then the excitement loops a second
+  later (0x82439F20). The port read only GH2's (sound (crowd ...)) from the
+  WorldDir type, which RB's venues lack: no crowd stream at all, so the
+  crowd was heard only from crowd_begin and the song's own crowd channels
+  once the music ran. Now the RB config is read; want_intro is followed.
+  [I: the stream cross-fade (+0x3c old stream) and pan 3 are not done.]
+- **Measured (GD05_SFXLOG=1 `crowd timing` lines, GD05_END_AT=20000):**
+  orangecrush (theater_08, --song): intro stream none -> crowd_theater_intro
+  at song -2582 ms (the track extends at -2000), first level loop none ->
+  crowd_theater_norm at 6860 ms; through the menus (rb_newsong_part,
+  big_club_11): crowd_big_intro at song -6709 ms. The owner's video has no
+  audio track, so no measurement from it.
+- **Undo:** GD05_CROWDSTREAMS_LEGACY=1.
+
