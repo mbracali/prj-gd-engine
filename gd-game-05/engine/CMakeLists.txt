@@ -156,6 +156,7 @@ target_sources(gd05 PRIVATE
   src/tests/facefxtest.cpp
   src/tests/uitest.cpp
   src/tests/walktest.cpp
+  src/tests/walktest_career.cpp
   src/tests/venuetest.cpp
   src/tests/director_golden.cpp
   src/tests/venuetest_crowd.cpp

@@ -1304,6 +1304,213 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1000);
         check("rb_tour_solo_events");
         check("restart_app");
+    } else if (scenario == "rb_full_solo") {
+        // GD05-119: the whole Solo Tour of a new character (guitar, or the
+        // instrument GD05_INSTRUMENT gives player 1) at the default
+        // difficulty (Medium; GD05_WALK_EASY=1 Easy). Its gigs are completed
+        // through the tour's natives (rb_full_solo_autoplay, the test aid of
+        // tests/walktest_career.cpp) but the one that wins the tour, played
+        // through the menus: endgame, the tour's win screen, the credits,
+        // the send-off; restarted, the progress is still there.
+        endMs_ = 20000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);  // GIG GUIDE
+        at("tour_solo_diff_screen");
+        if (SDL_getenv("GD05_WALK_EASY")) press(kUp), wait(300);
+        press(kX);  // the difficulty
+        check("rb_to_screen:tour_solo_event_screen", 30000);  // through the welcome hint
+        wait(1000);
+        check("rb_full_solo_autoplay");
+        press(kTri);  // back to the hub, then the gig guide again: its list rebuilt
+        at("tour_solo_hub_screen", 20000);
+        wait(800);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);
+        at("tour_solo_diff_screen");
+        press(kX);
+        check("rb_to_screen:tour_solo_event_screen", 30000);  // through the hints the gigs raised
+        wait(1000);
+        check("rb_focus_row:solo_event_provider:final", 20000);
+        press(kX);  // the winning gig
+        at("game_screen", 60000);
+        check("rb_to_screen:tour_solo_win_screen|tour_solo_easy_win_screen", 180000);
+        check("rb_full_solo_won");
+        wait(1500);
+        check("rb_to_screen:tour_solo_sendoff_screen", 60000);  // the credits: the video (none headless), the text
+        wait(1000);
+        press(kX);
+        at("tour_solo_event_screen|tour_solo_hub_screen", 30000);
+        check("restart_app");
+    } else if (scenario == "rb_full_solo_restarted") {
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(1000);
+        press(kX);  // the saved character
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_full_solo_reloaded");
+    } else if (scenario == "rb_full_band") {
+        // GD05-118: the whole Band World Tour. A guitarist made in the Solo
+        // Tour's creator, restarted; a new band (hometown boston, the data's
+        // default) with a drummer (GD05_BAND_PLAYERS 2, the lobby stand-in);
+        // its gigs completed through the natives (rb_full_band_autoplay) up to
+        // the hall of fame, played through the menus (the tour's win screen),
+        // then the endless setlist through the natives (is_hardcore_winning,
+        // tour_bwt_complete); restarted, all of it kept.
+        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,guitar", 1);
+        SDL_setenv_unsafe("GD05_BAND_PLAYERS", "2", 1);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        check("restart_app");
+    } else if (scenario == "rb_full_band_restarted") {
+        endMs_ = 12000;  // the hall of fame's eight songs
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(800);
+        press(kX);  // a new band
+        at("tour_band_create_screen", 20000);
+        wait(1200);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        for (int i = 0; i < 2; ++i) press(kDown), wait(200);
+        press(kX);  // ACCEPT
+        at("tour_band_hub_screen", 30000);
+        wait(1000);
+        check("rb_full_band_autoplay");
+        press(kX);  // GIG GUIDE
+        check("rb_to_screen:tour_band_town_screen", 40000);  // through the hints the gigs raised
+        wait(1000);
+        check("rb_focus_row:tour_town_provider:final_town", 20000);
+        press(kX);
+        at("tour_band_venue_screen", 20000);
+        wait(1000);
+        check("rb_focus_row:tour_venue_provider:final_venue", 20000);
+        press(kX);
+        at("tour_band_event_screen", 20000);
+        wait(1000);
+        check("rb_focus_row:tour_event_provider:final", 20000);
+        press(kX);  // the hall of fame
+        check("rb_to_screen:game_screen", 60000);
+        check("rb_to_screen:tour_band_win_screen", 400000);
+        wait(1500);
+        check("rb_full_band_end");
+        check("restart_app");
+    } else if (scenario == "rb_bwt_diy") {
+        // GD05-118: a make-your-own setlist gig (the hometown small club's
+        // diy, (songs any any)) through the menus: the band's first gig
+        // through the natives, then the venue, the gig, tour_selsong_screen
+        // twice (one song each), the difficulty, the game: the set holds the
+        // two songs chosen (RB's selsong.dta game_tour: set_any_song).
+        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,guitar", 1);
+        SDL_setenv_unsafe("GD05_BAND_PLAYERS", "2", 1);
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(800);
+        press(kX);  // a new band
+        at("tour_band_create_screen", 20000);
+        wait(1200);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        for (int i = 0; i < 2; ++i) press(kDown), wait(200);
+        press(kX);  // ACCEPT
+        at("tour_band_hub_screen", 30000);
+        wait(1000);
+        check("rb_bwt_first_gig");
+        press(kX);  // GIG GUIDE
+        check("rb_to_screen:tour_band_venue_screen", 40000);  // the hints
+        wait(1000);
+        check("rb_focus_row:tour_venue_provider:final_venue", 20000);
+        press(kX);
+        at("tour_band_event_screen", 20000);
+        wait(1000);
+        check("rb_focus_row:tour_event_provider:final", 20000);
+        press(kX);  // Make a Setlist
+        at("tour_selsong_screen", 20000);
+        wait(2000);
+        press(kX);  // the first song
+        wait(2500);
+        at("tour_selsong_screen", 20000);
+        wait(2000);
+        press(kDown), wait(300), press(kDown), wait(300);
+        press(kX);  // another song
+        check("rb_to_screen:game_screen", 60000);  // the difficulty
+        wait(3000);
+        check("rb_bwt_diy_set");
+    } else if (scenario == "rb_full_band_restarted_restarted") {
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(1000);
+        press(kX);  // the saved band (row 0)
+        at("tour_band_hub_screen", 30000);
+        wait(1000);
+        check("rb_full_band_reloaded");
     } else if (scenario == "rb_tour_rules_restarted") {
         at("splash_screen", 30000);
         press(kX);
@@ -4524,6 +4731,63 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (keepGoing) return (void)std::printf("  FAIL (kept going) %s\n", e.c_str()), pass();
         error_ = e, failed_ = done_ = true;
     };
+    // The career rundown's checks (GD05-118 / 119: tests/walktest_career.cpp).
+    {
+        std::string err;
+        bool ok = false;
+        if (walkCareerCheck(ui, s.screen, err, ok)) return ok ? pass() : fail(err);
+    }
+    if (s.screen.rfind("rb_to_screen:", 0) == 0) {
+        // X on every screen in between (hints, results, next song) until one
+        // of the screens (a|b) is up; never on a song or a loading screen.
+        const std::string want = "|" + s.screen.substr(13) + "|";
+        if (stepStart_ < 0) stepStart_ = nowMs;
+        const std::string cur = ui.current() ? ui.current()->name() : std::string();
+        if (!ui.inTransition() && want.find("|" + cur + "|") != std::string::npos) return pass();
+        if (nowMs - stepStart_ > (s.ms > 0 ? s.ms : 30000)) return fail("never reached " + s.screen.substr(13) + " (at " + cur + ")");
+        const bool busy = cur == "game_screen" || cur.find("load") != std::string::npos || cur.find("waiting") != std::string::npos;
+        if (!busy && !ui.inTransition() && nowMs - lastNavMs_ > 1500) {
+            std::printf("  rb_to_screen: X on %s\n", cur.c_str());
+            ui.buttonDown(kX, 0), ui.buttonUp(kX, 0), lastNavMs_ = nowMs;
+        }
+        return;
+    }
+    if (s.screen.rfind("rb_focus_row:", 0) == 0) {
+        // Down the focused list until its selection is <sym> of <provider>
+        // (final / final_town / final_venue: GD05_WALK_FINAL's event or its
+        // town/venue/event parts, set by the autoplay checks).
+        const std::string rest = s.screen.substr(13);
+        const std::string prov = rest.substr(0, rest.find(':'));
+        std::string sym = rest.substr(rest.find(':') + 1);
+        if (sym.rfind("final", 0) == 0) {
+            const char* f = SDL_getenv("GD05_WALK_FINAL");
+            const std::string key = f ? f : "";
+            std::vector<std::string> parts;
+            for (size_t a = 0, b; a <= key.size(); a = b + 1) {
+                b = key.find('/', a);
+                if (b == std::string::npos) b = key.size();
+                parts.push_back(key.substr(a, b - a));
+            }
+            sym = sym == "final_town" ? parts.front() : sym == "final_venue" && parts.size() > 1 ? parts[1] : parts.back();
+        }
+        if (stepStart_ < 0) stepStart_ = nowMs;
+        auto* lp = dynamic_cast<ui::ListProvider*>(ui.interp().findObject(prov));
+        ui::PanelObj* fp = ui.focusPanel();
+        ScriptObject* lst = fp ? fp->component(fp->focus) : nullptr;
+        const int at = lst ? ui.interp().send(lst, "selected_pos", {}).integerValue() : -1;
+        const int want = lp ? lp->indexOf(sym) : -1;
+        if (want < 0) return fail(prov + " has no row " + sym);
+        if (at == want && !ui.inTransition()) {
+            std::printf("  rb_focus_row: %s at row %d\n", sym.c_str(), at);
+            return pass();
+        }
+        if (nowMs - stepStart_ > (s.ms > 0 ? s.ms : 15000)) return fail("could not reach " + sym + " in " + prov + " (at " + std::to_string(at) + ")");
+        if (!ui.inTransition() && nowMs - lastNavMs_ > 250) {
+            const int b = at > want ? kUp : kDown;
+            ui.buttonDown(b, 0), ui.buttonUp(b, 0), lastNavMs_ = nowMs;
+        }
+        return;
+    }
     if (s.screen.rfind("refcolors:", 0) == 0) {
         // rb_text_colors: refcolors:<tag> measures main_solomode_screen's
         // labels against the owner's capture of RB once it has rested 700 ms.

@@ -104,5 +104,49 @@ setlist, no win.
 
 ## Fixes (this rundown)
 
-See the table's **broken** rows; results in "After the fixes" below once
-measured.
+Each with a legacy switch and a walk that fails before and passes after.
+
+| Row | Cause | Fix | Switch | Before -> after |
+|---|---|---|---|---|
+| GD05-119 Solo Tour end | is_winning answered the endgame's own flag | RB 0x823E47E0 / 0x823CFA58 (D124) | GD05_TOURWIN_LEGACY | rb_full_solo: no winning gig -> song45 wins: tour_solo_win_screen, credits, send-off (guitar, drums, vocals) |
+| GD05-119 Tokyo's download gig | the (download ...) template listed as a gig | RB 0x823FDB20: one gig per downloaded song, none (D124) | GD05_DOWNLOADGIG_LEGACY | 'download' left unplayable, Tokyo counted as the last town -> no Tokyo solo gig |
+| GD05-118 Band towns, travel, staff, venues, win | tiers by order, town files unread, any town open | RB 0x823FE1D8 / 0x823FCED8 / 0x823F3AD0 / 0x823FD058 / 0x823EC890 / 0x823F4C00 / 0x823EDB00 (D123) | GD05_BWTTOWNS_LEGACY | rb_full_band: 71 gigs, 12 towns, 12 entered without the vehicle, no end -> 173 gigs, 17 towns, 0, Hall of Fame -> tour_band_win_screen, Endless Setlist -> tour_bwt_complete, kept through a restart |
+| GD05-120 Gig names | rows filled list.lbl, the resources use event.lbl | event.lbl (D125) | GD05_EVENTLBL_LEGACY | blank rows -> "Say It Ain't So", "Make a Setlist", "Mystery Requests" (rb_bwt_diy shot); solo rows song + artist |
+
+## After the fixes
+
+- rb_full_solo, Medium: guitar, drum, vocals each: towns open in the
+  data's order, 44 tier gigs + 13 bonus gigs, 0 wrong songs, song45
+  played through the menus wins (screens ... tour_solo_gigcomplete_screen
+  > meta_loading_tour_win_screen > tour_solo_win_screen >
+  tour_solo_video_credits_screen > tour_solo_text_credits_screen >
+  tour_solo_sendoff_screen > tour_solo_event_screen), 58 gigs kept through
+  a restart, cash 9850.
+- rb_full_band (boston): tiers in newyork 1_2, chicago 1_3, losangeles
+  2_1, seattle 2_2, sanfrancisco 2_3, berlin 3_1 .. amsterdam 3_6; van at
+  gig 7, bus 14, roadies 53, jet 57, promoter 97, security 147, tour
+  manager 148; the Hall of Fame the only gig left, 8 songs through the
+  menus (tour_nextsong_screen between), tour_band_win_screen; the Endless
+  Setlist then open (status 2), is_winning / is_hardcore_winning 1, 58
+  songs, tour_bwt_complete; restart: world fame 3215 and the item kept.
+- rb_bwt_diy: Make a Setlist through tour_selsong_screen twice, the set
+  missqueen inbloom, the game started.
+- Regression: rb_career, rb_career_band, rb_tour_rules, rb_band_lobby,
+  rb_shop_items OK on the fixed build.
+
+## Left (not fixed)
+
+- Active moments (double or nothing, charity, sellout) and the buzz-cap /
+  fans-lost hints: missing (RB's moment code not read).
+- A gig's min_difficulty is not enforced (RB's check not read).
+- The solo gig guide lists the bonus (Rio) gigs inline; RB lists an
+  "unlock" row that switches the list to the bonus gigs (ui/tour_solo.dta
+  solo_event_provider set mode kTourVenueUnlock).
+- The band hub's practice space shows four "Loading" labels where RB
+  shows the members (seen in the rb_career_band shot 1 s after entering;
+  not investigated).
+- The win screen promises a golden instrument (win_instruments): not
+  checked whether the port awards it.
+- The gig rows' star / fame / medal / new labels stay empty.
+- The hometown list's contents (RB 0x8206fb30) not read: the port offers
+  the 12 towns with a region.

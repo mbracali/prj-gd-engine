@@ -2199,3 +2199,95 @@ pattern). Each says what, why and how to undo it.
   5 % is 2 shown for 1.9). Screenshots in song at 13 s: legacy "330 FPS",
   now "223 FPS".
 - **Undo:** GD05_FPSCOUNTER_LEGACY=1.
+
+## D123
+- **What (2026-11-16, GD05-118, career rundown):** the Band World Tour's
+  towns as RB's. RB loads the tiers with their own events and the (world
+  ...) towns in the data's order with their (region a b) (RB 0x823FE1D8,
+  record RB 0x823FD338: +4 order, +8 / +0xc the region's two parts) [C],
+  then each town's own file tour/<town>.dta (the tour folder's content
+  list, RB 0x823FC400 -> 0x823FDB20: (<venue> <world> <events> ...)) [C;
+  I: the port finds the files by the towns' names]. A town plays a tier
+  chosen relative to the hometown (RB 0x823FCED8) [C]: none without a
+  region; the hometown tier1_1; else the count, over the regioned towns
+  in the data's order, of the towns of its half before it, the hometown
+  after it in that half, the other half of the hometown's region, and
+  every town of another region (hometown boston: newyork tier1_2, chicago
+  tier1_3, losangeles tier2_1, seattle 2_2, sanfrancisco 2_3, berlin 3_1
+  .. amsterdam 3_6). A town's venues are its file's; at each, the tier's
+  events of that venue (the tier's (last ...) at the town's last venue)
+  then the town's own (RB 0x823F3AD0) [C]. Open towns: the travel need
+  (RB 0x823FD058: 0 home, 1 its half, 2 the other half, 3 another region
+  or no region) up to the vehicle level, the last of (moments (vehicles
+  van bus jet)) owned (RB 0x823EE2B8, 0x823F2E20) [C]; the town list shows
+  those [I]; can_leave_hometown = more than the hometown open (RB
+  0x823CE850 asks vfunc +0x48) [C; I: the compare]. Event status (RB
+  0x823EC890) [C]: locked while the event's buzz is over the band's, its
+  (item ...) not owned (the staff the late gigs need), or the stars of
+  its town / the world under (fame (town n) (world m)); else played /
+  new. venue_variant is the town file's venue (RB 0x823F4C00:
+  seattle's big_club big_club_07) [C]. TourBand is_winning (vfunc
+  +0x5c, RB 0x823EDB00): the event awards win_item not yet owned, or is
+  hardcore winning (RB 0x823EC428: it awards hardcore_item) [C]. The gig
+  list's names are locale_events.dta's <town>_<venue>_<event> (the data's
+  town, the tier for a tier's event), else the song when (display_song
+  TRUE) [I: RB's event_display_name not read]. The hometown list keeps
+  the regioned towns (a town without a region is closed even as the
+  hometown by RB's travel rule) [I: RB's list 0x8206fb30 not read].
+  total_town_fame counts max_stars_per_song a song [I]. A save made
+  before keys its events by the old towns: moved on load (rb_profile.json
+  bands "towns_v" 2 marks the new keys).
+- **Measured (walk rb_full_band, hometown boston, 5 stars a song through
+  the natives):** before (GD05_BWTTOWNS_LEGACY=1): 71 gigs in 12 towns, the
+  first in San Francisco, 12 towns entered without the vehicle, no hall of
+  fame; after: 173 gigs (the tiers' 71 + the towns' own) in all 17 towns
+  (boston first, then newyork chicago losangeles seattle sanfrancisco,
+  europe, reykjavik tokyo sydney rio moscow), 0 towns without the
+  vehicle; van at gig 7, bus 14, jet 57, the staff 53-148; the hall of
+  fame (moscow arena) the only gig left, played through the menus: 8
+  songs, tour_band_win_screen; then the endless setlist (allmara, 58
+  songs; status 2 once tour_halloffame_complete is owned, is_winning /
+  is_hardcore_winning 1, tour_bwt_complete awarded); kept through a
+  restart (world fame 3215).
+- **Undo:** GD05_BWTTOWNS_LEGACY=1 (tiers as towns by order, no town files,
+  no item rule); GD05_TOURWIN_LEGACY=1 (is_winning the endgame flag).
+
+## D124
+- **What (2026-11-16, GD05-119, career rundown):** the Solo Tour ends as
+  RB's. TourCharLocal is_winning (vfunc +0x5c, RB 0x823E47E0 -> 0x823CFA58,
+  read in assembly: the decompiler drops the loop) [C]: going back from the
+  last town in the data's order, the first whose first venue is a normal
+  one with open events at the difficulty (Easy: tier3_2, songs 26-30;
+  else moscow, "Impossible Songs", 41-45) must be the character's town,
+  and the gig playing the only one of that town's open events not yet
+  completed. The port answered the flag endgame.dta sets from it (never
+  1), so no tour ever reached tour_solo_win_screen, the credits or the
+  send-off. Also: a venue's (download ...) entry is the template of one
+  event per downloaded song (RB 0x823FDB20: the event named download makes
+  the venue kTourVenueDownload, kind 2, and adds an event per song SongMgr
+  has downloaded) [C]: none here, so Tokyo's arena has no Solo Tour gig;
+  the port listed a "download" gig with no song (and counted Tokyo as the
+  last town).
+- **Measured (walk rb_full_solo, guitar, Medium):** after: 44 tier gigs and
+  13 bonus gigs through the natives, towns opening in the data's order, 0
+  wrong songs, song45 left as the winning gig, played through the menus:
+  meta_loading_tour_win_screen > tour_solo_win_screen > credits >
+  tour_solo_sendoff_screen; 58 gigs kept through a restart. Before:
+  GD05_TOURWIN_LEGACY=1 "the tour's winning gig is ''" (all 45 played, no
+  win); GD05_DOWNLOADGIG_LEGACY=1 "'download' left".
+- **Undo:** GD05_TOURWIN_LEGACY=1, GD05_DOWNLOADGIG_LEGACY=1.
+
+## D125
+- **What (2026-11-16, GD05-120, career rundown):** the tours' gig lists
+  name their rows. The list resources name the row's label event.lbl
+  (ui/resource/list_event.milo: event, songs, fame, star, medal, item,
+  new; list_solo_event.milo: event, by_line, town, venue, score, star,
+  new) [C data]; the port filled list.lbl / name.lbl only, so every gig
+  row was blank (rb_career_band's event screen shot: one empty highlighted
+  row). Band rows: the gig's locale name (D123), else its song; solo rows:
+  the song and its artist (by_line.lbl) [I: RB's Text functions not read;
+  the other labels left empty].
+- **Measured:** rb_bwt_diy shot of tour_band_event_screen (boston small
+  club): "Say It Ain't So", "In Bloom", "I Think I'm Paranoid", "Make a
+  Setlist", "Mystery Requests"; before: blank rows.
+- **Undo:** GD05_EVENTLBL_LEGACY=1.

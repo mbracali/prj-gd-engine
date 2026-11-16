@@ -256,3 +256,7 @@ private:
 
     void runCheck(ui::UiManager& ui, const Step& s, double nowMs);
 };
+
+// The career rundown's walk checks (tests/walktest_career.cpp, GD05-118 /
+// GD05-119): true when `name` is one of them; `ok` its verdict, `err` why not.
+bool walkCareerCheck(ui::UiManager& ui, const std::string& name, std::string& err, bool& ok);

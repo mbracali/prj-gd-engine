@@ -292,3 +292,23 @@ RB focus 11-16 (GD05-113 hair):
   GD05_HAIRLOG=1 logs each hair's hookup and the character's collides.
   Switches GD05_HAIRCOLLIDE / HAIRGRAVITY / HAIRSLACK / HAIRRESET_LEGACY=1.
 
+Career rundown 11-16 (GD05-118..120, agents/CAREER_AUDIT_20261116.md):
+- Test aid (tests/walktest_career.cpp): `rb_full_solo_autoplay` /
+  `rb_full_band_autoplay` complete the tours' gigs through the tour
+  objects' natives as ui/endgame.dta does (complete_song 5 stars per set
+  song, complete_event, the hints' advance) and recompute the
+  expectations from the data; the gig that ends a tour is left for the
+  menus. Walk checks `rb_to_screen:<a|b>` (X through hints / results until
+  a screen, never on a song or a load) and `rb_focus_row:<provider>:<sym>`
+  (final / final_town / final_venue: the autoplay's GD05_WALK_FINAL).
+- `--walktest rb_full_solo` (GD05_INSTRUMENT=drum / vocals for the other
+  instruments, GD05_WALK_EASY=1 Easy): the whole Solo Tour, the winning
+  gig through the menus (tour_solo_win_screen, credits, send-off), then a
+  restart. GD05_TOURWIN_LEGACY=1 / GD05_DOWNLOADGIG_LEGACY=1 fail (D124).
+- `--walktest rb_full_band`: a guitarist, a restart, a new band (boston):
+  every gig of all 17 towns through the natives, the hall of fame through
+  the menus (8 songs, tour_band_win_screen), the endless setlist through
+  the natives, a restart. GD05_BWTTOWNS_LEGACY=1 fails (D123). ~6 min.
+- `--walktest rb_bwt_diy`: the hometown small club's Make a Setlist gig
+  through tour_selsong_screen twice, the set checked (`rb_bwt_diy_set`).
+
