@@ -12,6 +12,7 @@
 
 #include "data/qb.h"
 #include "ui/fx2d.h"
+#include "ui/hud_widgets.h"
 
 class Canvas;
 class Disc;
@@ -60,6 +61,9 @@ public:
     // The pause menu: the song's scripts wait (GH3 pauses its game scripts).
     void setPaused(bool paused);
     bool active() const { return active_; }
+    // gh4's HUD (GD10-063): built by setup_band_hud, its widgets driven here.
+    bool gh4Hud() const { return gh4Hud_; }
+    const HudWidgets& hudWidgets() const { return hud_; }
 
     struct Counters {
         std::map<std::string, uint64_t> events;    // gameplay events raised, by name
@@ -149,4 +153,11 @@ private:
     bool winMovie_ = false;           // win_song's movie preloaded
     double transitionAt_ = -1e18;     // the start transition's first frame (song ms; -1e18: not yet)
     bool startRendered_ = false;      // its Transition_StartRendering ran
+    // gh4's HUD (GD10-063; GD10_HUD_LEGACY=1: GH3's Hud2D as before).
+    void beginHud(SongScreen& s);
+    void frameHud(SongScreen& s, double now);
+    HudWidgets hud_;
+    bool gh4Hud_ = false, hudShown_ = false;
+    std::vector<double> basePrefix_;   // base score of notes [0, i) (projected_song_stars)
+    bool streakOn_ = false, bulbsOn_ = false;  // player1_streak_started / starpower_bulbs_unhide raised
 };

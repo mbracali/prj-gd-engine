@@ -88,6 +88,7 @@ SongHooks::SongHooks(FrontEnd& fe, Mixer& mixer, const Disc& disc, TextureCache&
     : fe_(fe), mixer_(mixer), disc_(disc), tex_(textures) {
     fx_.setParentPos([this](uint32_t id, float& x, float& y) { return elementPos(id, x, y); });
     addNatives();
+    hud_.addNatives(fe_.vm(), fe_.ui());
     setSoundEventListener([this](uint32_t ev) {
         if (active_) ++k_.sounds[qbkey::name(ev)];
     });
@@ -459,6 +460,7 @@ void SongHooks::begin(SongScreen& s) {
                 }
         }
     std::stable_sort(timed_.begin(), timed_.end(), [](const Timed& a, const Timed& b) { return a.time < b.time; });
+    beginHud(s);
     size_t handlers = 0;
     for (const FlowState::Handler& h : fe_.flow.handlers)
         if (h.script == K("event_spawner")) ++handlers;
@@ -978,6 +980,7 @@ void SongHooks::frame(SongScreen& s, double now) {
     if (!active_ || song_ != &s) return;
     if (!paused_) introAndEndMedia(s, now);
     frameSection(now);
+    frameHud(s, now);
     // The scripts' big bolts: adopted (hidden in the element tree, drawn by draw()).
     bolts_.erase(std::remove_if(bolts_.begin(), bolts_.end(), [this](const Bolt& b) { return !fe_.ui().find(b.id); }), bolts_.end());
     for (int p = 0; p < players_; ++p)
@@ -1021,6 +1024,125 @@ void SongHooks::frame(SongScreen& s, double now) {
         const bool star = fn.phrase >= 0;
         const float ox = star ? (s.match().battleMode() ? 125.0f : 255.0f) : 66.0f, oy = star ? 170.0f : 20.0f;
         g->x = x - cx - ox, g->y = y - cy - oy;
+    }
+}
+
+void SongHooks::beginHud(SongScreen& s) {
+    // gh4's HUD (GD10-063): start_gem_scroller's setup_band_hud after the
+    // players' setup_highway (get_highway_pos_and_scale: one non-vocal
+    // player's hud_parent alias_g1) [C scripts]. One player for now: the
+    // two-player modes keep the port's HUDs (render/hud2p). The HUD comes at
+    // alpha 0; move_2d_elements_to_default shows it (frameHud).
+    // GD10_HUD_LEGACY=1: GH3's Hud2D as before.
+    hud_.clear();
+    gh4Hud_ = hudShown_ = false;
+    streakOn_ = bulbsOn_ = false;
+    static const bool legacy = SDL_getenv("GD10_HUD_LEGACY") != nullptr;
+    if (legacy || players_ != 1) return;
+    Vm& vm = fe_.vm();
+    if (const qb::Value* cur = vm.global(K("player1_status")); cur && cur->st) {
+        qb::Value v = *cur;
+        v.st = std::make_shared<qb::Struct>(*cur->st);
+        Vm::set(*v.st, K("hud_parent"), Vm::makeKey(K("alias_g1")));
+        vm.setGlobal(K("player1_status"), v);
+    }
+    if (fe_.ui().find(K("hud_root"))) {
+        qb::Struct d;
+        Vm::set(d, K("id"), Vm::makeKey(K("hud_root")));
+        vm.run(K("DestroyScreenElement"), d);
+    }
+    vm.run(K("setup_band_hud"), qb::Struct{});
+    gh4Hud_ = fe_.ui().find(K("hud_root")) != nullptr;
+    // projected_song_stars: the base score of the notes judged so far [I].
+    const NoteTrack& t = s.match().track(0);
+    basePrefix_.assign(t.notes.size() + 1, 0.0);
+    for (size_t i = 0; i < t.notes.size(); ++i)
+        basePrefix_[i + 1] = basePrefix_[i] + 50.0 * t.notes[i].fretCount() + (t.notes[i].sustain ? t.notes[i].maxSustainPoints : 0);
+    s.hud().setAlertsOnly(gh4Hud_);
+    const qb::Value* lay = vm.global(K("g_hud_2d_struct_used"));
+    SDL_Log("hud: gh4 HUD %s (layout %s), %zu widgets", gh4Hud_ ? "up" : "NOT built", lay && lay->st ? "struct" : "none", hud_.widgets());
+}
+
+void SongHooks::frameHud(SongScreen& s, double now) {
+    if (!gh4Hud_) return;
+    Vm& vm = fe_.vm();
+    const Player& pl = s.match().player(0);
+    const PlayerStats& st = pl.stats();
+    std::array<HudWidgets::Values, 4> v{};
+    HudWidgets::Values& a = v[0];
+    a.score = st.score, a.streak = st.currentRun, a.multiplier = st.multiplier(), a.spActive = st.starPowerActive;
+    a.starPower = st.starPower, a.health = st.health, a.missedNote = st.misses > 0;
+    // projected_song_stars: score / the judged notes' base score x
+    // star_count_projection_base_mult, then 3 + to star4's cutoff, 4 + to
+    // star5's, under the base 3 x the ratio [C 0x82118C30; I: the ratio's
+    // inputs, the C's other term under the base].
+    {
+        const size_t cur = std::min(pl.current(), basePrefix_.empty() ? 0 : basePrefix_.size() - 1);
+        const double base = basePrefix_.empty() ? 0 : basePrefix_[cur];
+        const float x = base > 0 ? float(st.score / base) : 0.0f;
+        const float b = Vm::number(vm.global(K("star_count_projection_base_mult")), 1);
+        float s4 = 2.0f, s5 = 2.8f;
+        if (const qb::Value* c = vm.global(K("star_rating_cutoffs")); c && c->st) {
+            if (const qb::Value* a4 = c->st->find(K("star4")); a4 && a4->arr && !a4->arr->values.empty()) s4 = a4->arr->values[0].number();
+            if (const qb::Value* a5 = c->st->find(K("star5")); a5 && a5->arr && !a5->arr->values.empty()) s5 = a5->arr->values[0].number();
+        }
+        auto c01 = [](float t) { return std::clamp(t, 0.0f, 1.0f); };
+        if (x >= b) a.stars = x >= s4 ? 4 + (s5 != s4 ? c01((x - s4) / (s5 - s4)) : 1) : 3 + (s4 != b ? c01((x - b) / (s4 - b)) : 1);
+        else a.stars = b > 0 ? 3 * c01(x / b) : 0;
+    }
+    hud_.update(v, 1, now);
+    // The C's player1_streak_started / _ended with the streak over / under
+    // 10 (0x82118710), starpower_bulbs_unhide / _hide across 50 (the
+    // drain's hide: star_power_activate_and_drain) [C; I: raised on a change].
+    // The HUD's elements take them through their event_handlers
+    // (HUD_setup_streak_meter_animation, HUD_setup_secondary_starpower_bulb_animation):
+    // the port's BroadcastEvent reaches the flow's handlers only, so the
+    // event is launched at each HUD element that handles it [I: GH's
+    // broadcast reaches every element].
+    auto broadcastType = [&](const char* type) {
+        qb::Struct b;
+        Vm::set(b, K("type"), Vm::makeKey(K(type)));
+        vm.run(K("BroadcastEvent"), b);
+        std::vector<uint32_t> targets;
+        if (const ui::Element* r = fe_.ui().find(K("hud_root"))) {
+            std::vector<const ui::Element*> q{r};
+            for (size_t i = 0; i < q.size(); ++i) {
+                for (const auto& h : q[i]->handlers)
+                    if (h.event == K(type)) {
+                        targets.push_back(q[i]->id);
+                        break;
+                    }
+                for (const auto& c : q[i]->children) q.push_back(c.get());
+            }
+        }
+        for (uint32_t t : targets) {
+            qb::Struct l;
+            Vm::set(l, K("type"), Vm::makeKey(K(type)));
+            Vm::set(l, K("target"), Vm::makeKey(t));
+            vm.run(K("LaunchEvent"), l);
+        }
+    };
+    const bool streak = st.currentRun > 9;
+    if (streak != streakOn_) streakOn_ = streak, broadcastType(streak ? "player1_streak_started" : "player1_streak_ended");
+    const bool bulbs = st.starPower >= 50;
+    if (bulbs != bulbsOn_) bulbsOn_ = bulbs, broadcastType(bulbs ? "starpower_bulbs_unhide" : "starpower_bulbs_hide");
+    // intro_hud_move -> move_2d_elements_to_default: hud_root alpha 1 over
+    // 0.25 s at current_intro's hud_start_time + hud_move_time after the
+    // start [C scripts].
+    if (!hudShown_) {
+        float start = 0, move = 200;
+        if (const qb::Value* ci = vm.global(K("current_intro")); ci && ci->st) {
+            start = Vm::number(ci->st->find(K("hud_start_time")), 0);
+            move = Vm::number(ci->st->find(K("hud_move_time")), 200);
+        }
+        if (now >= s.startMs() + start + move) {
+            hudShown_ = true;
+            qb::Struct p;
+            Vm::set(p, K("id"), Vm::makeKey(K("hud_root")));
+            Vm::set(p, K("alpha"), Vm::makeFloat(1));
+            Vm::set(p, K("time"), Vm::makeFloat(0.25f));
+            vm.run(K("SetScreenElementProps"), p);
+        }
     }
 }
 
@@ -1076,6 +1198,14 @@ void SongHooks::end(bool killed) {
     fx_.clear();
     bolts_.clear();
     destroyProxies();
+    // destroy_band_hud [C script].
+    if (gh4Hud_ && fe_.ui().find(K("hud_root"))) {
+        qb::Struct d;
+        Vm::set(d, K("id"), Vm::makeKey(K("hud_root")));
+        fe_.vm().run(K("DestroyScreenElement"), d);
+    }
+    hud_.clear();
+    gh4Hud_ = hudShown_ = false;
     fe_.vm().run(K("GH_Star_Power_Verb_Off"), qb::Struct{});
     fe_.vm().run(K("GuitarEvent_ExitVenue"), qb::Struct{});
     mixer_.guitarFx().reset();
