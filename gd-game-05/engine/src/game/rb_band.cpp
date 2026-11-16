@@ -25,7 +25,11 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <set>
 #include <functional>
 #include <map>
@@ -970,6 +974,31 @@ struct Band::RbCheck {
         double minPadMs = 0;
     };
     std::vector<DrumHit> drumHits;
+    // Arms (GD05-110): per member, the arm chain's bones (clavicle, upper
+    // arm, fore arm, the twist bones, the hand, both sides): the local
+    // rotation's change between consecutive frames (degrees), the twist /
+    // fore arm bones' turn from their bind, the hands' world moves per frame.
+    struct Arm {
+        std::vector<int> bones;
+        std::vector<std::array<float, 9>> prev;
+        std::array<std::array<float, 3>, 2> prevHand{};
+        bool havePrev = false;
+        std::vector<float> jumps, handJumps;
+        float jumpMax = 0, twistMax = 0;
+        std::string jumpBone, twistBone;
+        double jumpMs = 0;
+        int over30 = 0, frames = 0, twistFrames = 0;
+        // The skin's twist along each arm (S bends): the skinned segments
+        // upper twist 1, 2, fore twist 1, 2, hand; between neighbours, the
+        // turn about the lower one's long axis (x), which a bend leaves 0.
+        std::array<std::vector<int>, 2> chain;
+        std::vector<float> segTwist;
+        float segMax = 0;
+        std::string segPair;
+        double segMs = 0;
+        int segFrames = 0;
+    };
+    std::map<std::string, Arm> arms;
 };
 
 bool Band::rbLegacy() {
@@ -1072,6 +1101,24 @@ void Band::rbCheckFrame() {
             }
             for (size_t i = 0; i < ch.size(); ++i)
                 if (ch[i].name.rfind("bone_facing", 0) == 0) bound[i] = 0;
+            // The channel's start: its bone's bind (CharBonesMeshes
+            // ReallocateInternal RB 0x82364508, GD05-110), which stays in it
+            // as far as the drivers' blend leaves it.
+            static const bool posLegacy = [] {
+                const char* e = SDL_getenv("GD05_SERVOPOS_LEGACY");
+                const char* f = SDL_getenv("GD05_SERVOBIND_LEGACY");
+                return (e && *e && *e != '0') || (f && *f && *f != '0');
+            }();
+            for (size_t i = 0; i < ch.size() && !posLegacy; ++i) {
+                if (bound[i] <= 0 || ch[i].type != scene::CharBonesSamples::kPos) continue;
+                const std::string base = scene::CharBonesSamples::boneOf(ch[i].name);
+                int b = sk.find(base + ".trans");
+                if (b < 0) b = sk.find(base + ".mesh");
+                if (b >= 0) {
+                    const auto& p = sk.bind(b).pos;
+                    bound[i] += std::max({std::fabs(p[0]), std::fabs(p[1]), std::fabs(p[2])});
+                }
+            }
         }
         bool over = false;
         for (size_t i = 0; i < ch.size(); ++i) {
@@ -1090,6 +1137,115 @@ void Band::rbCheckFrame() {
             out = sk.world(i).pos;
             return true;
         };
+        if (ms > 0) {
+            RbCheck::Arm& am = k.arms[m.slot];
+            if (am.bones.empty()) {
+                static const char* parts[] = {"clavicle", "upperarm", "uppertwist", "forearm", "foretwist", "hand.mesh"};
+                for (int i = 0; i < sk.size(); ++i) {
+                    std::string n = sk.name(i);
+                    if (n.rfind("bone_L-", 0) != 0 && n.rfind("bone_R-", 0) != 0) continue;
+                    for (char& ch : n) ch = char(std::tolower(static_cast<unsigned char>(ch)));
+                    for (const char* p : parts)
+                        if (n.compare(7, std::strlen(p), p) == 0) am.bones.push_back(i);
+                }
+                am.prev.resize(am.bones.size());
+            }
+            const int hands[2] = {sk.find("bone_L-hand.mesh"), sk.find("bone_R-hand.mesh")};
+            int twisted = 0;
+            ++am.frames;
+            for (size_t j = 0; j < am.bones.size(); ++j) {
+                const int b = am.bones[j];
+                const auto& r = sk.local(b).rot;
+                if (am.havePrev) {
+                    const float d = angleBetween(r, am.prev[j]);
+                    am.jumps.push_back(d);
+                    if (d > am.jumpMax) am.jumpMax = d, am.jumpBone = sk.name(b), am.jumpMs = ms;
+                    if (d > 30) ++am.over30;
+                }
+                am.prev[j] = r;
+                const std::string& n = sk.name(b);
+                std::string ln = n;
+                for (char& ch : ln) ch = char(std::tolower(static_cast<unsigned char>(ch)));
+                if (ln.find("twist") != std::string::npos || ln.find("forearm") != std::string::npos) {
+                    const float t = angleBetween(r, sk.bind(b).rot);
+                    if (t > am.twistMax) am.twistMax = t, am.twistBone = n;
+                    if (t > 90) ++twisted;
+                }
+            }
+            if (twisted) ++am.twistFrames;
+            if (am.chain[0].empty() && am.chain[1].empty())
+                for (int h = 0; h < 2; ++h) {
+                    const std::string side = h ? "bone_R-" : "bone_L-";
+                    for (const char* n : {"upperTwist1", "upperTwist2", "foreTwist1", "foreTwist2", "hand"}) {
+                        const int b = sk.find(side + n + ".mesh");
+                        if (b >= 0) am.chain[size_t(h)].push_back(b);
+                    }
+                }
+            bool sBend = false;
+            // Rotations are rows (the axes): world = local x parent's world.
+            using R3 = std::array<float, 9>;
+            auto mulR = [](const R3& x, const R3& y) {
+                R3 r{};
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        for (int q = 0; q < 3; ++q) r[size_t(i * 3 + j)] += x[size_t(i * 3 + q)] * y[size_t(q * 3 + j)];
+                return r;
+            };
+            auto trR = [](const R3& x) {
+                R3 r{};
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j) r[size_t(i * 3 + j)] = x[size_t(j * 3 + i)];
+                return r;
+            };
+            auto ortho = [](R3 x) {  // rows to unit length (no scale)
+                for (int i = 0; i < 3; ++i) {
+                    const float l = std::sqrt(x[size_t(i * 3)] * x[size_t(i * 3)] + x[size_t(i * 3 + 1)] * x[size_t(i * 3 + 1)] + x[size_t(i * 3 + 2)] * x[size_t(i * 3 + 2)]);
+                    if (l > 1e-6f)
+                        for (int j = 0; j < 3; ++j) x[size_t(i * 3 + j)] /= l;
+                }
+                return x;
+            };
+            auto bindWorld = [&](int i) {
+                R3 r = ortho(sk.bind(i).rot);
+                for (int p = sk.parent(i); p >= 0; p = sk.parent(p)) r = mulR(r, ortho(sk.bind(p).rot));
+                return r;
+            };
+            for (const auto& c : am.chain)
+                for (size_t j = 1; j < c.size(); ++j) {
+                    // b's turn against a since the bind, in b's frame; its
+                    // twist about b's long axis (x, as CharForeTwist turns it).
+                    const R3 rel = mulR(ortho(sk.world(c[j]).rot), trR(ortho(sk.world(c[j - 1]).rot)));
+                    const R3 relBind = mulR(bindWorld(c[j]), trR(bindWorld(c[j - 1])));
+                    const R3 e = mulR(rel, trR(relBind));
+                    const float t = std::fabs(std::atan2(e[5] - e[7], e[4] + e[8])) * 57.29578f;
+                    am.segTwist.push_back(t);
+                    if (t > am.segMax) am.segMax = t, am.segPair = sk.name(c[j - 1]) + ">" + sk.name(c[j]), am.segMs = ms;
+                    if (t > 75) sBend = true;
+                }
+            if (sBend) ++am.segFrames;
+            for (int h = 0; h < 2; ++h) {
+                if (hands[h] < 0) continue;
+                const auto w = sk.world(hands[h]).pos;
+                if (am.havePrev) am.handJumps.push_back(dist3(w, am.prevHand[size_t(h)]));
+                am.prevHand[size_t(h)] = w;
+            }
+            am.havePrev = true;
+            // GD05_ARMDUMP=<file>: each frame's elbows and hands (world), to
+            // compare two runs frame by frame (tools: agents/scratch).
+            static FILE* dump = [] {
+                const char* f = SDL_getenv("GD05_ARMDUMP");
+                return f && *f ? std::fopen(f, "w") : nullptr;
+            }();
+            if (dump) {
+                std::fprintf(dump, "%.1f %s", ms, m.slot.c_str());
+                for (const char* n : {"bone_L-foreArm.mesh", "bone_L-hand.mesh", "bone_R-foreArm.mesh", "bone_R-hand.mesh"}) {
+                    const int b = sk.find(n);
+                    const auto w = b >= 0 ? sk.world(b).pos : std::array<float, 3>{};
+                    std::fprintf(dump, " %.3f %.3f %.3f", double(w[0]), double(w[1]), double(w[2]));
+                }
+                std::fputc('\n', dump);
+            }
+        }
         if (c.rbFace() && ms > 0) {
             RbCheck::Face& f = k.face[m.slot];
             ++f.faceFrames;
@@ -1250,6 +1406,30 @@ void Band::rbCheckReport() {
         SDL_snprintf(buf, sizeof buf, "%s stretch: worst %.3f x bind (%s), %d of %d frames past 1.2", m.slot.c_str(), st,
                      k.worstBone.count(m.slot) ? k.worstBone.at(m.slot).c_str() : "-", sf, k.frames);
         line(sf == 0, buf);
+        // Arms (GD05-110): the arm chain's bones turn more than 30 deg in one
+        // frame on at most 1 in 1000 bone-frames (a clip's blend or the IK
+        // moves them a few degrees a frame; the odd unblended clip change or
+        // cut snaps one). A drummer whose stick targets are out of reach
+        // flips his arms every frame (shouldistay before the fix: 2225 of
+        // 90000). The twist from bind is informative: these rigs' bind is not
+        // their rest, their twist bones pass 90 deg in every build.
+        if (auto ai = k.arms.find(m.slot); ai != k.arms.end()) {
+            const RbCheck::Arm& am = ai->second;
+            SDL_snprintf(buf, sizeof buf, "%s arms: %zu bones, turn per frame p99 %.1f max %.1f deg (%s at %.0f ms), %d of %zu bone-frames over 30; hand moves p99 %.2f max %.2f",
+                         m.slot.c_str(), am.bones.size(), double(percentile(am.jumps, 0.99f)), double(am.jumpMax), am.jumpBone.empty() ? "-" : am.jumpBone.c_str(),
+                         am.jumpMs, am.over30, am.jumps.size(), double(percentile(am.handJumps, 0.99f)), double(percentile(am.handJumps, 1)));
+            line(!am.bones.empty() && size_t(am.over30) * 1000 <= am.jumps.size(), buf);
+            // The skin twisted between neighbouring segments (an S bend): the
+            // twisters spread the hand's and the upper arm's twist in thirds,
+            // so neighbours stay within ~60 deg (inbloom after GD05-110: 55-64
+            // at most); with the twisters polled before the arm's IK the
+            // guitarist's forearm reached 107 (bass 95).
+            SDL_snprintf(buf, sizeof buf, "%s arm skin twist between segments: p99 %.1f max %.1f deg (%s at %.0f ms), %d of %d frames over 75", m.slot.c_str(),
+                         double(percentile(am.segTwist, 0.99f)), double(am.segMax), am.segPair.empty() ? "-" : am.segPair.c_str(), am.segMs, am.segFrames, am.frames);
+            line(size_t(am.segFrames) * 1000 <= size_t(am.frames), buf);
+            SDL_Log("bandcheck: info %s arm twist: fore arm / twist bones up to %.1f deg from bind (%s), %d of %d frames over 90", m.slot.c_str(),
+                    double(am.twistMax), am.twistBone.empty() ? "-" : am.twistBone.c_str(), am.twistFrames, am.frames);
+        }
         const int cf = k.channelFrames.count(m.slot) ? k.channelFrames.at(m.slot) : 0;
         SDL_snprintf(buf, sizeof buf, "%s channels within their clips: worst %.3f x (%s), %d of %d frames past 1.01", m.slot.c_str(),
                      k.channelWorst.count(m.slot) ? double(k.channelWorst.at(m.slot)) : 0.0,

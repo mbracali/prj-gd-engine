@@ -163,15 +163,21 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
         driverByName_[drv->name] = cd.get();
         drivers_.push_back(std::move(cd));
     }
-    // The servo's rotation channels start at their bones' bind (GD05-108) [I:
-    // RB's starting values not read]: Bones::add starts a quaternion at the
-    // identity, so a channel no driver had written yet turned its bone there
-    // (the drum kit's bone_R-cymbal_stand, written only by right_crash.dmidi's
-    // crash clips, 141 degrees off its bind: the crash, its stick target with
-    // it, out of the drummer's reach, the arm stretched up to 4 x). Channels
-    // the drivers write are unchanged once written. Positions keep 0: the
-    // blender-fed foot targets (bone_R-toe_kick) hold their start where the
-    // blend weight stays under 1. GD05_SERVOBIND_LEGACY=1: the identity.
+    // The servo's channels start at their bones' pose (GD05-108, GD05-110):
+    // CharBonesMeshes ReallocateInternal (RB 0x82364508) [C] reads each
+    // channel's mesh once its meshes are found: positions = the mesh's local
+    // position, scales (0x8238E178) and quaternions (0x8238E4C0) from its
+    // local matrix, the x / y / z angles (0x8238E328 / 358 / 388) from it too,
+    // the rest 0. Bones::add starts every channel at 0 (a quaternion at the
+    // identity), so a channel no driver had written yet put its bone there:
+    // the drum kit's bone_R-cymbal_stand (rotation, written only by
+    // right_crash.dmidi's crash clips) 141 degrees off its bind, and
+    // bone_hihat_pos (position, written only by hihat.dmidi's clips) at the
+    // stand's foot, 28 units under its bind: the hi-hat's stick targets on the
+    // floor until the first hi-hat note, the drummer's arms stretched up to
+    // 3 x and flipping (GD05-110). Channels the drivers write are unchanged
+    // once written. GD05_SERVOBIND_LEGACY=1: all at 0 / the identity;
+    // GD05_SERVOPOS_LEGACY=1: only the quaternions at the bind (D112).
     static const bool servoBindLegacy = [] {
         const char* e = SDL_getenv("GD05_SERVOBIND_LEGACY");
         return e && *e && *e != '0';
@@ -184,6 +190,24 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
             if (b < 0) b = skeleton_.find(base + ".mesh");
             if (b < 0) continue;
             const scene::Xfm& x = skeleton_.bind(b);
+            static const bool posLegacy = [] {
+                const char* e = SDL_getenv("GD05_SERVOPOS_LEGACY");
+                return e && *e && *e != '0';
+            }();
+            const auto& r = x.rot;
+            if (!posLegacy) switch (c.type) {
+                case scene::CharBonesSamples::kPos:
+                    std::copy(x.pos.begin(), x.pos.end(), c.v);
+                    break;
+                case scene::CharBonesSamples::kScale:  // each axis row's length
+                    for (int k = 0; k < 3; ++k) c.v[k] = std::sqrt(r[size_t(k * 3)] * r[size_t(k * 3)] + r[size_t(k * 3 + 1)] * r[size_t(k * 3 + 1)] + r[size_t(k * 3 + 2)] * r[size_t(k * 3 + 2)]);
+                    break;
+                // The inverse of axisRot [I: RB's angle readers not read].
+                case scene::CharBonesSamples::kRotX: c.v[0] = std::atan2(r[5], r[4]); break;
+                case scene::CharBonesSamples::kRotY: c.v[0] = std::atan2(r[6], r[0]); break;
+                case scene::CharBonesSamples::kRotZ: c.v[0] = std::atan2(r[1], r[0]); break;
+                default: break;
+                }
             if (c.type == scene::CharBonesSamples::kQuat) {
                 // The inverse of scene::quatToRot.
                 const auto& m = x.rot;

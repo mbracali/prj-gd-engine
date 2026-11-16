@@ -132,6 +132,12 @@ Wave G06 band (GD05-066/067/068):
   off counted apart). GD05_DRUMREACH_LOG=1 logs each hit's targets,
   GD05_STRETCH_LOG=1 each stretched frame. Legacy switches: GD05_EYES /
   GAZE / BLINK / EXPR / MIDICLIP / SERVOBIND_LEGACY=1.
+- GD05-110 (D113, D114): bandcheck `arms` (arm chain bones turning over 30
+  deg in one frame, at most 1 in 1000) and `arm skin twist between
+  segments` (twist segments against each other, over 75 deg on at most 1
+  frame in 1000); `info ... arm twist` is informative. GD05_ARMDUMP=<file>
+  writes each frame's elbows / hands (agents/scratch/armcmp.py compares two
+  runs). Switches GD05_SERVOPOS_LEGACY=1, GD05_POLLSORT_LEGACY=1.
 
 Wave G06 highway and crowd (GD05-070 / GD05-071):
 - `--walktest rb_highway`: App::rbProbes under every frame: the Overdrive

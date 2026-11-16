@@ -1930,3 +1930,40 @@ pattern). Each says what, why and how to undo it.
   65 at a crash). Guitar, bass, vocals: no channel at weight 0 off its bind,
   so unchanged. Close shot: the crash now hit with the arm forward.
 - **Undo:** GD05_SERVOBIND_LEGACY=1.
+
+## D113
+- **What (2026-11-16, GD05-110):** the servo's channels start at their
+  bones' pose, all types. CharBonesMeshes ReallocateInternal (RB 0x82364508)
+  [C]: once the meshes are found, positions = the mesh's local position,
+  scales (0x8238E178) and quaternions (0x8238E4C0) from its local matrix, the
+  x / y / z angles (0x8238E328 / 358 / 388) too, the rest 0. D112 did only
+  the quaternions: bone_hihat_pos (written only by hihat.dmidi) stayed at 0,
+  the hi-hat and its stick targets 28 units under their place until the
+  first hi-hat clip; on songs whose drums open on the cymbals (shouldistay,
+  creep) the drummer's right hand chased targets out of reach.
+- **Measured (bandcheck, shouldistay 45 s, drummer):** stretch 3.33 x on 3555
+  frames -> 1.10 x, 0; arm bones turning over 30 deg in a frame 3063 of 90016
+  -> 15; R hi-hat tip to target at the note p50 22.3 -> 0.23. The channels
+  check counts the start (|bind|) in each channel's bound.
+- **Undo:** GD05_SERVOPOS_LEGACY=1 (the quaternions only, D112);
+  GD05_SERVOBIND_LEGACY=1 (all at 0).
+
+## D114
+- **What (2026-11-16, GD05-110):** the twisters poll after the hand IKs. The
+  rig sort broke cycles by directory order: left_hand.ikhand and fret.ikhand
+  read and change the same hand, and the first node left was upperTwist_L,
+  so CharUpperTwist / CharForeTwist (RB 0x8233EAD0 / 0x8233DE58, same maths
+  as the port [C]) twisted the skin for the arm before the IK moved it (the S
+  bend). Now a cycle is broken by the node with the fewest dependencies left
+  [I: RB polls the hand IKs as one CharPollGroup, hand_iks, so its twisters
+  come after all of them; the group's place in RB's sort not read]. Guitar
+  and bass orders now ... left_hand.ikhand fret.ikhand upperTwist_L
+  foreTwist_L ...; drums / vocals unchanged. Not a regression of ead8336:
+  3d806a3 built and compared, guitarist arms identical (p50 0.1 units).
+- **Measured (new bandcheck "arm skin twist between segments": the turn of
+  each twist segment against the next about its long axis, against the
+  bind; fails above 75 deg on more than 1 frame in 1000), inbloom 60 s:**
+  guitar max 106.9 deg, 12 frames -> 59.0, 0; bass 95.2, 143 -> 63.5, 0;
+  drums 62.9 / vocals 61, 0 both ways. Close shot at 16.47 s: the fret
+  arm's flattened, wrung forearm is round again.
+- **Undo:** GD05_POLLSORT_LEGACY=1.

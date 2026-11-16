@@ -628,9 +628,26 @@ void Rig::Impl::sort() {
         size_t pick = n;
         for (size_t i = 0; i < n && pick == n; ++i)
             if (!done[i] && indeg[i] == 0) pick = i;
-        if (pick == n)  // a cycle: the first left in directory order
+        // A cycle (the hand IKs: left_hand.ikhand and fret.ikhand change and
+        // read the same hand): the one left with the fewest dependencies
+        // still to run, the first in directory order among them (GD05-110).
+        // RB polls the hand IKs as one CharPollGroup (hand_iks, RB 0x82345C38),
+        // so the twists that read the arm (CharUpperTwist RB 0x8233EAD0,
+        // CharForeTwist RB 0x8233DE58) run after all of them [I: the group's
+        // place in RB's sort not read]. GD05_POLLSORT_LEGACY=1: the first left
+        // in directory order, which put upperTwist_L / foreTwist_L before the
+        // left arm's IKs: the twist bones followed the arm before the IK moved
+        // it, the forearm skin twisted into an S.
+        static const bool legacy = [] {
+            const char* e = SDL_getenv("GD05_POLLSORT_LEGACY");
+            return e && *e && *e != '0';
+        }();
+        if (pick == n && legacy)
             for (size_t i = 0; i < n && pick == n; ++i)
                 if (!done[i]) pick = i;
+        if (pick == n)
+            for (size_t i = 0; i < n; ++i)
+                if (!done[i] && (pick == n || indeg[i] < indeg[pick])) pick = i;
         done[pick] = true;
         for (size_t b : after[pick]) --indeg[b];
         out.push_back(pollables[pick]);
