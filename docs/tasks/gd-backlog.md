@@ -1172,6 +1172,11 @@ universal launcher, not released on its own.
 | GD10-052 | Bugfix | ✅ AddParam works: the difficulty pop-up's scribble highlight marks the focused difficulty (D80); walk setlist_preview shots | Owner (11-12): "When selecting a difficulty there is no way to see what difficulty I'm selecting" | Owner 11-12 | Owner 11-12 |
 | GD10-060 | Bugfix | ✅ a song's lifecycle as the scripts run it (D90): a quit song stops (gh4's kill_gem_scroller calls SongUnLoad), the loading screen's crowd swell is killed by the transition's WarmUp (Quickplay's FastIntro never ran it: 4.3 crowd sounds / s through every song and on in the menus -> 0.26), the venue's crowd bed and one-shots start with the song (crowd_reset), a voice stopped while paused is freed; walks qp_quit (x3), qp_restart, qp_finish with check:song_quiet / check:crowd_rate; docs/ui.md "A song's lifecycle" | Owner (11-12): "When I quit a song, it looks like it keeps playing in the background." "The crowd is screaming NON STOP FOREVER after a song. Also they scream all the time during the song." "Trying to play a song and quitting makes the game do a lot of wrong stuff." | Owner 11-12 | Owner 11-12 |
 | GD10-061 | Original | ❌ | Check our camera / crowd / light-show / trigger note decode and pak file types against GHWT:DE's documented formats (GD10-039, 040, 003) [study_ghwt_de] |  | Colabs 02 (docs/spikes/colabs02.md) |
+| GD10-062 | Bugfix | ❌ | Menus: alignment still off; the button legend (green, red, yellow... helper pills) overlaps and sits out of place | GD10-020 | Owner 11-16 (METALLICA_20261116.md) |
+| GD10-063 | Bugfix | ❌ | In-song HUD widgets missing (score, multiplier, rock meter, Star Power, etc. as the original) | | Owner 11-16 (METALLICA_20261116.md) |
+| GD10-064 | Bugfix | ❌ | Crowd does not move during gameplay | GD10-042 | Owner 11-16 (METALLICA_20261116.md) |
+| GD10-065 | Bugfix | ❌ | Band walks into each other and, in some set pieces (especially Metallica's), past the venue's edge | GD10-033, GD10-044 | Owner 11-16 (METALLICA_20261116.md) |
+| GD10-066 | Bugfix | ❌ | A screen effect shows a reflection of the band upside down (a screen FX, not the band) | GD10-036 | Owner 11-16 (METALLICA_20261116.md) |
 
 
 ## gd-game-11: Guitar Hero: Smash Hits (Xbox 360)
