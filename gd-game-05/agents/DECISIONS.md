@@ -1764,3 +1764,76 @@ pattern). Each says what, why and how to undo it.
   (GD05_WALK_SHOTS), the guitarist's crop over 16 shots (1.6 s): 1 distinct
   image -> 4, up to 1,073 pixels changed between two shots.
 - **Undo:** GD05_LOADICON_LEGACY=1.
+
+## D105
+- **What (2026-11-16, GD05-107 #1 / #3 / #8):** RB's shot end and directed
+  cuts. (a) The port never played a directed cut: rbShots looked for
+  `[do_directed_cut `, but the song's VENUE texts are stored without their
+  brackets (chart.cpp eventText), so the 680 directed cuts of the 62 songs
+  (CAMERA_RULES_20261116.md) never ran and their gaps in the note-60 grid
+  held the last NORMAL shot's last frame (the owner's "held too long").
+  (b) midi_parsers.dta's text: the cut's shot is chosen when the track is
+  read (get_shot) and starts zero_time frames (the BandCamShot member, not a
+  header property) before the event; start_directed_cut holds note-60 picks
+  to the event + min_time / 30 s [C data]. (c) band_objects.dta BandCamShot
+  shot_over: next_shot forced, else worldbase.dta camshot_end: after a
+  directed shot (the intro, a directed cut) pick_new_shot at once, else
+  next_cam_beat = now + 2 beats (the last frame holds, cuts within 2 beats
+  skipped) [C data]; sent once at the end frame of a non-looping shot (RB
+  0x82292968) [C]. The director's onShotOver calls App::rbCamshotEnd. The
+  intro chain's end waits for the clock's 0 (its duration_seconds add
+  0.0425 s a shot; the port's shots end that much earlier), so the intro
+  check still holds; WIN / LOSE shots keep the port's handling.
+- **Measured:** walks `rb_camera_cuts` (solo, big_club_11) and
+  `rb_camera_cuts_band` (4 players, arena_07), App::rbCamSimRun over
+  inbloom, blackholesun, highwaystar. Solo: longest hold 15.4 / 13.1 / 16.2 s
+  -> 6.7 / 10.3 / 6.8 s; longest time past a shot's last frame 5.4 / 9.8 /
+  6.2 s -> 0.03 / 3.8 / 0.03 s; total 6.3 / 14.4 / 7.6 s -> 0.0 / 3.8 / 0.0 s;
+  directed cuts 0 -> 10 / 7 / 18, all started at event - zero_time. Band:
+  longest hold 15.4 / 13.1 / 16.2 s -> 7.0 / 10.3 / 6.7 s; past last frame
+  9.7 / 6.4 / 9.5 s -> 0.03 / 6.3 / 0.8 s; directed 0 -> 10 / 7 / 19. What
+  is left past a last frame is RB's own hold (a NORMAL shot shorter than the
+  song's note-60 gap). GD05_SHOTEND_LEGACY=1 alone: directed shots held
+  5.8 / 2.8 s past their end. Walk `quickplay`: intro check 0 errors.
+- **Undo:** GD05_DIRECTED_LEGACY=1 (no directed cuts, as 1.1.15),
+  GD05_SHOTEND_LEGACY=1 (shot_over goes nowhere); GD05_CAMRULES_LEGACY=1
+  turns off every GD05-107 switch (D105-D107).
+
+## D106
+- **What (2026-11-16, GD05-107 #2):** a venue's disabled shots. WorldDir's
+  camshot_overrides (load RB 0x8228B6C8 -> 0x822883A8, rev > 0xf; the same
+  in SyncProperty 0x82289DC8 and 0x8228C178) clear each listed CamShot's
+  +0x16c, which the CamShot constructor (RB 0x82295310) sets to 1, and the
+  picker (0x8229E190) takes only shots with it set [C]. The port read the
+  list (scene/objects.cpp) and ignored it: these are Harmonix's shared
+  shots that clip that venue's set. They are left out of rbShots_ (intro,
+  NORMAL and directed alike); a next_shot can still force one, as RB's
+  force_shot does.
+- **Measured:** big_club_11 lists 34 (all found), arena_07 19,
+  small_club_01 0. Disabled shots picked per song (solo inbloom /
+  blackholesun / highwaystar): 3 / 7 / 12 -> 0; band 2 / 2 / 5 -> 0.
+- **Undo:** GD05_CAMOVERRIDES_LEGACY=1.
+
+## D107
+- **What (2026-11-16, GD05-107 P2 #4 / #5 / #6 / #9 / #10):**
+  pick_new_shot's details [C data worldbase.dta, midi_parsers.dta]:
+  nothing acceptable -> no cut, the shot stays (RB 0x8229F0D0 returns 0)
+  [C], the port's two fallbacks dropped (GD05_PICKFAIL_LEGACY); a solo mode
+  (gamemode is_solo: max_players 1) with exactly two members in focus puts
+  the player's instrument in (it replaces the bass, for a bassist the
+  guitar, else one of the other two at random) (GD05_SOLOFOCUS_LEGACY);
+  one_time shots once a song, the milos storing the flag as 1 (start_shot
+  sets one_time_played, cleared at the song's start) (GD05_ONETIME_LEGACY);
+  directed cuts filtered by valid_male / valid_female and valid_banger /
+  dramatic / rocker / spazz of the member the category names, no shot -> no
+  cut (GD05_DIRFILTER_LEGACY).
+- **Measured:** on the three songs no pick failed and no one_time or
+  invalid shot came up (those switches change nothing there); the solo
+  focus changes the solo sequence. #10 (a cut's frame 0 aimed before the
+  band is posed): App::rbCutAimProbe, frame 0 as drawn against frame 0
+  evaluated two frames later: 25 cuts in 60 s of band play, largest 3.8
+  degrees (coop_bs_d_c07, 0 units), 1 over 2 degrees; posing the band again
+  after the cut changed nothing, so it is not the stale pose the study
+  suspected: not fixed (a first version of the probe read 116 degrees from
+  the frame a shot_over cut is made in, which still shows the old shot).
+- **Undo:** the switches above.

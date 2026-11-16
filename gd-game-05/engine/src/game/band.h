@@ -141,6 +141,7 @@ public:
         // main_add.drv while he plays), the mode the parser asked for
         // (cur_play) and whether the player plays (playing).
         uint32_t rbFlags = 0;
+        std::string rbGender;  // RB: male / female (the directed cuts' valid_male / valid_female)
         std::string rbGroup;
         chr::ClipDriver* rbActive = nullptr;
         uint32_t rbCurPlay = 0;

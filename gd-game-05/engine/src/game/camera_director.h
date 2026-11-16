@@ -131,6 +131,11 @@ public:
     std::function<void(const std::string&)> onShot;
     // For the crowd: a shot started (its crowd, crowd3d, crowd_face_camera).
     std::function<void(const scene::CamShot&)> onShotStarted;
+    // RB's BandCamShot shot_over (band_objects.dta: next_shot, else the
+    // world's camshot_end) [C data]: a non-looping shot reached its last
+    // frame with no sequence left (CamShot SetFrame RB 0x82292968 [C]); the
+    // host plays its next_shot or ends it (App::rbCamshotEnd).
+    std::function<void(const scene::CamShot&)> onShotOver;
     int shotsStarted() const { return started_; }
     int failedPicks() const { return failedPicks_; }
 

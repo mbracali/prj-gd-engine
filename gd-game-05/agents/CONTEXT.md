@@ -237,3 +237,16 @@ RB focus 11-16 (GD05-105 / GD05-109):
   every icon must change frames; GD05_WALK_SHOTS=<dir> also saves a shot
   every 100 ms (loading_icons_<n>.bmp; the icons sit at about x 1170-1600,
   y 820-970 of 1920 x 1080). GD05_LOADICON_LEGACY=1 fails (D104).
+
+RB focus 11-16 (GD05-107 cameras):
+- `--walktest rb_camera_cuts` (quick play solo) / `rb_camera_cuts_band`
+  (band quick play, four players): 60 s of the song with a shot every
+  2.5 s (GD05_WALK_SHOTS: title_cam_NN.bmp; GD05_SHOTLOG=1 names the shots
+  and logs `cut aim` per cut), then App::rbCamSimRun: the camera alone
+  through each song of GD05_CAMSIM_SONGS (comma list, default the one
+  playing) on its own clock (seconds a song): `camsim <song> cut ...` per
+  cut, per song the longest hold, the longest time past a shot's last
+  frame, the venue's disabled shots picked and the directed cuts started at
+  event - zero_time; counters rb_camsim_*, rb_cut_aim_*. GD05_VENUE picks
+  the venue (big_club_11 lists 34 disabled shots, arena_07 19).
+  GD05_CAMRULES_LEGACY=1 runs the camera of 1.1.15 (D105-D107).

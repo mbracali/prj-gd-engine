@@ -940,6 +940,7 @@ void CameraDirector::update() {
             startShot(next);
         } else {
             in.send(o, "shot_over", {}, false);
+            if (onShotOver && current_ == &shot && !shot.looping) onShotOver(shot);
         }
     }
 }

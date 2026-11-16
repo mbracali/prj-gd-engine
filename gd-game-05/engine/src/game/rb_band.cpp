@@ -158,6 +158,7 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
         const std::map<std::string, std::string> outfits = rbOutfitMilos(data, gender, instrument, pieces, kind, &missing);
         for (const std::string& path : missing) problems_.push_back(text(pre, 0) + ": no " + path);
         auto m = std::make_unique<Member>();
+        m->rbGender = gender;
         m->slot = it->first;
         m->miloPath = base;
         m->object = it->second;

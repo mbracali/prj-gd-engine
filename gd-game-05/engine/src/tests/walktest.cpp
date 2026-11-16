@@ -2105,6 +2105,56 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         for (int i = 0; i < 30; ++i) wait(500), check("band_start_shot");
         check("counter_max:missing_shaders:0");
         at("endgame_waiting_screen", 90000);
+    } else if (scenario == "rb_camera_cuts" || scenario == "rb_camera_cuts_band") {
+        // GD05-107 (owner: "some shots not looking to the band, or taking too
+        // long to change"): quick play solo (guitar) or band quick play
+        // (four players), 60 s of the song with a shot every 2.5 s
+        // (GD05_WALK_SHOTS: title_cam_NN.bmp; GD05_SHOTLOG=1 names the
+        // shots; App::rbCutAimProbe on every cut), then App::rbCamSimRun: the camera alone through each song
+        // of GD05_CAMSIM_SONGS (default the first): every cut logged
+        // (camsim ... cut), per song the longest hold, the longest time
+        // past a shot's last frame and the venue's disabled shots picked
+        // (GD05_CAMRULES_LEGACY=1: the camera of 1.1.15 to compare).
+        // GD05_VENUE picks the venue.
+        endMs_ = 600000;
+        if (scenario == "rb_camera_cuts_band") {
+            SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,guitar", 1);
+            SDL_setenv_unsafe("GD05_BAND_PLAYERS", "4", 1);
+            at("splash_screen", 30000);
+            check("unlock_all_songs");
+            press(kX);
+            at("main_screen");
+            press(kDown), wait(200);
+            press(kX);  // MULTIPLAYER
+            at("main_multimode_screen");
+            press(kX);  // BAND QUICKPLAY
+            at("main_bandcoop_screen");
+            press(kX);  // LOCAL
+            at("qp_selsong_screen", 30000);
+            wait(800);
+            press(kX);  // the first entry
+            at("qp_seldiff_screen|qp_seldiff_solo_screen", 20000);
+            wait(1500);
+            press(kX), wait(1500), press(kX), wait(1500);
+            at("game_screen", 60000);
+        } else {
+            rbQuickplay();
+        }
+        check("song_clock_running", 30000);
+        for (int i = 0; i < 24; ++i) {
+            wait(2500);
+            const std::string tag = "tshot:cam_" + std::string(i < 10 ? "0" : "") + std::to_string(i);
+            check(tag.c_str());
+        }
+        check("counter:rb_cut_aim_checks:1");
+        check("counter_max:rb_cut_aim_max_deg:1000");
+        check("counter_max:rb_cut_aim_off:1000");
+        check("counter:rb_camsim:1");
+        check("counter_max:rb_camsim_max_hold_ms:1000000");
+        check("counter_max:rb_camsim_max_past_end_ms:1000000");
+        check("counter_max:rb_camsim_directed_past_end_ms:1000000");
+        check("counter_max:rb_camsim_disabled_picks:100000");
+        check("counter_max:rb_camsim_directed_late:100000");
     } else if (scenario == "rb_highway") {
         // GD05-070 (owner: "the yellow Overdrive bar flickers", "the
         // multiplier is drawn on top of other elements", "the hit area looks
