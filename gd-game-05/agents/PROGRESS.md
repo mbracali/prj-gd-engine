@@ -1776,3 +1776,9 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   frames (amplitude about the same: 0.41 -> 0.45 units). Grain already
   uses the PostProc's noise_intensity; the pacing already takes each
   PostProc's own emulate_fps (there is no world-FPS option to skip).
+- **rb_look alone (GD05-069 / 095), before (GD05_WORLD_CLOCK_LEGACY=1) ->
+  after, one run each:** small_club_02 luma 57.6 -> 58.9 (movies 69.3),
+  contrast 56.1 -> 57.0, grain 2.93 -> 2.94 (fails on grain, as before);
+  arena_04 luma 41.5 -> 44.2, contrast 42.4 -> 44.2, grain 2.19 -> 2.24
+  (fails on luma, as before). The world clock barely moves brightness;
+  the venues stay darker than the movies (GD05-069 open).
