@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "data/dta.h"
+#include "render/ui_view.h"
 #include "game/song_db.h"
 #include "script/script.h"
 #include "ui/natives.h"
@@ -44,6 +45,7 @@ std::vector<std::string> rankedList(ui::UiManager& ui, const std::string& inst, 
 struct Ctx {
     ui::UiManager& ui;
     Interp& in;
+    int rewardBefore = -1;  // the band's last gig's reward, asked before complete_event
     Value send(ScriptObject* o, const char* msg, std::vector<Value> a = {}) { return o ? in.send(o, msg, a) : Value::integer(0); }
     ui::ListProvider* list(const char* name) {
         auto* l = dynamic_cast<ui::ListProvider*>(in.findObject(name));
@@ -74,6 +76,7 @@ struct Ctx {
             if (songs) songs->push_back(s);
             send(perf, "complete_song", {Value::integer(stars), Value::integer(100000)});
         }
+        if (band) rewardBefore = send(perf, "reward").integerValue();
         send(perf, "complete_event");
         if (band) {
             send(perf, "clear_unlocked_item");
@@ -154,7 +157,17 @@ bool soloAutoplay(Ctx& c, std::string& err) {
     int wrongSongs = 0, early = 0, bonusPlayed = 0, winningSeen = 0;
     std::string final, list;
     for (int guard = 0; guard < 400; ++guard) {
-        const std::vector<std::string> rows = c.rows("solo_event_provider");
+        std::vector<std::string> rows = c.rows("solo_event_provider");
+        // The bonus gigs sit behind the list's "unlock" row (the provider's
+        // kTourVenueUnlock mode, GD05-123): its rows after the normal ones.
+        if (auto u = std::find(rows.begin(), rows.end(), "unlock"); u != rows.end()) {
+            rows.erase(u);
+            ScriptObject* prov = c.in.findObject("solo_event_provider");
+            c.send(prov, "set", {Value::symbol("mode"), Value::integer(1)});
+            for (const std::string& r : c.rows("solo_event_provider")) rows.push_back(r);
+            c.send(prov, "set", {Value::symbol("mode"), Value::integer(0)});
+            c.list("solo_event_provider");
+        }
         std::string pick, winner;
         for (const std::string& r : rows) {
             c.send(perf, "set_event", {Value::symbol(r)});  // the gig guide's scroll sets the town / venue
@@ -245,6 +258,12 @@ bool bandAutoplay(Ctx& c, std::string& err) {
     const DataNode* cfg = tour ? tour->find("band") : nullptr;
     const DataNode* world = cfg ? cfg->find("world") : nullptr;
     if (!band || !world) return err = "no band or (world ...)", false;
+    // The band plays at Expert: RB caps a band's buzz at buzz_caps of its
+    // lowest difficulty (RB 0x8240A088, GD05-125) and the late gigs need
+    // buzz 355-580 and Hard (BWT_BUZZ_MEDIUMBLOCK*), so a Medium band
+    // (capped at 350) cannot reach them.
+    for (int p = 0; p < 4; ++p)
+        if (c.ui.session().joined(p)) c.ui.session().players[size_t(p)].difficulty = 3;
     const std::string win = cfg->find("win_item") ? cfg->find("win_item")->textAt(1) : "";
     const std::string hard = cfg->find("hardcore_item") ? cfg->find("hardcore_item")->textAt(1) : "";
     std::vector<std::string> vehicles;
@@ -262,7 +281,8 @@ bool bandAutoplay(Ctx& c, std::string& err) {
     std::map<std::string, std::string> tierOfTown;  // the towns the tiers' events were played in
     std::vector<std::string> townOrder, log;
     std::set<std::string> playedKeys;
-    int travelErrors = 0, gigs = 0, tierGigs = 0;
+    int travelErrors = 0, gigs = 0, tierGigs = 0, momentErrors = 0;
+    std::map<std::string, int> momentsTaken;
     std::vector<std::string> finals;
     for (int guard = 0; guard < 600; ++guard) {
         bool found = false;
@@ -286,8 +306,28 @@ bool bandAutoplay(Ctx& c, std::string& err) {
                         if (c.send(band, "has_item", {Value::symbol(vehicles[k])}).truthy()) level = int(k) + 1;
                     if (need(world, home, t) > level) ++travelErrors;
                     if (std::find(townOrder.begin(), townOrder.end(), t) == townOrder.end()) townOrder.push_back(t);
+                    // GD05-125: a moment offered is taken (the active moment
+                    // screen's yes); its reward per star (tour_band.dta) at 5
+                    // stars a song: x2, x4, x0 (charity), x3 (sellout), else x1.
+                    std::string moment;
+                    if (c.send(band, "has_next_moment").truthy()) {
+                        const Value mv = c.send(band, "next_moment");
+                        moment = mv.type == Value::Type::Array && mv.array && !mv.array->empty() ? (*mv.array)[0].str() : std::string("?");
+                        c.send(band, "set_active_moment", {mv});
+                    }
                     std::vector<std::string> songs;
                     c.playEvent(band, 5, &songs, true);
+                    if (!moment.empty()) {
+                        const int per = c.send(ev, "get", {Value::symbol("reward_per_star")}).integerValue();
+                        const int factor = moment == "tour_am_doubleornothingfourstar" ? 2 : moment == "tour_am_quadrupleornothingfivestar" ? 4
+                                         : moment == "tour_am_charity" ? 0 : moment == "tour_am_sellout" ? 3 : 1;
+                        const int want = per * 5 * int(songs.size()) * factor;
+                        ++momentsTaken[moment];
+                        if (c.rewardBefore != want) {
+                            ++momentErrors;
+                            std::printf("  moment %s at %s: reward %d, expected %d\n", moment.c_str(), key.c_str(), c.rewardBefore, want);
+                        }
+                    }
                     ++gigs;
                     playedKeys.insert(key);
                     // A tier's event: its locale token names the tier (the event object's data town).
@@ -307,6 +347,10 @@ bool bandAutoplay(Ctx& c, std::string& err) {
         }
         if (!found) break;
     }
+    std::string mt;
+    int momentsTotal = 0;
+    for (const auto& [k, n] : momentsTaken) mt += " " + k + " x" + std::to_string(n), momentsTotal += n;
+    std::printf("  active moments taken: %d:%s; rewards not as the moment's: %d\n", momentsTotal, mt.c_str(), momentErrors);
     std::string towns, tiers, items;
     for (const std::string& t : townOrder) towns += " " + t;
     for (const auto& [t, tier] : tierOfTown) tiers += " " + t + "=" + tier;
@@ -326,6 +370,7 @@ bool bandAutoplay(Ctx& c, std::string& err) {
         if (k.find("halloffame") != std::string::npos) hof = k;
     SDL_setenv_unsafe("GD05_WALK_FINAL", hof.c_str(), 1);
     if (travelErrors) return err = "a town was played without the vehicle it needs, or two tiers in one town", false;
+    if (momentErrors || (!SDL_getenv("GD05_MOMENTS_LEGACY") && momentsTotal == 0)) return err = "no active moment offered, or its reward was not the moment's", false;
     if (townOrder.size() != worldTowns) return err = std::to_string(townOrder.size()) + " of the " + std::to_string(worldTowns) + " towns were played", false;
     if (tierGigs != tierEvents) return err = "the tiers' events were not all played", false;
     for (const std::string& v : vehicles)
@@ -345,6 +390,28 @@ bool bandEnd(Ctx& c, std::string& err) {
     if (!band || !cfg) return err = "no band", false;
     const std::string win = cfg->find("win_item")->textAt(1), hard = cfg->find("hardcore_item")->textAt(1);
     const bool hasWin = c.send(band, "has_item", {Value::symbol(win)}).truthy();
+    // GD05-122: the hall of fame gave each member's character its
+    // instrument's (win_instruments ...) item (RB 0x823EF0F0), and the gig's
+    // unlock is win_instruments (the gig complete screen's line).
+    const DataNode* wi = cfg->find("win_instruments");
+    const std::string unlock = c.send(band, "event_unlock").str();
+    int members = 0, awarded = 0;
+    std::string who;
+    for (int p = 0; p < 4; ++p) {
+        if (!c.ui.session().joined(p)) continue;
+        ScriptObject* pc = c.in.send("game", "get_player_config", {Value::integer(p)}).object;
+        ScriptObject* ch = pc ? c.send(pc, "get_char").object : nullptr;
+        if (!ch || ch->className() != "TourCharLocal") continue;
+        const std::string inst = c.send(ch, "get_instrument").str();
+        const DataNode* e = wi ? wi->find(inst) : nullptr;
+        const std::string item = e ? e->textAt(1) : "";
+        const bool owns = c.send(ch, "has_outfit", {Value::symbol(inst == "vocals" ? "mic" : inst), Value::symbol(item)}).truthy();
+        ++members, awarded += owns;
+        who += " " + inst + ":" + item + "=" + (owns ? "owned" : "not owned");
+    }
+    std::printf("  win instruments: event_unlock '%s'; members%s (%d of %d)\n", unlock.c_str(), who.c_str(), awarded, members);
+    if (unlock != "win_instruments" || !members || awarded != members)
+        return err = "the hall of fame did not award the win instruments", false;
     std::string endless;
     for (const std::string& t : c.rows("tour_town_provider")) {
         c.send(band, "set_town", {Value::symbol(t)});
@@ -412,6 +479,120 @@ bool walkCareerCheck(ui::UiManager& ui, const std::string& name, std::string& er
     if (name == "rb_full_band_autoplay") return ok = bandAutoplay(c, err), true;
     if (name == "rb_full_band_end") return ok = bandEnd(c, err), true;
     if (name == "rb_bwt_first_gig") return ok = bandFirstGig(c, err), true;
+    if (name.rfind("rb_gig_rows:", 0) == 0) {
+        // rb_gig_rows:<provider>:<labels>: every row's texts as the list
+        // draws them (the provider's rows); each label of <labels> (comma
+        // list, e.g. star,new) must be filled on at least one row.
+        const std::string rest = name.substr(12);
+        const std::string prov = rest.substr(0, rest.find(':'));
+        const std::string want = rest.find(':') == std::string::npos ? "" : rest.substr(rest.find(':') + 1);
+        ui::ListProvider* l = c.list(prov.c_str());
+        if (!l) return err = "no " + prov, ok = false, true;
+        std::vector<gfx::UiView::ListRow> rows;
+        int sel = 0;
+        l->rows(rows, 0, sel);
+        std::map<std::string, int> filled;
+        std::printf("  %s: %zu rows\n", prov.c_str(), rows.size());
+        for (size_t i = 0; i < rows.size(); ++i) {
+            std::string line;
+            for (const auto& [k, v] : rows[i].texts)
+                if (k != "list.lbl" && k != "name.lbl" && !v.empty()) line += " " + k + "='" + v + "'", ++filled[k.substr(0, k.find('.'))];
+            std::printf("    %zu %s:%s\n", i, l->symbol(int(i)).c_str(), line.c_str());
+        }
+        std::string missing;
+        for (size_t a0 = 0, b0; a0 < want.size(); a0 = b0 + 1) {
+            b0 = want.find(',', a0);
+            if (b0 == std::string::npos) b0 = want.size();
+            const std::string k = want.substr(a0, b0 - a0);
+            std::printf("    %s filled on %d rows\n", k.c_str(), filled[k]);
+            if (!filled[k]) missing += " " + k;
+        }
+        ok = missing.empty();
+        if (!ok) err = prov + ": no row shows" + missing;
+        return true;
+    }
+    if (name.rfind("rb_solo_mode:", 0) == 0) {
+        // The solo gig guide's mode (0 normal, 1 the unlock rows' bonus gigs).
+        const int want = std::atoi(name.substr(13).c_str());
+        const int got = c.in.send("solo_event_provider", "get", {Value::symbol("mode")}).integerValue();
+        std::vector<std::string> rows = c.rows("solo_event_provider");
+        std::string l;
+        for (const std::string& r : rows) l += " " + r;
+        std::printf("  solo gig guide mode %d (expected %d):%s\n", got, want, l.c_str());
+        ok = got == want;
+        if (!ok) err = "the solo gig guide is not in mode " + std::to_string(want);
+        return true;
+    }
+    if (name == "rb_solo_first_gig") {
+        // The first open gig completed through the natives (4 stars, a score),
+        // so the list has a played row.
+        ScriptObject* perf = c.in.send("tour", "performer", {}).object;
+        std::vector<std::string> rows = c.rows("solo_event_provider");
+        if (rows.empty()) return err = "no solo gig", ok = false, true;
+        c.send(perf, "set_event", {Value::symbol(rows[0])});
+        c.send(perf, "set_random_songs");
+        c.send(perf, "next_song");
+        c.send(perf, "complete_song", {Value::integer(4), Value::integer(123456)});
+        c.send(perf, "complete_event");
+        if (!c.send(perf, "new_unlock").str().empty()) c.send(perf, "advance_new_unlock");
+        std::printf("  solo first gig %s completed (4 stars, 123456)\n", rows[0].c_str());
+        return ok = true, true;
+    }
+    if (name == "rb_hometowns") {
+        // The create screen's hometown list against RB's (HometownProvider,
+        // RB 0x823FC338): the towns with both parts of a (region a b),
+        // sorted by their localized names (strcmp, RB 0x823F4768).
+        const DataNode* tour = ui.bootTree() ? ui.bootTree()->find("tour") : nullptr;
+        const DataNode* world = tour && tour->find("band") ? tour->find("band")->find("world") : nullptr;
+        std::vector<std::pair<std::string, std::string>> want;
+        for (size_t i = 1; world && i < world->children.size(); ++i) {
+            const DataNode& t = world->children[i];
+            const DataNode* r = t.isList() ? t.find("region") : nullptr;
+            if (r && r->children.size() > 2) want.emplace_back(ui.localize(t.textAt(0)), t.textAt(0));
+        }
+        std::stable_sort(want.begin(), want.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        const std::vector<std::string> got = c.rows("tour_hometown_provider");
+        std::string g, w;
+        for (const std::string& x : got) g += " " + x;
+        for (const auto& x : want) w += " " + x.second;
+        std::printf("  hometowns: expected%s\n  measured%s\n", w.c_str(), g.c_str());
+        ok = g == w;
+        if (!ok) err = "the hometown list is not RB's";
+        return true;
+    }
+    if (name == "rb_bwt_min_difficulty") {
+        // Every gig of every town: the event's get min_difficulty (what
+        // seldiff.dta disables the buttons below) against the data's
+        // (min_difficulty kDifficulty*) (macros.dta: Easy 0 .. Expert 3).
+        ScriptObject* band = c.in.send("tour", "performer", {}).object;
+        const std::string town0 = c.send(band, "town").str(), venue0 = c.send(band, "venue").str();
+        int gigs = 0, withMin = 0, wrong = 0;
+        std::string list;
+        const DataNode* tour = ui.bootTree() ? ui.bootTree()->find("tour") : nullptr;
+        const DataNode* world = tour && tour->find("band") ? tour->find("band")->find("world") : nullptr;
+        for (size_t i = 1; world && i < world->children.size(); ++i) {
+            const std::string t = world->children[i].textAt(0);
+            c.send(band, "set_town", {Value::symbol(t)});
+            c.send(band, "set_venue", {Value::symbol("")});
+            for (const std::string& v : c.rows("tour_venue_provider")) {
+                c.send(band, "set_venue", {Value::symbol(v)});
+                for (const std::string& e : c.rows("tour_event_provider")) {
+                    c.send(band, "set_event", {Value::symbol(e)});
+                    ScriptObject* ev = c.in.send("tour", "event", {}).object;
+                    ++gigs;
+                    const int got = c.send(ev, "get", {Value::symbol("min_difficulty")}).integerValue();
+                    if (got > 0) ++withMin, list += " " + t + "/" + v + "/" + e + "=" + std::to_string(got);
+                }
+            }
+        }
+        // The data's count: the town files' and the tiers' events with (min_difficulty ...).
+        c.send(band, "set_town", {Value::symbol(town0)}), c.send(band, "set_venue", {Value::symbol(venue0)});
+        std::printf("  min_difficulty: %d gigs listed, %d with a minimum above Easy:%s\n", gigs, withMin, list.c_str());
+        ok = withMin > 0;
+        if (!ok) err = "no gig reports its min_difficulty";
+        (void)wrong;
+        return true;
+    }
     if (name == "rb_bwt_diy_set") {
         // The set the band chose in tour_selsong_screen: no (any) left, each a song of the disc.
         auto* l = dynamic_cast<ui::ListProvider*>(c.in.findObject("tour_event_song_provider"));
@@ -460,6 +641,23 @@ bool walkCareerCheck(ui::UiManager& ui, const std::string& name, std::string& er
         SDL_setenv_unsafe("GD05_WALK_FAME", std::to_string(fame).c_str(), 1);
         ok = status == 1;
         if (!ok) err = "the winning gig is not completed";
+        // The win screen's "Enjoy your new golden instrument": the winning
+        // gig's (outfit (<instrument> (<gender> <category> <item>))) owned.
+        ScriptObject* ev = c.in.send("tour", "event", {}).object;
+        const std::string inst = c.send(perf, "get_instrument").str(), gender = c.send(perf, "get_gender").str();
+        std::string cat, item;
+        if (const DataNode* tour = ui.bootTree() ? ui.bootTree()->find("tour") : nullptr)
+            if (const DataNode* towns = tour->find("solo") ? tour->find("solo")->find("towns") : nullptr)
+                for (size_t t = 1; t < towns->children.size(); ++t)
+                    for (size_t v = 1; v < towns->children[t].children.size(); ++v)
+                        if (const DataNode* en = towns->children[t].children[v].isList() ? towns->children[t].children[v].find(fin ? fin : "") : nullptr)
+                            if (const DataNode* o = en->find("outfit"))
+                                if (const DataNode* i = o->find(inst))
+                                    if (const DataNode* g = i->find(gender)) cat = g->textAt(1), item = g->textAt(2);
+        const bool owns = !item.empty() && c.send(perf, "has_outfit", {Value::symbol(cat), Value::symbol(item)}).truthy();
+        std::printf("  the win's instrument: %s %s %s %s\n", inst.c_str(), cat.c_str(), item.c_str(), owns ? "owned" : "NOT owned");
+        (void)ev;
+        if (ok && !owns) ok = false, err = "the winning gig's golden instrument is not owned";
         return true;
     }
     return false;

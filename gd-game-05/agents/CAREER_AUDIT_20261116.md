@@ -134,19 +134,50 @@ Each with a legacy switch and a walk that fails before and passes after.
 - Regression: rb_career, rb_career_band, rb_tour_rules, rb_band_lobby,
   rb_shop_items OK on the fixed build.
 
+## Rundown 2 (the audit's leftovers, the screens through the menus)
+
+New walks: `rb_career_screens_band` (the real band lobby, two characters
+made there, a new band, the hub, the gig guide, the difficulty screen, the
+shop, band profile, band roster) and `rb_career_screens_solo` (a new
+guitarist, the hub, the difficulty, the gig guide and its unlock row, the
+shop, the character profile). Each screen: `rb_texts:<tag>` (a shot, the
+labels shown with no text or "Loading"), plus row / data checks. Shots in
+`agents/scratch/career17/shots/` (git-ignored).
+
+| Row | Found | Cause | Fix | Switch | Before -> after |
+|---|---|---|---|---|---|
+| GD05-126 hub "Loading" | four "Loading" labels, no band in the practice space | slot characters drawn only on lobby screens; the CharLoadingPanel's loading<i>.lbl never hidden | RB 0x828433C0: the mode's slots' players' characters unless show_char FALSE, loading only while loading; coop_hub's band-target teleports (D130) | GD05_HUBCHARS_LEGACY | Loading 4 -> 0; members' pixels 4.6 % (29 % left) -> 19.2 % (82 % left) |
+| GD05-127 gig row labels | star / fame / medal / new / songs / item / town / venue / score empty | the providers filled event.lbl only | EventProvider::Text RB 0x823F6848, SoloEventProvider::Text RB 0x823FA578; medal and song score records (D131) | GD05_GIGROWS_LEGACY | band rows star 0 -> 1, medal 0 -> 1, new 0 -> 4, songs 0 -> 5; solo star / score 0 -> 1, new 0 -> 5 |
+| GD05-122 golden / clear instruments | the Hall of Fame awarded no instrument | TourBand complete_event's win_instruments not done | RB 0x823EF0F0 (D133) | GD05_WININSTR_LEGACY | rb_full_band: clear guitar not owned -> owned, event_unlock win_instruments; solo gold: already awarded (now checked) |
+| min_difficulty | works | seldiff.dta disables the difficulties below {{tour event} get min_difficulty} (the port answered it) | none: the audit's "missing" was wrong | | rb_seldiff_min: song45 (Medium) easy disabled; localartists (Hard) easy, medium |
+| GD05-123 Rio unlock row | bonus gigs inline | the provider had no modes | RB 0x823FA248 / 0x823FA578 modes (D132) | GD05_SOLOUNLOCK_LEGACY | no unlock row -> row, X: mode 1 (unlock1), Triangle: mode 0 |
+| GD05-125 moments, buzz caps, hints | never offered; cap by vehicle | natives answered 0 | LocalTourBand RB 0x8240BE80 / 0x8240A768 / 0x8240A088 / 0x823EEAE8 (D134) | GD05_MOMENTS_LEGACY, GD05_BUZZCAP_LEGACY | see GD05-125 |
+| GD05-128 hometowns | data order | the provider sorts by localized name | RB 0x823FC338 / 0x823F4768 (D135) | GD05_HOMETOWN_LEGACY | newyork chicago boston ... -> amsterdam berlin boston ... stockholm |
+| GD05-124 profile screens | character profile "kDataUnhandled", band profile all "kDataUnhandled", band roster no rows | CharProfilePanel / BandProfilePanel / BandLineupPanel natives missing | RB 0x82841A00 / 0x828388C0 messages (D136) | GD05_CHARPROFILE_LEGACY, GD05_BANDPROFILE_LEGACY | 18 unhandled natives -> 0 |
+
+Screens walked with labels and textures (rb_texts, shots looked at):
+tour_band_sel, matchmaking_band (lobby), tour_band_create, tour_band_hub,
+tour_band_venue, tour_band_event, tour_band_seldiff, shop (band),
+tour_band_profile, tour_band_lineup; tour_solo_char, charcreator_maker,
+tour_solo_hub, tour_solo_diff, tour_solo_event (normal and unlock), shop
+(solo), tour_solo_char_profile. Win screens: rb_full_solo /
+rb_full_band (tour_solo_win_screen, credits, send-off;
+tour_band_win_screen).
+
 ## Left (not fixed)
 
-- Active moments (double or nothing, charity, sellout) and the buzz-cap /
-  fans-lost hints: missing (RB's moment code not read).
-- A gig's min_difficulty is not enforced (RB's check not read).
-- The solo gig guide lists the bonus (Rio) gigs inline; RB lists an
-  "unlock" row that switches the list to the bonus gigs (ui/tour_solo.dta
-  solo_event_provider set mode kTourVenueUnlock).
-- The band hub's practice space shows four "Loading" labels where RB
-  shows the members (seen in the rb_career_band shot 1 s after entering;
-  not investigated).
-- The win screen promises a golden instrument (win_instruments): not
-  checked whether the port awards it.
-- The gig rows' star / fame / medal / new labels stay empty.
-- The hometown list's contents (RB 0x8206fb30) not read: the port offers
-  the 12 towns with a region.
+- The profile screens' damask background draws bright yellow, so the grey
+  labels on it are hard to read (char / band profile shots): material or
+  colour of tour_char_profile.milo / tour_band_profile.milo not checked.
+- The guitarist's arm in the practice space (lobby, hub, roster) is held
+  up behind the head: the lobby's idle / attitude clip (seen before this
+  rundown, not investigated).
+- The solo tiers (tier1_1 ...) have no locale token: RB's Localize would
+  show the token; the port leaves the list's town / venue labels empty
+  for them (D131) [I].
+- tour_solo_diff.milo's / tour_band_event.milo's loading.lbl are posed
+  shown but draw nothing (allowed in the walks).
+- Where RB clears the moment taken, and the event's (sellout TRUE) field,
+  were not traced (D134).
+- The Easy band can't reach buzz-blocked gigs now (RB's caps): intended.
+- The creator's patch canvas preview, warp, held d-pad (D93 left).

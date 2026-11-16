@@ -2395,3 +2395,165 @@ pattern). Each says what, why and how to undo it.
   TailBuilder's slot read, 0x8281C4A0, not traced).
 - **Undo:** GD05_GEMCURVE_LEGACY=1.
 
+## D130
+- **What (2026-11-16, GD05-126, career rundown 2):** the band hub shows the
+  band. RB's CharSelectPanel poll (RB 0x828433C0) [C]: for each of the
+  mode's max_players slots (proxies "<coop|hth|solo><i>.pxy" by
+  max_players 4 / 2 / else: RB 0x82842860 / 0x82843910) the player in it
+  (gamecfg get_player_num_from_slot_num) shows its character unless the
+  screen's show_char <player> answers FALSE (an unhandled show_char shows
+  it); the CharLoadingPanel's loading<i>.lbl shows only while that
+  character is still loading. The port drew slot characters only on
+  screens with player slots (the lobbies), so the hub (tour_band_hub.milo,
+  a CharLoadingPanel) showed the milo's four "Loading" labels over an
+  empty practice space. The selected BandCamShot's band targets teleport
+  the proxies (practice_space.milo coop_hub moves coop0..3.pxy in front of
+  its camera; coop_enter's equal the proxies' own places) [C data]: the
+  characters stand there.
+- **Measured (walk rb_career_screens_band, real lobby, guitarist + drummer
+  made there):** tour_band_hub_screen labels shown "Loading" 4 -> 0; the
+  members' pixels (shot with / without the previews) 4.6 % of the screen,
+  29 % of it in the left half (noise) -> 19.2 %, 82 % (two members framed
+  left of the menu). Shots band_hub.bmp.
+- **Undo:** GD05_HUBCHARS_LEGACY=1.
+
+## D131
+- **What (2026-11-16, GD05-127, career rundown 2):** the gig rows' labels
+  as RB's providers write them. EventProvider::Text (RB 0x823F6848) [C], by
+  the list type's elements (ui_objects.dta event: event star fame new songs
+  medal item): star.lbl the star rating (scoring.dta star_ratings symbols,
+  RB 0x82435678) of a played one-song gig, "*" for a played set; fame.lbl
+  a played set's "%i/%i" stars / songs x max_stars_per_song; new.lbl
+  tour_new for a new gig that awards nothing; songs.lbl the song (one or
+  two-song lists: the concrete song, "" for "any") or tour_song_set
+  "%i Song Set" (RB 0x823FF208); medal.lbl medal_strings by the record's
+  difficulty (RB 0x823EFAD0 -> 0x823ECC28); item.lbl a new gig's
+  award_item icon (items (<item> (icon ...)), RB 0x823ECD60).
+  SoloEventProvider::Text (RB 0x823FA578) [C] (solo_event: town venue event
+  by_line star new score): town.lbl on a town's first row, venue.lbl
+  (<town>_<venue>) on a venue's first row, star.lbl, new.lbl, score.lbl
+  the song's best score. The band's event record keeps the difficulty it
+  was played at, the best kept (LocalTourBand complete_event RB 0x8240BE80:
+  record +0x18 = max(+0x18, the band's lowest difficulty, RB 0x823EDED8))
+  [C]; the solo character keeps each song's best score per difficulty [I:
+  the record]. RB's Localize gives a missing token back (RB 0x82265878);
+  the solo tiers (tier1_1 ...) and their venues have none, the port leaves
+  those two labels empty rather than show the token [I].
+- **Measured (walks rb_career_screens_band / _solo, a first gig through the
+  natives):** band rows (boston small club) filled star 0 -> 1, medal 0 ->
+  1 ("M"), new 0 -> 4, songs 0 -> 5 ("2 Song Set" for Make a Setlist /
+  Mystery Requests); solo rows star 0 -> 1 ("****"), score 0 -> 1
+  ("123456"), new 0 -> 5, town / venue 0 -> 1 (Rio's row). Shots
+  band_event.bmp, solo_event.bmp.
+- **Undo:** GD05_GIGROWS_LEGACY=1.
+
+## D132
+- **What (2026-11-16, GD05-123, career rundown 2):** the solo gig guide's
+  bonus gigs behind an "unlock" row. SoloEventProvider (RB 0x823FA248 /
+  0x823FA578) [C]: in kTourVenueNormal (0) it lists the open towns' normal
+  venues' open events, then one mode row per open venue of another kind
+  ("unlock": tour_unlock_songs "[Play Bonus Tour]", its town, venue and
+  NEW when it has a new gig); kTourVenueUnlock (1) lists that venue's
+  events; ui/tour_solo.dta's SELECT_MSG on the row sets the mode and
+  Triangle sets it back (first_unplayed_event takes the mode). The port
+  listed Rio's bonus gigs inline and answered mode 0 always.
+- **Measured (walk rb_career_screens_solo):** normal list song1..song5
+  unlock1 -> song1..song5 unlock; X on the row: mode 0 -> 1, rows
+  unlock1; Triangle: mode 0, still on tour_solo_event_screen. Before
+  (GD05_SOLOUNLOCK_LEGACY=1): no unlock row, mode stays 0. rb_full_solo
+  (the test aid lists the unlock mode's gigs after the normal ones): 44
+  tier + 13 bonus gigs, song45 wins, as before. Shot solo_event_unlock.bmp.
+- **Undo:** GD05_SOLOUNLOCK_LEGACY=1.
+
+## D133
+- **What (2026-11-16, GD05-122, career rundown 2):** the win instruments.
+  TourBand complete_event (RB 0x823EF0F0) [C]: when the gig awards win_item
+  (tour_halloffame_complete), each local member's character gets its
+  instrument's (win_instruments (guitar stratocaster03clear) (bass
+  precision01clear) (drum solid_vistalite) (vocals mic1_clear)) item in the
+  instrument's category (mic for vocals) when not owned, and the gig's
+  unlock (event_unlock, +0x194) is win_instruments: the gig complete
+  screen's "You have been awarded clear instruments!" [C; I: a member who
+  plays bass takes the bass entry]. The port gave nothing. The Solo Tour's
+  golden instrument (song45's (outfit (guitar (male guitar
+  stratocaster03gold)) ...), the win screen's "Enjoy your new golden
+  instrument") was already awarded (D67's event outfit): rb_full_solo now
+  checks it owned; a costless instrument model is listed in the shop only
+  when owned (OutfitProvider RB 0x82859E08) [C].
+- **Measured:** rb_full_band: the hall of fame's guitarist: stratocaster03clear
+  not owned, event_unlock '' (GD05_WININSTR_LEGACY=1: FAIL) -> owned,
+  win_instruments. rb_full_solo (guitar): stratocaster03gold owned.
+- **Undo:** GD05_WININSTR_LEGACY=1.
+
+## D134
+- **What (2026-11-16, GD05-125, career rundown 2):** active rock moments
+  and the buzz caps, from LocalTourBand (vtable RB 0x82071d8c) [C]. After
+  each gig (complete_event RB 0x8240BE80 -> 0x8240A768) a count of gigs
+  runs down; at 0 it is drawn again in (moments (frequency 2 5)) (RB
+  0x8240A3D8; RB's generator [I]) and a moment is offered for the next
+  gig: one of the band's vehicle's list ((vehicles (tour_vehicle_van
+  ...)), the vehicle level's entry) not offered since the list was last
+  cleared (cleared once all were); next_moment (vfunc +0x8c) is it and
+  has_next_moment its != 0 (RB 0x823F1550); seldiff.dta's start_loading_msg
+  then goes to tour_active_moment_screen, whose yes / no calls
+  set_active_moment. The moment taken changes the gig (RB 0x823EEAE8):
+  each song's reward per star is its (reward_per_star ($stars
+  $event_reward) ...), and (RB 0x8240A088) the buzz gain its (buzz_change
+  ($avg_stars $buzz_change) ...). Buzz caps (RB 0x8240A088, 0x823ECA28)
+  [C]: a gain is capped at (buzz_caps 175 350 600 40000) of the band's
+  lowest difficulty (only up to it; none when already over); a loss from
+  a band with buzz sets have_lost_fans (+0x164); buzz_state (+0x160) is
+  kTourBuzzCap when a gain reached the cap, kTourBuzzMaxCap at Expert's:
+  the first_fans_lost / first_buzz_cap / fist_buzz_maxcap hints. The port
+  answered has_next_moment / buzz_state / have_lost_fans 0 and capped buzz
+  by the vehicle [I]. Not found in the code: where RB clears the moment
+  taken (the port after its gig) [I]; no moment without a vehicle (RB
+  indexes the list by the level) [I]; the event's (sellout TRUE) field
+  (+0x5c) [not traced].
+- **Measured (rb_full_band, Expert, GD05_MOMENT_SEED=7; the test aid takes
+  every moment offered):** moments offered 0 (GD05_MOMENTS_LEGACY=1) -> 45
+  over 173 gigs, none before the van (gig 7): charity 8, double or nothing
+  fans 7, double or nothing 4 stars 8, quadruple 5 stars 8, sellout 8,
+  triple fans 6; each gig's reward as its moment's (x2 / x4 / x0 / x3 at 5
+  stars a song): 45 of 45. The Hall of Fame and Endless Setlist still end
+  the tour. The test aid now plays at Expert: at Medium the cap (350)
+  keeps a band from the buzz 355-580 gigs, which need Hard anyway. The
+  active moment screen through the menus was not reached by a walk (no
+  moment fell on the gig played through the menus).
+- **Undo:** GD05_MOMENTS_LEGACY=1 (no moments, hints never),
+  GD05_BUZZCAP_LEGACY=1 (the cap by vehicle).
+
+## D135
+- **What (2026-11-16, GD05-128, career rundown 2):** the hometown list as
+  RB's. HometownProvider (vtable RB 0x8206fb30), filled by RB 0x823FC338
+  [C]: the towns whose record has both parts of a (region a b), sorted by
+  their localized names (RB 0x823FBB90; compare RB 0x823F4768: strcmp of
+  the two Localize results). The port had the regioned towns in the
+  data's order.
+- **Measured (walk rb_career_screens_band, rb_hometowns):** newyork chicago
+  boston losangeles seattle sanfrancisco berlin stockholm rome london paris
+  amsterdam -> amsterdam berlin boston chicago london losangeles newyork
+  paris rome sanfrancisco seattle stockholm (Amsterdam .. Stockholm).
+- **Undo:** GD05_HOMETOWN_LEGACY=1.
+
+## D136
+- **What (2026-11-16, GD05-124, career rundown 2):** the profile screens
+  answer their panels. CharProfilePanel (handler RB 0x82841A00),
+  BandProfilePanel (RB 0x828388C0) and BandLineupPanel (BandLineupPanel
+  class RB 0x82829D18) had none of their natives in the port: the
+  character profile showed "kDataUnhandled" as its name, the band profile
+  "kDataUnhandled" in every line, the band roster no rows. Now [C: the
+  messages and the strings' tokens; I: the answers from the port's
+  profile]: the character's name, the player's intro name for the
+  gamertag (no Xbox Live), cash, quote (band_profile_default_motto when
+  none, editable), instrument icon, its bands, its five best-scored songs;
+  the band's name, "Formed on <day> <month> <year>"
+  (band_profile_formed_date_fmt; the date kept from now on, RB 0x82838658),
+  "in <hometown>" (band_profile_hometown_fmt, RB 0x828386D0), fans
+  (tour_band_fans), world fame (RB 0x828382C0), quote, members, songs
+  played; the roster's get_row (leader, instrument icon, name, Playing /
+  Absent: kMetaLineup*) per member.
+- **Measured (walks rb_career_screens_band / _solo):** UNHANDLED natives on
+  the three screens 18 -> 0; shots band_profile.bmp, band_lineup.bmp,
+  solo_profile.bmp show the data.
+- **Undo:** GD05_CHARPROFILE_LEGACY=1, GD05_BANDPROFILE_LEGACY=1.

@@ -312,3 +312,26 @@ Career rundown 11-16 (GD05-118..120, agents/CAREER_AUDIT_20261116.md):
 - `--walktest rb_bwt_diy`: the hometown small club's Make a Setlist gig
   through tour_selsong_screen twice, the set checked (`rb_bwt_diy_set`).
 
+Career rundown 2, 11-16 (GD05-122..128, agents/CAREER_AUDIT_20261116.md):
+- `--walktest rb_career_screens_band` (~90 s): RB's band lobby (guitarist
+  and drummer make characters there), a new band, the hub, a first gig
+  through the natives, the gig guide's venue / event screens, the
+  difficulty screen, the shop, band profile, band roster.
+  `--walktest rb_career_screens_solo` (~70 s): a new guitarist, the hub,
+  the difficulty, the gig guide (a first gig through the natives; the
+  unlock row: mode 1 and back), the shop, the character profile.
+- Checks: `rb_texts:<tag>` (once the screen rests: a shot <tag>.bmp in
+  GD05_WALK_SHOTS, every label shown with no text or "Loading";
+  `rb_texts_end` fails if any screen had one; GD05_TEXTS_ALLOW=<tags>);
+  `rb_hub_chars:<n>` (the practice space with / without the previews: the
+  members' pixels, left half); `rb_gig_rows:<provider>:<labels>` (each
+  row's texts; each label filled on a row); `rb_solo_mode:<n>`;
+  `rb_solo_first_gig`; `rb_seldiff_min:<town>/<venue>/<event>|none` (the
+  difficulties disabled for the gig's min_difficulty); `rb_hometowns`;
+  `rb_bwt_min_difficulty`.
+- rb_full_band's test aid plays at Expert (RB's buzz caps by difficulty)
+  and takes every moment offered, checking its reward (x2 / x4 / x0 / x3);
+  GD05_MOMENTLOG=1 logs each gig's moment, buzz gain, cap, state;
+  GD05_MOMENT_SEED=<n> fixes the moments' draws. rb_full_band_end checks
+  the win instruments; rb_full_solo_won the golden instrument.
+
