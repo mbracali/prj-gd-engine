@@ -13,7 +13,7 @@
 #   tools/walks.sh <gd01 binary> <Guitar Hero (PS2) .iso> [walk ...]
 #
 # Walks (all by default): selftest logo_skip band quickplay mouse enhanced
-# gamepads gamepads_pad store. song_end and career_win are run by name (each plays a whole song). "band" runs first when another walk needs its save.
+# gamepads gamepads_pad store tutorial_pause. song_end and career_win are run by name (each plays a whole song). "band" runs first when another walk needs its save.
 # The universal menus (universal_mechanisms.md) are covered by: logo_skip and
 # band (1.1.1 skips, 1.1.2 band naming, band_typing), mouse (1.1.3, credits skip,
 # song row hover, one Back in Enhanced),
@@ -23,7 +23,7 @@ bin="$(realpath "$1")"
 iso="$(realpath "$2")"
 shift 2
 walks=("$@")
-[ ${#walks[@]} -eq 0 ] && walks=(selftest logo_skip band quickplay mouse enhanced gamepads gamepads_pad store)
+[ ${#walks[@]} -eq 0 ] && walks=(selftest logo_skip band quickplay mouse enhanced gamepads gamepads_pad store tutorial_pause)
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/gd01-walks.XXXXXX")"
 trap '[ -n "${WALK_KEEP:-}" ] && cp "$work"/*.log "$WALK_KEEP"/ ; rm -rf "$work"' EXIT
@@ -398,6 +398,20 @@ if band:
 d['profiles'][0].update(last_difficulty=diff, tutorials_done=3)
 json.dump(d, open(p, 'w'))
 EOF
+}
+
+# The tutorial's pause menu (#98, GD01-325): the guitar's Start pauses the
+# first lesson, Down, Down and green pick QUIT; the keyboard's Down and Enter
+# pick RESTART; the mouse shows the cursor over it (the game stays Playing).
+walk_tutorial_pause() {
+  needs_band
+  local tut="4000:keyDown,4300:keyDown,4600:keyReturn,7000:keyReturn"
+  run tutorial_pause 15000 "$tut,10000:start,11500:down,12000:down,12500:green" GD01_SKIP_BOOT=1
+  result tutorial_pause "$(has tutorial_pause "goto_screen tutorial_quit")" "guitar: Start, Down, Down, green on the tutorial's pause quits"
+  run tutorial_pause_keys 15000 "$tut,10000:keyReturn,11500:keyDown,12500:keyReturn" GD01_SKIP_BOOT=1
+  result tutorial_pause_keys "$(( $(grep -c "goto_screen tut_loading" "$work/tutorial_pause_keys.log") >= 2 ))" "keyboard: Down, Enter on the tutorial's pause restarts the lesson"
+  run tutorial_pause_cursor 13000 "$tut,10000:start,11000:hover100_100" GD01_SKIP_BOOT=1
+  result tutorial_pause_cursor "$(has tutorial_pause_cursor "cursor: shown")" "the mouse shows the cursor on the tutorial's pause"
 }
 
 # Unlock Shop: Career > UNLOCK SHOP > Guitars > the Gibson ES-335 ($600),

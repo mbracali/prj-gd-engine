@@ -449,6 +449,8 @@ private:
     double mouseUsedMs_ = -1e9;
     void cursorEvent(const SDL_Event& e);
     void updateCursor();
+    // A tutorial's pause menu is up (the game stays Playing under it, #98).
+    bool tutorialMenuUp() const { return tutorial_ && ui_ && ui_->currentScreen().rfind("tut_pause", 0) == 0; }
     Screen screen_ = Screen::NeedData;
     std::string message_;
 
@@ -1227,7 +1229,7 @@ void App::updateTouchLanes() {
     for (int p = 0; p < 2; ++p) {
         Input::TouchLanes l;
         TrackRenderer* tr = p == 0 ? track_.get() : multi_ ? track2_.get() : nullptr;
-        l.active = tr && screen_ == Screen::Playing && (!ui_ || (ui_->inGame() && ui_->trackShowing()));
+        l.active = tr && screen_ == Screen::Playing && !tutorialMenuUp() && (!ui_ || (ui_->inGame() && ui_->trackShowing()));  // a menu: Enter selects
         // The strike line, and 25 units up the highway (its nearer part, where the gems are readable).
         for (int f = 0; f < 5 && l.active; ++f)
             l.active = tr->laneScreen(f, 0, l.nearX[size_t(f)], l.nearY[size_t(f)]) && tr->laneScreen(f, 25, l.farX[size_t(f)], l.farY[size_t(f)]);
@@ -1362,6 +1364,7 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
             continue;
         }
         if (key.edge >= 2) {
+            mouseUsedMs_ = double(SDL_GetTicksNS()) / 1e6;  // as a real mouse motion (cursorEvent)
             if (ui_) ui_->mouse(key.mx, key.my, key.edge == 3);
             continue;
         }
@@ -2149,6 +2152,15 @@ void App::onAction(const InputEvent& e) {
             if (e.down) ui_->buttonDown(e.action == Action::Start ? UiSystem::Start : UiSystem::Cross, e.mode == ControllerMode::Guitar);
             break;
         }
+        // The tutorial's pause menu (tut_pause): the lesson script pauses with
+        // set_time_paused, not set_paused, so the game stays Playing; the menu
+        // over it takes every button as the other menus do (#98, GD01-325:
+        // before, only Start / Back reached it and the frets, strum and
+        // arrows were dropped as the lesson's own input).
+        if (tutorialMenuUp()) {
+            uiButton(e);
+            break;
+        }
         if ((e.action == Action::Back || e.action == Action::Start) && ui_ && ui_->inGame()) {
             // game screen: kPad_Start goes to the pause screen.
             if (e.down) ui_->buttonDown(UiSystem::Start, e.mode == ControllerMode::Guitar);
@@ -2399,9 +2411,10 @@ void App::cursorEvent(const SDL_Event& e) {
 
 void App::updateCursor() {
     const double now = double(SDL_GetTicksNS()) / 1e6;
-    const bool show = screen_ != Screen::Playing && (!ui_ || enhancedOn("mouse")) && now - mouseUsedMs_ < 3000;  // the ISO picker screen too
+    const bool show = (screen_ != Screen::Playing || tutorialMenuUp()) && (!ui_ || enhancedOn("mouse")) && now - mouseUsedMs_ < 3000;  // the ISO picker screen too
     if (show == cursorShown_) return;
     cursorShown_ = show;
+    if (SDL_getenv("GD01_UILOG")) SDL_Log("cursor: %s", show ? "shown" : "hidden");  // the walks' check (#98)
     if (show) SDL_ShowCursor();
     else SDL_HideCursor();
 }
