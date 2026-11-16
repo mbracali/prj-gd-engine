@@ -875,7 +875,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("enhanced_progress_loaded");
         // Enable Cut Content (not built: stays off), No Fail Mode, Autoplay,
         // Forgiving Hammer-ons and Pull-offs.
-        row(kX), row(kX), row(kX), row(kX);
+        row(kX), row(kX), row(kX);
+        // Song Speed and Track Speed (GDALL-053 / 054): left at 100 % and 1x.
+        press(kDown), wait(120), press(kDown), wait(120);
+        row(kX);
         check("enhanced_cheats");
         // Developer Keyboard Cheats' help, one key a line (GD02-160, #103).
         press(kDown), wait(150);
