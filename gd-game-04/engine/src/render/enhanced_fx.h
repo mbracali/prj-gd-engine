@@ -128,6 +128,7 @@ private:
     int expoIndex_ = 0;
     bool expoValid_ = false;
     uint64_t expoNs_ = 0;
+    uint64_t starNs_ = 0;  // the last Star Power blur frame (its trail and smear per 60 Hz frame, GD04-122)
     bool autoExposure(TextureId color, int sw, int sh);
     int starIndex_ = 0, historyIndex_ = 0;
     bool starValid_ = false, historyValid_ = false;
