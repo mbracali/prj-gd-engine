@@ -9,7 +9,10 @@
  *   nm chd_libchdr.o | awk '$2 ~ /^[TDBRCGSV]$/ {print $3}' | sort -u
  * A symbol missed here still links (it keeps its own name), so a new one is
  * only a clash risk, never a build break. Included by chd_image.cpp too, so
- * the wrapper calls the renamed libchdr functions. */
+ * the wrapper calls the renamed libchdr functions. ZSTD_isError is renamed
+ * in chd_libchdr.c with #pragma redefine_extname instead: zstd #undefs it
+ * before defining it. Check after a pin move that the object has no global
+ * symbol without the prefix (nm ... | grep -v gdchd_). */
 #ifndef GDCORE_CHD_LIBCHDR_NAMES_H
 #define GDCORE_CHD_LIBCHDR_NAMES_H
 #define avhuff_codec_decompress gdchd_avhuff_codec_decompress
@@ -241,7 +244,6 @@
 #define ZSTD_initStaticDDict gdchd_ZSTD_initStaticDDict
 #define ZSTD_initStaticDStream gdchd_ZSTD_initStaticDStream
 #define ZSTD_insertBlock gdchd_ZSTD_insertBlock
-#define ZSTD_isError gdchd_ZSTD_isError
 #define ZSTD_isFrame gdchd_ZSTD_isFrame
 #define ZSTD_isSkippableFrame gdchd_ZSTD_isSkippableFrame
 #define ZSTD_loadDEntropy gdchd_ZSTD_loadDEntropy

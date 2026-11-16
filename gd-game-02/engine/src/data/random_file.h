@@ -8,6 +8,8 @@
 #include <mutex>
 #include <string>
 
+#include "gd/core/platform/file.h"
+
 // A file opened for 64-bit random access reads (from gd01's data/iso9660).
 // Reads are serialised, so the audio worker and the main thread can share it.
 class RandomFile {
@@ -26,4 +28,6 @@ private:
     std::FILE* f_;
     uint64_t size_;
     std::mutex mutex_;
+    // A CHD disc image, read as the image it holds by gd-engine-core (GDUL-030).
+    std::unique_ptr<gd::core::platform::RandomAccessFile> core_;
 };

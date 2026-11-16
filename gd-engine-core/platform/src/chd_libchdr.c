@@ -8,6 +8,9 @@
  * into the same game modules, and the launcher and a module must never share
  * one by accident. */
 #include "chd_libchdr_names.h"
+/* zstd #undefs ZSTD_isError before defining it (a macro rename would not
+ * reach it): rename the symbol itself (GCC, Clang, MinGW). */
+#pragma redefine_extname ZSTD_isError gdchd_ZSTD_isError
 
 #ifndef MINIZ_ARCHIVE_APIS
 #define MINIZ_NO_ARCHIVE_APIS
