@@ -162,6 +162,7 @@ void Mixer::play(std::unique_ptr<VgsStream> stream, std::vector<Track> tracks, d
         fixedT_ = -leadInMs;
         framesPushed_ = 0;
         songFrames_ = 0;
+        tempo_ = 1;
         for (GuitarCopy& g : copies_) {
             g.gain = 1, g.target = 1, g.volume = 1, g.slipSpeed = 1;
             g.lag = 0, g.lagMs = 0, g.resyncSeen = g.resync.load();
@@ -174,6 +175,18 @@ void Mixer::play(std::unique_ptr<VgsStream> stream, std::vector<Track> tracks, d
     }
     SDL_UnlockAudioStream(stream_);
     resumeDevice();
+}
+
+void Mixer::setTempo(double tempo) {
+    if (!stream_) return;
+    SDL_LockAudioStream(stream_);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        tempo_ = std::fabs(tempo - 1.0) < 1e-6 ? 1.0 : std::clamp(tempo, 0.25, 4.0);
+        stretch_.reset(int(scratch_.size()), rate_);
+        stretch_.setTempo(tempo_);
+    }
+    SDL_UnlockAudioStream(stream_);
 }
 
 void Mixer::stop() {
@@ -194,7 +207,7 @@ void Mixer::setPaused(bool paused) {
     } else {
         // Re-anchor so the clock resumes where it stopped.
         anchorNs_ = SDL_GetTicksNS();
-        anchorFrames_ = static_cast<int64_t>((pausedTimeMs_ / 1000.0) * rate_) + leadIn_;
+        anchorFrames_ = static_cast<int64_t>((pausedTimeMs_ / tempo_.load() / 1000.0) * rate_) + leadIn_;
         paused_ = false;
     }
     frameNs_ = 0;
@@ -206,12 +219,12 @@ double Mixer::songTimeMs(uint64_t ticksNs) const {
     if (ticksNs == 0) ticksNs = SDL_GetTicksNS();
     double elapsed = (double(ticksNs) - double(anchorNs_.load())) / 1e9;
     double frames = anchorFrames_.load() + std::max(0.0, elapsed) * rate_;
-    return (frames - leadIn_.load()) * 1000.0 / rate_;
+    return (frames - leadIn_.load()) * 1000.0 / rate_ * tempo_.load();
 }
 
 double Mixer::frameTimeMs() {
     if (fixedStep_ > 0) {
-        if (!paused_) fixedT_ += fixedStep_;
+        if (!paused_) fixedT_ += fixedStep_ * tempo_.load();
         return fixedT_;
     }
     uint64_t now = SDL_GetTicksNS();
@@ -220,7 +233,7 @@ double Mixer::frameTimeMs() {
         frameMs_ = raw, frameNs_ = now;
         return raw;
     }
-    double predicted = frameMs_ + double(now - frameNs_) / 1e6;
+    double predicted = frameMs_ + double(now - frameNs_) / 1e6 * tempo_.load();
     double err = raw - predicted;
     // Big jumps (seek, resume, a stalled device) snap; small ones ease in at
     // 5 % a frame, never moving the clock backwards.
@@ -393,6 +406,16 @@ void Mixer::fill(int frames) {
             s = std::move(res);
         }
         songFrac_ = need - std::floor(need);
+    } else if (tempo_.load() != 1.0 && stretch_.channels() == int(scratch_.size())) {
+        // Song Speed (GDALL-053): the stretcher reads the song at the tempo, pitch kept.
+        for (auto& s : scratch_) {
+            s.resize(audible);
+            ptrs.push_back(s.data());
+        }
+        stretch_.process(ptrs.data(), audible, [&](float* const* d, int n) {
+            vgs_->decode(d, n);  // silence past the end, as the plain path
+            return n;
+        });
     } else {
         for (auto& s : scratch_) {
             s.resize(audible);

@@ -1970,6 +1970,7 @@ UiSystem::UiSystem(Renderer& renderer, const GameData& data, Hooks hooks)
         ctx.difficulty = [this] { return static_cast<GameObj*>(interp_.findObject("game"))->difficulty; };
         ctx.song = [this] { return interp_.send("game", "get_song", {}).str(); };
         ctx.starsOf = [this](int score) { return hooks_.starsOf ? hooks_.starsOf(score) : 3; };
+        ctx.noSave = [this] { return hooks_.noSave && hooks_.noSave(); };
         ctx.localize = [this](const std::string& t) { return res_->localize(t); };
         ctx.getPlayer = [this](std::string& c, std::string& g, std::string& sk) {
             auto* p = static_cast<GameObj*>(interp_.findObject("game"))->players[0].get();

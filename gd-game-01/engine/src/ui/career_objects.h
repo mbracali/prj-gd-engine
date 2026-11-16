@@ -17,6 +17,9 @@ struct CareerContext {
     std::function<int()> difficulty;                  // GameConfig +0x90
     std::function<std::string()> song;                // GameConfig +0x98
     std::function<int(int score)> starsOf;            // num_stars for the current song (3..5)
+    // The song saves no record, stars, cash or high score: Enhanced Song
+    // Speed not 100 % (GDALL-053, GH2DX's rule: it is practice).
+    std::function<bool()> noSave;
     std::function<std::string(const std::string&)> localize;
     // Player 0's config: character, guitar, skin.
     std::function<void(std::string&, std::string&, std::string&)> getPlayer;
