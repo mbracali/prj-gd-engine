@@ -908,8 +908,9 @@ private:
     std::vector<std::pair<std::string, std::string>> dialogResults_;
     std::string userFilesStatus_;
     bool fpsCounter_ = false;
-    double fps_ = 0;
-    uint64_t fpsLastNs_ = 0;
+    double fps_ = 0, fpsEma_ = 0;
+    uint64_t fpsLastNs_ = 0, fpsWindowNs_ = 0;
+    int fpsFrames_ = 0;
     std::string venuePath_;
     gfx::PostProcState venuePost_;  // the static shot's PostProc (the director's from M8 phase 2)
     bool venuePostOn_ = false;
@@ -5424,14 +5425,31 @@ void App::drawBackendLabel() {
     t.draw(canvas_.renderer().materials(), "helveticablack.font", s, 23, y, 18, {1, 1, 1, 0.9f}, 0x41);
 }
 
-// Bottom left, in GH2's menu font: the frames drawn a second (averaged).
+// Bottom left, in GH2's menu font: the frames shown a second, counted over
+// half a second as gd01's counter (D122). The old counter averaged each
+// frame's 1 / dt (5 % a frame): with the world drawn at 24 a second (D55) the
+// frames alternate long and short, and the mean of the rates is not the rate
+// (2 ms + 10 ms frames: it read 300 for 167), a frame a few microseconds
+// after the last jumped it by hundreds. GD05_FPSCOUNTER_LEGACY=1: the old
+// average; GD05_FPSLOG=1 logs both against the frames counted.
 void App::drawFpsCounter() {
+    static const bool legacy = envOn("GD05_FPSCOUNTER_LEGACY"), log = envOn("GD05_FPSLOG");
     const uint64_t now = SDL_GetTicksNS();
     if (fpsLastNs_ && now > fpsLastNs_) {
         const double f = 1e9 / double(now - fpsLastNs_);
-        fps_ = fps_ <= 0 ? f : fps_ * 0.95 + f * 0.05;
+        fpsEma_ = fpsEma_ <= 0 ? f : fpsEma_ * 0.95 + f * 0.05;
     }
     fpsLastNs_ = now;
+    ++fpsFrames_;
+    if (!fpsWindowNs_) fpsWindowNs_ = now, fpsFrames_ = 0;
+    else if (now - fpsWindowNs_ >= 500000000ull) {
+        const double counted = double(fpsFrames_) * 1e9 / double(now - fpsWindowNs_);
+        if (!legacy) fps_ = counted;
+        if (log) SDL_Log("fps counter: shown %d, %d frames in %.0f ms = %.1f a second (the old average %.1f)", int(std::lround(legacy ? fpsEma_ : fps_)),
+                         fpsFrames_, double(now - fpsWindowNs_) / 1e6, counted, fpsEma_);
+        fpsWindowNs_ = now, fpsFrames_ = 0;
+    }
+    if (legacy) fps_ = fpsEma_;
     if (!fpsCounter_ || !ui_ || ui_->headless()) return;
     char buf[32];
     std::snprintf(buf, sizeof buf, "%d FPS", int(std::lround(fps_)));

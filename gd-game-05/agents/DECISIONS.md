@@ -2180,3 +2180,22 @@ pattern). Each says what, why and how to undo it.
   mesh draws opaque (eyebrows.mat blend 1, kBlendSrc on the disc).
 - **Undo:** GD05_HEADBONES_LEGACY=1.
 
+
+## D122
+- **What (2026-11-16, GD05-117, owner: "The fps count is broken"):** the
+  Enhanced FPS counter averaged each frame's rate (1 / dt, 5 % a frame;
+  copied from gd02). That is not the frame rate when frames are uneven:
+  with the world drawn at 24 a second (D55) a song's frames alternate long
+  (world drawn) and short (picture held), and the mean of the rates reads
+  far above the frames shown (2 ms + 10 ms frames: 300 for 167); a frame a
+  few microseconds after the last moves it by hundreds, and a stall (a
+  load: 1 frame in 0.9 s) barely shows. Now it counts the frames shown
+  over half a second, as gd01's counter (App::frame fpsWindowNs_). Same
+  place, size and font.
+- **Measured (GD05_FPSLOG=1 `fps counter` lines, walk rb_pause_quit,
+  offscreen, 24 windows):** shown against the frames counted: legacy off by
+  more than 5 % in 11 windows (in the song 284-330 shown for 116-204
+  counted, the load window 223 for 1.2), now 0 windows over 5 % (the one at
+  5 % is 2 shown for 1.9). Screenshots in song at 13 s: legacy "330 FPS",
+  now "223 FPS".
+- **Undo:** GD05_FPSCOUNTER_LEGACY=1.
