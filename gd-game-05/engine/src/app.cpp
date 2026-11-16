@@ -28,6 +28,7 @@
 #include "audio/audio_device.h"
 #include "audio/mixer.h"
 #include "audio/synth.h"
+#include "char/rig.h"
 #include "char/character.h"
 #include "char/midi_parser.h"
 #include "data/dta.h"
@@ -2714,6 +2715,14 @@ void App::updateSong(float t) {
             const gfx::Vec3 c = venueView_->camera().position();
             const std::array<float, 3> cam{c.x, c.y, c.z};
             band_->update(world_->seconds(), world_->beats(), &cam);
+        }
+        {
+            // The world clock (GD05-102): the shake and the hair step at the
+            // world's paced rate (24 under ProFilm); GD05_WORLD_CLOCK_LEGACY=1: 60.
+            static const bool legacyClock = SDL_getenv("GD05_WORLD_CLOCK_LEGACY") != nullptr;
+            const int wf = legacyClock ? 0 : canvas_.renderer().post().worldFps();
+            chr::setHairStepHz(wf > 0 ? wf : 60);
+            if (director_) director_->setShakeStepHz(float(wf > 0 ? wf : 60));
         }
         if (director_) {
             director_->setStarPower(player_->starPowerActive() || (player2_ && player2_->starPowerActive()));

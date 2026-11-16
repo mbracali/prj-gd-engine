@@ -966,7 +966,11 @@ void CameraDirector::play(const scene::CamShot& shot, ShotState& st, float f, fl
     const float maxZ = (ka.shakeMaxAngle[1] + (kb.shakeMaxAngle[1] - ka.shakeMaxAngle[1]) * t) * kPi / 180;
     // GH2's 1/60 s frames: whole ones only, the remainder carried to the next
     // frame (one impulse draw and spring step per 1/60 s at any frame rate).
-    st.shakeSteps += dt * 60;
+    // RB steps it once a world frame: the world paced at the PostProc's
+    // emulate_fps (24 under ProFilm) shakes 24 times a second, not 60 (RB2
+    // DX scales the shake by 0.25 when it runs the venue above 25 FPS:
+    // study_rb2dx) [I: the poll per paced frame] (GD05-102).
+    st.shakeSteps += dt * shakeHz_;
     const int steps = int(std::min(st.shakeSteps + 0.01f, 15.0f));
     st.shakeSteps -= float(steps);
     if (st.shakeSteps > 1) st.shakeSteps = 0;

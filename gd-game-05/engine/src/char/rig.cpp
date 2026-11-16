@@ -1094,8 +1094,13 @@ void Rig::Impl::pollHair(Hair& h) {
 // rate (at most 4 steps a frame, so a hitch cannot fling the strands). A
 // frame without a step still places the bones from the points, so the hair
 // follows the head (the segments aimed as the last step left them) [I].
+namespace {
+double gHairStepHz = 60;
+}  // namespace
+void setHairStepHz(double hz) { gHairStepHz = hz > 0 ? hz : 60; }
+
 void Rig::Impl::stepHair(Hair& h, double dSeconds) {
-    constexpr double kStep = 1.0 / 60;
+    const double kStep = 1.0 / gHairStepHz;
     h.clock += std::max(0.0, dSeconds);
     int n = int(h.clock / kStep);
     h.clock -= n * kStep;

@@ -23,6 +23,12 @@
 // character's, called through the hooks at their place in that order.
 namespace chr {
 
+// The world clock the hair steps on (Hz): RB's world runs at the PostProc's
+// emulate_fps (24 under ProFilm, D55) and its hair is tuned for it (RB2 DX
+// resets the hair harder when it raises the venue rate: study_rb2dx);
+// GH2's 60 by default (GD05-102).
+void setHairStepHz(double hz);
+
 struct RigContext {
     double beat = 0;          // song beat (TaskMgr)
     float dBeats = 0;         // this poll

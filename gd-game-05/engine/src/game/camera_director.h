@@ -87,6 +87,9 @@ public:
     void setStarPower(bool on) { starPower_ = on; }
     // The shots' camera shake shown (Enhanced Options > Disable Shaky Camera turns it off).
     void setShake(bool on) { shake_ = on; }
+    // The world clock the shake steps on (Hz): the world's paced rate (24
+    // under ProFilm), 60 (GH2's) when the world draws every frame (GD05-102).
+    void setShakeStepHz(float hz) { shakeHz_ = hz > 0 ? hz : 60; }
     bool shake() const { return shake_; }
     bool starPower() const { return starPower_; }
 
@@ -203,6 +206,7 @@ private:
     Dof dof_;
     bool starPower_ = false;
     bool shake_ = true;
+    float shakeHz_ = 60;
     bool pickEnabled_ = true, freeCam_ = false;
     std::vector<const scene::CamShot*> sequence_;
     int ppCalls_ = 0;                             // pp_blend_task / PostProc select calls
