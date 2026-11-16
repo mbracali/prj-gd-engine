@@ -1837,3 +1837,96 @@ pattern). Each says what, why and how to undo it.
   suspected: not fixed (a first version of the probe read 116 degrees from
   the frame a shot_over cut is made in, which still shows the old shot).
 - **Undo:** the switches above.
+
+## D108
+- **What (2026-11-16, GD05-106 A1 / A4):** the band's eyes turn. RB's
+  CharLookAt Poll (RB 0x82321A48) turns the source bone, else the pivot
+  [C]; every eye look-at on the disc has source "" and pivot
+  bone_X-eye.mesh, and the port returned at once, so no eye ever moved
+  (GD05_EYES_LEGACY). CharEyes (RB 0x82329588) [C]: a new gaze point after
+  3 s, or after 1 s on a blink (the face servo's Blink weight falling from
+  above 0.8 after it went under 0.3) or a head turn, no random draw; the
+  port had GH2's 8 s and right-lid test (GD05_GAZE_LEGACY). The lids'
+  follow of the eyes (A5) is not done.
+- **Measured (bandcheck "face", inbloom 60 s, every member):** eye turn from
+  bind 0 -> up to 25 deg (the look-at box: yaw -16..20, pitch -16..5), over
+  2 deg on 0 -> ~98 % of frames, gaze points 7-8 -> 23-26. Close shots
+  (GD05_FACE_CAM): legacy shows the non-singers' eyes in their bind pose,
+  iris rolled up under a half-closed lid; now the irises look ahead / around.
+- **Undo:** GD05_EYES_LEGACY=1, GD05_GAZE_LEGACY=1.
+
+## D109
+- **What (2026-11-16, GD05-106 A2 / A6):** blinks on everyone.
+  FaceFxLipSyncServo Poll (RB 0x82324110) [C]: Base first, the node whose
+  clip is the set's `Blink` at its full value (enable_blink its only gate,
+  TRUE except for the band snapshot), the other nodes x the servo's weight.
+  The port scaled the whole face by the weight and skipped the face at 0:
+  the guitarists and the drummer (weight owner singalong.weight, 0 outside
+  VENUE 85-87) never blinked and their faces stayed in the skeleton's bind.
+  set_blink_song (LIPSERVO_COMMON) [C data]: the blink track loops at
+  song_offset random_float 0..1000 per servo; the port played it once from 0
+  for everyone. The offsets come from their own generator [I: RB uses its one
+  global RandomGen; a separate one keeps the band's clip picks as before].
+- **Measured:** blinks per member 0 / 0 / 0 / 2 -> 17 / 19 / 17 / 8 (16-18 a
+  minute for the non-singers; the singer's come from its song's .voc); upper
+  lid up to 0 -> 35-44 deg; blinks within 50 ms of another member's 2 of 61.
+- **Undo:** GD05_BLINK_LEGACY=1 (both).
+
+## D110
+- **What (2026-11-16, GD05-106 A3):** expressions. The musician / shell
+  CharClip types' enter (char_objects.dta) sends `change_face_group
+  [viseme_group]` (default `normal`); BandCharacter (RB 0x822E5850 ->
+  0x822E4C58) finds that group in expression.drv's clips (the face set,
+  CHAR_COMMON sync_objects) and plays a clip, the 0x80000-flagged one first
+  (kExpressionFirst [I]); its poll (RB 0x822E6360) plays another when it
+  ends [C]. Port: main.drv / main_add.drv clip starts call
+  Character::changeFaceGroup; the clip (realtime, 6-12 s) runs on its own
+  clock and is added as an offset from Base under the visemes and the blink,
+  at expression.drv's weight, the old one blended out over the new one's
+  blend width (beats) [I: the driver's place in the servo's blend not read;
+  the same group keeps its clip].
+- **Measured:** expression clips started per member (inbloom 60 s) 0 -> 17 /
+  18 / 30 / 12, 5-11 distinct clips each, a clip on every frame; walk logs
+  `char <name>: expr <group> <clip>` under GD05_BANDLOG.
+- **Undo:** GD05_EXPR_LEGACY=1.
+
+## D111
+- **What (2026-11-16, GD05-108 B1):** the drum hits land on the notes.
+  CharDriverMidi midi_parser (RB 0x82342168) plays its clip at -length:
+  0x82312CB0 -> 0x82361620 stores that value as the node's frame (+0x10)
+  [C], so the clip's frame 0 lands on the note. The port started at the
+  clip's first frame - length; the drum hand clips hold a 0.7-0.85 beat
+  lead-in at negative frames and touch their pad at frame 0 (their data:
+  each pad's target nearest its pad at frame 0, 1.4-4.9 units), so every hit
+  came that much late. Applies to every CharDriverMidi clip (guitar strums
+  and frets start at 0: unchanged; bass plucks -0.25, kit pads -0.05..-0.27).
+- **Measured (bandcheck "drum reach", new):** at each left / right hand clip
+  the drum parsers start: the stick tip (bone_X-tip) to its IK target and to
+  the pad (bone_target_<pad>) at the note, the closest approach and its time,
+  the hand IK weight. inbloom, tip to the pad at the note p50: hi-hat 18.3
+  -> 4.7, cymbals 21-34 -> 3-4.6, snare 3.4 / 4.5 -> 2.4 / 1.7; closest
+  approach at the note -6..+5 ms (was +30..+230 ms, or not within 250 ms);
+  highwaystar toms 14-26 -> 2-4. Drum notes with a limb moving 236 -> 252 of
+  252. Hits with the hand IK off (71 of 249 in inbloom: a directed shot's
+  stand_cut_stand_windmill, idle_play_c_01, whose main clips flag the arms)
+  are RB's rule and left out of the numbers. Guitar / bass reach unchanged.
+- **Undo:** GD05_MIDICLIP_LEGACY=1.
+
+## D112
+- **What (2026-11-16, GD05-108):** the servo's rotation channels start at
+  their bones' bind [I: RB's starting values not read]. Bones::add starts a
+  quaternion at the identity and the servo poses every channel, so a bone
+  no driver had written yet was turned to the identity: the kit's
+  bone_R-cymbal_stand (bind -141 deg about z, written only by
+  right_crash.dmidi's crash clips) put the crash and its stick target 10+
+  units out of the drummer's reach, the IK stretched the arm (inbloom at
+  rest: R-cymbal target 97 units from the tip, the others 32). Positions
+  keep 0 (the blender-fed foot targets hold their start while the blend
+  weight stays under 1; starting them at the bind broke "channels within
+  their clips").
+- **Measured:** highwaystar drummer stretch 2.21 x bind on 88 frames (4.19 x
+  on 271 with D111 alone) -> 1.00 x, 0 frames; bandcheck passed; stick tip
+  to its IK target at the note p95 <= 0.44 units on every pad (was up to 2.5,
+  65 at a crash). Guitar, bass, vocals: no channel at weight 0 off its bind,
+  so unchanged. Close shot: the crash now hit with the arm forward.
+- **Undo:** GD05_SERVOBIND_LEGACY=1.

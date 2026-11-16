@@ -77,6 +77,11 @@ public:
     bool newSpot(const std::string& ik, const std::string& spot, double beats);
     // CharIKMidi (fret.ik): {midi_parser <spot> <start> <end>} / new_spot.
     bool ikMidi(const std::string& ik, const std::string& spot, double start, double end, double now);
+    // Rock Band's CharEyes read the face servo's Blink weight (RB 0x82329588):
+    // the character passes it each poll (< 0: no Rock Band face).
+    void setBlinkValue(float v);
+    // New gaze points picked so far, every CharEyes (diagnostics).
+    int eyeRetargets() const;
     // Hair back to rest (teleports: reset_hair).
     void resetHair();
     // A component switched on / off by name (e.g. the guitar IK while walking).

@@ -6,6 +6,8 @@
 #include <cmath>
 #include <set>
 
+#include <SDL3/SDL.h>
+
 #include "char/char_driver.h"
 
 // The pollables of a character directory, ported from the Xbox 360 code
@@ -25,6 +27,22 @@ using M3 = std::array<float, 9>;
 constexpr float kPi = 3.14159265f;
 constexpr float kDeg = 0.017453292f;
 constexpr float kHuge = 1e30f;
+
+bool envSwitch(const char* name) {
+    const char* e = SDL_getenv(name);
+    return e && *e && *e != '0';
+}
+// GD05_EYES_LEGACY=1: an eye look-at with no source does nothing (the port
+// before GD05-106); GD05_GAZE_LEGACY=1: GH2's CharEyes timing (8 s, the right
+// lid's blinks with a 1 in 3 draw) instead of Rock Band's.
+bool eyesLegacy() {
+    static const bool v = envSwitch("GD05_EYES_LEGACY");
+    return v;
+}
+bool gazeLegacy() {
+    static const bool v = envSwitch("GD05_GAZE_LEGACY");
+    return v;
+}
 
 V3 sub(const V3& a, const V3& b) { return {a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }
 V3 add(const V3& a, const V3& b) { return {a[0] + b[0], a[1] + b[1], a[2] + b[2]}; }
@@ -171,6 +189,7 @@ struct Rig::Impl {
     Skeleton& sk;
     const scene::Directory& dir;
     Random rng{0x45594553u};
+    float blinkValue = -1;  // the face servo's Blink weight this poll (Rock Band's eyes); < 0: none
 
     struct Weight {
         float weight = 1;
@@ -256,6 +275,9 @@ struct Rig::Impl {
         int lid = -1;              // right_lid (+0x38): its blinks retarget (GD02-050 G3)
         float lidLast = 0;         // +0x5c (Enter: 0)
         float lidDelta = 0;        // +0x60 (Enter: 0)
+        bool blinkArmed = false;   // RB: the servo's Blink went under 0.3
+        float blinkLast = 0;       // RB: the servo's Blink last poll
+        int retargets = 0;         // diagnostics (bandcheck)
         std::vector<std::pair<int, float>> interests;  // (object, radius); none on the disc
     };
     // CharHair (Poll 0x8217B898, reset 0x8217B6F0).
@@ -421,6 +443,12 @@ void Rig::Impl::build() {
             LookAt k;
             k.name = o->name;
             k.source = bone(l->source), k.pivot = bone(l->pivot), k.dest = bone(l->dest);
+            // Rock Band's CharLookAt Poll (RB 0x82321A48) [C]: the source if
+            // set, else the pivot, is the bone turned; every eye look-at on the
+            // disc has source "" (GD05-106: the port returned at once, the
+            // eyes never moved).
+            const bool pivotIsSource = !eyesLegacy() && l->source.empty() && k.pivot >= 0;
+            if (pivotIsSource) k.source = k.pivot;
             k.halfTime = l->values[0];
             k.fadeMin = l->values[5], k.fadeMax = l->values[6], k.fadeRate = l->values[7];
             k.allowRoll = l->allowRoll;
@@ -437,7 +465,7 @@ void Rig::Impl::build() {
             p.kind = kLookAt, p.index = lookats.size() - 1;
             // 0x8216FA08: changed by the pivot (else the source), changes the source.
             p.reads = {l->pivot.empty() ? l->source : l->pivot};
-            p.writes = {l->source};
+            p.writes = {pivotIsSource ? l->pivot : l->source};
         } else if (auto* e = o->as<scene::CharEyes>()) {
             Eyes k;
             k.name = o->name;
@@ -941,6 +969,7 @@ void Rig::Impl::retarget(Eyes& e) {
     e.timer = 0;
     e.smoothed = 0;
     e.lastDot = kHuge;
+    ++e.retargets;
 }
 
 // 0x82170BA8: the eyes keep their point until 8 s have passed, or (after
@@ -957,7 +986,17 @@ void Rig::Impl::pollEyes(Eyes& e, const RigContext& ctx) {
     // just turning to open; one in three (RandomFloat, drawn only then, as
     // GH2's short-circuit) moves the eyes to a new point after it.
     bool blink = false;
-    if (e.lid >= 0) {
+    // Rock Band's CharEyes Poll (RB 0x82329588) [C]: the blink is the face
+    // servo's Blink weight (servo +0x10c) falling from above 0.8 after it
+    // went under 0.3; a new point after 3 s, or after 1 s on a blink or a
+    // head turn; no random draw. GD05_GAZE_LEGACY=1: GH2's below.
+    const bool rb = !gazeLegacy() && blinkValue >= 0;
+    if (rb) {
+        const float v = blinkValue;
+        if (v < 0.3f) e.blinkArmed = true;
+        if (e.blinkArmed && e.blinkLast > 0.8f && v < e.blinkLast) blink = true, e.blinkArmed = false;
+        e.blinkLast = v;
+    } else if (e.lid >= 0) {
         const float v = row(sk.local(e.lid).rot, 0)[0];
         const float dv = v - e.lidLast;
         blink = v < -0.1f && dv > 0 && e.lidDelta <= 0 && rng.real(0.0f, 1.0f) < 0.33f;
@@ -965,7 +1004,8 @@ void Rig::Impl::pollEyes(Eyes& e, const RigContext& ctx) {
     }
     if (e.lastDot != kHuge) {
         e.smoothed = ((d - e.lastDot) - e.smoothed) * 0.1f + e.smoothed;
-        if (8 < e.timer || (1 < e.timer && (blink || (e.threshold < d && 0 < e.smoothed)))) retarget(e);
+        const float hold = rb ? 3.0f : 8.0f;
+        if (hold < e.timer || (1 < e.timer && (blink || (e.threshold < d && 0 < e.smoothed)))) retarget(e);
     }
     e.lastDot = d;
     e.lastForward = row(sk.world(e.head).rot, 1);
@@ -1213,6 +1253,14 @@ bool Rig::ikMidi(const std::string& ik, const std::string& spot, double start, d
             return true;
         }
     return false;
+}
+
+void Rig::setBlinkValue(float v) { impl_->blinkValue = v; }
+
+int Rig::eyeRetargets() const {
+    int n = 0;
+    for (const auto& e : impl_->eyes) n += e.retargets;
+    return n;
 }
 
 void Rig::resetHair() {

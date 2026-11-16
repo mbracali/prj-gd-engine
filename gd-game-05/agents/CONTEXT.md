@@ -125,6 +125,13 @@ Wave G06 band (GD05-066/067/068):
   `GD05_PREFAB_VOCALS=vocals2` (any instrument: GD05_PREFAB_GUITAR, _BASS,
   _DRUM) picks the premade; bandcheck's "face rest" line checks each
   member's jaw against its face clips (D94).
+- GD05-106 / 108 (D108-D112): bandcheck also prints informative `face
+  <member> eyes / blinks / expressions` lines, blinks together, and `drum
+  reach` per hand and pad (stick tip to its IK target and to the pad at the
+  note, closest approach and its time, the hand IK weight; hits with the IK
+  off counted apart). GD05_DRUMREACH_LOG=1 logs each hit's targets,
+  GD05_STRETCH_LOG=1 each stretched frame. Legacy switches: GD05_EYES /
+  GAZE / BLINK / EXPR / MIDICLIP / SERVOBIND_LEGACY=1.
 
 Wave G06 highway and crowd (GD05-070 / GD05-071):
 - `--walktest rb_highway`: App::rbProbes under every frame: the Overdrive

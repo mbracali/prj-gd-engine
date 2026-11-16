@@ -779,6 +779,19 @@ void Band::rbPlayGroup(Member& m) {
     if (log) SDL_Log("band: %8.2f %s %s %s (flags %#x)", beat_, m.slot.c_str(), d->name().c_str(), clip->name.c_str(), m.rbFlags);
 }
 
+// The musician / shell CharClip types' enter (char_objects.dta) [C data]:
+// {if [viseme_group] {$clip.dude change_face_group [viseme_group]}}, the
+// type's default `normal`; BandCharacter change_face_group (RB 0x822E5850 ->
+// 0x822E4C58) plays a clip of that group on expression.drv (GD05-106 A3).
+void Band::rbFaceGroup(Member& m, const scene::CharClipSamples& clip) {
+    if (!startsWith(m.type, "rb_") || !m.character->rbFace()) return;
+    const std::string& t = clip.header.type;
+    if (t != "musician" && t != "shell") return;
+    std::string g = headerProp(clip.header, "viseme_group");
+    if (g.empty()) g = "normal";
+    if (m.character->changeFaceGroup(g) && log) SDL_Log("band: %8.2f %s expr %s <- %s", beat_, m.slot.c_str(), g.c_str(), clip.name.c_str());
+}
+
 // CharDriverMidi midi_parser (RB 0x82342168) [C]: the clip starts `length`
 // before its first frame (seconds x its rate for a realtime clip) and
 // blends in over that length.
@@ -788,8 +801,26 @@ bool Band::rbDriverClip(Member& m, const std::string& driver, scene::CharClipSam
     float frames = length;
     if (clip->playFlags & kPlayRealTime) frames *= clip->framesPerSec;
     if (frames < 0) frames = 0;
-    d->playAt(clip, 0, clip->startFrame - frames, 0, frames);
-    if (log) SDL_Log("band: %8.2f %s %s %s over %.2f", beat_, m.slot.c_str(), driver.c_str(), clip->name.c_str(), frames);
+    // The node's frame is the value passed, -length (RB 0x82312CB0 ->
+    // 0x82361620: node +0x10 = f1) [C]: the clip's frame 0, where the hand
+    // clips touch their pad (their data: the pad's target nearest it at
+    // frame 0), lands on the note; their lead-in sits at negative frames
+    // (-0.7..-0.85 beats). GD05_MIDICLIP_LEGACY=1: from the clip's first
+    // frame, as before (the drummer's hits 0.7..0.85 beats late, GD05-108).
+    static const bool legacy = [] {
+        const char* e = SDL_getenv("GD05_MIDICLIP_LEGACY");
+        return e && *e && *e != '0';
+    }();
+    d->playAt(clip, 0, (legacy ? clip->startFrame : 0.0f) - frames, 0, frames);
+    if (rbCheck_ && song_ && m.type == "rb_drum" && (driver == "left_hand.dmidi" || driver == "right_hand.dmidi")) {
+        // bandcheck drum reach: the note, `length` from now (frame 0 lands there;
+        // GD05_MIDICLIP_LEGACY: the clip's first frame).
+        const double div = song_->tempo.division();
+        const double now = song_->tempo.tickToMs(beat_ * div);
+        const double at = (clip->playFlags & kPlayRealTime) ? now + double(length) * 1000.0 : song_->tempo.tickToMs((beat_ + double(length)) * div);
+        rbCheckDrumHit(at, driver == "left_hand.dmidi" ? 0 : 1, clip);
+    }
+    if (log) SDL_Log("band: %8.2f %s %s %s over %.2f (start %.2f)", beat_, m.slot.c_str(), driver.c_str(), clip->name.c_str(), frames, double(clip->startFrame));
     return true;
 }
 
@@ -905,6 +936,40 @@ struct Band::RbCheck {
     // The face's rest (GD05-097): each member's jaw from its bind (degrees),
     // the most over the run.
     std::map<std::string, float> jawWorst;
+    // Faces (GD05-106): per member, the eyes' turn from bind (degrees, the
+    // most, and frames over 2), blinks (the servo's Blink rising past 0.8),
+    // each blink's song time, the upper lid's turn, expressions.
+    struct Face {
+        float eyeMax = 0, lidMax = 0;
+        int eyeFrames = 0, eyeMoved = 0;
+        float eyeMin = 1e30f, eyeTop = 0;
+        int blinks = 0;
+        bool blinkHigh = false;
+        std::vector<double> blinkMs;
+        int expFrames = 0, faceFrames = 0;
+        double firstMs = -1, lastMs = 0;
+        std::set<std::string> expClips;
+        std::string firstGroup;
+    };
+    std::map<std::string, Face> face;
+    // Drum reach (GD05-108 B1): each hand clip the drum parsers start, its hit
+    // time (the clip's first frame), the pad its IK target calls, the stick
+    // tip's distance to that target / the pad at the hit, the closest approach
+    // and its time against the hit, the hand IK's weight at the hit.
+    struct DrumHit {
+        double ms = 0;
+        int hand = 0;  // 0 left, 1 right
+        std::string clip;
+        bool noted = false;
+        std::string pad;
+        float bestLocal = 1e30f, localAtNote = -1;
+        float clipMin = 1e30f, clipMinFrame = 0, clipStart = 0;
+        double bestLocalMs = 0;
+        float tipAtNote = -1, padAtNote = -1, ikAtNote = -1;
+        float minPad = 1e30f;
+        double minPadMs = 0;
+    };
+    std::vector<DrumHit> drumHits;
 };
 
 bool Band::rbLegacy() {
@@ -978,7 +1043,11 @@ void Band::rbCheckFrame() {
             if (rest < 0.5f) continue;
             const float r = len3(sk.local(i).pos) / rest;
             if (r > k.maxStretch[m.slot]) k.maxStretch[m.slot] = r, k.worstBone[m.slot] = sk.name(i);
-            if (r > 1.2f) bad = true;
+            if (r > 1.2f) {
+                static const bool slog = SDL_getenv("GD05_STRETCH_LOG") != nullptr;
+                if (slog && !bad) SDL_Log("stretch: %.0f %s %s %.2f", ms, m.slot.c_str(), sk.name(i).c_str(), double(r));
+                bad = true;
+            }
             if (auto it = k.minStretch.find(m.slot); it == k.minStretch.end() || r < it->second) k.minStretch[m.slot] = r, k.shortBone[m.slot] = sk.name(i);
         }
         if (bad) ++k.stretchFrames[m.slot];
@@ -1021,6 +1090,87 @@ void Band::rbCheckFrame() {
             out = sk.world(i).pos;
             return true;
         };
+        if (c.rbFace() && ms > 0) {
+            RbCheck::Face& f = k.face[m.slot];
+            ++f.faceFrames;
+            if (f.firstMs < 0) f.firstMs = ms;
+            f.lastMs = ms;
+            const int le = sk.find("bone_L-eye.mesh"), lid = sk.find("bone_L-lid.mesh");
+            if (le >= 0) {
+                const float ang = angleBetween(sk.local(le).rot, sk.bind(le).rot);
+                f.eyeMax = std::max(f.eyeMax, ang);
+                f.eyeMin = std::min(f.eyeMin, ang), f.eyeTop = std::max(f.eyeTop, ang);
+                ++f.eyeFrames;
+                if (ang > 2) ++f.eyeMoved;
+            }
+            if (lid >= 0) f.lidMax = std::max(f.lidMax, angleBetween(sk.local(lid).rot, sk.bind(lid).rot));
+            const float bv = c.blinkValue();
+            if (bv > 0.8f && !f.blinkHigh) ++f.blinks, f.blinkMs.push_back(ms);
+            f.blinkHigh = bv > 0.8f;
+            if (const auto* e = c.expressionClip()) {
+                ++f.expFrames;
+                f.expClips.insert(e->name);
+                if (f.firstGroup.empty()) f.firstGroup = c.faceGroup();
+            }
+        }
+        if (m.type == "rb_drum" && !k.drumHits.empty()) {
+            static std::map<const chr::Character*, std::array<std::vector<int>, 2>> targetsOf;
+            static std::map<const chr::Character*, std::array<std::string, 2>> ikOf;
+            auto& tg = targetsOf[&c];
+            if (tg[0].empty() && tg[1].empty()) {
+                for (int i = 0; i < sk.size(); ++i)
+                    for (int h = 0; h < 2; ++h)
+                        if (sk.name(i).rfind(h ? "bone_R-tip_" : "bone_L-tip_", 0) == 0) tg[size_t(h)].push_back(i);
+                c.forEachObject([&](scene::Object& o) {
+                    if (auto* ik = o.as<scene::CharIKHand>()) {
+                        if (ik->finger == "bone_L-tip.mesh") ikOf[&c][0] = o.name;
+                        if (ik->finger == "bone_R-tip.mesh") ikOf[&c][1] = o.name;
+                    }
+                });
+            }
+            const int tips[2] = {sk.find("bone_L-tip.mesh"), sk.find("bone_R-tip.mesh")};
+            for (auto& h : k.drumHits) {
+                if (ms < h.ms - 250 || ms > h.ms + 250 || tips[h.hand] < 0) continue;
+                // The pad the clip hits, from its name (hihat_norm_01 -> hihat,
+                // tom_l_* -> L-tom ...): its target bone_X-tip_<pad>.
+                static const std::pair<const char*, const char*> padOf[] = {
+                    {"hihat", "hihat"},       {"snare", "snare"},       {"tom_l", "L-tom"}, {"tom_r", "R-tom"},
+                    {"floor", "floor_tom"},   {"cymbal_l", "L-cymbal"}, {"cymbal_r", "R-cymbal"}, {"ride", "ride"}};
+                if (h.pad.empty()) {
+                    h.pad = "?";
+                    for (const auto& [pre, pad] : padOf)
+                        if (h.clip.rfind(pre, 0) == 0) h.pad = pad;
+                }
+                const int best = sk.find(std::string(h.hand ? "bone_R-tip_" : "bone_L-tip_") + h.pad + ".mesh");
+                if (best < 0) continue;
+                const float bl = len3(sk.local(best).pos);
+                const auto tip = sk.world(tips[h.hand]).pos;
+                const int pad = sk.parent(best);
+                const float dPad = pad >= 0 ? dist3(tip, sk.world(pad).pos) : -1;
+                if (!h.noted && ms >= h.ms) {
+                    static const bool dlog = SDL_getenv("GD05_DRUMREACH_LOG") != nullptr;
+                    if (dlog) {
+                        std::string t;
+                        for (int x : tg[size_t(h.hand)]) {
+                            char b[96];
+                            SDL_snprintf(b, sizeof b, " %s=%.1f/%.1f", sk.name(x).c_str() + 11, double(len3(sk.local(x).pos)),
+                                         double(dist3(sk.world(tips[h.hand]).pos, sk.world(x).pos)));
+                            t += b;
+                        }
+                        SDL_Log("drumreach: %.0f %c %s ik %.2f:%s", h.ms, h.hand ? 'R' : 'L', h.clip.c_str(),
+                                double(ikOf[&c][size_t(h.hand)].empty() ? -1.0f : c.rig().weightOf(ikOf[&c][size_t(h.hand)])), t.c_str());
+                    }
+                    h.noted = true;
+                    h.localAtNote = bl;
+                    h.tipAtNote = dist3(tip, sk.world(best).pos);
+                    h.padAtNote = dPad;
+                    const std::string& ik = ikOf[&c][size_t(h.hand)];
+                    h.ikAtNote = ik.empty() ? -1 : c.rig().weightOf(ik);
+                }
+                if (bl < h.bestLocal) h.bestLocal = bl, h.bestLocalMs = ms;
+                if (dPad >= 0 && dPad < h.minPad) h.minPad = dPad, h.minPadMs = ms;
+            }
+        }
         std::array<float, 3> a{}, b{};
         if (m.type == "rb_guitar" || m.type == "rb_bass") {
             if (c.rig().weightOf("left_hand.weight") >= 0.99f && at("bone_tip.mesh", a) && at("bone_tip_fret.mesh", b)) k.reachFret[m.slot].push_back(dist3(a, b)), ++k.ikFrames[m.slot];
@@ -1057,6 +1207,30 @@ void Band::rbCheckFrame() {
                 if (const auto* grp = g->as<scene::Group>()) k.micDrawOnly = c.drawOnly(*grp);
         }
     }
+}
+
+void Band::rbCheckDrumHit(double ms, int hand, const scene::CharClipSamples* clip) {
+    RbCheck::DrumHit h;
+    h.ms = ms, h.hand = hand, h.clip = clip->name;
+    // The clip's own data: the frame where its pad's target (bone_X-tip_<pad>)
+    // is nearest its pad, and how near.
+    static const std::pair<const char*, const char*> padOf[] = {
+        {"hihat", "hihat"}, {"snare", "snare"}, {"tom_l", "L-tom"}, {"tom_r", "R-tom"}, {"floor", "floor_tom"}, {"cymbal_l", "L-cymbal"}, {"cymbal_r", "R-cymbal"}, {"ride", "ride"}};
+    std::string pad;
+    for (const auto& [pre, pd] : padOf)
+        if (h.clip.rfind(pre, 0) == 0) pad = pd;
+    const std::string ch = std::string(hand ? "bone_R-tip_" : "bone_L-tip_") + pad + ".pos";
+    const scene::CharBonesSamples& set = clip->full;
+    for (size_t b = 0; b < set.bones.size() && !pad.empty(); ++b) {
+        if (set.bones[b].name != ch) continue;
+        for (uint32_t i = 0; i < set.count; ++i) {
+            const float* v = set.sample(i) + set.offset[b];
+            const float l = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            if (l < h.clipMin) h.clipMin = l, h.clipMinFrame = clip->startFrame + (set.count > 1 ? float(i) / float(set.count - 1) * clip->length() : 0.0f);
+        }
+    }
+    h.clipStart = clip->startFrame;
+    rbCheck_->drumHits.push_back(h);
 }
 
 void Band::rbCheckReport() {
@@ -1113,6 +1287,74 @@ void Band::rbCheckReport() {
             SDL_snprintf(buf, sizeof buf, "%s mic: to the nearer hand p95 %.2f, hands.grp draws %s", m.slot.c_str(), percentile(k.micDist, 0.95f),
                          k.micDrawOnly.empty() ? "every member" : k.micDrawOnly.c_str());
             line(!k.micDist.empty() && percentile(k.micDist, 0.95f) < 8 && k.micDrawOnly == "mic.grp", buf);
+        }
+    }
+    // Faces (GD05-106): informative lines (RB's numbers are not measured;
+    // the study's expectations: eyes > 2 deg on every member, blinks on all
+    // four, expressions playing on the non-singers).
+    for (auto& mp : members_) {
+        const Member& m = *mp;
+        auto it = k.face.find(m.slot);
+        if (it == k.face.end()) continue;
+        const RbCheck::Face& f = it->second;
+        const double minutes = (f.lastMs - f.firstMs) / 60000.0;
+        SDL_Log("bandcheck: face %s eyes: up to %.1f deg from bind (range %.1f), over 2 deg on %d of %d frames, %d gaze points", m.slot.c_str(),
+                double(f.eyeMax), double(f.eyeTop - std::min(f.eyeMin, f.eyeTop)), f.eyeMoved, f.eyeFrames, m.character->rig().eyeRetargets());
+        SDL_Log("bandcheck: face %s blinks: %d (%.1f a minute), upper lid up to %.1f deg", m.slot.c_str(), f.blinks,
+                minutes > 0 ? double(f.blinks) / minutes : 0.0, double(f.lidMax));
+        std::string clips;
+        for (const auto& n : f.expClips) clips += (clips.empty() ? "" : " ") + n;
+        SDL_Log("bandcheck: face %s expressions: %d started, a clip on %d of %d frames, %zu distinct (%s), first group %s", m.slot.c_str(),
+                m.character->expressionsPlayed(), f.expFrames, f.faceFrames, f.expClips.size(), clips.empty() ? "-" : clips.c_str(),
+                f.firstGroup.empty() ? "-" : f.firstGroup.c_str());
+    }
+    {
+        // Blinks together: a blink within 50 ms of another member's.
+        int all = 0, together = 0;
+        for (const auto& [slot, f] : k.face)
+            for (double t : f.blinkMs) {
+                ++all;
+                for (const auto& [slot2, g] : k.face) {
+                    if (slot2 == slot) continue;
+                    bool hit = false;
+                    for (double u : g.blinkMs) hit = hit || std::fabs(u - t) <= 50;
+                    if (hit) {
+                        ++together;
+                        break;
+                    }
+                }
+            }
+        if (all) SDL_Log("bandcheck: face blinks within 50 ms of another member's: %d of %d", together, all);
+    }
+    if (!k.drumHits.empty()) {
+        // Drum reach (GD05-108 B1), per hand and pad.
+        std::map<std::string, std::vector<const RbCheck::DrumHit*>> by;
+        // Hits with the hand IK off (main.drv's clip flags the arm: a
+        // directed shot's or an idle clip) counted apart.
+        int off = 0, noted = 0;
+        for (const auto& h : k.drumHits) {
+            if (!h.noted) continue;
+            ++noted;
+            if (h.ikAtNote < 0.99f) ++off;
+            else by[std::string(h.hand ? "R " : "L ") + h.pad].push_back(&h);
+        }
+        SDL_Log("bandcheck: drum reach: %d hand hits, %d with the hand IK under 0.99 (left out below)", noted, off);
+        for (const auto& [key, v] : by) {
+            std::vector<float> tip, pad, minPad, dt, ik, loc, minLoc, ldt, cmin, cfr, cst;
+            for (const auto* h : v) {
+                if (h->clipMin < 1e29f) cmin.push_back(h->clipMin), cfr.push_back(h->clipMinFrame), cst.push_back(h->clipStart);
+                tip.push_back(h->tipAtNote), pad.push_back(h->padAtNote), ik.push_back(h->ikAtNote), loc.push_back(h->localAtNote);
+                if (h->minPad < 1e29f) minPad.push_back(h->minPad), dt.push_back(float(h->minPadMs - h->ms));
+                if (h->bestLocal < 1e29f) minLoc.push_back(h->bestLocal), ldt.push_back(float(h->bestLocalMs - h->ms));
+            }
+            SDL_Log("bandcheck: drum reach %-12s n %3zu at the hit: tip to target p50 %.2f p95 %.2f, tip to pad p50 %.2f p95 %.2f, the clip's "
+                    "target offset p50 %.2f p95 %.2f; closest: offset p50 %.2f at %+.0f ms, tip to pad p50 %.2f at %+.0f ms; IK weight p50 %.2f min %.2f",
+                    key.c_str(), v.size(), percentile(tip, 0.5f), percentile(tip, 0.95f), percentile(pad, 0.5f), percentile(pad, 0.95f),
+                    percentile(loc, 0.5f), percentile(loc, 0.95f), percentile(minLoc, 0.5f), percentile(ldt, 0.5f), percentile(minPad, 0.5f),
+                    percentile(dt, 0.5f), percentile(ik, 0.5f), percentile(ik, 0));
+            SDL_Log("bandcheck: drum reach %-12s the clips' data: their pad's target nearest its pad p50 %.2f p95 %.2f, at frame p50 %+.2f (clip "
+                    "start p50 %+.2f)",
+                    key.c_str(), percentile(cmin, 0.5f), percentile(cmin, 0.95f), percentile(cfr, 0.5f), percentile(cst, 0.5f));
         }
     }
     SDL_Log("bandcheck: %s (%d problem(s), %d frames)", problems ? "FAILED" : "passed", problems, k.frames);

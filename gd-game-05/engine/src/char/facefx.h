@@ -220,6 +220,11 @@ public:
     // starts the player (state 2, start time unset).
     void play(std::shared_ptr<const Anim> anim);
     const Anim* anim() const { return anim_.get(); }
+    // Rock Band's set_blink_song (char_objects.dta LIPSERVO_COMMON) [C data]:
+    // [loop] TRUE and [song_offset] random_float 0 1000: the player's time is
+    // the song's plus the offset, wrapped into the anim (servo song_offset /
+    // loop [I: added to the song clock as the singer's WORLD_OFFSET_SEC]).
+    void setLoop(bool loop, float songOffset) { loop_ = loop, songOffset_ = songOffset; }
     // FxAnimPlayer not stopped (state != 4, 0x823874D8): the servo poses only then.
     bool playing() const { return hasInstance_ && state_ != 4; }
 
@@ -298,6 +303,8 @@ private:
     std::vector<int> entryNodes_;
     std::vector<Register> registers_;
     std::shared_ptr<const Anim> anim_;
+    bool loop_ = false;
+    float songOffset_ = 0;
     std::vector<int> curveNode_;        // per anim curve: bound node or -1
     std::vector<uint32_t> curveHint_;   // per anim curve: cached segment
     bool hasInstance_ = false;

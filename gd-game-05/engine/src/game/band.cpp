@@ -725,8 +725,11 @@ void Band::makeScripts(const DataNode* objects) {
             d->onPlay = [this, &m](const scene::CharClipSamples& clip, uint32_t) {
                 if (onClip) onClip(beat_, m.slot, clip.name);
                 if (log) SDL_Log("band: %8.2f %s %s", beat_, m.slot.c_str(), clip.name.c_str());
+                rbFaceGroup(m, clip);
             };
         }
+        if (chr::ClipDriver* d = c.driver("main_add.drv"))
+            d->onPlay = [this, &m](const scene::CharClipSamples& clip, uint32_t) { rbFaceGroup(m, clip); };
     }
 }
 
@@ -770,6 +773,15 @@ void Band::setupFace(Member& m, scene::Object* servo) {
             m.lip->setup(graph, names, entries);
             const std::string voc = m.type == "rb_vocals" ? facefx::singerVocPath(midiFile_) : facefx::kBlinkTrackPath;
             if (data_.exists(voc)) m.lip->play(std::make_shared<facefx::Anim>(facefx::loadAnim(data_, voc)));
+            // set_blink_song (LIPSERVO_COMMON) [C data]: looped, at a random
+            // offset per servo, so the band does not blink together (GD05-106
+            // A6; GD05_BLINK_LEGACY=1: from 0, once). Its own generator [I: RB
+            // draws from the one global; the band's clip picks stay as they were].
+            static const bool blinkLegacy = [] {
+                const char* e = SDL_getenv("GD05_BLINK_LEGACY");
+                return e && *e && *e != '0';
+            }();
+            if (m.type != "rb_vocals" && !blinkLegacy) m.lip->setLoop(true, faceRng_.real(0.0f, 1000.0f));
             m.character->setRbFace(set, names);
             m.character->attachFace(m.lip.get());
             if (log) SDL_Log("band: %s face %s, %zu visemes, %s", m.slot.c_str(), fac.c_str(), names.size(), voc.c_str());
