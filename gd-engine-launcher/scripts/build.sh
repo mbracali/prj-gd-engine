@@ -784,6 +784,9 @@ build_os() {
   cp "$launcher/package/README.md" "$stage/README.md"
   [ "$os" = android ] || cp "$launcher/package/original_isos-README.md" "$stage/original_isos/README.md"
   [ "$os" = steamdeck ] && cp "$launcher/package/STEAM-DECK.txt" "$stage/STEAM-DECK.txt"
+  # RecompLauncher's manifest (GDUL-032, docs/tasks/RECOMPLAUNCHER_SDK.md): at
+  # the top of every desktop download, next to the program (the APK has none).
+  [ "$os" = android ] || cp "$launcher/package/recomplauncher.json" "$stage/recomplauncher.json"
   cp "$launcher/manual/"*.md "$stage/manual/"
 
   # The manifest: what each game module was built from.

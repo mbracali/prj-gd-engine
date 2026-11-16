@@ -5,7 +5,7 @@
 # game in games.yaml with ready_to_play true, on every system (no exemption:
 # a launcher never ships without a ready game's module), its module
 # (exporting gd_game_run) and the libraries it needs, non-empty, and listed
-# in gd-engine-games/manifest.json. Fails loudly otherwise. build.sh runs it on every build it assembles, the
+# in gd-engine-games/manifest.json; a desktop download's recomplauncher.json (GDUL-032). Fails loudly otherwise. build.sh runs it on every build it assembles, the
 # gdul release workflow on every archive before it is uploaded.
 #
 # Usage: gd-engine-launcher/scripts/verify_bundle.sh <build folder | .zip | .tar.gz | .apk | .AppImage> [linux|steamdeck|windows|macos|android]
@@ -115,6 +115,40 @@ case "$os" in
     fi
     [ -n "$abi" ] && { note "APK ABI: $abi"; nonempty "$apk/lib/$abi/libmain.so"; nonempty "$apk/lib/$abi/libSDL3.so"; } ;;
 esac
+
+# RecompLauncher's manifest (GDUL-032): on top of every desktop download, next
+# to the program; valid JSON, format 1, a start.program that is in the
+# download, and every game it starts (--play gdNN) a ready game here.
+if [ "$os" != android ]; then
+  mapfile -t rl < <(find "$root" -maxdepth 2 -name recomplauncher.json | LC_ALL=C sort)
+  if [ ${#rl[@]} -ne 1 ]; then
+    fail "recomplauncher.json on top of the download (found ${#rl[@]})"
+  elif ! why="$(python3 -I -c '
+import json, os, re, sys
+path, games = sys.argv[1:]
+top = os.path.dirname(path)
+try:
+    m = json.load(open(path, encoding="utf-8"))
+except ValueError as e:
+    sys.exit(f"not valid JSON: {e}")
+if m.get("format") != 1:
+    sys.exit("format is not 1")
+progs = m.get("start", {}).get("program", [])
+if not any(os.path.isfile(os.path.join(top, p)) for p in progs):
+    sys.exit("no start.program is in the download (" + ", ".join(progs) + ")")
+ready = set()
+for gi in re.findall(r"^\s*-\s*(\S*game-info\.yaml)", open(os.path.join(games, "games.yaml")).read(), re.M):
+    text = open(os.path.join(games, gi)).read() if os.path.isfile(os.path.join(games, gi)) else ""
+    if re.search(r"^ready_to_play:\s*(true|True|yes)", text, re.M):
+        ready.add(re.search(r"^id:\s*(\S+)", text, re.M).group(1))
+for g in m.get("games", []):
+    a = g.get("args", [])
+    if "--play" in a and "gd-game-" + a[a.index("--play") + 1][2:] not in ready:
+        sys.exit("games: " + g.get("id", "?") + " plays " + a[a.index("--play") + 1] + ", not a ready game in this download")
+' "${rl[0]}" "$games" 2>&1)"; then
+    fail "recomplauncher.json: $why"
+  fi
+fi
 
 # exports <library>: it exports gd_game_run (when a tool can read it).
 exports() {
