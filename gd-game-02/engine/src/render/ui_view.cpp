@@ -212,6 +212,15 @@ LightEnv UiView::environment() {
     if (own && own->hasRnd)
         if (const scene::Object* e = find(own->rnd.environment); e && e->as<scene::Environ>())
             return cache_.lightEnv(*e->as<scene::Environ>(), &pose_);
+    // A panel that names no environ (endgame.milo, endgame_stats.milo) draws
+    // with the one selected before it: GH2 selects an environ only when a
+    // directory has one (RndEnviron's current stays), and in the menus that
+    // is metacam.milo's ui.env (white ambient, no lights), which the other
+    // panels and the help bar select. Before, the port's default (ambient
+    // 0.3) lit their use_environ materials: meta_bricks' light.mat (multiply)
+    // darkened the whole More Stats screen to 0.3 (#115, GD02-163) [C: the
+    // dirs name no environ; I: the current environ there is ui.env].
+    if (const scene::Object* e = find("ui.env"); e && e->as<scene::Environ>()) return cache_.lightEnv(*e->as<scene::Environ>(), &pose_);
     return LightEnv{};
 }
 

@@ -1031,6 +1031,29 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kTri);
         at("main_screen");
         expect_ = {"main_screen", "gamepads_screen", "main_screen"};
+    } else if (scenario == "endgame_stats") {
+        // #115 (GD02-163): a quick-play song (ended early), the endgame
+        // screen, MORE STATS: each panel draws with ui.env's light.
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("startup_create_save_screen");
+        press(kX);
+        at("saving_screen");
+        at("guitar_help_screen");
+        press(kX);
+        quickplaySong(0);
+        at("endgame_screen", 90000);
+        wait(1500);
+        check("endgame_env endgame_panel");
+        press(kDown);  // CONTINUE -> MORE STATS
+        wait(300);
+        press(kX);
+        at("endgame_stats_screen");
+        wait(1500);
+        check("endgame_env endgame_stats_panel");
+        expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "post_show_screen",
+                   "endgame_screen", "endgame_stats_screen"};
     } else if (scenario == "char_luma") {
         // GD02-163: each character on Character Select, its drawn brightness
         // (a new band: the ten characters from Punk down).
@@ -2573,6 +2596,43 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         ++step_, stepStart_ = -1;
         return;
+    }
+    if (s.screen.rfind("endgame_env ", 0) == 0) {
+        // GD02-163 (#115): endgame.milo and endgame_stats.milo name no
+        // environ; they draw with metacam.milo's ui.env (its ambient), not
+        // the port's default 0.3, which darkened the More Stats screen (meta
+        // bricks' light.mat multiplies) and the Continue / More Stats box.
+        ui::PanelObj* p = ui.panel(s.screen.substr(12));
+        if (!p || !p->view) return fail(s.screen.substr(12) + " has no view");
+        const scene::Object* e = p->view->find("ui.env");
+        const auto* env = e ? e->as<scene::Environ>() : nullptr;
+        if (!env) return fail("no ui.env under " + s.screen.substr(12));
+        const gfx::LightEnv le = p->view->environment();
+        double luma = -1;
+        const char* dir = SDL_getenv("GD02_WALK_SHOTS");
+        const std::string path = std::string(dir ? dir : "/tmp") + "/" + s.screen.substr(12) + ".bmp";
+        if (ui.host().saveScreenshot(path))
+            if (SDL_Surface* raw = SDL_LoadBMP(path.c_str())) {
+                if (SDL_Surface* img = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32)) {
+                    double sum = 0;
+                    for (int y = 0; y < img->h; ++y)
+                        for (int x = 0; x < img->w; ++x) {
+                            const uint8_t* px = static_cast<const uint8_t*>(img->pixels) + size_t(y) * size_t(img->pitch) + size_t(x) * 4;
+                            sum += 0.299 * px[0] + 0.587 * px[1] + 0.114 * px[2];
+                        }
+                    luma = sum / (double(img->w) * img->h);
+                    SDL_DestroySurface(img);
+                }
+                SDL_DestroySurface(raw);
+                std::remove(path.c_str());
+            }
+        std::printf("  %s: ambient %.2f %.2f %.2f (ui.env %.2f %.2f %.2f), frame luma %.1f\n", s.screen.substr(12).c_str(), double(le.envAmbient.x),
+                    double(le.envAmbient.y), double(le.envAmbient.z), double(env->ambientColor[0]), double(env->ambientColor[1]),
+                    double(env->ambientColor[2]), luma);
+        const float got[3] = {le.envAmbient.x, le.envAmbient.y, le.envAmbient.z};
+        for (int k = 0; k < 3; ++k)
+            if (std::fabs(got[k] - env->ambientColor[size_t(k)]) > 0.01f) return fail(s.screen.substr(12) + " is not lit by ui.env");
+        return pass();
     }
     if (s.screen == "career_song_saved") {
         // GD02-168 (#104): a song played by Enhanced > Autoplay saves no
