@@ -256,6 +256,7 @@ public:
         setup.song = s.song;
         setup.difficulty = s.players[0].difficulty;
         setup.autoplay = gameCfgValue(ui, "force_autoplay").truthy() || SDL_getenv("GD02_AUTOPLAY") != nullptr;
+        s.noSave = ui.host().enhancedValue("autoplay") == "on";  // GD02-168
         const Career::Options& o = ui.career().options;
         setup.lefty = o.lefty[0];
         setup.syncOffsetMs = o.syncOffsetMs;

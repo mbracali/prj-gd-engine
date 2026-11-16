@@ -451,6 +451,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                 wait(8000);
             } else {
                 at("endgame_screen|endgame_encore_screen|win_game_screen", 900000);  // win_game: the tour's last song
+                check("career_song_saved");
                 for (int i = 0; i < 6; ++i) wait(2500), press(kX);
                 wait(4000);
             }
@@ -2572,6 +2573,21 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         ++step_, stepStart_ = -1;
         return;
+    }
+    if (s.screen == "career_song_saved") {
+        // GD02-168 (#104): a song played by Enhanced > Autoplay saves no
+        // record (score, stars, gold); played otherwise, its score is kept.
+        Career::Profile* p = ui::campaign::profile(ui);
+        if (!p) return fail("no band");
+        const auto& rec = ui::campaign::record(ui, *p, ui::campaign::difficulty(ui));
+        const auto it = rec.find(ui.session().song);
+        const int score = it == rec.end() ? 0 : it->second.score, stars = it == rec.end() ? 0 : it->second.stars;
+        const bool gold = it != rec.end() && it->second.perfect;
+        std::printf("  career song: %s saved score %d, %d stars%s (%s)\n", ui.session().song.c_str(), score, stars, gold ? ", gold" : "",
+                    ui.session().noSave ? "Enhanced autoplay: none expected" : "played: kept");
+        if (ui.session().noSave && (score != 0 || stars != 0 || gold)) return fail("an autoplayed song wrote its record");
+        if (!ui.session().noSave && score <= 0) return fail("the song's score was not saved");
+        return pass();
     }
     if (s.screen.rfind("career_venue_loaded ", 0) == 0) {
         const std::string v = s.screen.substr(20);
