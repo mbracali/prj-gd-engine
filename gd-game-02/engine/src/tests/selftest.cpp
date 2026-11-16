@@ -25,6 +25,7 @@
 #include "game/song_db.h"
 #include "game/song_setup.h"
 #include "input/input_selftest.h"
+#include "script/script.h"
 
 namespace {
 
@@ -43,6 +44,26 @@ int checkScripts(const GameData& data) {
     }
     std::printf("%zu archive files; %d .dtb scripts decoded, %d failed\n", data.paths().size(), ok, bad);
     return bad;
+}
+
+// The script's {mod a b} as Harmonix's Mod (GD02-167; gd01's GD01-319):
+// wrapped into [0, b); the store's {mod {+ itemIdx -1} n} on the first item
+// gives n - 1, the tutorials' previous lesson from the first the last.
+int checkScriptMod() {
+    Interp in;
+    int failures = 0;
+    const struct { const char* code; float want; bool real; } cases[] = {
+        {"{mod -1 5}", 4, false}, {"{mod {+ 0 -1} 7}", 6, false}, {"{mod 7 5}", 2, false}, {"{mod -6 5}", 4, false},
+        {"{mod -5 5}", 0, false}, {"{mod 0 5}", 0, false}, {"{mod 5.5 2}", 1.5f, true}, {"{mod -0.5 2}", 1.5f, true},
+    };
+    for (const auto& c : cases) {
+        const DataNode tree = parseDtaText(c.code);
+        const Value v = tree.children.empty() ? Value() : in.eval(tree.children[0]);
+        const bool ok = std::fabs(v.number() - c.want) < 1e-4f && (v.type == Value::Type::Float) == c.real;
+        if (!ok) std::printf("  FAIL script mod: %s = %g, want %g\n", c.code, double(v.number()), double(c.want)), ++failures;
+    }
+    std::printf("script mod: %d of %zu cases\n", int(std::size(cases)) - failures, std::size(cases));
+    return failures;
 }
 
 // The mogg header and Vorbis headers, and songs.dtb's per-channel lists.
@@ -687,7 +708,7 @@ int runSelfTest(const std::string& dataPath) {
     try {
         GameData data(dataPath);
         std::printf("%s\n", data.description().c_str());
-        int scriptFailures = checkScripts(data);
+        int scriptFailures = checkScripts(data) + checkScriptMod();
         Rules rules = loadRules(data);
         std::vector<SongInfo> songs = loadSongs(data);
         std::printf("%zu songs; slop %.0f ms, head %d, tail %d, hopo_threshold %d ticks\n", songs.size(), rules.slopMs,
