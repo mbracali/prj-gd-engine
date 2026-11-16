@@ -1011,6 +1011,9 @@ struct Band::RbCheck {
         int segFrames = 0;
     };
     std::map<std::string, Arm> arms;
+    // Hair (GD05-113): each member's CharHair collision after every hair
+    // step (chr::RigHairStats), summed over the run.
+    std::map<std::string, chr::RigHairStats> hair;
 };
 
 bool Band::rbLegacy() {
@@ -1092,6 +1095,18 @@ void Band::rbCheckFrame() {
             if (auto it = k.minStretch.find(m.slot); it == k.minStretch.end() || r < it->second) k.minStretch[m.slot] = r, k.shortBone[m.slot] = sk.name(i);
         }
         if (bad) ++k.stretchFrames[m.slot];
+        // Hair: the rig's measure since the last frame (the first call starts it).
+        {
+            chr::RigHairStats h = c.rig().takeHairStats();
+            chr::RigHairStats& a = k.hair[m.slot];
+            a.collides = h.collides, a.points = h.points, a.rbPairs = h.rbPairs, a.usedPairs = h.usedPairs;
+            a.steps += h.steps, a.pairSamples += h.pairSamples, a.pointSamples += h.pointSamples;
+            a.pen.insert(a.pen.end(), h.pen.begin(), h.pen.end());
+            a.penBetween.insert(a.penBetween.end(), h.penBetween.begin(), h.penBetween.end());
+            a.penAll.insert(a.penAll.end(), h.penAll.begin(), h.penAll.end());
+            a.penMid.insert(a.penMid.end(), h.penMid.begin(), h.penMid.end());
+            a.motion += h.motion, a.motionSeconds += h.motionSeconds;
+        }
         // Channels against their clips' largest values.
         auto& ch = c.bones().channels();
         auto& bound = k.channelBound[m.slot];
@@ -1480,6 +1495,27 @@ void Band::rbCheckReport() {
         SDL_snprintf(buf, sizeof buf, "%s stretch: worst %.3f x bind (%s), %d of %d frames past 1.2", m.slot.c_str(), st,
                      k.worstBone.count(m.slot) ? k.worstBone.at(m.slot).c_str() : "-", sf, k.frames);
         line(sf == 0, buf);
+        // Hair (GD05-113): every (point, collide) pair Rock Band's hookup makes
+        // (RB 0x823392A0) is tested by the step, and after each step no hooked
+        // point is inside its collide by more than 0.01 (RB pushes it to the
+        // hard radius in the same step, RB 0x82335B10), unless a later collide
+        // of its list pushed it back in (counted apart: RB's one ordered pass
+        // does that too). The points against
+        // every collide and the segments' midpoints are informative: RB tests
+        // neither (hookup flags and segments let hair through in RB too).
+        if (auto hi = k.hair.find(m.slot); hi != k.hair.end() && hi->second.points > 0) {
+            const chr::RigHairStats& h = hi->second;
+            const float mx = h.pen.empty() ? 0.0f : percentile(h.pen, 1);
+            SDL_snprintf(buf, sizeof buf, "hair %s: %d points, %d collides, %d hooked pairs (RB's hookup %d), %d hair-steps: hooked pairs inside on %zu of %ld pair-steps, "
+                         "p99 of those %.3f, max %.3f; pushed into it from another hooked collide %zu (max %.3f)",
+                         m.slot.c_str(), h.points, h.collides, h.usedPairs, h.rbPairs, h.steps, h.pen.size(), h.pairSamples, double(percentile(h.pen, 0.99f)), double(mx),
+                         h.penBetween.size(), double(percentile(h.penBetween, 1)));
+            line(h.steps > 0 && h.usedPairs == h.rbPairs && h.rbPairs > 0 && mx <= 0.01f, buf);
+            SDL_Log("bandcheck: info hair %s: points inside any collide on %zu of %ld point-steps (p99 %.3f, max %.3f), segment midpoints %zu (p99 %.3f, max %.3f); "
+                    "points move %.2f units/s against their strand root",
+                    m.slot.c_str(), h.penAll.size(), h.pointSamples, double(percentile(h.penAll, 0.99f)), double(percentile(h.penAll, 1)), h.penMid.size(),
+                    double(percentile(h.penMid, 0.99f)), double(percentile(h.penMid, 1)), h.motionSeconds > 0 ? h.motion / h.motionSeconds : 0.0);
+        }
         // Arms (GD05-110): the arm chain's bones turn more than 30 deg in one
         // frame on at most 1 in 1000 bone-frames (a clip's blend or the IK
         // moves them a few degrees a frame; the odd unblended clip change or

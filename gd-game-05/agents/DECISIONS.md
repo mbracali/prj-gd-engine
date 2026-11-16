@@ -2053,3 +2053,51 @@ pattern). Each says what, why and how to undo it.
   GD05_PREFAB_VOCALS=vocals2, 20.06 / 41.24 s): legacy, white above the
   iris; now the lid comes down with the look.
 - **Undo:** GD05_LIDS_LEGACY=1.
+
+## D118
+- **What (2026-11-16, GD05-113, study agents/HAIR_20261116.md):** Rock
+  Band's hair collision. The port ran none for RB [C]: the rig read GH2's
+  per-point type / collide (empty on RB's rev 9 points), so no point was
+  ever tested, and CharCollide was never placed. Now (GD05_HAIRCOLLIDE_LEGACY):
+  - CharCollide objects of the character (outfits merged) are placed each
+    step as their local under their parent bone (the outfit's exo_* bones).
+    The rig composes it itself instead of adding CharCollide to
+    `gfx::transOf`: the same placement, without new skeleton nodes for
+    every renderer / explorer that walks transOf.
+  - RB's hookup (CharHair 0x823392A0) [C] at the hair's first poll (after
+    the deform and the slot placement; RB at sync_objects [I]): per strand,
+    collides whose flags share a bit with hookup_flags; a point gets a
+    collide when worldRadius + max(radius, outer_radius) + L (lengths
+    from the root) > |collide - root|. World radius = radius x the
+    collide's world y scale (compute_radius 0x8232DB30) [C].
+  - The point fields as RB loads them (RB 0x823372A0): radius,
+    outer_radius, side_length (the port read outer_radius as the radius
+    and side_length as the band).
+  - RB's step (0x82335B10) [C] after the length step: shapes 1 / 3
+    (outside a sphere / a capsule clamped to [0, length] on x), hard push
+    to radius + worldRadius, the soft band (outer_radius) turning only the
+    up vector; 2 / 4 inside (none on the disc, push only [I]); 0 logged.
+  - Gravity per step g x -3.8582678 x 60 / rate^2 at the step rate (24
+    under ProFilm: 6.25 x GH2's 60 Hz constant) (GD05_HAIRGRAVITY_LEGACY);
+    the neighbour-strand slack for side_length >= 0 (GD05_HAIRSLACK_LEGACY);
+    after a reset one settle step at rate 15 with inertia and friction 0
+    (0x82336F70) (GD05_HAIRRESET_LEGACY).
+- **Measured (new bandcheck "hair <slot>", inbloom 60 s; pairs RB hooks,
+  per hair step, penetration = hard radius - distance):** hooked pairs
+  tested 0 -> 24 / 162 / 37 / 27 (guitar / bass / drums / vocals); hooked
+  pairs inside 21 / 24 / 8 / 13 % of pair-steps, max 5.6 / 7.8 / 4.8 / 5.5
+  -> 0 (a point pushed by a later collide of its list back into an earlier
+  one, as RB's one ordered pass does: 0 / 326 / 13 / 4 pair-steps, max 0 /
+  1.41 / 0.15 / 0.01, counted apart). P1 alone does it all; gravity then
+  hangs the hair lower (points move 19.5 / 16.6 / 18.6 / 14.1 -> 14.7 / 12.0 /
+  14.0 / 10.5 units/s against their root, P1 alone 18.3 / 15.6 / 17.0 /
+  13.4); slack and reset change these hairs by under 1 %. Info (RB tests
+  neither): points inside any collide, hooked or not, 40 / 64 / 82 / 48 %
+  -> 34 / 56 / 81 / 46 % (the scalp points sit inside head spheres their
+  strand's flags leave out); segment midpoints likewise. Arm / face /
+  stretch lines unchanged. Close shots (GD05_FACE_CAM=player_bass0 /
+  player_vocals0:30:f|90:bone_neck.mesh, 20 / 32 / 44 s): legacy, the
+  bassist's strand ends and the singer's side hair sink into the chest and
+  the jacket collar; now they lie outside on the shoulders.
+- **Undo:** GD05_HAIRCOLLIDE_LEGACY=1, GD05_HAIRGRAVITY_LEGACY=1,
+  GD05_HAIRSLACK_LEGACY=1, GD05_HAIRRESET_LEGACY=1.

@@ -281,3 +281,14 @@ RB focus 11-16 (GD05-112 eyes):
 - GD05_FACE_CAM=<member>:<distance>:f:<bone>: the camera in front of the
   face (square to the line between the eye bones), whatever way the member
   turns, aimed at <bone> (e.g. player_vocals0:12:f:bone_R-eye.mesh).
+
+RB focus 11-16 (GD05-113 hair):
+- bandcheck adds `hair <slot>` (D118): the (point, collide) pairs RB's
+  hookup makes, the pairs the step tests, and after every hair step the
+  hooked points inside their collide (RB's hard radius; pass max <= 0.01;
+  points pushed back in by a later collide of their list counted apart);
+  `info hair <slot>`: points / segment midpoints inside any collide (RB
+  tests neither) and the points' motion against their strand root.
+  GD05_HAIRLOG=1 logs each hair's hookup and the character's collides.
+  Switches GD05_HAIRCOLLIDE / HAIRGRAVITY / HAIRSLACK / HAIRRESET_LEGACY=1.
+
