@@ -356,6 +356,15 @@ void rememberPath(const std::string& path) {
     out << "data=" << path << "\n";
 }
 
+// Require Strum (#98, GD01-326): the device that plays decides, not the one
+// last used in the menus. The player was made with the menus' last mode, so
+// a guitar's d-pad Left / Right (sent as a joypad's), the mouse or another
+// pad there left a guitar with Require Strum on playing as a joypad (a fret
+// alone hit) for the whole song or tutorial lesson.
+void followPlayMode(Player& pl, const InputEvent& e) {
+    if (e.down && (isFret(e.action) || e.action == Action::Strum)) pl.setMode(e.mode);
+}
+
 class App {
 public:
     explicit App(const Options& o) : opt_(o), difficulty_(std::clamp(o.difficulty, 0, 3)) {}
@@ -2186,6 +2195,7 @@ void App::onAction(const InputEvent& e) {
             break;
         }
         pl->update(t);
+        followPlayMode(*pl, e);
         if (isFret(e.action)) {
             if (e.down) pl->fretDown(fretOf(e.action), t);
             else pl->fretUp(fretOf(e.action), t);
@@ -3133,6 +3143,43 @@ int sustainAudioSelfTest(const std::vector<SongInfo>& songs, GameData& data, con
 // original) a chord strummed with one of its frets misses; on, any part of it
 // hits and scores as the whole chord, a fret outside it misses, and a held
 // chord's sustain lasts while any of its frets is held.
+// Require Strum (#98, GD01-326): a player made in the joypad mode (the menus'
+// last device was a guitar's d-pad, the mouse or a gamepad) and played by a
+// guitar with Require Strum on: a fret alone must not hit, a strum must;
+// played by a device with it off, the fret alone hits.
+int requireStrumSelfTest(const std::vector<SongInfo>& songs, GameData& data, const Rules& rules) {
+    if (songs.empty()) return 0;
+    Song song = buildSong(parseMidi(data.read(songs[0].midiPath)));
+    const auto& gems = song.charts[3].gems;
+    size_t i = 1;
+    while (i + 1 < gems.size() && (gems[i].fretCount() != 1 || gems[i].hopo || gems[i].ms - gems[i - 1].ms < 300 || gems[i + 1].ms - gems[i].ms < 300)) ++i;
+    if (i + 1 >= gems.size()) return std::printf("require strum self-test: no lone gem\n"), 1;
+    const Gem& g = gems[i];
+    const Action fret = Action(int(Action::Fret0) + std::countr_zero(unsigned(g.frets)));
+    auto run = [&](ControllerMode device, bool strum) {
+        Player p(song, Difficulty(3), rules, ControllerMode::Joypad, true);
+        for (float t = g.ms - 200; t < g.ms + 250; t += 1) {
+            if (t == g.ms - 20) {
+                const InputEvent e{fret, true, 0, device, 0};
+                followPlayMode(p, e);
+                p.fretDown(fretOf(fret), t);
+            }
+            if (strum && t == g.ms) {
+                const InputEvent e{Action::Strum, true, 0, device, 0};
+                followPlayMode(p, e);
+                p.strum(t);
+            }
+            p.update(t);
+        }
+        return p.gemHit(int(i));
+    };
+    const bool fretOnly = run(ControllerMode::Guitar, false), strummed = run(ControllerMode::Guitar, true), pad = run(ControllerMode::Joypad, false);
+    const int failures = fretOnly + !strummed + !pad;
+    std::printf("require strum: guitar fret alone %s, strummed %s, joypad fret alone %s: %s\n", fretOnly ? "hit" : "missed",
+                strummed ? "hit" : "missed", pad ? "hit" : "missed", failures ? "FAILED" : "ok");
+    return failures;
+}
+
 int easyChordsSelfTest(const std::vector<SongInfo>& songs, GameData& data, const Rules& rules) {
     int failures = 0, checks = 0;
     auto check = [&](bool ok, const char* what) {
@@ -3374,6 +3421,7 @@ int runSelfTest(const Options& options) {
                     rules.slopMs, rules.headPoints, rules.tailPoints);
         if (sustainAudioSelfTest(songs, data, rules)) return 1;
         if (easyChordsSelfTest(songs, data, rules)) return 1;
+        if (requireStrumSelfTest(songs, data, rules)) return 1;
         int failures = 0, hopos = 0;
         for (const SongInfo& info : songs) {
             Song song = buildSong(parseMidi(data.read(info.midiPath)));

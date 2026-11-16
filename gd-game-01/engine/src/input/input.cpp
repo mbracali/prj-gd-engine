@@ -752,8 +752,8 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
         p.down[c] = now;
     }
     curGuitar_ = !joypad;
-    controlEdges(was, p.down, requireStrum("pad:" + std::to_string(SDL_GetGamepadID(p.pad))) ? ControllerMode::Guitar : ControllerMode::Joypad,
-                 p.slot, joypad, ts, out);
+    const ControllerMode mode = requireStrum("pad:" + std::to_string(SDL_GetGamepadID(p.pad))) ? ControllerMode::Guitar : ControllerMode::Joypad;
+    controlEdges(was, p.down, mode, p.slot, joypad, ts, out);
     curGuitar_ = false;
     // The built-in menu helpers: d-pad left / right; a gamepad's south (select) and east (back).
     const std::array<bool, 4> help = {p.buttons[SDL_GAMEPAD_BUTTON_DPAD_LEFT], p.buttons[SDL_GAMEPAD_BUTTON_DPAD_RIGHT],
@@ -762,7 +762,9 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
     for (size_t k = 0; k < 4; ++k)
         if (help[k] != p.helper[k]) {
             p.helper[k] = help[k];
-            if (p.slot >= 0 || !inGame() || kHelp[k] == Action::Back) emit(out, kHelp[k], help[k], ts, ControllerMode::Joypad, std::max(p.slot, 0));
+            // In the pad's own mode (#98, GD01-326: a guitar's d-pad Left / Right
+            // was a joypad's, so the next song took Require Strum off).
+            if (p.slot >= 0 || !inGame() || kHelp[k] == Action::Back) emit(out, kHelp[k], help[k], ts, k < 2 ? mode : ControllerMode::Joypad, std::max(p.slot, 0));
         }
 }
 
