@@ -738,6 +738,21 @@ void RbTrackView::fxEvents(const PlayerView& player, float nowMs) {
                 if (!hitsPending_) hitsPendingMs_ = nowMs;
                 ++hitsPending_;
                 if (combo) fxTrigger(trackFx_, "spotlight_phrase_success.trig", nowMs), ++st.phrases;
+                // A kick struck: gem_track.dta kick_hit {kick_drummer.trig
+                // trigger}, the drum track's bounce (kick_neighbor.tnm ...)
+                // [C data]; the port never sent it (GD05-100).
+                // A note hit in a solo: gem_track.dta solo_note ($in_slot):
+                // its smasher's hit_fill, the track's solo_hit.trig [C data;
+                // I: the native sends it for every gem hit in a solo].
+                if (player.soloActive && !SDL_getenv("GD05_TRACKFX_LEGACY")) {
+                    for (int s = 0; s < 5; ++s)
+                        if (slots & (1u << s)) fxTrigger(smashFx_[size_t(s)], "hit_fill.trig", nowMs);
+                    if (fxTrigger(trackFx_, "solo_hit.trig", nowMs)) ++st.soloNotes;
+                }
+                if (drums_ && (slots & 1u) && !SDL_getenv("GD05_KICK_LEGACY")) {  // the kick's slot 0
+                    ++st.kicks;
+                    if (fxTrigger(trackFx_, "kick_drummer.trig", nowMs)) ++st.kickTriggers;
+                }
             }
             const bool missed = !struck && player.missed && player.missed(i);
             if (missed && !(seen & 2)) {
@@ -797,6 +812,17 @@ void RbTrackView::fxEvents(const PlayerView& player, float nowMs) {
     if (player.soloActive != wasSolo_ && !SDL_getenv("GD05_TRACKFX_LEGACY")) {
         wasSolo_ = player.soloActive;
         if (fxTrigger(trackFx_, wasSolo_ ? "guitar_solo_start.trig" : "guitar_solo_stop.trig", nowMs)) ++(wasSolo_ ? st.soloStarts : st.soloStops);
+    }
+    // The bass's super streak: track_handlers.dta set_streak calls
+    // super_streak TRUE as the multiplier reaches 5 (the bass's 5x / 6x),
+    // streak_broken super_streak FALSE; gem_track.dta super_streak fires
+    // BassSuperStreak_ON / _OFF.trig on the bass's track [C data].
+    if (part_ == "bass" && !SDL_getenv("GD05_TRACKFX_LEGACY")) {
+        const bool on = player.baseMultiplier >= 5;
+        if (on != superStreak_) {
+            superStreak_ = on;
+            if (fxTrigger(trackFx_, on ? "BassSuperStreak_ON.trig" : "BassSuperStreak_OFF.trig", nowMs) && on) ++st.superStreaks;
+        }
     }
     // Overdrive deployed / over.
     if (player.overdriveActive != wasOd_) {
@@ -1305,7 +1331,7 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
         lastFxMs_ = nowMs;
         for (FxDir* fx : {&smashFx_[0], &smashFx_[1], &smashFx_[2], &smashFx_[3], &smashFx_[4], &trackFx_}) fxReset(*fx);
         colorSmashers();
-        gemSeen_.clear(), seenChart_ = nullptr, wasOd_ = false, wasSolo_ = false, lastHeld_ = -1, lastHeldSlots_ = 0;
+        gemSeen_.clear(), seenChart_ = nullptr, wasOd_ = false, wasSolo_ = false, superStreak_ = false, lastHeld_ = -1, lastHeldSlots_ = 0;
     }
     lastFxMs_ = nowMs;
     fxEvents(player, nowMs);
@@ -1323,7 +1349,13 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
             viewW_ = vw, viewH_ = vh;
             return;
         }
-        if (const scene::Object* ia = obj("intro_anim.grp")) pose_.setFrame(ia, std::min(f, 20.0f));
+        // Played once: held at its last frame by re-setting it every frame,
+        // it put cameras.grp back over kick_drummer.trig's kick_success.tnm
+        // (the drum track's kick bounce never showed; GD05-100).
+        if (f < 20.0f || introHeldAt_ != introAtMs_ || SDL_getenv("GD05_KICK_LEGACY")) {
+            if (const scene::Object* ia = obj("intro_anim.grp")) pose_.setFrame(ia, std::min(f, 20.0f));
+            introHeldAt_ = f >= 20.0f ? introAtMs_ : -1e30f;
+        }
         if (const scene::Object* st = obj("static.grp")) pose_.setShowing(st, f >= 0.1f);
     }
     camera_.world = gfx::toMat4(pose_.world(cam_));

@@ -1671,3 +1671,54 @@ pattern). Each says what, why and how to undo it.
   BRE_final_gem_hit, finger_tap(_bonus), hit_fill, hit_drums / hit_cymbals,
   drumfill_complete_hit, break_bonus not.
 - **Undo:** RbTrackView::fxEvents' solo (GD05_TRACKFX_LEGACY=1).
+
+## D101
+- **What (2026-11-16, GD02-167 / GD05-101, bug-fix wave):** the script's
+  `mod` is Harmonix's Mod, wrapped into [0, n) (fmod and C's % kept the
+  sign): tutorial_state.dta get_prev_state ({mod {- $old $inc} n}) on the
+  first lesson gave -1 (elem -1: no lesson), now the last; drum_trainer's
+  dec_beat too. Six builtins added with Harmonix's semantics [C data: the
+  call sites; I: RB's own DataFuncs not traced]: `|=` / `&=` (on a
+  variable or [property]), `~`, `with` ($this = the object, the last value
+  returned), `sort` (in place; numbers by value, text case-insensitively,
+  lists by their first element), `search_replace` (every match, the result
+  in the fourth argument, true when changed). Clip events: RB's are handler
+  names (set_leftarm_true, freeze, sfx_mic_drop ...) [C data: the clips'
+  event records]; the port parsed them as script (a bare symbol: nothing
+  ran). Now sent to the clip as a script object of its CharClip type
+  (char_objects.dta musician), [flags] the clip's own flags (the main
+  driver's flag weights read them: kLeftArm / kRightArm hand the arms to
+  the hand IK). ClipDriver::runEvents fires [from, to): an event on the
+  clip's first frame (the arm events sit at 0) never fired with (from, to)
+  and held back every later event of the clip [I].
+- **Measured:** selftest "script mod: 8 of 8 cases"; scripttest 49 checks
+  (6 new: mod wrap, |= / &= / ~, sort, search_replace, with + [flags]).
+  Arm events in a song: 0 before (bare symbols); after, 0 in inbloom and
+  blitzkriegbop (guitar, autoplay, whole songs): the arm events live in a
+  few clips only (stand_cut_04/05_slomo, stand_rhythm_ext_*,
+  kneel_rhythm_norm_s_med_01: 60 of the 148 events of the loaded sets)
+  and none was played; the path is checked by scripttest only.
+- **Undo:** script_builtins.cpp arith '%' (gd01's form), Band::runClipScript's
+  ClipObj branch.
+
+## D102
+- **What (2026-11-16, GD05-100 / GD05-096):** a kick struck fires
+  gem_track.dta kick_hit {kick_drummer.trig trigger} [C data]:
+  kick_success.tnm moves cameras.grp (0, 2, -1) -> 0 over 5 frames, the
+  drum track's bounce. It never showed even when fired: the view set
+  intro_anim.grp (camera_intro.tnm, also on cameras.grp) at its last frame
+  every frame after the intro, over any other cameras.grp anim; the intro
+  is now set until it ends, then left. The kick is the lane whose slot is
+  0 (the drums' bits are permuted to the lanes: bit 4 of the view's chart).
+  Also: a gem hit in a solo fires gem_track solo_note (the smasher's
+  hit_fill.trig, the track's solo_hit.trig) [C data; I: the native sends it
+  for each hit in a solo]; the bass's BassSuperStreak_ON / _OFF.trig at 5x
+  (track_handlers set_streak / streak_broken) [C data] is wired but cannot
+  fire: the port's Player keeps the singleplayer multipliers (4x) for the
+  bass (rulesForInstrument is not called; RB's bass goes to 6x).
+- **Measured:** inbloom drums, 30 s, autoplay: kick_drummer.trig 0 -> 39
+  (39 kicks), the camera off its rest in 0 -> 1,584 of 7,014 frames (lift
+  up to 2.8); mainoffender guitar, 25 s: solo_hit / hit_fill 0 -> 85 each,
+  particles launched 1,188 -> 1,528.
+- **Undo:** GD05_KICK_LEGACY=1 (kick and the intro hold), GD05_TRACKFX_LEGACY=1
+  (solo notes, super streak).

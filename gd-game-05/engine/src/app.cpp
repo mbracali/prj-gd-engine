@@ -2329,6 +2329,7 @@ void App::drawSeats(float t, float speed) {
         pv.heldGem = p->sustainGem();
         pv.whammy = p->whammyBar();
         pv.heldFrets = p->heldFrets();
+        pv.baseMultiplier = p->baseMultiplier();
         pv.struck = [p](int i) { return p->gemHit(i); };
         pv.soloActive = st.bonus && st.bonus->soloShare(t) >= 0;
         if (st.part == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
@@ -3259,6 +3260,10 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "rb_fx_hits_no_flame") return RbTrackView::fxStats().hitsNoFx;
     if (key == "rb_fx_hits_seen") return RbTrackView::fxStats().hitsSeen;
     if (key == "rb_fx_solo_starts") return RbTrackView::fxStats().soloStarts;
+    if (key == "rb_fx_kicks") return RbTrackView::fxStats().kicks;
+    if (key == "rb_fx_solo_notes") return RbTrackView::fxStats().soloNotes;
+    if (key == "rb_fx_super_streaks") return RbTrackView::fxStats().superStreaks;
+    if (key == "rb_fx_kick_triggers") return RbTrackView::fxStats().kickTriggers;
     if (key == "rb_fx_hits_unseen_pct") {
         const auto& f = RbTrackView::fxStats();
         const int n = f.hitsSeen + f.hitsUnseen;
@@ -4320,6 +4325,7 @@ void App::drawRbTrack0(float t, float speed) {
     pv.heldGem = p->sustainGem();
     pv.whammy = p->whammyBar();
     pv.heldFrets = p->heldFrets();
+    pv.baseMultiplier = p->baseMultiplier();
     pv.struck = [p](int i) { return p->gemHit(i); };
     pv.soloActive = rbBonus_ && rbBonus_->soloShare(t) >= 0;
     // The drums' permuted lanes back to the chart's (kick = lane 0).

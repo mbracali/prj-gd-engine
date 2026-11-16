@@ -60,6 +60,7 @@ public:
         uint32_t heldFrets = 0;  // the frets held (the chart's bits): their smashers glow
         std::function<bool(int gem)> struck;  // the player hit it (the hit flames); unset: `hit`
         bool soloActive = false;  // in a solo section (player.dta solo_start / solo_end)
+        int baseMultiplier = 1;   // the streak multiplier (the bass's super streak at 5x and over)
     };
 
     // The fret board's effects, counted for the walks (GD05-045): hits whose
@@ -70,6 +71,8 @@ public:
         // (seen) or not (unseen); particles the smashers' effects drew.
         int hitsSeen = 0, hitsUnseen = 0;
         int soloStarts = 0, soloStops = 0;  // guitar_solo_start / _stop.trig fired
+        int kicks = 0, kickTriggers = 0;    // kick gems struck, kick_drummer.trig fired (GD05-100)
+        int soloNotes = 0, superStreaks = 0;  // solo_hit.trig / hit_fill.trig fired, BassSuperStreak_ON.trig fired
         long fxParticlesDrawn = 0;
     };
     static FxStats& fxStats();
@@ -147,6 +150,7 @@ private:
     std::string part_;
     bool drums_ = false, lefty_ = false;
     float introAtMs_ = -1e30f;
+    float introHeldAt_ = -1e30f;  // the intro anim has reached its end for this introAtMs_
     const scene::Cam* cam_ = nullptr;
     std::array<float, 4> screenRect_{0, 0, 1, 1};
     gfx::ScenePose pose_;
@@ -238,7 +242,7 @@ private:
     const TempoMap* tempo_ = nullptr;  // the song's (draw), for the beat rates
     int fxLaunchedNow_ = 0;  // particles launched by the triggers being fired
     int hitsPending_ = 0;    // hits not yet seen drawn (fxStats)
-    bool wasSolo_ = false;
+    bool wasSolo_ = false, superStreak_ = false;
     float hitsPendingMs_ = 0;
     float lastFxMs_ = -1e30f;
     // What the view saw last frame (the events are its changes).
