@@ -41,6 +41,10 @@ struct EnhancedSetting {
 };
 const std::vector<EnhancedSetting>& enhancedSettings();
 const EnhancedSetting* enhancedSetting(const std::string& key);
+// The defaults that differ on the Steam Deck (`deck`) and on Android, or
+// nullptr (the setting's own). Android renders 900 lines as gd01 does, not the
+// panel's own resolution (2880x1800 on #105's tablet: under 10 FPS, GD03-108).
+const char* platformDefault(const std::string& key, bool deck, bool android);
 // Whether `value` is one the setting takes.
 bool enhancedValid(const EnhancedSetting& s, const std::string& value);
 

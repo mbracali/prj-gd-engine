@@ -1229,6 +1229,18 @@ private:
              "Loads content left unused on the original disc into the game."},
             {Kind::Check, "no_fail", "No Fail Mode", true, "The rock meter cannot fail you: every song plays to the end."},
             {Kind::Check, "autoplay", "Autoplay", true, "The game plays every note of a song by itself, without a miss."},
+            {Kind::Choice, "song_speed", "Song Speed", true,
+             "Plays the songs slower or faster, from 50 % to 200 %, with the music at its own pitch. The notes keep their "
+             "speed on the highway; above 100 % the timing window grows with the speed. A song not at 100 % saves no "
+             "score, stars or record, like practice.",
+             {{"50", "50 %"}, {"60", "60 %"}, {"70", "70 %"}, {"80", "80 %"}, {"90", "90 %"}, {"100", "100 % (original)"},
+              {"110", "110 %"}, {"120", "120 %"}, {"130", "130 %"}, {"140", "140 %"}, {"150", "150 %"}, {"160", "160 %"},
+              {"170", "170 %"}, {"180", "180 %"}, {"190", "190 %"}, {"200", "200 %"}}},
+            {Kind::Choice, "track_speed", "Track Speed", true,
+             "How fast the notes come down the highway, times the difficulty's own speed (1x, as the original). Higher "
+             "spreads the notes out and shows them for less time. The same choice in every game.",
+             {{"0.5", "0.5x"}, {"0.75", "0.75x"}, {"1", "1x (original)"}, {"1.25", "1.25x"}, {"1.5", "1.5x"}, {"1.75", "1.75x"},
+              {"2", "2x"}, {"2.25", "2.25x"}, {"2.5", "2.5x"}, {"2.75", "2.75x"}, {"3", "3x"}, {"3.25", "3.25x"}, {"3.5", "3.5x"}}},
             {Kind::Choice, "hopo_mode", "Forgiving Hammer-ons & Pull-offs", true,
              "Notes with a coloured top can be played without strumming. Off (as on the PS2): after a strum while a "
              "fret stays held, from 40 ms before the note, and a wrong fret locks the note out. On (forgiving): no "
@@ -1526,6 +1538,7 @@ private:
         const float rowTop = rowY(dropdown_), h = rowHeight(it), n = float(it.options.size());
         ddTop_ = rowTop + h - 2;
         if (ddTop_ + n * kDdRow > kScreenH - 70) ddTop_ = rowTop + 2 - n * kDdRow;  // no room below: open upward
+        ddTop_ = std::max(ddTop_, 8.0f);  // a long list (Song Speed) stays on the screen
         const float o = offset_, x0 = kDdPopX0 + o, x1 = kCtrlX1 + o;
         quad(x0, ddTop_, x1, ddTop_ + n * kDdRow, {0.08f, 0.08f, 0.1f, 0.97f});
         frame(x0, ddTop_, x1, ddTop_ + n * kDdRow, 2, kAccent);

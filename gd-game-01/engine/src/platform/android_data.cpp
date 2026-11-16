@@ -25,7 +25,7 @@ std::string AndroidIsoImport::findIso() {
     for (const auto& e : std::filesystem::directory_iterator(folder(), ec)) {
         std::string ext = e.path().extension().string();
         for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
-        if (e.is_regular_file(ec) && ext == ".iso") return e.path().string();
+        if (e.is_regular_file(ec) && (ext == ".iso" || ext == ".chd")) return e.path().string();
     }
     return {};
 }
@@ -37,8 +37,10 @@ void AndroidIsoImport::pick(SDL_Window* window) {
         std::lock_guard lock(mutex_);
         status_ = "Choose your Guitar Hero (USA) disc image...";
     }
-    static const SDL_DialogFileFilter kIso[] = {{"PS2 disc image (.iso)", "iso"}};
-    SDL_ShowOpenFileDialog(picked, this, window, kIso, 1, nullptr, false);
+    // .chd too (GDUL-030); "All files" as well: Android has no MIME type for .chd,
+    // so its file dialog would hide them behind the .iso filter alone.
+    static const SDL_DialogFileFilter kIso[] = {{"PS2 disc image (.iso, .chd)", "iso;ISO;chd;CHD"}, {"All files", "*"}};
+    SDL_ShowOpenFileDialog(picked, this, window, kIso, 2, nullptr, false);
 }
 
 void AndroidIsoImport::picked(void* self, const char* const* files, int) {

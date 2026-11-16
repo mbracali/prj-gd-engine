@@ -368,9 +368,7 @@ void HudView::drawObject(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, cons
                 mat = it->second;
             }
         if (const gfx::ScenePose::MeshAnimState* ma = pose.meshAnim(m)) {
-            const scene::Mesh* geom = m;
-            if (m->verts.empty() && !m->geomOwner.empty() && m->dir)
-                if (auto* g = m->dir->resolve<scene::Mesh>(m->geomOwner)) geom = g;
+            const scene::Mesh* geom = gfx::meshGeometry(m);
             if (!geom->faces.empty()) {
                 if (!meshAnimBuffer_) meshAnimBuffer_ = std::make_unique<gfx::DynamicMesh>(*device_);
                 std::vector<uint16_t> idx;

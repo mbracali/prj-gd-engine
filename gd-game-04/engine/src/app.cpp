@@ -1915,7 +1915,10 @@ int App::run() {
             const char* d = SDL_GetCurrentVideoDriver();
             return d && std::strcmp(d, "offscreen") == 0;
         }();
-        const uint64_t minNs = !headless ? 0 : cap == 0 ? kMinFrameNs : uint64_t(1e9 / cap);
+        // GD04_FPS (development aid) paces a headless run too: the 60 vs 240 FPS comparison (GD04-122).
+        static const int devFps = SDL_getenv("GD04_FPS") ? std::max(0, std::atoi(SDL_getenv("GD04_FPS"))) : -1;
+        const int pace = devFps >= 0 ? devFps : cap;
+        const uint64_t minNs = !headless ? 0 : pace == 0 ? kMinFrameNs : uint64_t(1e9 / pace);
         const uint64_t spent = SDL_GetTicksNS() - frameStart;
         perf::frameDone(spent, song_ ? "song" : front_ ? front_->flowState() : "-");
         // GD04_FRAMELOG: every frame over 25 ms, with the screen (owner 1.7).

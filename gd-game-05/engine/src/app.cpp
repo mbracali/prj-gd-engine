@@ -28,6 +28,7 @@
 #include "audio/audio_device.h"
 #include "audio/mixer.h"
 #include "audio/synth.h"
+#include "char/rig.h"
 #include "char/character.h"
 #include "char/midi_parser.h"
 #include "data/dta.h"
@@ -143,6 +144,10 @@ bool envOn(const char* name) {
     const char* v = SDL_getenv(name);
     return v && *v && *v != '0';
 }
+
+// GD05-107: each camera rule fix has its own switch; GD05_CAMRULES_LEGACY=1
+// turns them all off (the camera as in 1.1.15).
+static bool camLegacy(const char* name) { return envOn(name) || envOn("GD05_CAMRULES_LEGACY"); }
 
 // Two players (`parts`: their instruments): each player's (tracks
 // (<instrument> channels)) are muted while that player misses; the guitar
@@ -554,6 +559,17 @@ private:
     Mixer mixer_;
     std::unique_ptr<GameData> data_;
     Rules rules_;
+    // The rules each instrument plays by (D127, GD05-104): its (points ...)
+    // and its streak multipliers, rulesForInstrument (the bass's to 6x, RB's
+    // bass super streak); the selftest always used them, the game played
+    // every part by the singleplayer table (4x). GD05_PARTRULES_LEGACY=1:
+    // rules_ for every part. partRules_[n]: player_ / player2_'s.
+    Rules partRules_[2];
+    Rules rulesFor(Part part) const {
+        static const bool legacy = envOn("GD05_PARTRULES_LEGACY");
+        if (legacy) return rules_;
+        return rulesForInstrument(rules_, part == Part::Drums ? "drum" : part == Part::Bass ? "bass" : part == Part::Vocals ? "vocals" : "guitar");
+    }
     std::vector<SongInfo> songs_;
     bool running_ = true;
     bool restart_ = false;  // Enhanced's Restart Now: runApp starts the game again
@@ -617,6 +633,7 @@ private:
     struct RbSeat {
         std::string part;
         int pad = 1, difficulty = 3;
+        std::unique_ptr<Rules> rules;  // its instrument's (D127); before player: it outlives it
         std::unique_ptr<Player> player;
         std::unique_ptr<VocalPlayer> vocal;
         std::unique_ptr<VocalInput> mic;
@@ -823,9 +840,45 @@ private:
     bool rbWinShot_ = false, rbLoseShot_ = false;
     float rbNextCamMs_ = -1e9f;
     std::set<const scene::CamShot*> rbShotUsed_;
+    // GD05-107: worldbase.dta's $camera.directed_cut (the intro, a directed
+    // cut, WIN / LOSE set it; pick_new_shot clears it), the shots started
+    // this song (one_time_played), the venue's disabled shots (WorldDir
+    // camshot_overrides), the song's directed cuts timed by their zero_time
+    // (midi_parsers.dta's text), the time rbShots last ran.
+    bool rbDirected_ = false, rbPendingPick_ = false;
+    std::set<const scene::CamShot*> rbOneTimePlayed_, rbVenueDisabled_;
+    struct RbDirectedCut {
+        float startMs, eventMs;
+        const scene::CamShot* shot;
+    };
+    std::vector<RbDirectedCut> rbDirectedCuts_;
+    size_t rbDirectedNext_ = 0;
+    bool rbDirectedBuilt_ = false;
+    float rbShotsT_ = 0;
     const scene::CamShot* rbShot(const std::string& category, const std::function<bool(const scene::CamShot&)>& ok = {});
+    const scene::CamShot* rbDirectedShot(const std::string& category);
+    const scene::CamShot* rbPickNormal(float t);
+    void rbCamshotEnd(const scene::CamShot& shot);
+    void rbStartShot(const scene::CamShot* shot, float t);
+    void rbResetSongShots();
     std::vector<const scene::CamShot*> rbIntroShots();
     void rbShots(float t);
+    // GD05-107's measure (counter rb_camsim): the song's camera run on its own clock.
+    struct RbCamSim {
+        int runs = 0, cuts = 0, disabledPicks = 0, directed = 0, directedOnTime = 0;
+        float maxHoldMs = 0, maxPastEndMs = 0, maxDirectedPastEndMs = 0;
+    } rbCamSim_;
+    int rbCamSimRun();
+    // GD05-107 #10: a cut's first frame aimed at the targets' places before
+    // the band was posed for the shot? Its frame 0 as drawn against frame 0
+    // evaluated two frames later (the targets posed): the largest angle
+    // between the two cameras' rotations and the count over 2 degrees.
+    const scene::CamShot* rbAimShot_ = nullptr;
+    int rbAimFrames_ = 0, rbAimChecks_ = 0, rbAimOff_ = 0;
+    bool rbCutInUpdate_ = false;
+    float rbAimMaxDeg_ = 0, rbAimMaxPos_ = 0;
+    gfx::Camera rbAimCam0_;
+    void rbCutAimProbe();
     // The band on stage (M9, game/band.h): made when the song begins in the venue.
     std::unique_ptr<Band> band_;
     // The players' look from the menus (GameSetup), for the band.
@@ -845,7 +898,17 @@ private:
         float fromMs = 0;
         bool framed = false;  // the band shot is picked (updateBackdrop)
         int lightPart = -1;
+        bool fixedCam = false;  // D126: the singer / drummer / guitarist camera, not the shot's
+        gfx::Camera cam;
+        float focus = 0;  // the singer's distance (the depth of field's focus)
+        bool noTeleport = false;  // D126: its shot leaves the band at the venue's places
+        float reaimMs = -1;       // D126: simMs to aim the camera again (-1: no)
     };
+    // Pick: the camera and its shot; Reaim: the same eye, aimed again once the
+    // shot's clips have posed the band; Measure: the composition logged.
+    enum class BackdropCam { Pick, Reaim, Measure };
+    const scene::CamShot* frameBackdropBand(BackdropCam mode = BackdropCam::Pick);
+    void forceBackdropShot(const scene::CamShot* shot);
     std::unique_ptr<Backdrop> backdrop_;
     // Shown by Enhanced Options; loaded at startup and kept in the menus (a
     // song's venue replaces it), so the screen opens on the next frame.
@@ -867,8 +930,9 @@ private:
     std::vector<std::pair<std::string, std::string>> dialogResults_;
     std::string userFilesStatus_;
     bool fpsCounter_ = false;
-    double fps_ = 0;
-    uint64_t fpsLastNs_ = 0;
+    double fps_ = 0, fpsEma_ = 0;
+    uint64_t fpsLastNs_ = 0, fpsWindowNs_ = 0;
+    int fpsFrames_ = 0;
     std::string venuePath_;
     gfx::PostProcState venuePost_;  // the static shot's PostProc (the director's from M8 phase 2)
     bool venuePostOn_ = false;
@@ -1282,7 +1346,9 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
                     if (input_.gh2Type(d.id).find("joypad") != std::string::npos) return ControllerMode::Joypad;
             return ControllerMode::Guitar;
         };
-        player_ = std::make_unique<Player>(*song_, part0, static_cast<Difficulty>(difficulties_[0]), rules_,
+        player_.reset();  // its rules change below
+        partRules_[0] = rulesFor(part0);
+        player_ = std::make_unique<Player>(*song_, part0, static_cast<Difficulty>(difficulties_[0]), partRules_[0],
                                            part0 == Part::Drums ? ControllerMode::Joypad : two ? modeOfPad(pads_[0]) : input_.lastMode(), noFail,
                                            faceOff ? 0 : -1, config);
         player_->setCalibrationMs(calibrationMs());
@@ -1321,7 +1387,8 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         guitarHeard_ = true;
         activeGem_ = 0, activePlayers_ = 0;
         if (two) {
-            player2_ = std::make_unique<Player>(*song_, part1, static_cast<Difficulty>(difficulties_[1]), rules_, autoplay || !ui_ ? ControllerMode::Guitar : modeOfPad(pads_[1]),
+            partRules_[1] = rulesFor(part1);
+            player2_ = std::make_unique<Player>(*song_, part1, static_cast<Difficulty>(difficulties_[1]), partRules_[1], autoplay || !ui_ ? ControllerMode::Guitar : modeOfPad(pads_[1]),
                                                 true, faceOff ? 1 : -1, config);
             player2_->setNumber(1);
             player2_->setCalibrationMs(calibrationMs());
@@ -1599,7 +1666,7 @@ void App::beginSong() {
         }
         if (shot) startMs = std::min(-double(shot->lengthFrames()) / 30.0 * 1000.0, 0.0);
     }
-    rbVenueNote_ = rbVenueEvent_ = 0;
+    rbResetSongShots();
     // Practice (0x00106840): the clock starts at the practice start (no
     // intro: skip_intro, the track already out).
     const bool practice = mode_ == DevMode::Practice;
@@ -1740,9 +1807,10 @@ void App::endSong() {
         ui_->gameEvent("game_outro");
     }
     input_.setTouchLanes(0, {}), input_.setTouchLanes(1, {});  // no lanes for the fingers until the next song
-    SDL_Log("%s: score %d, %d/%d notes, longest streak %d%s (audio underruns: %lld frames)", info_->id.c_str(),
+    SDL_Log("%s: score %d, %d/%d notes, longest streak %d (top multiplier %dx, bass super streaks %d)%s (audio underruns: %lld frames)", info_->id.c_str(),
             player_->score(), player_->notesHit(), int(player_->chart().gems.size()), player_->longestStreak(),
-            player_->failed() ? ", failed" : "", static_cast<long long>(mixer_.underruns()));
+            partRules_[0].multiplierForStreak(player_->longestStreak()), RbTrackView::fxStats().superStreaks, player_->failed() ? ", failed" : "",
+            static_cast<long long>(mixer_.underruns()));
     for (int i = 0; i < 2; ++i) {
         const Player* p = i == 0 ? player_.get() : player2_.get();
         SongResult& res = lastResult_[size_t(i)];
@@ -2101,7 +2169,8 @@ void App::makeSeats(bool autoplay) {
         if (part == Part::Vocals && (song_->vocals.empty() || haveVocals)) part = Part::Guitar;
         if (part == Part::Vocals) haveVocals = true;
         st.part = part == Part::Drums ? "drum" : part == Part::Bass ? "bass" : part == Part::Vocals ? "vocals" : "guitar";
-        const Rules& r = rules_;
+        st.rules = std::make_unique<Rules>(rulesFor(part));
+        const Rules& r = *st.rules;
         st.player = std::make_unique<Player>(*song_, part, static_cast<Difficulty>(st.difficulty), r,
                                              part == Part::Drums ? ControllerMode::Joypad : ControllerMode::Guitar, true, -1, nullptr);
         st.player->setNumber(int(seats_.size()) + 1);
@@ -2329,6 +2398,7 @@ void App::drawSeats(float t, float speed) {
         pv.heldGem = p->sustainGem();
         pv.whammy = p->whammyBar();
         pv.heldFrets = p->heldFrets();
+        pv.baseMultiplier = p->baseMultiplier();
         pv.struck = [p](int i) { return p->gemHit(i); };
         pv.soloActive = st.bonus && st.bonus->soloShare(t) >= 0;
         if (st.part == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
@@ -2714,6 +2784,14 @@ void App::updateSong(float t) {
             const std::array<float, 3> cam{c.x, c.y, c.z};
             band_->update(world_->seconds(), world_->beats(), &cam);
         }
+        {
+            // The world clock (GD05-102): the shake and the hair step at the
+            // world's paced rate (24 under ProFilm); GD05_WORLD_CLOCK_LEGACY=1: 60.
+            static const bool legacyClock = SDL_getenv("GD05_WORLD_CLOCK_LEGACY") != nullptr;
+            const int wf = legacyClock ? 0 : canvas_.renderer().post().worldFps();
+            chr::setHairStepHz(wf > 0 ? wf : 60);
+            if (director_) director_->setShakeStepHz(float(wf > 0 ? wf : 60));
+        }
         if (director_) {
             director_->setStarPower(player_->starPowerActive() || (player2_ && player2_->starPowerActive()));
             rbShots(t);
@@ -2726,6 +2804,7 @@ void App::updateSong(float t) {
                     director_->update();
                 }
             if (director_->hasCamera()) venueView_->setCamera(director_->camera());
+            rbCutAimProbe();
         }
         if (begun_ && t <= float(kTrackExtendMs)) {
             const gfx::Vec3 c = venueView_->camera().position();
@@ -2759,6 +2838,17 @@ void App::updateSong(float t) {
                 if (gfx::dot(dir, dir) < 1e-6f) dir = {0, -1, 0};
                 dir = gfx::normalize(dir);
                 dir = {dir.x * std::cos(turn) - dir.y * std::sin(turn), dir.x * std::sin(turn) + dir.y * std::cos(turn), 0};
+                // <degrees> "f": in front of the face (level, square to the
+                // line between the eyes, on the side the eyes look), whatever
+                // way the member turns; <bone> then is only the target
+                // (GD05-112 close shots).
+                scene::Xfm el, er;
+                if (f.size() > 2 && f[2] == "f" && band_->objectXfm(who, "bone_L-eye.mesh", el) && band_->objectXfm(who, "bone_R-eye.mesh", er)) {
+                    const gfx::Vec3 across{er.pos[0] - el.pos[0], er.pos[1] - el.pos[1], 0};
+                    gfx::Vec3 fwd = gfx::normalize(gfx::Vec3{-across.y, across.x, 0});
+                    if (fwd.x * el.rot[3] + fwd.y * el.rot[4] < 0) fwd = fwd * -1.0f;
+                    dir = fwd;
+                }
                 const gfx::Vec3 eye = target + dir * dist + gfx::Vec3{0, 0, up};
                 gfx::Camera cam = gfx::Camera::lookAt(eye, target);
                 cam.yFov = 0.6f;
@@ -3225,6 +3315,16 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "rb_track_frames") return rbTrackFrames_;
     if (key == "rb_intro_shots") return int(rbIntroChain_.size());
     if (key == "rb_intro_errors") return rbIntroErrors(true);
+    // GD05-107 (rbCamSimRun).
+    if (key == "rb_camsim") return const_cast<App*>(this)->rbCamSimRun();  // a walk step, run once
+    if (key == "rb_camsim_max_hold_ms") return int(rbCamSim_.maxHoldMs);
+    if (key == "rb_camsim_max_past_end_ms") return int(rbCamSim_.maxPastEndMs);
+    if (key == "rb_camsim_directed_past_end_ms") return int(rbCamSim_.maxDirectedPastEndMs);
+    if (key == "rb_camsim_disabled_picks") return rbCamSim_.disabledPicks;
+    if (key == "rb_cut_aim_checks") return rbAimChecks_;
+    if (key == "rb_cut_aim_max_deg") return int(std::ceil(rbAimMaxDeg_));
+    if (key == "rb_cut_aim_off") return rbAimOff_;
+    if (key == "rb_camsim_directed_late") return rbCamSim_.directed - rbCamSim_.directedOnTime;
     // GD05-070 / GD05-071 (rbProbes).
     if (key == "meter_frames") return rbProbe_.meterFrames;
     if (key == "meter_jumps") return rbProbe_.meterJumps;
@@ -3259,6 +3359,10 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "rb_fx_hits_no_flame") return RbTrackView::fxStats().hitsNoFx;
     if (key == "rb_fx_hits_seen") return RbTrackView::fxStats().hitsSeen;
     if (key == "rb_fx_solo_starts") return RbTrackView::fxStats().soloStarts;
+    if (key == "rb_fx_kicks") return RbTrackView::fxStats().kicks;
+    if (key == "rb_fx_solo_notes") return RbTrackView::fxStats().soloNotes;
+    if (key == "rb_fx_super_streaks") return RbTrackView::fxStats().superStreaks;
+    if (key == "rb_fx_kick_triggers") return RbTrackView::fxStats().kickTriggers;
     if (key == "rb_fx_hits_unseen_pct") {
         const auto& f = RbTrackView::fxStats();
         const int n = f.hitsSeen + f.hitsUnseen;
@@ -3487,8 +3591,9 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
             }
             static const bool legacy = SDL_getenv("GD05_INTRO_LEGACY") != nullptr, noTeleport = SDL_getenv("GD05_NO_TELEPORT") != nullptr;
             if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(&s); bs && band_ && !rbShots_.empty() && (!legacy || rbShotsPicking_))
-                band_->rbShotStart(*bs, !noTeleport);
+                band_->rbShotStart(*bs, !noTeleport && !(backdrop_ && backdrop_->noTeleport));
         };
+        director_->onShotOver = [this](const scene::CamShot& s) { rbCamshotEnd(s); };
         world_->crowd().audio().open();
         if (!ui_)
             director_->provideGameObjects(variant != VenueVariant::Single,
@@ -3536,7 +3641,10 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
                 }
                 const CameraDirector::Dof& d = director_->dof();
                 const gfx::Camera& c = director_->camera();
-                if (d.on && d.maxBlur > 0) r.post().setDof(gfx::DofState::fromShot(d.focus, d.blurDepth, d.maxBlur, c.nearPlane, c.farPlane));
+                // The Enhanced backdrop's own camera (D126): the shot's blur, focused on the singer.
+                if (backdrop_ && backdrop_->fixedCam && d.on && d.maxBlur > 0)
+                    r.post().setDof(gfx::DofState::fromShot(backdrop_->focus, d.blurDepth, d.maxBlur, backdrop_->cam.nearPlane, backdrop_->cam.farPlane));
+                else if (d.on && d.maxBlur > 0) r.post().setDof(gfx::DofState::fromShot(d.focus, d.blurDepth, d.maxBlur, c.nearPlane, c.farPlane));
                 else r.post().clearDof();
             } else if (venuePostOn_) {
                 r.post().select(venuePost_);
@@ -3560,7 +3668,7 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
     rbShotUsed_.clear();
     rbNextCamMs_ = -1e9f;
     rbWinShot_ = rbLoseShot_ = false;
-    rbVenueNote_ = rbVenueEvent_ = 0;
+    rbResetSongShots();
     // RB's world enter (worldbase.dta) [C data]: the mode's shots only
     // (change_proxies keeps coop_ in a band), no PS3-only ones
     // (platform_only 4), and each NORMAL shot re-keyed NORMAL<b><d><g><v>
@@ -3568,12 +3676,33 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
     bool anyCoop = false;
     for (const auto& p : venue_->parts())
         for (scene::Object* o : p.milo->root().byClass("BandCamShot")) anyCoop |= o->name.rfind("coop_", 0) == 0;
+    // GD05-107: the venue's disabled shots (WorldDir camshot_overrides, RB
+    // 0x8228B6C8 -> 0x822883A8): each listed CamShot's +0x16c cleared (the
+    // CamShot constructor RB 0x82295310 sets it to 1), and the picker
+    // (0x8229E190) takes only shots with it set [C]. Harmonix's own list of
+    // the shared shots that clip this venue's set; the port ignored it.
+    // GD05_CAMOVERRIDES_LEGACY=1: the listed shots picked as before.
+    rbVenueDisabled_.clear();
+    std::set<std::string> disabledNames;
+    for (const auto& p : venue_->parts()) {
+        const scene::Directory& root = p.milo->root();
+        auto* self = root.self ? root.self->as<scene::DirObj>() : nullptr;
+        if (self && self->hasWorld)
+            for (const std::string& n : self->world.camshots) disabledNames.insert(n);
+    }
+    for (const auto& p : venue_->parts())
+        for (scene::Object* o : p.milo->root().byClass("BandCamShot"))
+            if (disabledNames.count(o->name) || disabledNames.count(o->name + ".shot"))
+                if (auto* c = o->as<scene::CamShot>()) rbVenueDisabled_.insert(c);
+    const bool overridesLegacy = camLegacy("GD05_CAMOVERRIDES_LEGACY");
+    SDL_Log("venue %s: %zu disabled shots listed, %zu found%s", venue.c_str(), disabledNames.size(), rbVenueDisabled_.size(), overridesLegacy ? " (GD05_CAMOVERRIDES_LEGACY: still picked)" : "");
     for (const auto& p : venue_->parts())
         for (scene::Object* o : p.milo->root().byClass("BandCamShot")) {
             auto* c = o->as<scene::CamShot>();
             if (!c || c->keyframes.empty()) continue;  // a shot with no keyframe frames nothing
             if (anyCoop && c->name.rfind("coop_", 0) != 0) continue;
             if (c->platformOnly == 4 || c->name.find("_ps3_") != std::string::npos) continue;
+            if (!overridesLegacy && rbVenueDisabled_.count(c)) continue;
             std::string cat = c->category;
             if (cat == "NORMAL") {
                 if (c->flag("special") == "TRUE" || c->flag("special") == "1") continue;
@@ -3807,71 +3936,248 @@ std::vector<const scene::CamShot*> App::rbIntroShots() {
     return chain;
 }
 
-// The VENUE track's camera (worldbase.dta pick_new_shot, midi_parsers.dta's
-// world_camera_parser / world_focus_parser) [C data]: note 60 picks a
-// NORMAL<bass drums guitar vocal> shot from the held focus notes 61..64 and
-// the held 70..73 (no_behind, force_far, force_closeup, no_closeup), facing
-// alternating and no far after far; [do_directed_cut <cat>] forces that
-// category's shot and holds note-60 picks for its min_time + zero_time;
-// LOSE when the band fails, WIN after the song. [I: the 1/8-beat lead, the
-// intro chains, the shots' band targets.]
-void App::rbShots(float t) {
-    if (rbShots_.empty() || !director_ || !song_) return;
-    const scene::CamShot* next = nullptr;
+// The song's camera state back to RB's game start (worldbase.dta enter /
+// game_start): the intro sets $camera.directed_cut TRUE before it forces
+// the intro shot [C data]; one_time_played and the directed cuts are the
+// song's.
+void App::rbResetSongShots() {
+    rbVenueNote_ = rbVenueEvent_ = 0;
+    rbDirected_ = true;
+    rbPendingPick_ = false;
+    rbOneTimePlayed_.clear();
+    rbDirectedCuts_.clear();
+    rbDirectedNext_ = 0;
+    rbDirectedBuilt_ = false;
+}
+
+// A shot the VENUE track's rules start (force_shot): its targets through
+// onShotStarted; start_shot sets one_time_played [C data].
+void App::rbStartShot(const scene::CamShot* next, float t) {
+    if (!next || !director_) return;
+    static const bool log = SDL_getenv("GD05_SHOTLOG") != nullptr;
+    if (log) SDL_Log("shot %.0f: %s (%s, %s %s)", double(t), next->name.c_str(), next->category.c_str(), next->flag("distance").c_str(), next->flag("facing").c_str());
+    if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(next); bs && log)
+        for (const auto& tg : bs->bandTargets) SDL_Log("  target %s anim %s teleport %d", tg.target.c_str(), tg.anim.c_str(), int(tg.teleport));
+    rbOneTimePlayed_.insert(next);
+    rbShotsPicking_ = true;
+    director_->forceShot(next);  // its targets: onShotStarted
+    rbShotsPicking_ = false;
+}
+
+// A directed cut's shot (midi_parsers.dta world_focus_parser get_shot)
+// [C data]: find_shot of the category with (valid_male 1) / (valid_female
+// 1) by the gender of the member the category names (bass, drum, guitar,
+// vocal: player_<inst>0) and (valid_banger / dramatic / rocker / spazz 1)
+// by its attitude; nothing acceptable: no cut. The shots' valid_* default
+// TRUE (band_objects.dta BandCamShot). GD05_DIRFILTER_LEGACY=1: any shot.
+const scene::CamShot* App::rbDirectedShot(const std::string& cat) {
+    if (camLegacy("GD05_DIRFILTER_LEGACY")) return rbShot(cat);
+    const Band::Member* who = nullptr;
+    const char* inst = cat.find("bass") != std::string::npos    ? "bass"
+                       : cat.find("drum") != std::string::npos  ? "drum"
+                       : cat.find("guitar") != std::string::npos ? "guitar"
+                       : cat.find("vocal") != std::string::npos ? "vocals"
+                                                                : nullptr;
+    if (inst && band_)
+        for (const auto& m : band_->members())
+            if (m->slot == std::string("player_") + inst + "0") who = m.get();
+    if (!who) return rbShot(cat);
+    std::string genre;
+    if (who->rbFlags & 256u) genre = "valid_rocker";
+    else if (who->rbFlags & 512u) genre = "valid_dramatic";
+    else if (who->rbFlags & 1024u) genre = "valid_banger";
+    else if (who->rbFlags & 2048u) genre = "valid_spazz";
+    const std::string gender = who->rbGender == "male" ? "valid_male" : who->rbGender == "female" ? "valid_female" : "";
+    auto valid = [](const scene::CamShot& c, const std::string& k) {
+        if (k.empty()) return true;
+        const std::string v = c.flag(k);
+        return v.empty() || (v != "0" && v != "FALSE");
+    };
+    return rbShot(cat, [&](const scene::CamShot& c) { return valid(c, gender) && valid(c, genre); });
+}
+
+// worldbase.dta pick_new_shot, the band's branch [C data]: the category
+// NORMAL<b d g v> from the held focus notes (none: a random one of 8), the
+// filter on facing / distance / one_time_played; $camera.directed_cut
+// cleared. Nothing acceptable: no cut (RB 0x8229F0D0 returns 0) [C].
+const scene::CamShot* App::rbPickNormal(float t) {
     auto held = [&](int pitch) {
         for (const VenueNote& n : song_->venueNotes)
             if (n.track == VenueNote::Track::Venue && n.pitch == pitch && n.ms <= t + 1 && (n.endMs < 0 ? n.ms + 1 >= t : n.endMs > t)) return true;
         return false;
     };
-    auto pickNormal = [&] {
-        const scene::CamShot* cur = director_->shot();
-        const std::string facing = cur ? cur->flag("facing") : std::string();
-        const std::string dist = cur ? cur->flag("distance") : std::string();
-        bool focus[4] = {held(61), held(62), held(63), held(64)};  // bass, drums, guitar, vocal
-        if (focus[1] && focus[0] + focus[2] + focus[3] >= 2) focus[1] = false;
-        const bool any = focus[0] || focus[1] || focus[2] || focus[3];
-        const bool forceFar = held(71), forceClose = held(72), noClose = held(73) || (forceClose && focus[0] + focus[1] + focus[2] + focus[3] > 1);
-        const bool noBehind = held(70) || dist == "behind";
-        bool farOk = dist != "far" && !any;
-        std::string cat;
-        if (forceFar) cat = "NORMAL1111";
-        else if (any) cat = std::string("NORMAL") + (focus[0] ? '1' : '0') + (focus[1] ? '1' : '0') + (focus[2] ? '1' : '0') + (focus[3] ? '1' : '0');
-        else {
-            static const char* kCats[] = {"0001", "0010", "0100", "1000", "1111", "1100", "0110", "0011"};
-            rbShotSeed_ = rbShotSeed_ * 1664525u + 1013904223u;
-            cat = std::string("NORMAL") + kCats[(rbShotSeed_ >> 8) % 8];
+    rbDirected_ = false;
+    const scene::CamShot* cur = director_->shot();
+    const std::string facing = cur ? cur->flag("facing") : std::string();
+    const std::string dist = cur ? cur->flag("distance") : std::string();
+    bool focus[4] = {held(61), held(62), held(63), held(64)};  // bass, drums, guitar, vocal
+    if (focus[1] && focus[0] + focus[2] + focus[3] >= 2) focus[1] = false;
+    const int numFocus = focus[0] + focus[1] + focus[2] + focus[3];
+    // A solo mode (gamemode is_solo: max_players 1) with two members in
+    // focus: the player's own instrument in their place (it replaces the
+    // bass, else the guitar, else one of the other two at random) [C data].
+    // GD05_SOLOFOCUS_LEGACY=1: the notes as they are.
+    if (numFocus == 2 && !camLegacy("GD05_SOLOFOCUS_LEGACY")) {
+        const bool solo = ui_ ? gameCfgValue(*ui_, "max_players").integerValue() == 1 : (!twoPlayers(mode_) && seats_.empty());
+        if (solo) {
+            const std::string& p = parts_[0];
+            const int me = p.rfind("bass", 0) == 0 ? 0 : p.rfind("drum", 0) == 0 ? 1 : p.rfind("vocal", 0) == 0 ? 3 : 2;
+            if (!focus[me]) {
+                focus[me] = true;
+                // the one it replaces: bass first (guitar for a bassist), else a random other
+                const int first = me == 0 ? 2 : 0;
+                if (focus[first]) {
+                    focus[first] = false;
+                } else {
+                    int others[2], n = 0;
+                    for (int k = 3; k >= 0 && n < 2; --k)
+                        if (k != me && k != first) others[n++] = k;
+                    rbShotSeed_ = rbShotSeed_ * 1664525u + 1013904223u;
+                    focus[others[(rbShotSeed_ >> 8) & 1]] = false;
+                }
+            }
         }
-        auto filter = [&](const scene::CamShot& c) {
-            const std::string f = c.flag("facing"), d = c.flag("distance");
+    }
+    const bool any = focus[0] || focus[1] || focus[2] || focus[3];
+    const bool forceFar = held(71), forceClose = held(72), noClose = held(73) || (forceClose && numFocus > 1);
+    const bool noBehind = held(70) || dist == "behind";
+    bool farOk = dist != "far" && !any;
+    std::string cat;
+    if (forceFar) cat = "NORMAL1111";
+    else if (any) cat = std::string("NORMAL") + (focus[0] ? '1' : '0') + (focus[1] ? '1' : '0') + (focus[2] ? '1' : '0') + (focus[3] ? '1' : '0');
+    else {
+        static const char* kCats[] = {"0001", "0010", "0100", "1000", "1111", "1100", "0110", "0011"};
+        rbShotSeed_ = rbShotSeed_ * 1664525u + 1013904223u;
+        cat = std::string("NORMAL") + kCats[(rbShotSeed_ >> 8) % 8];
+    }
+    // one_time shots once a song: the milos keep the flag as 1, not TRUE
+    // (start_shot sets one_time_played) [C data]. GD05_ONETIME_LEGACY=1: TRUE only.
+    const bool oneTimeLegacy = camLegacy("GD05_ONETIME_LEGACY");
+    auto filter = [&](const scene::CamShot& c) {
+        const std::string f = c.flag("facing"), d = c.flag("distance");
+        if (oneTimeLegacy) {
             if (c.flag("one_time") == "TRUE" && rbShotUsed_.count(&c)) return false;
-            if (dist != "behind" && !facing.empty() && facing != "null" && f == facing) return false;  // alternate left / right
-            if (forceFar) return d == "far";
-            if (forceClose && !noClose) return d == "closeup";
-            if (d == "far" && !farOk) return false;
-            if (d == "behind" && noBehind) return false;
-            if (d == "closeup" && noClose) return false;
-            return true;
-        };
-        const scene::CamShot* s = rbShot(cat, filter);
+        } else if (const std::string o = c.flag("one_time"); (o == "TRUE" || o == "1") && rbOneTimePlayed_.count(&c)) {
+            return false;
+        }
+        if (dist != "behind" && !facing.empty() && facing != "null" && f == facing) return false;  // alternate left / right
+        if (forceFar) return d == "far";
+        if (forceClose && !noClose) return d == "closeup";
+        if (d == "far" && !farOk) return false;
+        if (d == "behind" && noBehind) return false;
+        if (d == "closeup" && noClose) return false;
+        return true;
+    };
+    const scene::CamShot* s = rbShot(cat, filter);
+    // GD05_PICKFAIL_LEGACY=1: the port's fallbacks (the category unfiltered,
+    // then NORMAL1111), which always cut.
+    if (camLegacy("GD05_PICKFAIL_LEGACY")) {
         if (!s) s = rbShot(cat);
         if (!s) s = rbShot("NORMAL1111", filter);
-        return s;
-    };
+    } else if (!s && SDL_getenv("GD05_SHOTLOG")) {
+        SDL_Log("shot %.0f: No acceptable camera shot: cats(%s), the shot stays", double(t), cat.c_str());
+    }
+    return s;
+}
+
+// A BandCamShot's end (band_objects.dta shot_over) [C data]: its next_shot
+// forced, else the world's camshot_end: next_cam_beat -10000, then after a
+// directed shot (the intro, a directed cut) pick_new_shot at once, else
+// next_cam_beat 2 beats on (the last frame holds and the VENUE track's cuts
+// within 2 beats are skipped). The port held a directed shot's last frame
+// until the next note 60. GD05_SHOTEND_LEGACY=1: as before.
+void App::rbCamshotEnd(const scene::CamShot& shot) {
+    if (!song_ || !begun_ || rbShots_.empty() || !director_ || director_->shot() != &shot || camLegacy("GD05_SHOTEND_LEGACY")) return;
+    if (rbWinShot_ || rbLoseShot_) return;  // the port's WIN / LOSE shot stays (game_win_camera not ported)
+    const float t = rbShotsT_;
+    const bool introEnd = !rbIntroChain_.empty() && rbIntroChain_.back() == &shot;
+    if (const auto* b = dynamic_cast<const scene::BandCamShot*>(&shot); b && !b->nextShot.empty() && !introEnd && venue_)
+        if (const scene::CamShot* n = venue_->find<scene::CamShot>(b->nextShot)) {
+            rbStartShot(n, t);
+            rbCutInUpdate_ = true;
+            return;
+        }
+    rbNextCamMs_ = -1e9f;
+    if (rbDirected_) {
+        // The intro's chain ends as the clock reaches 0 (its duration_seconds
+        // add 0.0425 s a shot); the port's shots end that much earlier: the
+        // pick waits for 0.
+        if (t < 0) {
+            rbPendingPick_ = true;
+            return;
+        }
+        if (const scene::CamShot* s = rbPickNormal(t)) rbStartShot(s, t), rbCutInUpdate_ = true;
+    } else {
+        const double div = std::max(1, song_->tempo.division());
+        rbNextCamMs_ = float(song_->tempo.tickToMs(song_->tempo.msToTick(std::max(0.0f, t)) + 2 * div));
+    }
+}
+
+// The VENUE track's camera (worldbase.dta pick_new_shot, midi_parsers.dta's
+// world_camera_parser / world_focus_parser) [C data]: note 60 picks a
+// NORMAL<bass drums guitar vocal> shot from the held focus notes 61..64 and
+// the held 70..73 (no_behind, force_far, force_closeup, no_closeup), facing
+// alternating and no far after far; [do_directed_cut <cat>] forces that
+// category's shot from its zero_time before the event and holds note-60
+// picks until the event + its min_time; LOSE when the band fails, WIN after
+// the song. [I: the 1/8-beat lead.]
+void App::rbShots(float t) {
+    if (rbShots_.empty() || !director_ || !song_) return;
+    rbShotsT_ = t;
+    const scene::CamShot* next = nullptr;
+    if (rbPendingPick_ && t >= 0) {
+        rbPendingPick_ = false;
+        if (director_->shot() && std::find(rbIntroChain_.begin(), rbIntroChain_.end(), director_->shot()) != rbIntroChain_.end() && !rbLoseShot_)
+            next = rbPickNormal(t);
+    }
     while (rbVenueNote_ < song_->venueNotes.size() && song_->venueNotes[rbVenueNote_].ms <= t) {
         const VenueNote& n = song_->venueNotes[rbVenueNote_++];
         if (n.track == VenueNote::Track::Venue && n.pitch == 60 && t >= rbNextCamMs_ && !rbLoseShot_)
-            if (const scene::CamShot* s = pickNormal()) next = s;
+            if (const scene::CamShot* s = rbPickNormal(t)) next = s;
     }
-    while (rbVenueEvent_ < song_->venueEvents.size() && song_->venueEvents[rbVenueEvent_].ms <= t) {
-        const std::string& e = song_->venueEvents[rbVenueEvent_++].text;
-        const std::string key = "[do_directed_cut ";
-        if (e.compare(0, key.size(), key) == 0 && !rbLoseShot_) {
-            std::string cat = e.substr(key.size());
-            while (!cat.empty() && (cat.back() == ']' || cat.back() == ' ')) cat.pop_back();
-            if (const scene::CamShot* s = rbShot(cat)) {
-                next = s;
-                const float minT = std::atof(s->flag("min_time").c_str()), zero = std::atof(s->flag("zero_time").c_str());
-                rbNextCamMs_ = t + (minT + zero) / 30.0f * 1000.0f;
+    // midi_parsers.dta's text: the directed cut's shot chosen as the VENUE
+    // track is read (get_shot), its start moved zero_time (frames, 30 a
+    // second) before the event; start_directed_cut then holds the picks
+    // for (min_time + zero_time) / 30 s, to the event + min_time [C data].
+    // The port never cut: it looked for "[do_directed_cut ", but the song's
+    // texts are kept without their brackets (chart.cpp eventText); it also
+    // started the shot at the event and read zero_time from the header's
+    // properties (none: 0). GD05_DIRECTED_LEGACY=1: as before (no cuts).
+    const std::string key = "[do_directed_cut ";
+    auto directedCat = [&](const std::string& e, size_t from) {
+        std::string cat = e.substr(from);
+        while (!cat.empty() && (cat.back() == ']' || cat.back() == ' ')) cat.pop_back();
+        return cat;
+    };
+    if (!camLegacy("GD05_DIRECTED_LEGACY")) {
+        if (!rbDirectedBuilt_ && (band_ || t >= 0)) {
+            rbDirectedBuilt_ = true;
+            for (const SongEvent& ev : song_->venueEvents)
+                if (ev.text.rfind("do_directed_cut ", 0) == 0 || ev.text.rfind(key, 0) == 0)
+                    if (const scene::CamShot* s = rbDirectedShot(directedCat(ev.text, ev.text.find(' ') + 1))) {
+                        const auto* b = dynamic_cast<const scene::BandCamShot*>(s);
+                        const float zt = b ? b->zeroTime : 0.0f;
+                        rbDirectedCuts_.push_back({ev.ms - zt / 30.0f * 1000.0f, ev.ms, s});
+                    }
+            std::stable_sort(rbDirectedCuts_.begin(), rbDirectedCuts_.end(), [](const RbDirectedCut& a, const RbDirectedCut& b) { return a.startMs < b.startMs; });
+        }
+        while (rbDirectedBuilt_ && rbDirectedNext_ < rbDirectedCuts_.size() && rbDirectedCuts_[rbDirectedNext_].startMs <= t) {
+            const RbDirectedCut& c = rbDirectedCuts_[rbDirectedNext_++];
+            if (rbLoseShot_) continue;
+            next = c.shot;
+            rbDirected_ = true;
+            rbNextCamMs_ = c.eventMs + std::atof(c.shot->flag("min_time").c_str()) / 30.0f * 1000.0f;
+        }
+    } else {
+        while (rbVenueEvent_ < song_->venueEvents.size() && song_->venueEvents[rbVenueEvent_].ms <= t) {
+            const std::string& e = song_->venueEvents[rbVenueEvent_++].text;
+            if (e.compare(0, key.size(), key) == 0 && !rbLoseShot_) {
+                if (const scene::CamShot* s = rbShot(directedCat(e, key.size()))) {
+                    next = s;
+                    rbDirected_ = true;
+                    const float minT = std::atof(s->flag("min_time").c_str()), zero = std::atof(s->flag("zero_time").c_str());
+                    rbNextCamMs_ = t + (minT + zero) / 30.0f * 1000.0f;
+                }
             }
         }
     }
@@ -3883,16 +4189,152 @@ void App::rbShots(float t) {
         rbWinShot_ = true;
         if (const scene::CamShot* s = rbShot("WIN")) next = s;
     }
-    if (t < 0) rbWinShot_ = rbLoseShot_ = false, rbNextCamMs_ = -1e9f;
-    if (next && next != director_->shot()) {
-        static const bool log = SDL_getenv("GD05_SHOTLOG") != nullptr;
-        if (log) SDL_Log("shot %.0f: %s (%s, %s %s)", double(t), next->name.c_str(), next->category.c_str(), next->flag("distance").c_str(), next->flag("facing").c_str());
-        if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(next); bs && log)
-            for (const auto& tg : bs->bandTargets) SDL_Log("  target %s anim %s teleport %d", tg.target.c_str(), tg.anim.c_str(), int(tg.teleport));
-        rbShotsPicking_ = true;
-        director_->forceShot(next);  // its targets: onShotStarted
-        rbShotsPicking_ = false;
+    if (t < 0) {
+        rbWinShot_ = rbLoseShot_ = false;
+        if (rbDirectedNext_ == 0 || camLegacy("GD05_DIRECTED_LEGACY")) rbNextCamMs_ = -1e9f;
     }
+    if (next && next != director_->shot()) rbStartShot(next, t);
+}
+
+// GD05-107's measure (walks rb_camera_cuts / rb_camera_cuts_band: counter
+// rb_camsim): each song of GD05_CAMSIM_SONGS (default the one playing) run
+// through the camera alone on its own clock, 30 steps a second, from the
+// intro chain to the song's end: the intro, rbShots and the director as in
+// play (the band is not animated). Logs every cut (time, shot, its
+// length, how long it was held, how long past its last frame) and per song
+// the longest hold, the longest time past a shot's last frame (all, and
+// directed / intro shots) and the venue's disabled shots picked. The game's
+// song state is spent: the walk ends after it.
+int App::rbCamSimRun() {
+    if (!song_ || !director_ || !world_ || rbShots_.empty()) return 0;
+    std::vector<std::string> ids;
+    if (const char* e = SDL_getenv("GD05_CAMSIM_SONGS"); e && *e) {
+        std::string list = e;
+        for (size_t a = 0; a <= list.size();) {
+            const size_t b = std::min(list.find(',', a), list.size());
+            if (b > a) ids.push_back(list.substr(a, b - a));
+            a = b + 1;
+        }
+    }
+    if (ids.empty()) ids.push_back(info_ ? info_->id : std::string());
+    rbCamSim_ = {};
+    for (const std::string& id : ids) {
+        std::unique_ptr<Song> other;
+        if (!info_ || id != info_->id) {
+            auto it = std::find_if(songs_.begin(), songs_.end(), [&](const SongInfo& s) { return s.id == id; });
+            if (it == songs_.end()) {
+                SDL_Log("camsim %s: no such song", id.c_str());
+                continue;
+            }
+            try {
+                other = std::make_unique<Song>(loadChart(*data_, *it, rules_));
+            } catch (const std::exception& e) {
+                SDL_Log("camsim %s: %s", id.c_str(), e.what());
+                continue;
+            }
+            std::swap(other, song_);
+        }
+        rbResetSongShots();
+        rbShotUsed_.clear();
+        rbNextCamMs_ = -1e9f;
+        rbWinShot_ = rbLoseShot_ = false;
+        rbIntroChain_ = rbIntroShots();
+        double secs = 0;
+        for (const scene::CamShot* c : rbIntroChain_) secs += c->lengthFrames() / 30.0 + 0.0425;
+        director_->playSequence(rbIntroChain_);
+        const float start = float(-secs * 1000.0), end = song_->endMs;
+        const int div = std::max(1, song_->tempo.division());
+        struct Cut {
+            float t;
+            const scene::CamShot* shot;
+        };
+        std::vector<Cut> cuts;
+        for (int i = 0;; ++i) {
+            const float t = start + float(i) * (1000.0f / 30.0f);
+            if (t >= end) break;
+            world_->setClock(t / 1000.0, t >= 0 ? song_->tempo.msToTick(t) / div : t / 500.0);
+            rbShots(t);
+            director_->update();
+            const scene::CamShot* cur = director_->shot();
+            if (cur && (cuts.empty() || cuts.back().shot != cur)) cuts.push_back({t, cur});
+        }
+        float maxHold = 0, maxPast = 0, maxDirPast = 0, totalPast = 0;
+        std::string maxHoldShot, maxPastShot;
+        float maxHoldAt = 0, maxPastAt = 0;
+        int disabled = 0;
+        for (size_t k = 0; k < cuts.size(); ++k) {
+            const Cut& c = cuts[k];
+            const float to = k + 1 < cuts.size() ? cuts[k + 1].t : end;
+            const float hold = to - c.t;
+            const float len = c.shot->looping ? 1e9f : c.shot->lengthFrames() / 30.0f * 1000.0f;
+            const float past = std::max(0.0f, hold - len - 1000.0f / 30.0f);
+            const bool off = rbVenueDisabled_.count(c.shot) != 0;
+            disabled += off;
+            totalPast += past;
+            if (hold > maxHold) maxHold = hold, maxHoldShot = c.shot->name, maxHoldAt = c.t;
+            if (past > maxPast) maxPast = past, maxPastShot = c.shot->name, maxPastAt = c.t;
+            if (c.shot->category.rfind("NORMAL", 0) != 0) maxDirPast = std::max(maxDirPast, past);
+            SDL_Log("camsim %s cut %.0f %s (%s) len %.0f held %.0f past_end %.0f%s", id.c_str(), double(c.t), c.shot->name.c_str(), c.shot->category.c_str(),
+                    double(c.shot->looping ? -1.0f : len), double(hold), double(past), off ? " DISABLED" : "");
+        }
+        // The directed cuts: each shot started zero_time before its event
+        // (its frame at the event = zero_time, within a step).
+        int onTime = 0, early = 0;
+        for (const RbDirectedCut& d : rbDirectedCuts_) {
+            early += d.startMs < d.eventMs - 1.0f;
+            for (const Cut& c : cuts)
+                if (c.shot == d.shot && std::fabs(c.t - d.startMs) <= 1000.0f / 30.0f + 1.0f) {
+                    ++onTime;
+                    break;
+                }
+        }
+        SDL_Log("camsim %s: %zu directed cuts, %d started at event - zero_time (%d with zero_time > 0)", id.c_str(), rbDirectedCuts_.size(), onTime, early);
+        rbCamSim_.directed += int(rbDirectedCuts_.size()), rbCamSim_.directedOnTime += onTime;
+        SDL_Log("camsim %s: %zu cuts, max hold %.0f ms (%s at %.0f), max past end %.0f ms (%s at %.0f), directed/intro past end max %.0f ms, total past end %.1f s, disabled picks %d",
+                id.c_str(), cuts.size(), double(maxHold), maxHoldShot.c_str(), double(maxHoldAt), double(maxPast), maxPastShot.c_str(), double(maxPastAt), double(maxDirPast),
+                double(totalPast / 1000.0f), disabled);
+        ++rbCamSim_.runs;
+        rbCamSim_.cuts += int(cuts.size());
+        rbCamSim_.disabledPicks += disabled;
+        rbCamSim_.maxHoldMs = std::max(rbCamSim_.maxHoldMs, maxHold);
+        rbCamSim_.maxPastEndMs = std::max(rbCamSim_.maxPastEndMs, maxPast);
+        rbCamSim_.maxDirectedPastEndMs = std::max(rbCamSim_.maxDirectedPastEndMs, maxDirPast);
+        if (other) std::swap(other, song_);
+    }
+    rbResetSongShots();
+    return rbCamSim_.cuts;
+}
+
+void App::rbCutAimProbe() {
+    if (!director_ || !world_ || !begun_ || !director_->hasCamera()) return;
+    const scene::CamShot* cur = director_->shot();
+    // A shot its predecessor's end started (inside the director's update)
+    // is first framed on the next frame: this frame still shows the old one.
+    if (cur != rbAimShot_) {
+        rbAimShot_ = cur, rbAimFrames_ = rbCutInUpdate_ ? -1 : 0, rbAimCam0_ = director_->camera();
+        rbCutInUpdate_ = false;
+        return;
+    }
+    if (rbAimFrames_ < 0) {
+        rbAimFrames_ = 0, rbAimCam0_ = director_->camera();
+        return;
+    }
+    if (cur && rbAimFrames_ < 3 && SDL_getenv("GD05_SHOTLOG2")) {
+        const gfx::Vec3 p = director_->camera().position(), q = CameraDirector::evaluate(*world_, *cur, 0.0f).position();
+        SDL_Log("cut aim %s frame %d: drawn %.1f %.1f %.1f, frame 0 now %.1f %.1f %.1f", cur->name.c_str(), rbAimFrames_ + 1, double(p.x), double(p.y), double(p.z), double(q.x), double(q.y), double(q.z));
+    }
+    if (!cur || ++rbAimFrames_ != 2 || cur->keyframes.empty()) return;
+    const gfx::Camera ev = CameraDirector::evaluate(*world_, *cur, 0.0f);
+    double dot = 0;
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c) dot += double(ev.world.at(r, c)) * double(rbAimCam0_.world.at(r, c));
+    const float deg = float(std::acos(std::clamp((dot - 1.0) / 2.0, -1.0, 1.0)) * 180.0 / 3.14159265358979);
+    const gfx::Vec3 a = ev.position(), b = rbAimCam0_.position();
+    const float pos = std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
+    ++rbAimChecks_;
+    rbAimOff_ += deg > 2.0f;
+    rbAimMaxDeg_ = std::max(rbAimMaxDeg_, deg), rbAimMaxPos_ = std::max(rbAimMaxPos_, pos);
+    if (SDL_getenv("GD05_SHOTLOG")) SDL_Log("cut aim %s: frame 0 drawn vs posed: %.2f deg, %.2f units", cur->name.c_str(), double(deg), double(pos));
 }
 
 // world_panel's milo: ../world/<v>/<v>[_mp|_coop].milo (GD05_VENUE replaces the venue).
@@ -4320,6 +4762,7 @@ void App::drawRbTrack0(float t, float speed) {
     pv.heldGem = p->sustainGem();
     pv.whammy = p->whammyBar();
     pv.heldFrets = p->heldFrets();
+    pv.baseMultiplier = p->baseMultiplier();
     pv.struck = [p](int i) { return p->gemHit(i); };
     pv.soloActive = rbBonus_ && rbBonus_->soloShare(t) >= 0;
     // The drums' permuted lanes back to the chart's (kick = lane 0).
@@ -5012,14 +5455,31 @@ void App::drawBackendLabel() {
     t.draw(canvas_.renderer().materials(), "helveticablack.font", s, 23, y, 18, {1, 1, 1, 0.9f}, 0x41);
 }
 
-// Bottom left, in GH2's menu font: the frames drawn a second (averaged).
+// Bottom left, in GH2's menu font: the frames shown a second, counted over
+// half a second as gd01's counter (D122). The old counter averaged each
+// frame's 1 / dt (5 % a frame): with the world drawn at 24 a second (D55) the
+// frames alternate long and short, and the mean of the rates is not the rate
+// (2 ms + 10 ms frames: it read 300 for 167), a frame a few microseconds
+// after the last jumped it by hundreds. GD05_FPSCOUNTER_LEGACY=1: the old
+// average; GD05_FPSLOG=1 logs both against the frames counted.
 void App::drawFpsCounter() {
+    static const bool legacy = envOn("GD05_FPSCOUNTER_LEGACY"), log = envOn("GD05_FPSLOG");
     const uint64_t now = SDL_GetTicksNS();
     if (fpsLastNs_ && now > fpsLastNs_) {
         const double f = 1e9 / double(now - fpsLastNs_);
-        fps_ = fps_ <= 0 ? f : fps_ * 0.95 + f * 0.05;
+        fpsEma_ = fpsEma_ <= 0 ? f : fpsEma_ * 0.95 + f * 0.05;
     }
     fpsLastNs_ = now;
+    ++fpsFrames_;
+    if (!fpsWindowNs_) fpsWindowNs_ = now, fpsFrames_ = 0;
+    else if (now - fpsWindowNs_ >= 500000000ull) {
+        const double counted = double(fpsFrames_) * 1e9 / double(now - fpsWindowNs_);
+        if (!legacy) fps_ = counted;
+        if (log) SDL_Log("fps counter: shown %d, %d frames in %.0f ms = %.1f a second (the old average %.1f)", int(std::lround(legacy ? fpsEma_ : fps_)),
+                         fpsFrames_, double(now - fpsWindowNs_) / 1e6, counted, fpsEma_);
+        fpsWindowNs_ = now, fpsFrames_ = 0;
+    }
+    if (legacy) fps_ = fpsEma_;
     if (!fpsCounter_ || !ui_ || ui_->headless()) return;
     char buf[32];
     std::snprintf(buf, sizeof buf, "%d FPS", int(std::lround(fps_)));
@@ -5043,7 +5503,9 @@ void App::menuBackdrop(bool on) {
 void App::loadBackdrop() {
     if (backdrop_ || player_ || !data_ || songs_.empty() || !ui_ || ui_->headless()) return;
     const uint64_t t0 = SDL_GetTicksNS();
-    const std::string venue = venues::names()[1];
+    std::string venue = venues::names()[1];
+    // GD05_BACKDROP_VENUE=<name> (development aid): another venue's backdrop.
+    if (const char* v = SDL_getenv("GD05_BACKDROP_VENUE"); v && *v) venue = v;
     auto b = std::make_unique<Backdrop>();
     for (const SongInfo& s : songs_)
         if (venues::forSong(*data_, s) == venue) {
@@ -5071,9 +5533,10 @@ void App::loadBackdrop() {
     // shot; then nothing moves again (gd01's backdrop). A band that has not
     // shown its singer yet gets up to 5 s more: the backdrop must always
     // show the band (GD02-074).
-    for (int i = 0; backdrop_ && (i < 45 || (!backdrop_->framed && i < 195)); ++i) updateBackdrop();
+    for (int i = 0; backdrop_ && (i < 45 || ((!backdrop_->framed || backdrop_->reaimMs >= 0) && i < 195)); ++i) updateBackdrop();
     if (!band_) SDL_Log("enhanced options: backdrop %s has no band", venue.c_str());
     else if (backdrop_ && !backdrop_->framed) SDL_Log("enhanced options: backdrop %s: no band shot", venue.c_str());
+    if (const char* l = SDL_getenv("GD05_UILOG"); backdrop_ && l && *l && *l != '0') frameBackdropBand(BackdropCam::Measure);
     if (backdrop_) backdrop_->frozen = true, backdropWarm_ = !backdropShown_;
     if (const char* l = SDL_getenv("GD05_UILOG"); l && *l && *l != '0')
         SDL_Log("ui: menu backdrop loaded in %.1f ms", double(SDL_GetTicksNS() - t0) / 1e6);
@@ -5157,26 +5620,270 @@ void App::updateBackdrop() {
             }
             if (bestScore >= int(heads.size()) * 3) break;
         }
+        // D126: the band's own camera (frameBackdropBand), under the shot
+        // nearest to it.
+        static const bool camLegacy = envOn("GD05_BACKDROPCAM_LEGACY");
+        if (!camLegacy)
+            if (const scene::CamShot* near = frameBackdropBand()) best = near, b.reaimMs = b.simMs + 900;
         if (best) {
-            if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(best)) {
-                std::vector<std::pair<std::string, std::string>> groups;
-                std::vector<std::pair<std::string, scene::Xfm>> moves;
-                for (const auto& tg : bs->bandTargets) {
-                    if (!tg.anim.empty()) groups.emplace_back(tg.target, tg.anim);
-                    if (tg.teleport) moves.emplace_back(tg.target, tg.to);
-                }
-                band_->rbShotTargets(groups, moves);
-            }
-            director_->forceShot(best);
+            forceBackdropShot(best);
             SDL_Log("enhanced options: backdrop on %s, shot %s (%s), score %d", b.info->id.c_str(), best->name.c_str(), best->category.c_str(), bestScore);
             b.framed = true;
         }
     }
+    if (b.framed && b.reaimMs >= 0 && b.simMs >= b.reaimMs) b.reaimMs = -1, frameBackdropBand(BackdropCam::Reaim);
     if (b.framed && director_) {
         director_->update();
-        if (director_->hasCamera()) venueView_->setCamera(director_->camera());
+        if (b.fixedCam) venueView_->setCamera(b.cam);
+        else if (director_->hasCamera()) venueView_->setCamera(director_->camera());
     }
     venueView_->update();
+}
+
+// The backdrop's shot, as a song's: its band targets' clips and places, then the director.
+void App::forceBackdropShot(const scene::CamShot* shot) {
+    if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(shot)) {
+        std::vector<std::pair<std::string, std::string>> groups;
+        std::vector<std::pair<std::string, scene::Xfm>> moves;
+        for (const auto& tg : bs->bandTargets) {
+            if (!tg.anim.empty()) groups.emplace_back(tg.target, tg.anim);
+            if (tg.teleport && !backdrop_->noTeleport) moves.emplace_back(tg.target, tg.to);
+        }
+        band_->rbShotTargets(groups, moves);
+    }
+    director_->forceShot(shot);
+}
+
+// The Enhanced Options backdrop's camera (D126, owner: "a shot that captures
+// the singer, the drummer at the back and the guitar player at the right side
+// of the singer", as gd01's): the singer in front, the drummer behind him, the
+// guitarist to his right on the screen, in the picture's free right half (the
+// boxes cover the left half; gd01 sets its singer at 0.75 / 0.3). RB has no
+// such shot: its band shots frame the band across the whole picture
+// (counted below with each shot's band targets' places; GD05_BACKDROP_SHOTS=1
+// logs each one). So a fixed camera from the venue's places of the members,
+// as gd01's drawMenuBackdrop. Returns the venue's band shot whose eye is
+// nearest (its PostProc and its 3D crowd rows, the ones RB shows from
+// there), forced without moving the band. GD05_BACKDROPCAM_LEGACY=1: the
+// shot picked as before (D31), with its camera.
+const scene::CamShot* App::frameBackdropBand(BackdropCam mode) {
+    if (!backdrop_ || !band_ || !world_ || !director_) return nullptr;
+    Backdrop& b = *backdrop_;
+    auto member = [&](const char* part, const char* bone, gfx::Vec3& out) {
+        for (const auto& m : band_->members())
+            if (m->slot.find(part) != std::string::npos)
+                if (scene::Xfm x; band_->objectXfm(m->slot, bone, x)) return out = {x.pos[0], x.pos[1], x.pos[2]}, true;
+        return false;
+    };
+    gfx::Vec3 v, g, d, bs, feet, rg, rd, rb;
+    const bool hasBass = member("bass", "bone_head.mesh", bs) && member("bass", "", rb);
+    if (!member("vocals", "bone_head.mesh", v) || !member("guitar", "bone_head.mesh", g) || !member("drum", "bone_head.mesh", d) ||
+        !member("vocals", "", feet) || !member("guitar", "", rg) || !member("drum", "", rd)) {
+        SDL_Log("enhanced options: backdrop camera: singer, guitarist or drummer missing; the shot's camera");
+        return nullptr;
+    }
+    const gfx::Vec3 v0 = v, g0 = g, d0 = d, bs0 = bs, feet0 = feet;
+    // Where a shot's band targets put the members (its teleports move each
+    // root; the head keeps its offset).
+    auto placeFor = [&](const scene::CamShot* c) {
+        v = v0, g = g0, d = d0, bs = bs0, feet = feet0;
+        if (const auto* bc = dynamic_cast<const scene::BandCamShot*>(c))
+            for (const auto& tg : bc->bandTargets) {
+                if (!tg.teleport) continue;
+                const gfx::Vec3 to{tg.to.pos[0], tg.to.pos[1], tg.to.pos[2]};
+                if (tg.target.find("vocals") != std::string::npos) v = v0 + (to - feet0), feet = to;
+                else if (tg.target.find("guitar") != std::string::npos) g = g0 + (to - rg);
+                else if (tg.target.find("drum") != std::string::npos) d = d0 + (to - rd);
+                else if (tg.target.find("bass") != std::string::npos && hasBass) bs = bs0 + (to - rb);
+            }
+    };
+    auto at = [](const gfx::Camera& cam, gfx::Vec3 p, float& x, float& y) {
+        const gfx::Mat4 vp = cam.viewProj(false);
+        float q[4];
+        for (int r = 0; r < 4; ++r) q[r] = vp.at(r, 0) * p.x + vp.at(r, 1) * p.y + vp.at(r, 2) * p.z + vp.at(r, 3);
+        if (q[3] <= 0) return false;
+        x = (q[0] / q[3] + 1) * 0.5f, y = (1 - q[1] / q[3]) * 0.5f;
+        return true;
+    };
+    // The composition: the three heads in x 0.53..0.95 (clear of the boxes'
+    // edge at 0.5), y 0.04..0.62, the guitarist right of the singer, the
+    // drummer from the singer to the guitarist, the singer head to feet over
+    // 0.2 of the height (gd01 0.37; RB's arenas are wide), the bassist not in
+    // the right half.
+    auto fits = [&](const gfx::Camera& cam) {
+        float xv, yv, xg, yg, xd, yd, xf, yf, xb = 0, yb = 0;
+        if (!at(cam, v, xv, yv) || !at(cam, g, xg, yg) || !at(cam, d, xd, yd) || !at(cam, feet, xf, yf)) return false;
+        for (auto [x, y] : {std::pair{xv, yv}, {xg, yg}, {xd, yd}})
+            if (x < 0.53f || x > 0.95f || y < 0.04f || y > 0.62f) return false;
+        if (hasBass && at(cam, bs, xb, yb) && xb > 0.5f && xb < 1 && yb > 0 && yb < 1) return false;
+        return yf - yv > 0.2f && xg > xv + 0.08f && xd > xv - 0.02f && xd < xg + 0.02f;
+    };
+    const bool shotLog = envOn("GD05_BACKDROP_SHOTS");
+    int shots = 0, fitting = 0;
+    for (const auto& [cat, list] : rbShots_)
+        for (const scene::CamShot* c : list) {
+            const gfx::Camera cam = CameraDirector::evaluate(*world_, *c, 0);
+            placeFor(c);
+            ++shots, fitting += fits(cam);
+            if (shotLog) {
+                const gfx::Vec3 e = cam.position();
+                float xv = -9, yv = -9, xg = -9, yg = -9, xd = -9, yd = -9;
+                at(cam, v, xv, yv), at(cam, g, xg, yg), at(cam, d, xd, yd);
+                SDL_Log("backdrop shot %s %s eye %.0f %.0f %.0f singer %.2f %.2f guitarist %.2f %.2f drummer %.2f %.2f%s", cat.c_str(), c->name.c_str(), e.x,
+                        e.y, e.z, xv, yv, xg, yg, xd, yd, fits(cam) ? " fits" : "");
+            }
+        }
+    placeFor(nullptr);
+    // The audience as upright capsules (a placement is its card's middle,
+    // the feet half the card's height below, CrowdView's 3D placement; raised
+    // hands reach 90 over the feet): a sight line from the eye to a head or
+    // the singer's shoulders passing within 22 of one (arms out) is blocked
+    // (gd01's crowd covers its singer's legs too).
+    struct Body {
+        gfx::Vec3 mid;
+        float h;
+    };
+    std::vector<Body> crowd;
+    for (const Crowd::State& st : world_->crowd().crowds())
+        for (const Crowd::Archetype& a : st.archetypes)
+            for (const scene::Xfm& p : a.placements) crowd.push_back({{p.pos[0], p.pos[1], p.pos[2]}, a.height});
+    auto blocked = [&](gfx::Vec3 eye) {
+        int n = 0;
+        const gfx::Vec3 chest = v * 0.75f + feet * 0.25f;  // the shoulders
+        for (gfx::Vec3 p : {v, chest, g, d}) {
+            bool hit = false;
+            for (const Body& c : crowd) {
+                const float z0 = c.mid.z - c.h * 0.5f, z1 = z0 + 90;  // feet, raised hands
+                // The closest point of the sight line to the capsule's axis, in the ground plane.
+                const gfx::Vec3 dir = p - eye;
+                const float dd = dir.x * dir.x + dir.y * dir.y;
+                if (dd < 1e-6f) continue;
+                const float t = std::clamp(((c.mid.x - eye.x) * dir.x + (c.mid.y - eye.y) * dir.y) / dd, 0.0f, 0.97f);
+                const gfx::Vec3 q = eye + dir * t;
+                if (std::hypot(q.x - c.mid.x, q.y - c.mid.y) < 22 && q.z > z0 && q.z < z1) hit = true;
+            }
+            n += hit;
+        }
+        return n;
+    };
+    // The check (GD05_UILOG, after the backdrop froze, either way): the picture's composition.
+    if (mode == BackdropCam::Measure) {
+        const gfx::Camera& cam = venueView_->camera();
+        float x[5] = {-1, -1, -1, -1, -1}, y[5] = {-1, -1, -1, -1, -1};
+        at(cam, v, x[0], y[0]), at(cam, g, x[1], y[1]), at(cam, d, x[2], y[2]), at(cam, bs, x[3], y[3]), at(cam, feet, x[4], y[4]);
+        SDL_Log("enhanced options: backdrop composition %s, sight lines blocked by the crowd %d of 4; heads singer %.2f %.2f guitarist %.2f %.2f "
+                "drummer %.2f %.2f bassist %.2f %.2f, singer's feet %.2f %.2f",
+                fits(cam) ? "ok" : "FAIL", blocked(cam.position()), x[0], y[0], x[1], y[1], x[2], y[2], x[3], y[3], x[4], y[4]);
+        return nullptr;
+    }
+    // The RB shots' eyes: where Harmonix put cameras (inside the venue, clear of its walls).
+    std::vector<gfx::Vec3> rbEyes;
+    for (const auto& [cat, list] : rbShots_)
+        for (const scene::CamShot* c : list) rbEyes.push_back(CameraDirector::evaluate(*world_, *c, 0).position());
+    // The camera: turned so a point beside the singer sits at the focus point
+    // (0.76 / 0.3; gd01 shifts its projection there), its field of view
+    // making the singer 0.4 of the picture's height (gd01's 0.37), widened
+    // until the composition fits. The stage's axes from the band (back:
+    // singer to drummer, right: toward the guitarist); distances grow with
+    // the band's spacing past small_club_01's (singer-guitarist 80).
+    std::array<float, 9> k{30, -260, 80, 38, 32, -6, 0.76f, 0.3f, 0};
+    // GD05_BACKDROP_CAM="eye_right eye_back eye_up target_right target_back target_up focus_x focus_y y_fov" (development aid; y_fov 0: fitted).
+    const char* devCam = SDL_getenv("GD05_BACKDROP_CAM");
+    if (devCam) std::sscanf(devCam, "%f %f %f %f %f %f %f %f %f", &k[0], &k[1], &k[2], &k[3], &k[4], &k[5], &k[6], &k[7], &k[8]);
+    const gfx::Vec3 up{0, 0, 1};
+    gfx::Vec3 back, right, target;
+    float sc = 1;
+    auto axes = [&] {
+        back = normalize(gfx::Vec3{d.x - v.x, d.y - v.y, 0});
+        right = {back.y, -back.x, 0};
+        if (dot(g - v, right) < 0) right = right * -1.0f;
+        sc = std::clamp(std::hypot(g.x - v.x, g.y - v.y) / 80.6f, 1.0f, 3.0f);
+        target = v + (right * k[3] + back * k[4] + up * k[5]) * sc;
+    };
+    auto build = [&](gfx::Vec3 eye, float fov) {
+        const float t = std::tan(fov * 0.5f), sx = (k[6] * 2 - 1) * t * (16.0f / 9.0f), sz = (1 - k[7] * 2) * t;
+        const gfx::Vec3 f = normalize(target - eye);
+        const float yaw = std::atan2(f.x, f.y) - std::atan(sx / std::hypot(1.0f, sz)), pitch = std::atan2(f.z, std::hypot(f.x, f.y)) - std::atan(sz);
+        gfx::Camera c = gfx::Camera::lookAt(eye, eye + gfx::Vec3{std::sin(yaw) * std::cos(pitch), std::cos(yaw) * std::cos(pitch), std::sin(pitch)});
+        c.yFov = fov, c.nearPlane = 5, c.farPlane = 10000;
+        return c;
+    };
+    auto fitted = [&](gfx::Vec3 eye) {
+        const float dist = std::sqrt(dot(v - eye, v - eye));
+        float fov = k[8] > 0 ? k[8] : std::min(1.0f, 2 * std::atan((v.z - feet.z) / (2 * 0.4f * std::max(dist, 1.0f))));
+        gfx::Camera c = build(eye, fov);
+        for (; k[8] <= 0 && !fits(c) && fov < 1.2f; fov += 0.05f) c = build(eye, fov);
+        return c;
+    };
+    // The band where it stands, or where one of RB's whole-band shots
+    // (NORMAL1111, directed_all: none of the band hidden) puts it; for each,
+    // gd01's eye (215 in front, 32 over the mouth, beside him) and others
+    // back and up from there, each within 250 of one of RB's camera places;
+    // the camera that fits with the fewest blocked sight lines, then the
+    // nearest to gd01's.
+    std::vector<const scene::CamShot*> places{nullptr};
+    for (const auto& [cat, list] : rbShots_)
+        if (cat == "NORMAL1111" || cat == "directed_all")
+            for (const scene::CamShot* c : list)
+                if (dynamic_cast<const scene::BandCamShot*>(c)) places.push_back(c);
+    placeFor(nullptr);
+    axes();
+    gfx::Vec3 eye = mode == BackdropCam::Reaim ? b.cam.position() : v + (right * k[0] + back * k[1]) * sc + up * k[2];
+    gfx::Camera cam = fitted(eye);
+    int eyeBlocked = blocked(eye), tried = 0;
+    const scene::CamShot* placedBy = nullptr;
+    if (mode == BackdropCam::Reaim) {
+        b.cam = cam;
+        SDL_Log("enhanced options: backdrop camera: aimed again at the posed band, field of view %.2f, composition %s", double(cam.yFov), fits(cam) ? "ok" : "FAIL");
+        return nullptr;
+    }
+    if (!devCam) {
+        float bestCost = 1e30f;
+        for (const scene::CamShot* pl : places) {
+            placeFor(pl);
+            axes();
+            for (float bk : {215.0f, 260.0f, 320.0f, 400.0f, 500.0f, 650.0f})
+                for (float upz : {32.0f, 60.0f, 90.0f, 130.0f, 170.0f})
+                    for (float rt : {-30.0f, 0.0f, 30.0f, 60.0f}) {
+                        const gfx::Vec3 e = v + (right * rt - back * bk) * sc + up * upz;
+                        float nearRb = 1e30f;
+                        for (const gfx::Vec3& r : rbEyes) nearRb = std::min(nearRb, std::sqrt(dot(r - e, r - e)));
+                        if (nearRb > 250 * sc) continue;
+                        const gfx::Camera c = fitted(e);
+                        ++tried;
+                        if (!fits(c)) continue;
+                        const int bl = blocked(e);
+                        // Low eyes first: the lighting rigs hang above.
+                        const float cost = float(bl) * 1000 + std::fabs(bk - 215) * 0.5f + std::fabs(upz - 32) * 2 + std::fabs(rt - 30) * 0.5f;
+                        if (cost < bestCost) bestCost = cost, eye = e, cam = c, eyeBlocked = bl, placedBy = pl;
+                    }
+        }
+        placeFor(placedBy);
+    }
+    // Under the chosen places' shot (its band targets, PostProc and 3D crowd
+    // rows); the band where it stands: the whole-band shot whose eye is
+    // nearest, the band left in place.
+    const scene::CamShot* under = placedBy;
+    if (!under) {
+        float nearDist = 1e30f;
+        for (const scene::CamShot* c : places)
+            if (c) {
+                const gfx::Vec3 e = CameraDirector::evaluate(*world_, *c, 0).position() - eye;
+                if (dot(e, e) < nearDist) under = c, nearDist = dot(e, e);
+            }
+    }
+    b.fixedCam = true, b.cam = cam, b.focus = std::sqrt(dot(v - eye, v - eye)), b.noTeleport = !placedBy;
+    SDL_Log("enhanced options: backdrop camera: %d of the venue's %d shots frame it; fixed, eye %.0f %.0f %.0f (of %d places), field of view %.2f, "
+            "band placed by %s, under %s; composition %s, sight lines blocked by the crowd %d of 4",
+            fitting, shots, eye.x, eye.y, eye.z, tried, double(cam.yFov), placedBy ? placedBy->name.c_str() : "the venue", under ? under->name.c_str() : "-",
+            fits(cam) ? "ok" : "FAIL", eyeBlocked);
+    if (const char* l = SDL_getenv("GD05_UILOG"); l && *l && *l != '0')
+        for (auto [n, p] : {std::pair{"singer", v}, {"guitarist", g}, {"drummer", d}, {"bassist", bs}}) {
+            float x = -1, y = -1;
+            if (std::string(n) != "bassist" || hasBass) at(cam, p, x, y);
+            SDL_Log("enhanced options: backdrop %s head at %.2f %.2f of the picture (%.0f %.0f %.0f)", n, double(x), double(y), p.x, p.y, p.z);
+        }
+    return under;
 }
 
 // One frame of the song screen without the menus (--song, the debug list):

@@ -298,7 +298,8 @@ public:
             const int stars = in.send("band", "num_stars", {}).integerValue();
             const int p0 = in.send("player0", "percent_hit", {}).integerValue();
             const int p1 = in.send("player1", "percent_hit", {}).integerValue();
-            campaign::finishCoopSong(ui_, score, stars, p0, p1, ss.players[0].difficulty, ss.players[1].difficulty);
+            if (ss.noSave) ss.guitarAwards.clear(), SDL_Log("campaign: finish_coop_song: song speed not 100 %%, not saved");  // GDALL-053
+            else campaign::finishCoopSong(ui_, score, stars, p0, p1, ss.players[0].difficulty, ss.players[1].difficulty);
             return true;
         }
         if (msg == "num_guitar_awards") return r = Value::integer(int(ss.guitarAwards.size())), true;
@@ -451,7 +452,9 @@ public:
             }
             const int stars = in.send("player0", "num_stars", {}).integerValue();
             const int hit = in.send("player0", "percent_hit", {}).integerValue();
-            const campaign::FinishResult fr = campaign::finishSong(ui_, score, stars, hit);
+            // Not at 100 % Song Speed: nothing saved, the outputs stay empty (GDALL-053).
+            const campaign::FinishResult fr = ui_.session().noSave ? campaign::FinishResult{} : campaign::finishSong(ui_, score, stars, hit);
+            if (ui_.session().noSave) SDL_Log("campaign: finish_song %s: song speed not 100 %%, not saved", song.c_str());
             const Value outs[] = {Value::integer(fr.cash), Value::symbol(fr.cashReason), Value::symbol(fr.newVenue), Value::integer(fr.newStatus),
                                   Value::integer(fr.statusAward)};
             for (size_t k = 1; k < args.size() && k <= 5; ++k) {
@@ -625,9 +628,10 @@ public:
         const Session& s = ui_.session();
         const int d = s.players[0].difficulty;
         r = Value::integer(0);
-        if (msg == "check_highscore") return r = Value::integer(c.checkHighScore(s.song, d, intArg(args, 0))), true;
+        // Not at 100 % Song Speed: no high score (GDALL-053).
+        if (msg == "check_highscore") return r = Value::integer(s.noSave ? -1 : c.checkHighScore(s.song, d, intArg(args, 0))), true;
         if (msg == "add") {
-            if (args.size() >= 2) c.addHighScore(s.song, d, args[0].str(), args[1].integerValue());
+            if (args.size() >= 2 && !s.noSave) c.addHighScore(s.song, d, args[0].str(), args[1].integerValue());
             return true;
         }
         if (msg == "get_highscore") {

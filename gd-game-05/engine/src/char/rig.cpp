@@ -6,6 +6,8 @@
 #include <cmath>
 #include <set>
 
+#include <SDL3/SDL.h>
+
 #include "char/char_driver.h"
 
 // The pollables of a character directory, ported from the Xbox 360 code
@@ -25,6 +27,51 @@ using M3 = std::array<float, 9>;
 constexpr float kPi = 3.14159265f;
 constexpr float kDeg = 0.017453292f;
 constexpr float kHuge = 1e30f;
+
+bool envSwitch(const char* name) {
+    const char* e = SDL_getenv(name);
+    return e && *e && *e != '0';
+}
+// GD05_EYES_LEGACY=1: an eye look-at with no source does nothing (the port
+// before GD05-106); GD05_GAZE_LEGACY=1: GH2's CharEyes timing (8 s, the right
+// lid's blinks with a 1 in 3 draw) instead of Rock Band's.
+bool eyesLegacy() {
+    static const bool v = envSwitch("GD05_EYES_LEGACY");
+    return v;
+}
+bool gazeLegacy() {
+    static const bool v = envSwitch("GD05_GAZE_LEGACY");
+    return v;
+}
+// GD05_LIDS_LEGACY=1: the eyelids do not follow the eyes (the port before
+// GD05-112).
+bool lidsLegacy() {
+    static const bool v = envSwitch("GD05_LIDS_LEGACY");
+    return v;
+}
+
+// The hair (GD05-113), each with its own switch to the port before it:
+// GD05_HAIRCOLLIDE_LEGACY=1: no Rock Band hookup / collision (GH2's per-point
+// collide fields, always empty on RB's disc); GD05_HAIRGRAVITY_LEGACY=1:
+// GH2's 60 Hz gravity per step whatever the step rate;
+// GD05_HAIRSLACK_LEGACY=1: no neighbour-strand slack; GD05_HAIRRESET_LEGACY=1:
+// no settle step after a reset.
+bool hairCollideLegacy() {
+    static const bool v = envSwitch("GD05_HAIRCOLLIDE_LEGACY");
+    return v;
+}
+bool hairGravityLegacy() {
+    static const bool v = envSwitch("GD05_HAIRGRAVITY_LEGACY");
+    return v;
+}
+bool hairSlackLegacy() {
+    static const bool v = envSwitch("GD05_HAIRSLACK_LEGACY");
+    return v;
+}
+bool hairResetLegacy() {
+    static const bool v = envSwitch("GD05_HAIRRESET_LEGACY");
+    return v;
+}
 
 V3 sub(const V3& a, const V3& b) { return {a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }
 V3 add(const V3& a, const V3& b) { return {a[0] + b[0], a[1] + b[1], a[2] + b[2]}; }
@@ -171,6 +218,7 @@ struct Rig::Impl {
     Skeleton& sk;
     const scene::Directory& dir;
     Random rng{0x45594553u};
+    float blinkValue = -1;  // the face servo's Blink weight this poll (Rock Band's eyes); < 0: none
 
     struct Weight {
         float weight = 1;
@@ -256,26 +304,62 @@ struct Rig::Impl {
         int lid = -1;              // right_lid (+0x38): its blinks retarget (GD02-050 G3)
         float lidLast = 0;         // +0x5c (Enter: 0)
         float lidDelta = 0;        // +0x60 (Enter: 0)
+        bool blinkArmed = false;   // RB: the servo's Blink went under 0.3
+        float blinkLast = 0;       // RB: the servo's Blink last poll
+        int retargets = 0;         // diagnostics (bandcheck)
+        // RB rev 7: each eye's upper and lower lid (bones, -1 for none), and
+        // the lid's local as the follow last left it with the pose before
+        // it (a lid no servo wrote again this poll starts from that pose).
+        struct Lid {
+            int bone = -1;
+            scene::Xfm before, after;
+            bool has = false;
+        };
+        std::vector<std::array<Lid, 2>> lids;  // per look-at of `lookats`: upper, lower
         std::vector<std::pair<int, float>> interests;  // (object, radius); none on the disc
     };
     // CharHair (Poll 0x8217B898, reset 0x8217B6F0).
     struct Hair {
         std::string name;
-        std::array<float, 6> p{};  // +0x08..+0x1c: stiffness, smoothing, inertia, gravity, weight, friction
+        // +0x08..: stiffness, torsion, inertia, gravity, weight, friction,
+        // min_slack, max_slack (RB rev 9)
+        std::array<float, 8> p{};
         struct Point {
             V3 pos{}, vel{}, prevVel{}, up{};
             int bone = -1, collide = -1, type = 0;
-            float length = 0, radius = 0, band = 0;
+            float length = 0, radius = 0, band = 0;  // GH2's fields (the legacy collision)
+            // RB rev 9 (RB 0x823372A0): radius (+0x64), outer_radius
+            // (+0x68), side_length (+0x6c) [C]; the collides the hookup
+            // gave it (+0x50, indexes into Impl::collides).
+            float rbRadius = 0, outer = 0, side = -1;
+            std::vector<int> hooks;
+            V3 rel{};  // pos - the strand root's, last step (bandcheck motion)
         };
         struct Strand {
             int root = -1;
             M3 base{};
+            uint32_t hookupFlags = 0;  // +0x80
             std::vector<Point> points;
         };
         std::vector<Strand> strands;
-        bool simulate = false, reset = true;
+        bool simulate = false, reset = true, hooked = false;
+        bool relValid = false;  // the points' rel is from a step (bandcheck)
         double clock = 0;  // unstepped seconds: the hair steps at GH2's 60 Hz (GD02-050 G1)
     };
+    // CharCollide (RB load 0x8232D9D0, compute_radius 0x8232DB30) [C]:
+    // placed under its parent bone (the outfit's exo_* bones); worldRadius
+    // = radius x the collide's world y scale, set at the hookup.
+    struct Collide {
+        std::string name;
+        int parent = -1;
+        scene::Xfm local;
+        uint32_t shape = 0, flags = 0;
+        float radius = 0, length = 0, worldRadius = 0;
+    };
+    std::vector<Collide> collides;
+    std::vector<scene::Xfm> collideWorld;  // this step's
+    RigHairStats hairStats;  // bandcheck (GD05-113)
+    bool hairMeasuring = false, hairSettling = false;
     // CharPosConstraint (Poll 0x82178B28).
     struct PosConstraint {
         std::string name;
@@ -333,10 +417,14 @@ struct Rig::Impl {
     void pollUpper(UpperTwist& u);
     void pollFore(ForeTwist& f);
     void pollLookAt(LookAt& l, const RigContext& ctx);
+    void followLids(Eyes& e);
     void retarget(Eyes& e);
     void pollEyes(Eyes& e, const RigContext& ctx);
     void resetHair(Hair& h);
-    void pollHair(Hair& h);
+    void hookupHair(Hair& h);
+    void placeCollides();
+    void measureHair(Hair& h, double rate);
+    void pollHair(Hair& h, double rate);
     void stepHair(Hair& h, double dSeconds);
     void placeHair(Hair& h);
     void pollConstraint(PosConstraint& c);
@@ -421,6 +509,12 @@ void Rig::Impl::build() {
             LookAt k;
             k.name = o->name;
             k.source = bone(l->source), k.pivot = bone(l->pivot), k.dest = bone(l->dest);
+            // Rock Band's CharLookAt Poll (RB 0x82321A48) [C]: the source if
+            // set, else the pivot, is the bone turned; every eye look-at on the
+            // disc has source "" (GD05-106: the port returned at once, the
+            // eyes never moved).
+            const bool pivotIsSource = !eyesLegacy() && l->source.empty() && k.pivot >= 0;
+            if (pivotIsSource) k.source = k.pivot;
             k.halfTime = l->values[0];
             k.fadeMin = l->values[5], k.fadeMax = l->values[6], k.fadeRate = l->values[7];
             k.allowRoll = l->allowRoll;
@@ -437,7 +531,7 @@ void Rig::Impl::build() {
             p.kind = kLookAt, p.index = lookats.size() - 1;
             // 0x8216FA08: changed by the pivot (else the source), changes the source.
             p.reads = {l->pivot.empty() ? l->source : l->pivot};
-            p.writes = {l->source};
+            p.writes = {pivotIsSource ? l->pivot : l->source};
         } else if (auto* e = o->as<scene::CharEyes>()) {
             Eyes k;
             k.name = o->name;
@@ -447,14 +541,21 @@ void Rig::Impl::build() {
             p.kind = kEyes, p.index = eyes.size() - 1;
             // 0x82170FD0: changed by its look-ats and the head.
             p.reads = e->eyes;
+            // RB (0x82329588): the lids follow the eyes after the face servo
+            // posed them (GD05-112).
+            if (!lidsLegacy()) {
+                for (const auto& n : e->upperLids) if (!n.empty()) p.reads.push_back(n), p.writes.push_back(n);
+                for (const auto& n : e->lowerLids) if (!n.empty()) p.reads.push_back(n), p.writes.push_back(n);
+            }
         } else if (auto* h = o->as<scene::CharHair>()) {
             Hair k;
             k.name = o->name;
-            std::copy_n(h->params.begin(), k.p.size(), k.p.begin());  // RB adds min / max slack [not simulated yet: I]
+            std::copy_n(h->params.begin(), k.p.size(), k.p.begin());
             k.simulate = h->simulate;
             for (const auto& s : h->strands) {
                 Hair::Strand st;
                 st.root = bone(s.root);
+                st.hookupFlags = s.hookupFlags;
                 // The strand frame (+0x50 of the 0x80-byte strand) [I: the
                 // second stored matrix].
                 for (size_t i = 0; i < 9; ++i) st.base[i] = s.baseMat2[i];
@@ -467,6 +568,9 @@ void Rig::Impl::build() {
                     q.collide = bone(pt.collide);
                     q.radius = pt.f60;
                     q.band = pt.f64;
+                    q.rbRadius = pt.radius;
+                    q.outer = pt.f60;
+                    q.side = pt.f64;
                     st.points.push_back(q);
                 }
                 k.strands.push_back(st);
@@ -476,6 +580,17 @@ void Rig::Impl::build() {
             }
             hairs.push_back(k);
             p.kind = kHair, p.index = hairs.size() - 1;
+        } else if (auto* cc = o->as<scene::CharCollide>()) {
+            Collide k;
+            k.name = o->name;
+            k.parent = bone(cc->trans.parent);
+            k.local = cc->trans.local;
+            k.shape = cc->shape, k.flags = cc->flags;
+            k.radius = cc->radius, k.length = cc->length;
+            if (k.parent < 0 && !cc->trans.parent.empty() && cc->trans.parent != dir.name)
+                SDL_Log("rig %s: %s's parent %s is not a bone", dir.name.c_str(), o->name.c_str(), cc->trans.parent.c_str());
+            collides.push_back(k);
+            continue;
         } else if (auto* c = o->as<scene::CharPosConstraint>()) {
             PosConstraint k;
             k.name = o->name;
@@ -510,9 +625,15 @@ void Rig::Impl::build() {
     for (Eyes& e : eyes) {
         const auto* def = dir.get(e.name) ? dir.get(e.name)->as<scene::CharEyes>() : nullptr;
         if (!def) continue;
-        for (const auto& n : def->eyes)
+        for (size_t j = 0; j < def->eyes.size(); ++j)
             for (size_t i = 0; i < lookats.size(); ++i)
-                if (lookats[i].name == n) e.lookats.push_back(i);
+                if (lookats[i].name == def->eyes[j]) {
+                    e.lookats.push_back(i);
+                    std::array<Eyes::Lid, 2> lp;
+                    lp[0].bone = j < def->upperLids.size() ? bone(def->upperLids[j]) : -1;
+                    lp[1].bone = j < def->lowerLids.size() ? bone(def->lowerLids[j]) : -1;
+                    e.lids.push_back(lp);
+                }
         if (!e.lookats.empty()) {
             const LookAt& l = lookats[e.lookats[0]];
             const int piv = l.pivot >= 0 ? l.pivot : l.source;
@@ -600,9 +721,26 @@ void Rig::Impl::sort() {
         size_t pick = n;
         for (size_t i = 0; i < n && pick == n; ++i)
             if (!done[i] && indeg[i] == 0) pick = i;
-        if (pick == n)  // a cycle: the first left in directory order
+        // A cycle (the hand IKs: left_hand.ikhand and fret.ikhand change and
+        // read the same hand): the one left with the fewest dependencies
+        // still to run, the first in directory order among them (GD05-110).
+        // RB polls the hand IKs as one CharPollGroup (hand_iks, RB 0x82345C38),
+        // so the twists that read the arm (CharUpperTwist RB 0x8233EAD0,
+        // CharForeTwist RB 0x8233DE58) run after all of them [I: the group's
+        // place in RB's sort not read]. GD05_POLLSORT_LEGACY=1: the first left
+        // in directory order, which put upperTwist_L / foreTwist_L before the
+        // left arm's IKs: the twist bones followed the arm before the IK moved
+        // it, the forearm skin twisted into an S.
+        static const bool legacy = [] {
+            const char* e = SDL_getenv("GD05_POLLSORT_LEGACY");
+            return e && *e && *e != '0';
+        }();
+        if (pick == n && legacy)
             for (size_t i = 0; i < n && pick == n; ++i)
                 if (!done[i]) pick = i;
+        if (pick == n)
+            for (size_t i = 0; i < n; ++i)
+                if (!done[i] && (pick == n || indeg[i] < indeg[pick])) pick = i;
         done[pick] = true;
         for (size_t b : after[pick]) --indeg[b];
         out.push_back(pollables[pick]);
@@ -941,6 +1079,7 @@ void Rig::Impl::retarget(Eyes& e) {
     e.timer = 0;
     e.smoothed = 0;
     e.lastDot = kHuge;
+    ++e.retargets;
 }
 
 // 0x82170BA8: the eyes keep their point until 8 s have passed, or (after
@@ -957,7 +1096,17 @@ void Rig::Impl::pollEyes(Eyes& e, const RigContext& ctx) {
     // just turning to open; one in three (RandomFloat, drawn only then, as
     // GH2's short-circuit) moves the eyes to a new point after it.
     bool blink = false;
-    if (e.lid >= 0) {
+    // Rock Band's CharEyes Poll (RB 0x82329588) [C]: the blink is the face
+    // servo's Blink weight (servo +0x10c) falling from above 0.8 after it
+    // went under 0.3; a new point after 3 s, or after 1 s on a blink or a
+    // head turn; no random draw. GD05_GAZE_LEGACY=1: GH2's below.
+    const bool rb = !gazeLegacy() && blinkValue >= 0;
+    if (rb) {
+        const float v = blinkValue;
+        if (v < 0.3f) e.blinkArmed = true;
+        if (e.blinkArmed && e.blinkLast > 0.8f && v < e.blinkLast) blink = true, e.blinkArmed = false;
+        e.blinkLast = v;
+    } else if (e.lid >= 0) {
         const float v = row(sk.local(e.lid).rot, 0)[0];
         const float dv = v - e.lidLast;
         blink = v < -0.1f && dv > 0 && e.lidDelta <= 0 && rng.real(0.0f, 1.0f) < 0.33f;
@@ -965,10 +1114,47 @@ void Rig::Impl::pollEyes(Eyes& e, const RigContext& ctx) {
     }
     if (e.lastDot != kHuge) {
         e.smoothed = ((d - e.lastDot) - e.smoothed) * 0.1f + e.smoothed;
-        if (8 < e.timer || (1 < e.timer && (blink || (e.threshold < d && 0 < e.smoothed)))) retarget(e);
+        const float hold = rb ? 3.0f : 8.0f;
+        if (hold < e.timer || (1 < e.timer && (blink || (e.threshold < d && 0 < e.smoothed)))) retarget(e);
     }
     e.lastDot = d;
     e.lastForward = row(sk.world(e.head).rot, 1);
+    if (!lidsLegacy()) followLids(e);
+}
+
+// Rock Band's CharEyes Poll (RB 0x82329588) [C], after each eye's look-at:
+// a = the eye's look (its local y) x component x (1 - the face servo's Blink
+// weight); the upper lid's local turned by -a about its z (0x8238ED60: each
+// row (x, y) -> (x cos - y sin, x sin + y cos)), the lower lid's local x
+// moved by 0.75 a. The port polls the look-ats before the eyes [I: RB polls
+// them from here]; a lid no servo wrote since the last follow starts again
+// from its pose before it.
+void Rig::Impl::followLids(Eyes& e) {
+    const float blink = blinkValue >= 0 ? blinkValue : 0.0f;
+    for (size_t i = 0; i < e.lookats.size() && i < e.lids.size(); ++i) {
+        const LookAt& l = lookats[e.lookats[i]];
+        if (l.source < 0) continue;
+        const float a = sk.local(l.source).rot[3] * (1 - blink);
+        for (int k = 0; k < 2; ++k) {
+            Eyes::Lid& lid = e.lids[i][size_t(k)];
+            if (lid.bone < 0) continue;
+            scene::Xfm x = sk.local(lid.bone);
+            if (lid.has && x.rot == lid.after.rot && x.pos == lid.after.pos) x = lid.before;
+            lid.before = x;
+            if (k == 0) {
+                const float c = std::cos(-a), sn = std::sin(-a);
+                for (int r = 0; r < 3; ++r) {
+                    const float x0 = x.rot[size_t(r * 3)], y0 = x.rot[size_t(r * 3 + 1)];
+                    x.rot[size_t(r * 3)] = x0 * c - y0 * sn;
+                    x.rot[size_t(r * 3 + 1)] = x0 * sn + y0 * c;
+                }
+            } else {
+                x.pos[0] += a * 0.75f;
+            }
+            sk.setLocal(lid.bone, x);
+            lid.after = x, lid.has = true;
+        }
+    }
 }
 
 // ---- CharHair --------------------------------------------------------------
@@ -976,6 +1162,7 @@ void Rig::Impl::pollEyes(Eyes& e, const RigContext& ctx) {
 // 0x8217B6F0: each point at the end of its bone (the bones' chain from the
 // root's parent), velocities zero, the up vector its bone's z.
 void Rig::Impl::resetHair(Hair& h) {
+    h.relValid = false;
     for (auto& s : h.strands) {
         if (s.root < 0 || s.points.empty()) continue;
         for (size_t i = 0; i < s.points.size(); ++i) {
@@ -990,6 +1177,118 @@ void Rig::Impl::resetHair(Hair& h) {
     }
 }
 
+// Each CharCollide's world this step: its local under its parent bone.
+void Rig::Impl::placeCollides() {
+    collideWorld.resize(collides.size());
+    for (size_t i = 0; i < collides.size(); ++i)
+        collideWorld[i] = scene::compose(collides[i].local, collides[i].parent >= 0 ? sk.world(collides[i].parent) : sk.root());
+}
+
+// Rock Band's hookup (CharHair 0x823392A0, from the character's
+// sync_objects) [C]: each strand with a root clears its points' collide
+// lists; for each CharCollide of the character (its outfits merged) whose
+// flags (+0xc4) share a bit with the strand's hookup_flags (+0x80), walking
+// the points with L += length, a point gets the collide when
+// c.worldRadius + max(radius, outer_radius) + L > |c.worldPos - root.worldPos|
+// (0x823393E4..0x823394B4). The world radius (compute_radius 0x8232DB30,
+// sent after the body deform) is |collideWorld x (0, radius, 0) - its
+// position|: the radius x the collide's world y scale [C]. Run at the first
+// poll (after the deform and the slot placement) [I: RB at sync_objects];
+// also with GD05_HAIRCOLLIDE_LEGACY (the bandcheck measures RB's pairs), but
+// then the step does not test them.
+void Rig::Impl::hookupHair(Hair& h) {
+    h.hooked = true;
+    placeCollides();
+    for (size_t i = 0; i < collides.size(); ++i) collides[i].worldRadius = collides[i].radius * len(row(collideWorld[i].rot, 1));
+    int pairs = 0;
+    for (auto& s : h.strands) {
+        for (auto& p : s.points) p.hooks.clear();
+        if (s.root < 0) continue;
+        const V3 r = sk.world(s.root).pos;
+        for (size_t ci = 0; ci < collides.size(); ++ci) {
+            const Collide& c = collides[ci];
+            if (!(s.hookupFlags & c.flags)) continue;
+            const float d = len(sub(collideWorld[ci].pos, r));
+            float l = 0;
+            for (auto& p : s.points) {
+                l += p.length;
+                if (c.worldRadius + std::max(p.rbRadius, p.outer) + l > d) p.hooks.push_back(int(ci)), ++pairs;
+            }
+        }
+    }
+    static const bool log = SDL_getenv("GD05_HAIRLOG") != nullptr;
+    if (log) {
+        SDL_Log("hair %s/%s: %zu strands, %zu collides, %d pairs", dir.name.c_str(), h.name.c_str(), h.strands.size(), collides.size(), pairs);
+        for (size_t ci = 0; ci < collides.size(); ++ci) {
+            const Collide& c = collides[ci];
+            SDL_Log("hair   collide %s shape %u flags %u r %.2f (world %.2f) length %.2f parent %s", c.name.c_str(), c.shape, c.flags,
+                    double(c.radius), double(c.worldRadius), double(c.length), nameOf(c.parent).c_str());
+        }
+    }
+}
+
+namespace {
+// A point's penetration into a collide in Rock Band's terms (> 0 inside):
+// the hard radius (point radius + world radius) less the distance to the
+// centre (shapes 1 / 2) or to the x segment [0, length] (3 / 4); the inside
+// shapes (2 / 4) the other way round.
+float hairPen(uint32_t shape, float worldRadius, float length, const scene::Xfm& w, const V3& pos, float r) {
+    V3 o = sub(pos, w.pos);
+    if (shape == 3 || shape == 4) {
+        const V3 ax = normalize(row(w.rot, 0));
+        o = sub(o, mul(ax, std::clamp(dot(o, ax), 0.0f, length)));
+    } else if (shape != 1 && shape != 2) {
+        return 0;
+    }
+    const float d = len(o);
+    return shape == 1 || shape == 3 ? r + worldRadius - d : d - (worldRadius - r);
+}
+}  // namespace
+
+// The bandcheck's measure after a step (GD05-113).
+void Rig::Impl::measureHair(Hair& h, double rate) {
+    RigHairStats& st = hairStats;
+    ++st.steps;
+    for (auto& s : h.strands) {
+        if (s.root < 0) continue;
+        const V3 r = sk.world(s.root).pos;
+        V3 prev = r;
+        for (auto& p : s.points) {
+            for (int ci : p.hooks) {
+                const Collide& c = collides[size_t(ci)];
+                ++st.pairSamples;
+                const float e = hairPen(c.shape, c.worldRadius, c.length, collideWorld[size_t(ci)], p.pos, p.rbRadius);
+                if (e <= 1e-4f) continue;
+                // Pushed out of a later collide of its list into this one: the
+                // point sits on that collide's hard radius (RB's one ordered
+                // pass leaves it there too).
+                bool between = false;
+                for (int cj : p.hooks)
+                    if (cj != ci) {
+                        const Collide& o = collides[size_t(cj)];
+                        between = between || std::fabs(hairPen(o.shape, o.worldRadius, o.length, collideWorld[size_t(cj)], p.pos, p.rbRadius)) < 1e-3f;
+                    }
+                (between ? st.penBetween : st.pen).push_back(e);
+            }
+            float all = 0, mid = 0;
+            const V3 m = mul(add(prev, p.pos), 0.5f);
+            for (size_t ci = 0; ci < collides.size(); ++ci) {
+                const Collide& c = collides[ci];
+                all = std::max(all, hairPen(c.shape, c.worldRadius, c.length, collideWorld[ci], p.pos, p.rbRadius));
+                mid = std::max(mid, hairPen(c.shape, c.worldRadius, c.length, collideWorld[ci], m, p.rbRadius));
+            }
+            ++st.pointSamples;
+            if (all > 0) st.penAll.push_back(all);
+            if (mid > 0) st.penMid.push_back(mid);
+            const V3 rel = sub(p.pos, r);
+            if (h.relValid) st.motion += len(sub(rel, p.rel)), st.motionSeconds += 1.0 / rate;
+            p.rel = rel;
+            prev = p.pos;
+        }
+    }
+    h.relValid = true;
+}
+
 // 0x8217B898 (per poll, no time step: GH2 runs it once a frame):
 // for each point, from the root: Verlet-like step (pos += vel, z -= 0.0643 x
 // gravity), the segment held at its length (the parent point's velocity
@@ -998,12 +1297,36 @@ void Rig::Impl::resetHair(Hair& h) {
 // the previous point aiming its y at this one (z from the frame's z,
 // smoothed), then vel = stiffness x (rest - pos) - friction x (that change)
 // + inertia x (pos - old pos), rest = the previous point + the frame's y x length.
-void Rig::Impl::pollHair(Hair& h) {
+// Rock Band's step (RB 0x82335B10, one a poll) [C]: the same order with the
+// neighbour slack between the integration and the length, gravity
+// g x -3.8582678 x 60 / rate^2 (rate: the PostProc's emulate_fps, else 60;
+// GH2's -0.0643 is that at 60), and the collision against the point's
+// hooked collides (hookupHair) after the length: it wins over the length.
+void Rig::Impl::pollHair(Hair& h, double rate) {
     if (!h.simulate) return;
-    if (h.reset) resetHair(h), h.reset = false;
-    const float gravity = h.p[3] * -0.06430447f;
+    if (h.reset) {
+        if (!h.hooked) hookupHair(h);
+        resetHair(h), h.reset = false;
+        // RB's reset (0x82336F70) [C]: the chain rebuilt, then one step at
+        // rate 15 with inertia (+0x18) and friction (+0x24) zeroed, restored.
+        if (!hairResetLegacy()) {
+            const float in = h.p[2], fr = h.p[5];
+            h.p[2] = h.p[5] = 0;
+            hairSettling = true;
+            pollHair(h, 15);
+            hairSettling = false;
+            h.p[2] = in, h.p[5] = fr;
+        }
+    }
+    const bool rbCollide = !hairCollideLegacy();
+    const bool measure = hairMeasuring && !hairSettling;
+    if (rbCollide || measure) placeCollides();
+    const float gravity = hairGravityLegacy() ? h.p[3] * -0.06430447f : float(h.p[3] * -3.8582678 * 60.0 / (rate * rate));
     const float pull = h.p[4] * -0.5f;
-    for (auto& s : h.strands) {
+    const bool slack = !hairSlackLegacy();
+    const size_t ns = h.strands.size();
+    for (size_t si = 0; si < ns; ++si) {
+        auto& s = h.strands[si];
         if (s.root < 0) continue;
         const int rp = sk.parent(s.root);
         M3 frame = mulRot(s.base, rp >= 0 ? sk.world(rp).rot : sk.root().rot);
@@ -1013,6 +1336,24 @@ void Rig::Impl::pollHair(Hair& h) {
             const V3 old = p.pos;
             p.pos = add(p.pos, p.vel);
             p.pos[2] += gravity;
+            // RB's neighbour slack [C]: only with side_length >= 0, against
+            // the same point of strand (s + 1) % n: out of [side - min_slack,
+            // side + max_slack] this point moves by k x delta and the
+            // neighbour's velocity by -k x delta, k = side^2 / (side^2 + d^2) - 0.5.
+            if (slack && p.side >= 0 && ns > 1) {
+                auto& nb = h.strands[(si + 1) % ns];
+                if (i < nb.points.size()) {
+                    auto& q = nb.points[i];
+                    const V3 dd = sub(p.pos, q.pos);
+                    const float d2 = dot(dd, dd), t2 = p.side * p.side;
+                    const float lo = p.side - h.p[6], hi = p.side + h.p[7];
+                    if ((d2 < lo * lo || d2 > hi * hi) && t2 + d2 > 0) {
+                        const float k = t2 / (t2 + d2) - 0.5f;
+                        p.pos = add(p.pos, mul(dd, k));
+                        q.vel = sub(q.vel, mul(dd, k));
+                    }
+                }
+            }
             V3 d = sub(p.pos, prev);
             const float dl = len(d);
             const float k = dl > 0 ? p.length / dl - 1 : 0;
@@ -1020,16 +1361,54 @@ void Rig::Impl::pollHair(Hair& h) {
             p.pos = add(p.pos, mul(d, k));
             const V3 rest = add(prev, mul(row(frame, 1), p.length));
             V3 up = lerp(p.up, row(frame, 2), h.p[1]);
-            // The collision (0x8217B898) against the collide bone [C]. Type 0:
-            // a plane (its y row, at radius); 1: stay outside a sphere; 2: stay
-            // inside a sphere; 3: stay outside a cylinder round its x row; 4:
-            // stay inside that cylinder. The type is an int (it read as a
-            // float once, so every strand was a plane and blew up). With a
-            // soft band (+0x64, types 2 and 3) the position is corrected only
-            // past the band's hard edge, the radius; inside the band the up
-            // vector blends towards the collision's direction (0x82122100),
-            // and past the edge it takes that direction.
-            if (p.collide >= 0) {
+            if (rbCollide) {
+                // RB's collision (0x82335B10) [C], per hooked collide, o = pos
+                // - the collide's centre; 3 / 4 (capsule): o less x t, t =
+                // o.x clamped to [0, length]; 1 / 3 stay outside: inner =
+                // radius + c.r, outer = outer_radius + c.r; 2 / 4 inside:
+                // c.r - radius / c.r - outer_radius. With no band (outer <=
+                // inner) a hard push to inner; else past inner the push and
+                // the up vector takes the push's direction, inside the band
+                // only the up vector turns towards it by (outer - d) /
+                // (outer - inner). Shape 0: RB notifies; over 4: skipped.
+                // [I] the inside shapes (none on the disc) only push.
+                for (int ci : p.hooks) {
+                    const Collide& c = collides[size_t(ci)];
+                    const scene::Xfm& w = collideWorld[size_t(ci)];
+                    V3 o = sub(p.pos, w.pos);
+                    if (c.shape == 3 || c.shape == 4) {
+                        const V3 ax = normalize(row(w.rot, 0));
+                        o = sub(o, mul(ax, std::clamp(dot(o, ax), 0.0f, c.length)));
+                    } else if (c.shape != 1 && c.shape != 2) {
+                        static bool once = false;
+                        if (c.shape == 0 && !once) once = true, SDL_Log("hair %s: collide %s has shape 0", h.name.c_str(), c.name.c_str());
+                        continue;
+                    }
+                    const bool outside = c.shape == 1 || c.shape == 3;
+                    const float inner = outside ? p.rbRadius + c.worldRadius : c.worldRadius - p.rbRadius;
+                    const float outer = outside ? p.outer + c.worldRadius : c.worldRadius - p.outer;
+                    const float dist = len(o);
+                    if (dist <= 0) continue;
+                    const V3 dir = mul(o, 1 / dist);
+                    const bool past = outside ? dist < inner : dist > inner;
+                    if (!outside || outer <= inner) {
+                        if (past) p.pos = add(p.pos, mul(dir, inner - dist));
+                    } else if (past) {
+                        p.pos = add(p.pos, mul(dir, inner - dist)), up = dir;
+                    } else if (dist < outer) {
+                        up = lerp(up, dir, (outer - dist) / (outer - inner));
+                    }
+                }
+            } else if (p.collide >= 0) {
+                // The collision (0x8217B898) against the collide bone [C]. Type 0:
+                // a plane (its y row, at radius); 1: stay outside a sphere; 2: stay
+                // inside a sphere; 3: stay outside a cylinder round its x row; 4:
+                // stay inside that cylinder. The type is an int (it read as a
+                // float once, so every strand was a plane and blew up). With a
+                // soft band (+0x64, types 2 and 3) the position is corrected only
+                // past the band's hard edge, the radius; inside the band the up
+                // vector blends towards the collision's direction (0x82122100),
+                // and past the edge it takes that direction.
                 const scene::Xfm& c = sk.world(p.collide);
                 const V3 o = sub(p.pos, c.pos);
                 if (p.type == 0) {
@@ -1087,6 +1466,7 @@ void Rig::Impl::pollHair(Hair& h) {
             prev = p.pos;
         }
     }
+    if (measure) measureHair(h, rate);
 }
 
 // GH2 polls the hair once a frame at 60 Hz, with no time step in the maths
@@ -1094,17 +1474,22 @@ void Rig::Impl::pollHair(Hair& h) {
 // rate (at most 4 steps a frame, so a hitch cannot fling the strands). A
 // frame without a step still places the bones from the points, so the hair
 // follows the head (the segments aimed as the last step left them) [I].
+namespace {
+double gHairStepHz = 60;
+}  // namespace
+void setHairStepHz(double hz) { gHairStepHz = hz > 0 ? hz : 60; }
+
 void Rig::Impl::stepHair(Hair& h, double dSeconds) {
-    constexpr double kStep = 1.0 / 60;
+    const double kStep = 1.0 / gHairStepHz;
     h.clock += std::max(0.0, dSeconds);
     int n = int(h.clock / kStep);
     h.clock -= n * kStep;
     if (n > 4) n = 4, h.clock = 0;
     if (n == 0 || h.reset) {
-        if (h.reset) return pollHair(h);
+        if (h.reset) return pollHair(h, gHairStepHz);
         return placeHair(h);
     }
-    for (int i = 0; i < n; ++i) pollHair(h);
+    for (int i = 0; i < n; ++i) pollHair(h, gHairStepHz);
 }
 
 void Rig::Impl::placeHair(Hair& h) {
@@ -1210,8 +1595,35 @@ bool Rig::ikMidi(const std::string& ik, const std::string& spot, double start, d
     return false;
 }
 
+void Rig::setBlinkValue(float v) { impl_->blinkValue = v; }
+
+int Rig::eyeRetargets() const {
+    int n = 0;
+    for (const auto& e : impl_->eyes) n += e.retargets;
+    return n;
+}
+
 void Rig::resetHair() {
     for (auto& h : impl_->hairs) h.reset = true;
+}
+
+RigHairStats Rig::takeHairStats() {
+    Impl& m = *impl_;
+    m.hairMeasuring = true;
+    RigHairStats r = std::move(m.hairStats);
+    m.hairStats = RigHairStats();
+    r.collides = int(m.collides.size());
+    r.points = r.rbPairs = 0;
+    for (const auto& h : m.hairs) {
+        if (!h.simulate) continue;
+        for (const auto& s : h.strands) {
+            if (s.root < 0) continue;
+            r.points += int(s.points.size());
+            for (const auto& p : s.points) r.rbPairs += int(p.hooks.size());
+        }
+    }
+    r.usedPairs = hairCollideLegacy() ? 0 : r.rbPairs;
+    return r;
 }
 
 void Rig::setEnabled(const std::string& name, bool on) {

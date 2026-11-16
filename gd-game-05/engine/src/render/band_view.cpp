@@ -247,9 +247,7 @@ void BandView::drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scen
     const gfx::GpuMesh* cached = cache_.mesh(&m);
     if (!cached || !m.dir) return;
     gfx::GpuMesh g = *cached;
-    const scene::Mesh* geom = &m;
-    if (m.verts.empty() && !m.geomOwner.empty())
-        if (auto* owner = m.dir->resolve<scene::Mesh>(m.geomOwner)) geom = owner;
+    const scene::Mesh* geom = gfx::meshGeometry(&m);
     const gfx::ScenePose* pose = world_ ? &world_->pose() : nullptr;
     if (pose)
         if (const gfx::ScenePose::MeshAnimState* ma = pose->meshAnim(&m); ma && ma->anim) {

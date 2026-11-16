@@ -99,6 +99,10 @@ struct Session {
     std::vector<std::string> voiceDropped;
     // The game panel's state.
     bool gameOver = false;
+    // A song not at 100 % Song Speed (Enhanced, GDALL-053) saves no record,
+    // stars, gold, cash or high score: it is practice (GH2DX's rule,
+    // docs/spikes/study_gh2dx.md).
+    bool noSave = false;
     std::string lastPreview;
 };
 

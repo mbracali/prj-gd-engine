@@ -59,6 +59,7 @@ pattern). Each says what, why and how to undo it.
 - **Why:** the original's grouping (RB 0x82404A10 -> 0x824024F0) is not
   read yet; the data has the ranks and the tier names [C data], not the cut.
 - **Undo:** `engine/src/ui/rb_natives.cpp` (RbSongProvider).
+- **Superseded (2026-11-16):** by D103 (RB's tiers); GD05_SONGTIERS_LEGACY=1 brings this back.
 
 ## D6. Drums played through GH2's joypad watcher in wave 01 (2026-11-09)
 - **What:** with the drum part, the player is gd02's `Player` in joypad
@@ -1671,3 +1672,888 @@ pattern). Each says what, why and how to undo it.
   BRE_final_gem_hit, finger_tap(_bonus), hit_fill, hit_drums / hit_cymbals,
   drumfill_complete_hit, break_bonus not.
 - **Undo:** RbTrackView::fxEvents' solo (GD05_TRACKFX_LEGACY=1).
+
+## D101
+- **What (2026-11-16, GD02-167 / GD05-101, bug-fix wave):** the script's
+  `mod` is Harmonix's Mod, wrapped into [0, n) (fmod and C's % kept the
+  sign): tutorial_state.dta get_prev_state ({mod {- $old $inc} n}) on the
+  first lesson gave -1 (elem -1: no lesson), now the last; drum_trainer's
+  dec_beat too. Six builtins added with Harmonix's semantics [C data: the
+  call sites; I: RB's own DataFuncs not traced]: `|=` / `&=` (on a
+  variable or [property]), `~`, `with` ($this = the object, the last value
+  returned), `sort` (in place; numbers by value, text case-insensitively,
+  lists by their first element), `search_replace` (every match, the result
+  in the fourth argument, true when changed). Clip events: RB's are handler
+  names (set_leftarm_true, freeze, sfx_mic_drop ...) [C data: the clips'
+  event records]; the port parsed them as script (a bare symbol: nothing
+  ran). Now sent to the clip as a script object of its CharClip type
+  (char_objects.dta musician), [flags] the clip's own flags (the main
+  driver's flag weights read them: kLeftArm / kRightArm hand the arms to
+  the hand IK). ClipDriver::runEvents fires [from, to): an event on the
+  clip's first frame (the arm events sit at 0) never fired with (from, to)
+  and held back every later event of the clip [I].
+- **Measured:** selftest "script mod: 8 of 8 cases"; scripttest 49 checks
+  (6 new: mod wrap, |= / &= / ~, sort, search_replace, with + [flags]).
+  Arm events in a song: 0 before (bare symbols); after, 0 in inbloom and
+  blitzkriegbop (guitar, autoplay, whole songs): the arm events live in a
+  few clips only (stand_cut_04/05_slomo, stand_rhythm_ext_*,
+  kneel_rhythm_norm_s_med_01: 60 of the 148 events of the loaded sets)
+  and none was played; the path is checked by scripttest only.
+- **Undo:** script_builtins.cpp arith '%' (gd01's form), Band::runClipScript's
+  ClipObj branch.
+
+## D102
+- **What (2026-11-16, GD05-100 / GD05-096):** a kick struck fires
+  gem_track.dta kick_hit {kick_drummer.trig trigger} [C data]:
+  kick_success.tnm moves cameras.grp (0, 2, -1) -> 0 over 5 frames, the
+  drum track's bounce. It never showed even when fired: the view set
+  intro_anim.grp (camera_intro.tnm, also on cameras.grp) at its last frame
+  every frame after the intro, over any other cameras.grp anim; the intro
+  is now set until it ends, then left. The kick is the lane whose slot is
+  0 (the drums' bits are permuted to the lanes: bit 4 of the view's chart).
+  Also: a gem hit in a solo fires gem_track solo_note (the smasher's
+  hit_fill.trig, the track's solo_hit.trig) [C data; I: the native sends it
+  for each hit in a solo]; the bass's BassSuperStreak_ON / _OFF.trig at 5x
+  (track_handlers set_streak / streak_broken) [C data] is wired but cannot
+  fire: the port's Player keeps the singleplayer multipliers (4x) for the
+  bass (rulesForInstrument is not called; RB's bass goes to 6x).
+- **Measured:** inbloom drums, 30 s, autoplay: kick_drummer.trig 0 -> 39
+  (39 kicks), the camera off its rest in 0 -> 1,584 of 7,014 frames (lift
+  up to 2.8); mainoffender guitar, 25 s: solo_hit / hit_fill 0 -> 85 each,
+  particles launched 1,188 -> 1,528.
+- **Undo:** GD05_KICK_LEGACY=1 (kick and the intro hold), GD05_TRACKFX_LEGACY=1
+  (solo notes, super streak).
+
+## D103
+- **What (2026-11-16, GD05-109):** the song list's rank sections are RB's
+  (supersedes D5). SongMgr (RB 0x82434020) [C] cuts each instrument's ranked
+  list (the songs neither downloaded nor (unlockable TRUE): 45 on the disc)
+  into band.dta's nine song_groupings rank tiers by count (n / 9 each, the
+  last n % 9 tiers one more), each tier's top the rank of its last song; the
+  list (0x82404A10) sorts the available songs by the instrument's rank, equal
+  ranks by symbol (0x82400348), and puts a heading wherever the tier changes,
+  a song's tier the first whose top is at least its rank (0x82431958; the
+  bonus songs land by the same tops, so sections hold 5 to 8 songs), the
+  heading the tier's (<instrument> generic_tierN) entry. The instrument
+  (0x824024F0): the leader's character's in a solo mode or outside a band
+  arrangement (guitar for a bass character), else band; band in the
+  leaderboards [I: their own instrument is not in the port].
+- **Measured:** walk `rb_songlist_tiers` (every song, recomputed from the
+  data): guitar tops 130 170 220 250 280 315 350 380 500, drums 130 170 200
+  250 300 340 380 450 500; 58 songs under 9 headings, 0 under a wrong
+  heading, 0 out of order on both (D5's split: 40 wrong on guitar).
+- **Not changed:** song_db rankedSongs (the unlocks, tours) keeps file order
+  among equal ranks; RB's 0x82434020 sorts them by symbol too (same
+  comparator). Only the choice at a tie of the 10th song differs.
+- **Undo:** GD05_SONGTIERS_LEGACY=1 (D5's band-rank split in nine equal groups).
+
+## D104
+- **What (2026-11-16, GD05-105):** a UITrigger anim without its own range
+  (enable FALSE) plays: RB's EventTrigger (0x8220E3A0) calls
+  RndAnimatable::Animate(blend, wait, delay) (0x8221BCE8) for it [C]: the
+  anim's own range at its own rate, looping as the anim's Loop() says. The
+  port skipped them, so loading.milo's enter.trg never played
+  loading_text.filt (load_icon_guitar, 0..15 looping: the guitarist's
+  windmill, the leftmost icon) and it stood still. Applied to AnimFilters
+  only [I: AnimFilter's Loop is its type Loop]; the other ~450 such anims of
+  the menus' triggers (main.milo's button flights, dialog popups) stay
+  skipped as before (a follow-up to check one by one).
+- **Measured:** walk `rb_loading_icons` (each icon's texture through 3 s of
+  the loading screens): guitar 1 texture, 0 changes -> 5 textures, 24
+  changes; vox / drum / bass unchanged (5 / 4 / 5 textures). Shots
+  (GD05_WALK_SHOTS), the guitarist's crop over 16 shots (1.6 s): 1 distinct
+  image -> 4, up to 1,073 pixels changed between two shots.
+- **Undo:** GD05_LOADICON_LEGACY=1.
+
+## D105
+- **What (2026-11-16, GD05-107 #1 / #3 / #8):** RB's shot end and directed
+  cuts. (a) The port never played a directed cut: rbShots looked for
+  `[do_directed_cut `, but the song's VENUE texts are stored without their
+  brackets (chart.cpp eventText), so the 680 directed cuts of the 62 songs
+  (CAMERA_RULES_20261116.md) never ran and their gaps in the note-60 grid
+  held the last NORMAL shot's last frame (the owner's "held too long").
+  (b) midi_parsers.dta's text: the cut's shot is chosen when the track is
+  read (get_shot) and starts zero_time frames (the BandCamShot member, not a
+  header property) before the event; start_directed_cut holds note-60 picks
+  to the event + min_time / 30 s [C data]. (c) band_objects.dta BandCamShot
+  shot_over: next_shot forced, else worldbase.dta camshot_end: after a
+  directed shot (the intro, a directed cut) pick_new_shot at once, else
+  next_cam_beat = now + 2 beats (the last frame holds, cuts within 2 beats
+  skipped) [C data]; sent once at the end frame of a non-looping shot (RB
+  0x82292968) [C]. The director's onShotOver calls App::rbCamshotEnd. The
+  intro chain's end waits for the clock's 0 (its duration_seconds add
+  0.0425 s a shot; the port's shots end that much earlier), so the intro
+  check still holds; WIN / LOSE shots keep the port's handling.
+- **Measured:** walks `rb_camera_cuts` (solo, big_club_11) and
+  `rb_camera_cuts_band` (4 players, arena_07), App::rbCamSimRun over
+  inbloom, blackholesun, highwaystar. Solo: longest hold 15.4 / 13.1 / 16.2 s
+  -> 6.7 / 10.3 / 6.8 s; longest time past a shot's last frame 5.4 / 9.8 /
+  6.2 s -> 0.03 / 3.8 / 0.03 s; total 6.3 / 14.4 / 7.6 s -> 0.0 / 3.8 / 0.0 s;
+  directed cuts 0 -> 10 / 7 / 18, all started at event - zero_time. Band:
+  longest hold 15.4 / 13.1 / 16.2 s -> 7.0 / 10.3 / 6.7 s; past last frame
+  9.7 / 6.4 / 9.5 s -> 0.03 / 6.3 / 0.8 s; directed 0 -> 10 / 7 / 19. What
+  is left past a last frame is RB's own hold (a NORMAL shot shorter than the
+  song's note-60 gap). GD05_SHOTEND_LEGACY=1 alone: directed shots held
+  5.8 / 2.8 s past their end. Walk `quickplay`: intro check 0 errors.
+- **Undo:** GD05_DIRECTED_LEGACY=1 (no directed cuts, as 1.1.15),
+  GD05_SHOTEND_LEGACY=1 (shot_over goes nowhere); GD05_CAMRULES_LEGACY=1
+  turns off every GD05-107 switch (D105-D107).
+
+## D106
+- **What (2026-11-16, GD05-107 #2):** a venue's disabled shots. WorldDir's
+  camshot_overrides (load RB 0x8228B6C8 -> 0x822883A8, rev > 0xf; the same
+  in SyncProperty 0x82289DC8 and 0x8228C178) clear each listed CamShot's
+  +0x16c, which the CamShot constructor (RB 0x82295310) sets to 1, and the
+  picker (0x8229E190) takes only shots with it set [C]. The port read the
+  list (scene/objects.cpp) and ignored it: these are Harmonix's shared
+  shots that clip that venue's set. They are left out of rbShots_ (intro,
+  NORMAL and directed alike); a next_shot can still force one, as RB's
+  force_shot does.
+- **Measured:** big_club_11 lists 34 (all found), arena_07 19,
+  small_club_01 0. Disabled shots picked per song (solo inbloom /
+  blackholesun / highwaystar): 3 / 7 / 12 -> 0; band 2 / 2 / 5 -> 0.
+- **Undo:** GD05_CAMOVERRIDES_LEGACY=1.
+
+## D107
+- **What (2026-11-16, GD05-107 P2 #4 / #5 / #6 / #9 / #10):**
+  pick_new_shot's details [C data worldbase.dta, midi_parsers.dta]:
+  nothing acceptable -> no cut, the shot stays (RB 0x8229F0D0 returns 0)
+  [C], the port's two fallbacks dropped (GD05_PICKFAIL_LEGACY); a solo mode
+  (gamemode is_solo: max_players 1) with exactly two members in focus puts
+  the player's instrument in (it replaces the bass, for a bassist the
+  guitar, else one of the other two at random) (GD05_SOLOFOCUS_LEGACY);
+  one_time shots once a song, the milos storing the flag as 1 (start_shot
+  sets one_time_played, cleared at the song's start) (GD05_ONETIME_LEGACY);
+  directed cuts filtered by valid_male / valid_female and valid_banger /
+  dramatic / rocker / spazz of the member the category names, no shot -> no
+  cut (GD05_DIRFILTER_LEGACY).
+- **Measured:** on the three songs no pick failed and no one_time or
+  invalid shot came up (those switches change nothing there); the solo
+  focus changes the solo sequence. #10 (a cut's frame 0 aimed before the
+  band is posed): App::rbCutAimProbe, frame 0 as drawn against frame 0
+  evaluated two frames later: 25 cuts in 60 s of band play, largest 3.8
+  degrees (coop_bs_d_c07, 0 units), 1 over 2 degrees; posing the band again
+  after the cut changed nothing, so it is not the stale pose the study
+  suspected: not fixed (a first version of the probe read 116 degrees from
+  the frame a shot_over cut is made in, which still shows the old shot).
+- **Undo:** the switches above.
+
+## D108
+- **What (2026-11-16, GD05-106 A1 / A4):** the band's eyes turn. RB's
+  CharLookAt Poll (RB 0x82321A48) turns the source bone, else the pivot
+  [C]; every eye look-at on the disc has source "" and pivot
+  bone_X-eye.mesh, and the port returned at once, so no eye ever moved
+  (GD05_EYES_LEGACY). CharEyes (RB 0x82329588) [C]: a new gaze point after
+  3 s, or after 1 s on a blink (the face servo's Blink weight falling from
+  above 0.8 after it went under 0.3) or a head turn, no random draw; the
+  port had GH2's 8 s and right-lid test (GD05_GAZE_LEGACY). The lids'
+  follow of the eyes (A5) is not done.
+- **Measured (bandcheck "face", inbloom 60 s, every member):** eye turn from
+  bind 0 -> up to 25 deg (the look-at box: yaw -16..20, pitch -16..5), over
+  2 deg on 0 -> ~98 % of frames, gaze points 7-8 -> 23-26. Close shots
+  (GD05_FACE_CAM): legacy shows the non-singers' eyes in their bind pose,
+  iris rolled up under a half-closed lid; now the irises look ahead / around.
+- **Undo:** GD05_EYES_LEGACY=1, GD05_GAZE_LEGACY=1.
+
+## D109
+- **What (2026-11-16, GD05-106 A2 / A6):** blinks on everyone.
+  FaceFxLipSyncServo Poll (RB 0x82324110) [C]: Base first, the node whose
+  clip is the set's `Blink` at its full value (enable_blink its only gate,
+  TRUE except for the band snapshot), the other nodes x the servo's weight.
+  The port scaled the whole face by the weight and skipped the face at 0:
+  the guitarists and the drummer (weight owner singalong.weight, 0 outside
+  VENUE 85-87) never blinked and their faces stayed in the skeleton's bind.
+  set_blink_song (LIPSERVO_COMMON) [C data]: the blink track loops at
+  song_offset random_float 0..1000 per servo; the port played it once from 0
+  for everyone. The offsets come from their own generator [I: RB uses its one
+  global RandomGen; a separate one keeps the band's clip picks as before].
+- **Measured:** blinks per member 0 / 0 / 0 / 2 -> 17 / 19 / 17 / 8 (16-18 a
+  minute for the non-singers; the singer's come from its song's .voc); upper
+  lid up to 0 -> 35-44 deg; blinks within 50 ms of another member's 2 of 61.
+- **Undo:** GD05_BLINK_LEGACY=1 (both).
+
+## D110
+- **What (2026-11-16, GD05-106 A3):** expressions. The musician / shell
+  CharClip types' enter (char_objects.dta) sends `change_face_group
+  [viseme_group]` (default `normal`); BandCharacter (RB 0x822E5850 ->
+  0x822E4C58) finds that group in expression.drv's clips (the face set,
+  CHAR_COMMON sync_objects) and plays a clip, the 0x80000-flagged one first
+  (kExpressionFirst [I]); its poll (RB 0x822E6360) plays another when it
+  ends [C]. Port: main.drv / main_add.drv clip starts call
+  Character::changeFaceGroup; the clip (realtime, 6-12 s) runs on its own
+  clock and is added as an offset from Base under the visemes and the blink,
+  at expression.drv's weight, the old one blended out over the new one's
+  blend width (beats) [I: the driver's place in the servo's blend not read;
+  the same group keeps its clip].
+- **Measured:** expression clips started per member (inbloom 60 s) 0 -> 17 /
+  18 / 30 / 12, 5-11 distinct clips each, a clip on every frame; walk logs
+  `char <name>: expr <group> <clip>` under GD05_BANDLOG.
+- **Undo:** GD05_EXPR_LEGACY=1.
+
+## D111
+- **What (2026-11-16, GD05-108 B1):** the drum hits land on the notes.
+  CharDriverMidi midi_parser (RB 0x82342168) plays its clip at -length:
+  0x82312CB0 -> 0x82361620 stores that value as the node's frame (+0x10)
+  [C], so the clip's frame 0 lands on the note. The port started at the
+  clip's first frame - length; the drum hand clips hold a 0.7-0.85 beat
+  lead-in at negative frames and touch their pad at frame 0 (their data:
+  each pad's target nearest its pad at frame 0, 1.4-4.9 units), so every hit
+  came that much late. Applies to every CharDriverMidi clip (guitar strums
+  and frets start at 0: unchanged; bass plucks -0.25, kit pads -0.05..-0.27).
+- **Measured (bandcheck "drum reach", new):** at each left / right hand clip
+  the drum parsers start: the stick tip (bone_X-tip) to its IK target and to
+  the pad (bone_target_<pad>) at the note, the closest approach and its time,
+  the hand IK weight. inbloom, tip to the pad at the note p50: hi-hat 18.3
+  -> 4.7, cymbals 21-34 -> 3-4.6, snare 3.4 / 4.5 -> 2.4 / 1.7; closest
+  approach at the note -6..+5 ms (was +30..+230 ms, or not within 250 ms);
+  highwaystar toms 14-26 -> 2-4. Drum notes with a limb moving 236 -> 252 of
+  252. Hits with the hand IK off (71 of 249 in inbloom: a directed shot's
+  stand_cut_stand_windmill, idle_play_c_01, whose main clips flag the arms)
+  are RB's rule and left out of the numbers. Guitar / bass reach unchanged.
+- **Undo:** GD05_MIDICLIP_LEGACY=1.
+
+## D112
+- **What (2026-11-16, GD05-108):** the servo's rotation channels start at
+  their bones' bind [I: RB's starting values not read]. Bones::add starts a
+  quaternion at the identity and the servo poses every channel, so a bone
+  no driver had written yet was turned to the identity: the kit's
+  bone_R-cymbal_stand (bind -141 deg about z, written only by
+  right_crash.dmidi's crash clips) put the crash and its stick target 10+
+  units out of the drummer's reach, the IK stretched the arm (inbloom at
+  rest: R-cymbal target 97 units from the tip, the others 32). Positions
+  keep 0 (the blender-fed foot targets hold their start while the blend
+  weight stays under 1; starting them at the bind broke "channels within
+  their clips").
+- **Measured:** highwaystar drummer stretch 2.21 x bind on 88 frames (4.19 x
+  on 271 with D111 alone) -> 1.00 x, 0 frames; bandcheck passed; stick tip
+  to its IK target at the note p95 <= 0.44 units on every pad (was up to 2.5,
+  65 at a crash). Guitar, bass, vocals: no channel at weight 0 off its bind,
+  so unchanged. Close shot: the crash now hit with the arm forward.
+- **Undo:** GD05_SERVOBIND_LEGACY=1.
+
+## D113
+- **What (2026-11-16, GD05-110):** the servo's channels start at their
+  bones' pose, all types. CharBonesMeshes ReallocateInternal (RB 0x82364508)
+  [C]: once the meshes are found, positions = the mesh's local position,
+  scales (0x8238E178) and quaternions (0x8238E4C0) from its local matrix, the
+  x / y / z angles (0x8238E328 / 358 / 388) too, the rest 0. D112 did only
+  the quaternions: bone_hihat_pos (written only by hihat.dmidi) stayed at 0,
+  the hi-hat and its stick targets 28 units under their place until the
+  first hi-hat clip; on songs whose drums open on the cymbals (shouldistay,
+  creep) the drummer's right hand chased targets out of reach.
+- **Measured (bandcheck, shouldistay 45 s, drummer):** stretch 3.33 x on 3555
+  frames -> 1.10 x, 0; arm bones turning over 30 deg in a frame 3063 of 90016
+  -> 15; R hi-hat tip to target at the note p50 22.3 -> 0.23. The channels
+  check counts the start (|bind|) in each channel's bound.
+- **Undo:** GD05_SERVOPOS_LEGACY=1 (the quaternions only, D112);
+  GD05_SERVOBIND_LEGACY=1 (all at 0).
+
+## D114
+- **What (2026-11-16, GD05-110):** the twisters poll after the hand IKs. The
+  rig sort broke cycles by directory order: left_hand.ikhand and fret.ikhand
+  read and change the same hand, and the first node left was upperTwist_L,
+  so CharUpperTwist / CharForeTwist (RB 0x8233EAD0 / 0x8233DE58, same maths
+  as the port [C]) twisted the skin for the arm before the IK moved it (the S
+  bend). Now a cycle is broken by the node with the fewest dependencies left
+  [I: RB polls the hand IKs as one CharPollGroup, hand_iks, so its twisters
+  come after all of them; the group's place in RB's sort not read]. Guitar
+  and bass orders now ... left_hand.ikhand fret.ikhand upperTwist_L
+  foreTwist_L ...; drums / vocals unchanged. Not a regression of ead8336:
+  3d806a3 built and compared, guitarist arms identical (p50 0.1 units).
+- **Measured (new bandcheck "arm skin twist between segments": the turn of
+  each twist segment against the next about its long axis, against the
+  bind; fails above 75 deg on more than 1 frame in 1000), inbloom 60 s:**
+  guitar max 106.9 deg, 12 frames -> 59.0, 0; bass 95.2, 143 -> 63.5, 0;
+  drums 62.9 / vocals 61, 0 both ways. Close shot at 16.47 s: the fret
+  arm's flattened, wrung forearm is round again.
+- **Undo:** GD05_POLLSORT_LEGACY=1.
+
+## D115
+- **What (2026-11-16, GD05-111):** a mesh draws its geom_owner's vertices and
+  faces even when it stores its own. RB reads a mesh's geometry through the
+  owner pointer (mesh +0x10c, then the owner's vertices +0xe0 / faces +0xf8:
+  RB 0x82205658, 0x82206000, 0x822B06F0; RndMesh::Load 0x821A02F8 sets the
+  owner to the mesh itself when none is named) [C]. The port took the owner
+  only for meshes with no vertices. gfx::meshGeometry (render/scene_gpu)
+  is now the one rule for the scene cache, band, venue, HUD and explorer.
+- **The strike line:** each smasher's square_smasher_plate.mesh keeps 471
+  vertices of its own (an older, taller hood whose top maps v 0.79-0.92 of
+  black_smasher_<colour>_nomip.tex: the grey V of the smasher's front) but
+  names black_smasher.mesh (237 vertices, a low dome y -3.1..3.1, z <= 0.36)
+  as its owner. The port drew the hood: the bright, wavy "chrome" band above
+  each coloured frame (owner's report: "the higher part of the notes is
+  wrong"). Now the top above the rim is the texture's dark strip and the row
+  is flush, as in Screen_2.
+- **Other meshes this changes (inbloom guitar / drums, venue big_club_11):**
+  the drum smashers' square_smasher_plate (59 own vertices), drum_slots_new
+  -> drum_slots_narrow (the drum track's lane lines now show, as in the
+  retail Wikipedia shot), guitar_rails -> trackslots_guitar_narrow (no
+  visible change), kick_smasher_back -> kick_smasher_base, phrase_marker ->
+  now_bar, the venue's stool15..35 -> stool01.
+- **Measured (1920 x 1080, inbloom 20.15 s, yellow lane column x 915-925):**
+  band above the rim, mean luma of the rows above it: 112.7 -> 9.9 (Screen_2
+  24.4, a lit blue board behind it); bright rows above the rim 16 (856-871)
+  -> 0; front below the rim / rim height 0.72 -> 0.70 (Screen_2 0.70). Left:
+  the rim's height / width is 0.225 against Screen_2's 0.16-0.18 (the old
+  hood hid the rim's top: 0.160); Screen_2 is a 1280 x 629 crop of an
+  unknown build, not checked further.
+- **Undo:** GD05_GEOMOWNER_LEGACY=1 (the owner only for meshes without
+  vertices).
+- **Not done:** the outer-lane gems on the plate's curve (STRIKELINE study
+  item 1): RB's gem instance transform still not traced (gem_smasher%d
+  0x82817D28 only finds the smashers).
+
+
+## D116
+- **What (2026-11-16, GD05-114):** the part / difficulty screen's ready flags
+  are cleared when it is left. seldiff.dta's panels (SELDIFF_PANEL_HANDLERS,
+  hth_split_seldiff_panel) send `{session set_all_local_ready_status FALSE}`
+  on unload; Session SetAllLocalReadyStatus (RB 0x82372F30) sets every local
+  player whose flag differs (0x8236EEC8) [C]. The port keeps its panels
+  loaded (never runs their unload) and quieted the message, so after a song
+  player 0 stayed ready: pause > New Song > a song > qp_seldiff_solo_screen
+  saw every slot ready and went straight to loading, with no part picked
+  (track kTrackNone: the game took the song's first instrument, the drums).
+  Any controller (keyboard, pad, guitar). Now the session message sets the
+  flags, and the seldiff panels' unload handler runs when the next screen
+  does not hold them [I: only these panels' unload; the others' (game,
+  loading, shop, charcreator) still never run]. Also `{session end_game
+  kQuit}` (pause's exit_new_song) is handled quietly (local session: no
+  sinks) instead of logged unhandled [I].
+- **Measured (walks rb_newsong_part keyboard / rb_newsong_part_pad,
+  `newsong_part` lines):** the second qp_seldiff_solo_screen: player 0 ready
+  1 -> 0, the song then played on track drum -> guitar (2); the first
+  screen unchanged (ready 0, guitar slot, part select) both ways.
+  rb_pause_quit, rb_qp_locked OK.
+- **Undo:** GD05_READYRESET_LEGACY=1.
+
+## D117
+- **What (2026-11-16, GD05-112):** the eyelids follow the eyes. Rock Band's
+  CharEyes Poll (RB 0x82329588) [C], after each eye's look-at: a = the eye's
+  look (its local y) x component x (1 - the face servo's Blink weight); the
+  upper lid's local is turned by -a about its z (0x8238ED60), the lower
+  lid's local x moved by 0.75 a. D108 turned the eyes (up to 16 deg down / 5
+  up, often at those limits) but the lids stayed where the face servo left
+  them: the iris went down and the white showed bared above it, the eye
+  standing out of the face (owner: "popping out of their skulls", the
+  singer). The eyeball itself never leaves its socket: eye-L / eye-R.mesh
+  are spheres (r 0.87) centred within 0.17 of their bone, the bone's local
+  position stays its bind, its look within the limits box (RB 0x82321FB8:
+  x by the pitch pair, z by the yaw pair, as the port) [measured]. The lids
+  are written after the face servo (they join the eyes' poll reads /
+  writes); a lid no servo wrote again starts from its pose before the
+  follow [I: RB polls the look-ats from CharEyes; the port before it].
+- **Measured (bandcheck, new lines "eye in socket" and "lid follows the
+  eye": the least-squares slope of the upper lid's turn about z from its
+  bind against the eye's vertical turn, frames with Blink under 0.3; RB's
+  rule gives about -1):** inbloom 60 s guitar / bass / drums / vocals -0.06 /
+  -0.07 / 0.13 / -0.08 -> -0.98 / -1.01 / -0.86 / -1.06; highwaystar 45 s ->
+  -0.80 / -0.83 / -1.00 / -1.16. Eye in socket 0.000 units, 0 deg past the
+  limits both ways. Close shots (GD05_FACE_CAM=player_vocals0:12:f:...,
+  GD05_PREFAB_VOCALS=vocals2, 20.06 / 41.24 s): legacy, white above the
+  iris; now the lid comes down with the look.
+- **Undo:** GD05_LIDS_LEGACY=1.
+
+## D118
+- **What (2026-11-16, GD05-113, study agents/HAIR_20261116.md):** Rock
+  Band's hair collision. The port ran none for RB [C]: the rig read GH2's
+  per-point type / collide (empty on RB's rev 9 points), so no point was
+  ever tested, and CharCollide was never placed. Now (GD05_HAIRCOLLIDE_LEGACY):
+  - CharCollide objects of the character (outfits merged) are placed each
+    step as their local under their parent bone (the outfit's exo_* bones).
+    The rig composes it itself instead of adding CharCollide to
+    `gfx::transOf`: the same placement, without new skeleton nodes for
+    every renderer / explorer that walks transOf.
+  - RB's hookup (CharHair 0x823392A0) [C] at the hair's first poll (after
+    the deform and the slot placement; RB at sync_objects [I]): per strand,
+    collides whose flags share a bit with hookup_flags; a point gets a
+    collide when worldRadius + max(radius, outer_radius) + L (lengths
+    from the root) > |collide - root|. World radius = radius x the
+    collide's world y scale (compute_radius 0x8232DB30) [C].
+  - The point fields as RB loads them (RB 0x823372A0): radius,
+    outer_radius, side_length (the port read outer_radius as the radius
+    and side_length as the band).
+  - RB's step (0x82335B10) [C] after the length step: shapes 1 / 3
+    (outside a sphere / a capsule clamped to [0, length] on x), hard push
+    to radius + worldRadius, the soft band (outer_radius) turning only the
+    up vector; 2 / 4 inside (none on the disc, push only [I]); 0 logged.
+  - Gravity per step g x -3.8582678 x 60 / rate^2 at the step rate (24
+    under ProFilm: 6.25 x GH2's 60 Hz constant) (GD05_HAIRGRAVITY_LEGACY);
+    the neighbour-strand slack for side_length >= 0 (GD05_HAIRSLACK_LEGACY);
+    after a reset one settle step at rate 15 with inertia and friction 0
+    (0x82336F70) (GD05_HAIRRESET_LEGACY).
+- **Measured (new bandcheck "hair <slot>", inbloom 60 s; pairs RB hooks,
+  per hair step, penetration = hard radius - distance):** hooked pairs
+  tested 0 -> 24 / 162 / 37 / 27 (guitar / bass / drums / vocals); hooked
+  pairs inside 21 / 24 / 8 / 13 % of pair-steps, max 5.6 / 7.8 / 4.8 / 5.5
+  -> 0 (a point pushed by a later collide of its list back into an earlier
+  one, as RB's one ordered pass does: 0 / 326 / 13 / 4 pair-steps, max 0 /
+  1.41 / 0.15 / 0.01, counted apart). P1 alone does it all; gravity then
+  hangs the hair lower (points move 19.5 / 16.6 / 18.6 / 14.1 -> 14.7 / 12.0 /
+  14.0 / 10.5 units/s against their root, P1 alone 18.3 / 15.6 / 17.0 /
+  13.4); slack and reset change these hairs by under 1 %. Info (RB tests
+  neither): points inside any collide, hooked or not, 40 / 64 / 82 / 48 %
+  -> 34 / 56 / 81 / 46 % (the scalp points sit inside head spheres their
+  strand's flags leave out); segment midpoints likewise. Arm / face /
+  stretch lines unchanged. Close shots (GD05_FACE_CAM=player_bass0 /
+  player_vocals0:30:f|90:bone_neck.mesh, 20 / 32 / 44 s): legacy, the
+  bassist's strand ends and the singer's side hair sink into the chest and
+  the jacket collar; now they lie outside on the shoulders.
+- **Undo:** GD05_HAIRCOLLIDE_LEGACY=1, GD05_HAIRGRAVITY_LEGACY=1,
+  GD05_HAIRSLACK_LEGACY=1, GD05_HAIRRESET_LEGACY=1.
+
+
+## D119
+- **What (2026-11-16, GD05-114 reopened):** the part / difficulty panels
+  (seldiff_panel, seldiff_solo_panel, hth_split_seldiff_panel) are really
+  unloaded when the next screen does not hold them (their unload handler,
+  then the milo freed), as RB's UIPanel Unload does; the next part select
+  loads a fresh seldiff milo. D116 ran only the handler and kept the panel:
+  once player 0 was ready the slot's update hid every BandButton but the
+  chosen difficulty ({$this iterate BandButton $b ... {$b set_showing {!
+  $ready}}}, seldiff.dta SELDIFF_SCREEN_PANELS [C data]), guitar.btn /
+  bass.btn among them, and nothing shows them again (only selpart.grp /
+  guitar.grp / bass.grp are re-shown): pause > New Song's part select came
+  up with no GUITAR / BASS labels. PanelObj::unload also drops the slots'
+  components, focus and disabled set (they pointed into the freed view).
+- **Measured (walks rb_newsong_part / rb_newsong_part_pad, new
+  `newsong_part <when> labels` line: selpart.grp, guitar.grp, bass.grp,
+  guitar.btn, bass.btn, guitar.lbl, bass.lbl shown and with text):** second
+  visit hidden 2 (guitar.btn, bass.btn) -> 0, empty 0 -> 0; first visit
+  0 / 0 both ways; ready reset unchanged (ready 0, game on track 2).
+  rb_pause_quit, rb_qp_locked, rb_band_start OK.
+- **Undo:** GD05_SELDIFFRELOAD_LEGACY=1 (handler only, as D116).
+
+## D120
+- **What (2026-11-16, GD05-115):** Rock Band's crowd streams. RB's
+  CrowdAudio (ctor 0x8243B660) [C] takes its type from the venue's name up
+  to the last '_' (0x8241F3E8: big_club_11 -> big_club) in
+  config/crowd_audio.dta ((streams (root world/<type>/streams) (intro dB
+  file) (levels ...))) and crowd_volume from config/sound.dta (-4 dB). Its
+  intro_start handler (CROWD_AUDIO_HANDLERS: crowd_begin and play_intro
+  when want_intro: no tour performer or its first song; play_intro
+  0x8243A2E8 plays the intro stream) runs at game.dta pick_intro, the
+  venue's first intro shot; music_start then the excitement loops a second
+  later (0x82439F20). The port read only GH2's (sound (crowd ...)) from the
+  WorldDir type, which RB's venues lack: no crowd stream at all, so the
+  crowd was heard only from crowd_begin and the song's own crowd channels
+  once the music ran. Now the RB config is read; want_intro is followed.
+  [I: the stream cross-fade (+0x3c old stream) and pan 3 are not done.]
+  Follow-up (11-16): there is no cross-fade [C]: a new stream moves the
+  playing one to +0x3c (0x824399D8); the poll (0x8243AEC8) starts the new
+  one once it is ready (stream vtable +0x8, then +0x14) and deletes the old
+  there. The port's streams are decoded in memory, so its switch is the
+  same cut.
+- **Measured (GD05_SFXLOG=1 `crowd timing` lines, GD05_END_AT=20000):**
+  orangecrush (theater_08, --song): intro stream none -> crowd_theater_intro
+  at song -2582 ms (the track extends at -2000), first level loop none ->
+  crowd_theater_norm at 6860 ms; through the menus (rb_newsong_part,
+  big_club_11): crowd_big_intro at song -6709 ms. The owner's video has no
+  audio track, so no measurement from it.
+- **Undo:** GD05_CROWDSTREAMS_LEGACY=1.
+
+## D121
+- **What (2026-11-16, GD05-116, owner: the singer's eyes pop out of the
+  skull on Mississippi Queen):** each head outfit (outfits/heads/gen/
+  head_<n>.milo) carries its own face rig, placed for its own skull [C
+  data]: on heads 2..6, 41 of its 55 bones differ from the base character's
+  (built on head_1) by up to 1.1 units (head_3's bone_L-eye 2.24 3.87 1.23
+  under bone_head.mesh, the base's 2.64 4.33 1.51); the body pieces' bones
+  all match the base's. The port kept the base character's bone for every
+  duplicate, so the head's meshes (eye-L / eye-R, eyebrows, head<n>) hung on
+  head_1's places. The viseme set's Base (male_viseme_head_<n>) poses the
+  brows, lids and lips but never the eyes, so the eyeballs sat 0.2..0.7
+  units forward and out of the sockets, in front of the lids: huge white
+  eyes, brows looking detached. Now a head piece's bone under the same
+  parent as the character's gives it its local place (parentless stubs,
+  bone_spine2 / bone_head_nod, stay the character's); the instruments' and
+  kits' bones stay as before [I: RB's outfit merge not read; heads only,
+  the faces fit only this way]. Characters on head_1 were unaffected,
+  hence "not every character".
+- **Measured (new bandcheck line "eyes on the head's rig": either eye's
+  local position against its head outfit's, missqueen to 15.5 s):** singer
+  vocals19 (head_3) 0.674 -> 0, guitar0 (head_2) 0.393 -> 0; prefab
+  drummers drum13 / drum11 / drum12 / drum8 / drum0 (heads 2 f, 4, 6, 4 f,
+  5) 0.367 / 0.221 / 0.667 / 0.308 / 0.647 -> 0, guitar15 (head_6 f)
+  0.528 -> 0, vocals16 (head_5 f) 0.126 -> 0; head_1 members 0 both ways.
+  No other bandcheck line changes. Close shots (GD05_FACE_CAM
+  player_vocals0:25:f, :16:f:bone_forehead.mesh): the eyes now sit behind
+  the lids in the sockets, the brows on the brow ridge.
+  Not changed: a crease on head_3's forehead (right side) stays with the
+  bones at the head's own rest and no expression; neither the normal,
+  spec nor skin texture has it, so it is the mesh's shape [I]; the brow
+  mesh draws opaque (eyebrows.mat blend 1, kBlendSrc on the disc).
+- **Undo:** GD05_HEADBONES_LEGACY=1.
+
+
+## D122
+- **What (2026-11-16, GD05-117, owner: "The fps count is broken"):** the
+  Enhanced FPS counter averaged each frame's rate (1 / dt, 5 % a frame;
+  copied from gd02). That is not the frame rate when frames are uneven:
+  with the world drawn at 24 a second (D55) a song's frames alternate long
+  (world drawn) and short (picture held), and the mean of the rates reads
+  far above the frames shown (2 ms + 10 ms frames: 300 for 167); a frame a
+  few microseconds after the last moves it by hundreds, and a stall (a
+  load: 1 frame in 0.9 s) barely shows. Now it counts the frames shown
+  over half a second, as gd01's counter (App::frame fpsWindowNs_). Same
+  place, size and font.
+- **Measured (GD05_FPSLOG=1 `fps counter` lines, walk rb_pause_quit,
+  offscreen, 24 windows):** shown against the frames counted: legacy off by
+  more than 5 % in 11 windows (in the song 284-330 shown for 116-204
+  counted, the load window 223 for 1.2), now 0 windows over 5 % (the one at
+  5 % is 2 shown for 1.9). Screenshots in song at 13 s: legacy "330 FPS",
+  now "223 FPS".
+- **Undo:** GD05_FPSCOUNTER_LEGACY=1.
+
+## D123
+- **What (2026-11-16, GD05-118, career rundown):** the Band World Tour's
+  towns as RB's. RB loads the tiers with their own events and the (world
+  ...) towns in the data's order with their (region a b) (RB 0x823FE1D8,
+  record RB 0x823FD338: +4 order, +8 / +0xc the region's two parts) [C],
+  then each town's own file tour/<town>.dta (the tour folder's content
+  list, RB 0x823FC400 -> 0x823FDB20: (<venue> <world> <events> ...)) [C;
+  I: the port finds the files by the towns' names]. A town plays a tier
+  chosen relative to the hometown (RB 0x823FCED8) [C]: none without a
+  region; the hometown tier1_1; else the count, over the regioned towns
+  in the data's order, of the towns of its half before it, the hometown
+  after it in that half, the other half of the hometown's region, and
+  every town of another region (hometown boston: newyork tier1_2, chicago
+  tier1_3, losangeles tier2_1, seattle 2_2, sanfrancisco 2_3, berlin 3_1
+  .. amsterdam 3_6). A town's venues are its file's; at each, the tier's
+  events of that venue (the tier's (last ...) at the town's last venue)
+  then the town's own (RB 0x823F3AD0) [C]. Open towns: the travel need
+  (RB 0x823FD058: 0 home, 1 its half, 2 the other half, 3 another region
+  or no region) up to the vehicle level, the last of (moments (vehicles
+  van bus jet)) owned (RB 0x823EE2B8, 0x823F2E20) [C]; the town list shows
+  those [I]; can_leave_hometown = more than the hometown open (RB
+  0x823CE850 asks vfunc +0x48) [C; I: the compare]. Event status (RB
+  0x823EC890) [C]: locked while the event's buzz is over the band's, its
+  (item ...) not owned (the staff the late gigs need), or the stars of
+  its town / the world under (fame (town n) (world m)); else played /
+  new. venue_variant is the town file's venue (RB 0x823F4C00:
+  seattle's big_club big_club_07) [C]. TourBand is_winning (vfunc
+  +0x5c, RB 0x823EDB00): the event awards win_item not yet owned, or is
+  hardcore winning (RB 0x823EC428: it awards hardcore_item) [C]. The gig
+  list's names are locale_events.dta's <town>_<venue>_<event> (the data's
+  town, the tier for a tier's event), else the song when (display_song
+  TRUE) [I: RB's event_display_name not read]. The hometown list keeps
+  the regioned towns (a town without a region is closed even as the
+  hometown by RB's travel rule) [I: RB's list 0x8206fb30 not read].
+  total_town_fame counts max_stars_per_song a song [I]. A save made
+  before keys its events by the old towns: moved on load (rb_profile.json
+  bands "towns_v" 2 marks the new keys).
+- **Measured (walk rb_full_band, hometown boston, 5 stars a song through
+  the natives):** before (GD05_BWTTOWNS_LEGACY=1): 71 gigs in 12 towns, the
+  first in San Francisco, 12 towns entered without the vehicle, no hall of
+  fame; after: 173 gigs (the tiers' 71 + the towns' own) in all 17 towns
+  (boston first, then newyork chicago losangeles seattle sanfrancisco,
+  europe, reykjavik tokyo sydney rio moscow), 0 towns without the
+  vehicle; van at gig 7, bus 14, jet 57, the staff 53-148; the hall of
+  fame (moscow arena) the only gig left, played through the menus: 8
+  songs, tour_band_win_screen; then the endless setlist (allmara, 58
+  songs; status 2 once tour_halloffame_complete is owned, is_winning /
+  is_hardcore_winning 1, tour_bwt_complete awarded); kept through a
+  restart (world fame 3215).
+- **Undo:** GD05_BWTTOWNS_LEGACY=1 (tiers as towns by order, no town files,
+  no item rule); GD05_TOURWIN_LEGACY=1 (is_winning the endgame flag).
+
+## D124
+- **What (2026-11-16, GD05-119, career rundown):** the Solo Tour ends as
+  RB's. TourCharLocal is_winning (vfunc +0x5c, RB 0x823E47E0 -> 0x823CFA58,
+  read in assembly: the decompiler drops the loop) [C]: going back from the
+  last town in the data's order, the first whose first venue is a normal
+  one with open events at the difficulty (Easy: tier3_2, songs 26-30;
+  else moscow, "Impossible Songs", 41-45) must be the character's town,
+  and the gig playing the only one of that town's open events not yet
+  completed. The port answered the flag endgame.dta sets from it (never
+  1), so no tour ever reached tour_solo_win_screen, the credits or the
+  send-off. Also: a venue's (download ...) entry is the template of one
+  event per downloaded song (RB 0x823FDB20: the event named download makes
+  the venue kTourVenueDownload, kind 2, and adds an event per song SongMgr
+  has downloaded) [C]: none here, so Tokyo's arena has no Solo Tour gig;
+  the port listed a "download" gig with no song (and counted Tokyo as the
+  last town).
+- **Measured (walk rb_full_solo, guitar, Medium):** after: 44 tier gigs and
+  13 bonus gigs through the natives, towns opening in the data's order, 0
+  wrong songs, song45 left as the winning gig, played through the menus:
+  meta_loading_tour_win_screen > tour_solo_win_screen > credits >
+  tour_solo_sendoff_screen; 58 gigs kept through a restart. Before:
+  GD05_TOURWIN_LEGACY=1 "the tour's winning gig is ''" (all 45 played, no
+  win); GD05_DOWNLOADGIG_LEGACY=1 "'download' left".
+- **Undo:** GD05_TOURWIN_LEGACY=1, GD05_DOWNLOADGIG_LEGACY=1.
+
+## D125
+- **What (2026-11-16, GD05-120, career rundown):** the tours' gig lists
+  name their rows. The list resources name the row's label event.lbl
+  (ui/resource/list_event.milo: event, songs, fame, star, medal, item,
+  new; list_solo_event.milo: event, by_line, town, venue, score, star,
+  new) [C data]; the port filled list.lbl / name.lbl only, so every gig
+  row was blank (rb_career_band's event screen shot: one empty highlighted
+  row). Band rows: the gig's locale name (D123), else its song; solo rows:
+  the song and its artist (by_line.lbl) [I: RB's Text functions not read;
+  the other labels left empty].
+- **Measured:** rb_bwt_diy shot of tour_band_event_screen (boston small
+  club): "Say It Ain't So", "In Bloom", "I Think I'm Paranoid", "Make a
+  Setlist", "Mystery Requests"; before: blank rows.
+- **Undo:** GD05_EVENTLBL_LEGACY=1.
+
+## D126
+- **What (2026-11-16, GD05-121, owner: "In the enhanced menu, I want a
+  shot that captures the singer, the drummer at the back and the guitar
+  player at the right side of the singer. Use as example the shot we have
+  in Guitar Hero 1"):** gd01's backdrop (drawMenuBackdrop) is a fixed
+  camera 215 in front of its singer, his partner beside him, the singer at
+  0.75 / 0.3 of the picture, the right half (the Enhanced boxes cover the
+  left). The port showed the venue band shot that scored most heads in the
+  free area (D31): in small_club_01 coop_bgv_n09, a far shot with the crowd
+  over the band. No RB shot frames the composition (the singer, drummer and
+  guitarist heads in x 0.53..0.95, y 0.04..0.62, guitarist right of the
+  singer, drummer between them, singer head to feet over 0.2 of the height,
+  bassist out of the right half): 0 of 197 / 250 / 440 / 269 shots in
+  small_club_01 / big_club_03 / arena_04 / theater_02, with each shot's
+  own band places. So a fixed camera as gd01's: stage axes from the band
+  (back: singer to drummer, right: toward the guitarist), the eye searched
+  from gd01's place back and up (within 250 of one of RB's camera places,
+  inside the venue), with the band where it stands or where an RB
+  whole-band shot (NORMAL1111 / directed_all) puts it; turned so a point
+  beside the singer sits at 0.76 / 0.3; field of view for a singer 0.4 of
+  the height, widened until it fits; the fewest sight lines (3 heads, the
+  singer's shoulders) through the audience's placements (upright capsules,
+  raised hands 90 up), then lowest and nearest gd01's. The forced shot (the
+  one that places the band, else the whole-band shot whose eye is nearest)
+  gives the PostProc and its 3D crowd rows; the depth of field focuses on
+  the singer; the camera is aimed again once that shot's clips posed the
+  band. [I: a port feature; no RB behaviour.]
+- **Found:** from RB's own coop_dir-all eye (small_club_01, 200 in front
+  at head height) the crowd's raised hands cover the band in a still: a
+  moving shot hides it, a still does not.
+- **Measured (GD05_UILOG `backdrop composition` line, walk rb_enhanced,
+  GD05_BACKDROP_VENUE for the others):** composition FAIL -> ok in all 4
+  venues; crowd-blocked sight lines 4 / 1 / 0 / 0 -> 0 / 0 / 0 / 0; singer
+  head x 0.53 / 0.50 / 0.50 / 0.53 -> 0.57 / 0.55 / 0.63 / 0.61, guitarist
+  0.69 / 0.66 / 0.55 / 0.66 -> 0.90 / 0.88 / 0.94 / 0.95. Screenshots
+  checked in the 4 venues.
+- **Undo:** GD05_BACKDROPCAM_LEGACY=1 (the same picture as before, byte for
+  byte in small_club_01). Development aids: GD05_BACKDROP_VENUE,
+  GD05_BACKDROP_CAM, GD05_BACKDROP_SHOTS.
+
+## D127
+- **What (2026-11-16, GD05-104):** each player plays by its instrument's
+  rules, rulesForInstrument (scoring.dtb (points (<instrument> ...)) and
+  (streaks (multipliers (bass ...) / (vocals ...) / (singleplayer ...)))
+  [C data; which table an instrument uses: I]); the selftest always did,
+  the game passed rules_ (singleplayer, 4x) to every Player. The bass's
+  table goes to 6x, so its super streak (BassSuperStreak_ON.trig, D102)
+  now fires. Guitar and drum points are the same table values (scores
+  unchanged).
+- **Measured (`--song inbloom --autoplay`, end-of-song line, new "top
+  multiplier" and "bass super streaks"):** bass to 45 s: 4x -> 6x, super
+  streaks 0 -> 1, score 13,403 -> 18,553; guitar to 45 s 15,344 both ways;
+  drums to 20 s 6,775 both ways.
+- **Undo:** GD05_PARTRULES_LEGACY=1.
+
+## D128
+- **What (2026-11-16, GD05-099):** the selftest's 7 Star Power / co-op
+  FAIL lines (reported, not counted: exit 0) were the tests, not the game:
+  its test songs marked their phrases on GH2's Star Power pitch 103, which
+  in RB is the solo marker; RB's Overdrive phrase is 116 (chart parser,
+  RB 0x8249F990) [C], so no phrase was ever captured (meter 0). On 116, the
+  drain and whammy checks then expected GH2's 0.25 a phrase where RB's is
+  scoring's spotlight_phrase 0.251 (drain 1 / deploy_beats 32 a beat =
+  0.125 a 4/4 measure, as GH2's; end 10,710 ms, not <= 10,700) [C data].
+  The two shared-meter co-op checks and the co-op stars check test GH2's
+  co-op mode (one meter both engage; badreputation's max_scores): RB has
+  none, each member has its own Overdrive meter [I]; they print SKIP when
+  the disc has no badreputation max_scores. The rule checks now count in
+  the exit code. GD05_SELFTEST_RULES=1 runs only them (a few seconds).
+- **Measured (GD05_SELFTEST_RULES=1):** FAIL 7 -> 0 (3 SKIP), exit 0;
+  with GD05_SELFTEST_PHRASE_LEGACY=1 (pitch 103, 0.25) 4 FAIL, exit 1.
+- **Undo:** GD05_SELFTEST_PHRASE_LEGACY=1 (the old songs' pitch and
+  phrase value), GD05_SELFTEST_COUNT_LEGACY=1 (not counted).
+
+## D129
+- **What (2026-11-16, GD05-111 follow-up, STRIKELINE item 1):** the gems
+  sit on their smashers' curve. RB's gem manager, at its set-up (RB
+  0x82816BB0 -> 0x828167F0) [C]: for each slot 0..4 it takes the smasher's
+  world matrix (its +0xb4), writes the TrackDir slot as (x, z) of its
+  translation (0x82251F28) and keeps the euler y of the matrix (0x8238E000)
+  as the slot's roll (a map at +0x134). A gem's transform (gem add
+  0x82818B68) is TrackDir MakeSecondsXfm (0x822509D8: identity, x = slot x,
+  z = slot z, y = y_per_second x seconds) turned by the roll
+  (0x8238EA48). The smashers stand on flat_curve.mesh's curve (guitar z
+  0 / -0.075 / -0.281, roll 0 / 0.044 / 0.073 rad; drums -0.036 / -0.239,
+  0.015 / 0.073); the port drew every gem flat at z 0, so the outer gems
+  floated and stood level over tilted smashers.
+- **Measured (GD05_GEMCURVE_LOG=1: each lane's gem at the now line, bounding
+  centre minus the smasher's centre in the smasher's frame, and the tilt of
+  the gem's base against it; inbloom):** guitar spread across the lanes
+  centre z 0.279 -> 0.000, x 0.120 -> 0.000, base tilt 0.574 -> 0.000
+  (FAIL -> ok); drums z 0.200 -> 0.000, tilt 0.709 -> 0.000 (FAIL -> ok).
+  Shots at 19991 ms (green / yellow gems on the line): the green gem no
+  longer stands above its smasher's rim and leans with it.
+- **Not done:** the sustain tails are still built flat at z 0 (the
+  TailBuilder's slot read, 0x8281C4A0, not traced).
+- **Undo:** GD05_GEMCURVE_LEGACY=1.
+
+## D130
+- **What (2026-11-16, GD05-126, career rundown 2):** the band hub shows the
+  band. RB's CharSelectPanel poll (RB 0x828433C0) [C]: for each of the
+  mode's max_players slots (proxies "<coop|hth|solo><i>.pxy" by
+  max_players 4 / 2 / else: RB 0x82842860 / 0x82843910) the player in it
+  (gamecfg get_player_num_from_slot_num) shows its character unless the
+  screen's show_char <player> answers FALSE (an unhandled show_char shows
+  it); the CharLoadingPanel's loading<i>.lbl shows only while that
+  character is still loading. The port drew slot characters only on
+  screens with player slots (the lobbies), so the hub (tour_band_hub.milo,
+  a CharLoadingPanel) showed the milo's four "Loading" labels over an
+  empty practice space. The selected BandCamShot's band targets teleport
+  the proxies (practice_space.milo coop_hub moves coop0..3.pxy in front of
+  its camera; coop_enter's equal the proxies' own places) [C data]: the
+  characters stand there.
+- **Measured (walk rb_career_screens_band, real lobby, guitarist + drummer
+  made there):** tour_band_hub_screen labels shown "Loading" 4 -> 0; the
+  members' pixels (shot with / without the previews) 4.6 % of the screen,
+  29 % of it in the left half (noise) -> 19.2 %, 82 % (two members framed
+  left of the menu). Shots band_hub.bmp.
+- **Undo:** GD05_HUBCHARS_LEGACY=1.
+
+## D131
+- **What (2026-11-16, GD05-127, career rundown 2):** the gig rows' labels
+  as RB's providers write them. EventProvider::Text (RB 0x823F6848) [C], by
+  the list type's elements (ui_objects.dta event: event star fame new songs
+  medal item): star.lbl the star rating (scoring.dta star_ratings symbols,
+  RB 0x82435678) of a played one-song gig, "*" for a played set; fame.lbl
+  a played set's "%i/%i" stars / songs x max_stars_per_song; new.lbl
+  tour_new for a new gig that awards nothing; songs.lbl the song (one or
+  two-song lists: the concrete song, "" for "any") or tour_song_set
+  "%i Song Set" (RB 0x823FF208); medal.lbl medal_strings by the record's
+  difficulty (RB 0x823EFAD0 -> 0x823ECC28); item.lbl a new gig's
+  award_item icon (items (<item> (icon ...)), RB 0x823ECD60).
+  SoloEventProvider::Text (RB 0x823FA578) [C] (solo_event: town venue event
+  by_line star new score): town.lbl on a town's first row, venue.lbl
+  (<town>_<venue>) on a venue's first row, star.lbl, new.lbl, score.lbl
+  the song's best score. The band's event record keeps the difficulty it
+  was played at, the best kept (LocalTourBand complete_event RB 0x8240BE80:
+  record +0x18 = max(+0x18, the band's lowest difficulty, RB 0x823EDED8))
+  [C]; the solo character keeps each song's best score per difficulty [I:
+  the record]. RB's Localize gives a missing token back (RB 0x82265878);
+  the solo tiers (tier1_1 ...) and their venues have none, the port leaves
+  those two labels empty rather than show the token [I].
+- **Measured (walks rb_career_screens_band / _solo, a first gig through the
+  natives):** band rows (boston small club) filled star 0 -> 1, medal 0 ->
+  1 ("M"), new 0 -> 4, songs 0 -> 5 ("2 Song Set" for Make a Setlist /
+  Mystery Requests); solo rows star 0 -> 1 ("****"), score 0 -> 1
+  ("123456"), new 0 -> 5, town / venue 0 -> 1 (Rio's row). Shots
+  band_event.bmp, solo_event.bmp.
+- **Undo:** GD05_GIGROWS_LEGACY=1.
+
+## D132
+- **What (2026-11-16, GD05-123, career rundown 2):** the solo gig guide's
+  bonus gigs behind an "unlock" row. SoloEventProvider (RB 0x823FA248 /
+  0x823FA578) [C]: in kTourVenueNormal (0) it lists the open towns' normal
+  venues' open events, then one mode row per open venue of another kind
+  ("unlock": tour_unlock_songs "[Play Bonus Tour]", its town, venue and
+  NEW when it has a new gig); kTourVenueUnlock (1) lists that venue's
+  events; ui/tour_solo.dta's SELECT_MSG on the row sets the mode and
+  Triangle sets it back (first_unplayed_event takes the mode). The port
+  listed Rio's bonus gigs inline and answered mode 0 always.
+- **Measured (walk rb_career_screens_solo):** normal list song1..song5
+  unlock1 -> song1..song5 unlock; X on the row: mode 0 -> 1, rows
+  unlock1; Triangle: mode 0, still on tour_solo_event_screen. Before
+  (GD05_SOLOUNLOCK_LEGACY=1): no unlock row, mode stays 0. rb_full_solo
+  (the test aid lists the unlock mode's gigs after the normal ones): 44
+  tier + 13 bonus gigs, song45 wins, as before. Shot solo_event_unlock.bmp.
+- **Undo:** GD05_SOLOUNLOCK_LEGACY=1.
+
+## D133
+- **What (2026-11-16, GD05-122, career rundown 2):** the win instruments.
+  TourBand complete_event (RB 0x823EF0F0) [C]: when the gig awards win_item
+  (tour_halloffame_complete), each local member's character gets its
+  instrument's (win_instruments (guitar stratocaster03clear) (bass
+  precision01clear) (drum solid_vistalite) (vocals mic1_clear)) item in the
+  instrument's category (mic for vocals) when not owned, and the gig's
+  unlock (event_unlock, +0x194) is win_instruments: the gig complete
+  screen's "You have been awarded clear instruments!" [C; I: a member who
+  plays bass takes the bass entry]. The port gave nothing. The Solo Tour's
+  golden instrument (song45's (outfit (guitar (male guitar
+  stratocaster03gold)) ...), the win screen's "Enjoy your new golden
+  instrument") was already awarded (D67's event outfit): rb_full_solo now
+  checks it owned; a costless instrument model is listed in the shop only
+  when owned (OutfitProvider RB 0x82859E08) [C].
+- **Measured:** rb_full_band: the hall of fame's guitarist: stratocaster03clear
+  not owned, event_unlock '' (GD05_WININSTR_LEGACY=1: FAIL) -> owned,
+  win_instruments. rb_full_solo (guitar): stratocaster03gold owned.
+- **Undo:** GD05_WININSTR_LEGACY=1.
+
+## D134
+- **What (2026-11-16, GD05-125, career rundown 2):** active rock moments
+  and the buzz caps, from LocalTourBand (vtable RB 0x82071d8c) [C]. After
+  each gig (complete_event RB 0x8240BE80 -> 0x8240A768) a count of gigs
+  runs down; at 0 it is drawn again in (moments (frequency 2 5)) (RB
+  0x8240A3D8; RB's generator [I]) and a moment is offered for the next
+  gig: one of the band's vehicle's list ((vehicles (tour_vehicle_van
+  ...)), the vehicle level's entry) not offered since the list was last
+  cleared (cleared once all were); next_moment (vfunc +0x8c) is it and
+  has_next_moment its != 0 (RB 0x823F1550); seldiff.dta's start_loading_msg
+  then goes to tour_active_moment_screen, whose yes / no calls
+  set_active_moment. The moment taken changes the gig (RB 0x823EEAE8):
+  each song's reward per star is its (reward_per_star ($stars
+  $event_reward) ...), and (RB 0x8240A088) the buzz gain its (buzz_change
+  ($avg_stars $buzz_change) ...). Buzz caps (RB 0x8240A088, 0x823ECA28)
+  [C]: a gain is capped at (buzz_caps 175 350 600 40000) of the band's
+  lowest difficulty (only up to it; none when already over); a loss from
+  a band with buzz sets have_lost_fans (+0x164); buzz_state (+0x160) is
+  kTourBuzzCap when a gain reached the cap, kTourBuzzMaxCap at Expert's:
+  the first_fans_lost / first_buzz_cap / fist_buzz_maxcap hints. The port
+  answered has_next_moment / buzz_state / have_lost_fans 0 and capped buzz
+  by the vehicle [I]. Not found in the code: where RB clears the moment
+  taken (the port after its gig) [I]; no moment without a vehicle (RB
+  indexes the list by the level) [I]; the event's (sellout TRUE) field
+  (+0x5c) [not traced].
+- **Measured (rb_full_band, Expert, GD05_MOMENT_SEED=7; the test aid takes
+  every moment offered):** moments offered 0 (GD05_MOMENTS_LEGACY=1) -> 45
+  over 173 gigs, none before the van (gig 7): charity 8, double or nothing
+  fans 7, double or nothing 4 stars 8, quadruple 5 stars 8, sellout 8,
+  triple fans 6; each gig's reward as its moment's (x2 / x4 / x0 / x3 at 5
+  stars a song): 45 of 45. The Hall of Fame and Endless Setlist still end
+  the tour. The test aid now plays at Expert: at Medium the cap (350)
+  keeps a band from the buzz 355-580 gigs, which need Hard anyway. The
+  active moment screen through the menus was not reached by a walk (no
+  moment fell on the gig played through the menus).
+- **Undo:** GD05_MOMENTS_LEGACY=1 (no moments, hints never),
+  GD05_BUZZCAP_LEGACY=1 (the cap by vehicle).
+
+## D135
+- **What (2026-11-16, GD05-128, career rundown 2):** the hometown list as
+  RB's. HometownProvider (vtable RB 0x8206fb30), filled by RB 0x823FC338
+  [C]: the towns whose record has both parts of a (region a b), sorted by
+  their localized names (RB 0x823FBB90; compare RB 0x823F4768: strcmp of
+  the two Localize results). The port had the regioned towns in the
+  data's order.
+- **Measured (walk rb_career_screens_band, rb_hometowns):** newyork chicago
+  boston losangeles seattle sanfrancisco berlin stockholm rome london paris
+  amsterdam -> amsterdam berlin boston chicago london losangeles newyork
+  paris rome sanfrancisco seattle stockholm (Amsterdam .. Stockholm).
+- **Undo:** GD05_HOMETOWN_LEGACY=1.
+
+## D136
+- **What (2026-11-16, GD05-124, career rundown 2):** the profile screens
+  answer their panels. CharProfilePanel (handler RB 0x82841A00),
+  BandProfilePanel (RB 0x828388C0) and BandLineupPanel (BandLineupPanel
+  class RB 0x82829D18) had none of their natives in the port: the
+  character profile showed "kDataUnhandled" as its name, the band profile
+  "kDataUnhandled" in every line, the band roster no rows. Now [C: the
+  messages and the strings' tokens; I: the answers from the port's
+  profile]: the character's name, the player's intro name for the
+  gamertag (no Xbox Live), cash, quote (band_profile_default_motto when
+  none, editable), instrument icon, its bands, its five best-scored songs;
+  the band's name, "Formed on <day> <month> <year>"
+  (band_profile_formed_date_fmt; the date kept from now on, RB 0x82838658),
+  "in <hometown>" (band_profile_hometown_fmt, RB 0x828386D0), fans
+  (tour_band_fans), world fame (RB 0x828382C0), quote, members, songs
+  played; the roster's get_row (leader, instrument icon, name, Playing /
+  Absent: kMetaLineup*) per member.
+- **Measured (walks rb_career_screens_band / _solo):** UNHANDLED natives on
+  the three screens 18 -> 0; shots band_profile.bmp, band_lineup.bmp,
+  solo_profile.bmp show the data.
+- **Undo:** GD05_CHARPROFILE_LEGACY=1, GD05_BANDPROFILE_LEGACY=1.

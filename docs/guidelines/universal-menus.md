@@ -229,6 +229,8 @@ components: we will.
 | Cheats & enhancers | Export User Files | Exports the user's settings and progress as JSON files | Button |
 | Cheats & enhancers | Load User Settings | Loads a user settings JSON file | Button |
 | Cheats & enhancers | Load User Progress | Loads a user progress JSON file | Button |
+| Cheats & enhancers | Song Speed | 50 % to 200 % in steps of 10, the music's pitch kept (`song_speed`: `"50"`..`"200"`) | Dropdown, default 100 %. GH2 Deluxe's rules: the track speed is divided by it (the gems keep their speed on screen), above 100 % the hit window is multiplied by it, a song not at 100 % saves no record (practice). Same key and values in every game (`gd-engine-core` `speed_options.h`, GDALL-053); gd01, gd02, gd03 so far |
+| Cheats & enhancers | Track Speed | The highway's speed times the difficulty's own, 0.5x to 3.5x in steps of 0.25 (`track_speed`: `"0.5"`..`"3.5"`) | Dropdown, default 1x. Same key in every game so the launcher can share it (GDALL-054, GDALL-051); gd01, gd02, gd03 so far |
 | Cheats & enhancers | *Every cheat of the game* | Each one can be turned on or off | Per game |
 
 One key difference from older versions, which had switches to enable the

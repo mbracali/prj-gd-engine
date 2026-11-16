@@ -66,7 +66,9 @@ boot, Solo > Quickplay, a song, the results, back. "Walk" means a
   under load_icon_bass), and a RndDir used as an anim sets its MatAnims (the
   AnimFilters' texture swaps) (D22). Check: walk `rb_owner_bugs`
   `loading_icons` (four distinct x), shots (the drummer and singer change
-  frames; the guitarist's filter plays 0..0, so it holds, as the data says).
+  frames). The guitarist's filter (loading_text.filt) is in enter.trg without
+  its own range: RB plays it over its own 0..15, looping (D104, GD05-105); it
+  stood still before. Walk `rb_loading_icons`.
 - **Menu feel (GD05-027).** UITriggers play as RndAnimatable::Animate
   (0x8221BE38): start -> end at the rate's fps x scale (or the period), with
   their delays (the pause buttons' 0.09 s cascade) and loops (the lights,

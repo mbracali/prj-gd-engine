@@ -123,8 +123,24 @@ jobs:
       V: ${{ needs.check.outputs.version }}
     steps:
       - name: git, curl (checkout with history, the DLSS SDK)
-        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends git curl ca-certificates >/dev/null
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends git curl ca-certificates ccache >/dev/null
       - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: ~/.ccache
+          key: ccache-linux-${{ github.run_id }}
+          restore-keys: ccache-linux-
+      # Compiled objects kept between releases (GDREL-010): CMake picks ccache
+      # up from CMAKE_<LANG>_COMPILER_LAUNCHER; without ccache the build runs as before.
+      - name: ccache
+        shell: bash
+        run: |
+          if command -v ccache >/dev/null; then
+            { echo "CCACHE_DIR=$HOME/.ccache"; echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"; echo "CCACHE_MAXSIZE=1500M"
+              echo "CCACHE_COMPILERCHECK=content"; echo "CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime"
+              echo "CMAKE_C_COMPILER_LAUNCHER=ccache"; echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"; } >> "$GITHUB_ENV"
+            ccache -z >/dev/null || true
+          else echo "no ccache: a full build"; fi
       - uses: actions/cache@v6
         with:
           path: gd-engine-launcher/build/portable/sdl3-prefix
@@ -178,6 +194,10 @@ jobs:
             gd-game-02/engine/build/ffmpeg/**/ffmpeg-build.log
           if-no-files-found: ignore
           retention-days: 7
+      - name: ccache hits
+        if: ${{ always() }}
+        shell: bash
+        run: ccache -s 2>/dev/null || true
       - uses: actions/upload-artifact@v7
         with:
           name: release-linux
@@ -200,6 +220,23 @@ jobs:
       V: ${{ needs.check.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: ~/.ccache
+          key: ccache-steamdeck-${{ github.run_id }}
+          restore-keys: ccache-steamdeck-
+      # Compiled objects kept between releases (GDREL-010): CMake picks ccache
+      # up from CMAKE_<LANG>_COMPILER_LAUNCHER; without ccache the build runs as before.
+      - name: ccache
+        shell: bash
+        run: |
+          command -v ccache >/dev/null || (apt-get update -qq && apt-get install -y -qq ccache >/dev/null) || true
+          if command -v ccache >/dev/null; then
+            { echo "CCACHE_DIR=$HOME/.ccache"; echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"; echo "CCACHE_MAXSIZE=1500M"
+              echo "CCACHE_COMPILERCHECK=content"; echo "CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime"
+              echo "CMAKE_C_COMPILER_LAUNCHER=ccache"; echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"; } >> "$GITHUB_ENV"
+            ccache -z >/dev/null || true
+          else echo "no ccache: a full build"; fi
       - uses: actions/cache@v6
         with:
           path: gd-game-02/engine/build/ffmpeg/steamdeck/ffmpeg-prefix
@@ -243,6 +280,10 @@ jobs:
             gd-game-02/engine/build/ffmpeg/**/ffmpeg-build.log
           if-no-files-found: ignore
           retention-days: 7
+      - name: ccache hits
+        if: ${{ always() }}
+        shell: bash
+        run: ccache -s 2>/dev/null || true
       - uses: actions/upload-artifact@v7
         with:
           name: release-steamdeck
@@ -266,9 +307,25 @@ jobs:
           # gcc-c++: gd-engine-core builds its shader compiler (gdcore_shaderc)
           # for the build machine (without it 1.1.13's Windows build failed).
           dnf install -y --setopt=install_weak_deps=False git cmake ninja-build python3 gcc gcc-c++ mingw64-gcc-c++ mingw64-SDL3 \
-            zip unzip make xz diffutils >/dev/null
+            zip unzip make xz diffutils ccache >/dev/null
       - uses: actions/checkout@v7
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.ccache
+          key: ccache-windows-${{ github.run_id }}
+          restore-keys: ccache-windows-
+      # Compiled objects kept between releases (GDREL-010): CMake picks ccache
+      # up from CMAKE_<LANG>_COMPILER_LAUNCHER; without ccache the build runs as before.
+      - name: ccache
+        shell: bash
+        run: |
+          if command -v ccache >/dev/null; then
+            { echo "CCACHE_DIR=$HOME/.ccache"; echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"; echo "CCACHE_MAXSIZE=1500M"
+              echo "CCACHE_COMPILERCHECK=content"; echo "CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime"
+              echo "CMAKE_C_COMPILER_LAUNCHER=ccache"; echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"; } >> "$GITHUB_ENV"
+            ccache -z >/dev/null || true
+          else echo "no ccache: a full build"; fi
       - uses: actions/cache@v6
         with:
           path: gd-game-02/engine/build/ffmpeg/windows/ffmpeg-prefix
@@ -310,6 +367,10 @@ jobs:
             gd-game-02/engine/build/ffmpeg/**/ffmpeg-build.log
           if-no-files-found: ignore
           retention-days: 7
+      - name: ccache hits
+        if: ${{ always() }}
+        shell: bash
+        run: ccache -s 2>/dev/null || true
       - uses: actions/upload-artifact@v7
         with:
           name: release-windows
@@ -327,7 +388,23 @@ jobs:
       V: ${{ needs.check.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      - run: brew install bash ninja sdl3 dylibbundler
+      - uses: actions/cache@v6
+        with:
+          path: ~/.ccache
+          key: ccache-macos-${{ github.run_id }}
+          restore-keys: ccache-macos-
+      # Compiled objects kept between releases (GDREL-010): CMake picks ccache
+      # up from CMAKE_<LANG>_COMPILER_LAUNCHER; without ccache the build runs as before.
+      - name: ccache
+        shell: bash
+        run: |
+          if command -v ccache >/dev/null; then
+            { echo "CCACHE_DIR=$HOME/.ccache"; echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"; echo "CCACHE_MAXSIZE=1500M"
+              echo "CCACHE_COMPILERCHECK=content"; echo "CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime"
+              echo "CMAKE_C_COMPILER_LAUNCHER=ccache"; echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"; } >> "$GITHUB_ENV"
+            ccache -z >/dev/null || true
+          else echo "no ccache: a full build"; fi
+      - run: brew install bash ninja sdl3 dylibbundler ccache
       - uses: actions/cache@v6
         with:
           path: gd-game-02/engine/build/ffmpeg/macos/ffmpeg-prefix
@@ -369,6 +446,10 @@ jobs:
             gd-game-02/engine/build/ffmpeg/**/ffmpeg-build.log
           if-no-files-found: ignore
           retention-days: 7
+      - name: ccache hits
+        if: ${{ always() }}
+        shell: bash
+        run: ccache -s 2>/dev/null || true
       - uses: actions/upload-artifact@v7
         with:
           name: release-macos
@@ -385,6 +466,23 @@ jobs:
       V: ${{ needs.check.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: ~/.ccache
+          key: ccache-android-${{ github.run_id }}
+          restore-keys: ccache-android-
+      # Compiled objects kept between releases (GDREL-010): CMake picks ccache
+      # up from CMAKE_<LANG>_COMPILER_LAUNCHER; without ccache the build runs as before.
+      - name: ccache
+        shell: bash
+        run: |
+          command -v ccache >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ccache >/dev/null) || true
+          if command -v ccache >/dev/null; then
+            { echo "CCACHE_DIR=$HOME/.ccache"; echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"; echo "CCACHE_MAXSIZE=1500M"
+              echo "CCACHE_COMPILERCHECK=content"; echo "CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime"
+              echo "CMAKE_C_COMPILER_LAUNCHER=ccache"; echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"; } >> "$GITHUB_ENV"
+            ccache -z >/dev/null || true
+          else echo "no ccache: a full build"; fi
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -458,6 +556,10 @@ jobs:
             gd-game-02/engine/build/ffmpeg/**/ffmpeg-build.log
           if-no-files-found: ignore
           retention-days: 7
+      - name: ccache hits
+        if: ${{ always() }}
+        shell: bash
+        run: ccache -s 2>/dev/null || true
       - uses: actions/upload-artifact@v7
         with:
           name: release-android

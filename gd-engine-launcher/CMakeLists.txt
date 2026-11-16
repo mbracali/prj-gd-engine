@@ -45,6 +45,10 @@ target_sources(gdul PRIVATE
   src/yaml.cpp
 )
 target_include_directories(gdul PRIVATE src sdk)
+# CHD disc images (GDUL-030): gd-engine-core's reader (libchdr) for the disc
+# probe; the game modules read CHDs through their own gd-engine-core.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../gd-engine-core/cmake/gdcore_chd.cmake)
+target_link_libraries(gdul PRIVATE gdcore_chd)
 target_link_libraries(gdul PRIVATE SDL3::SDL3 ${CMAKE_DL_LIBS})
 target_compile_definitions(gdul PRIVATE GDUL_VERSION="${PROJECT_VERSION}")
 # The Steam Deck download (scripts/build.sh steamdeck): the Linux launcher,

@@ -903,7 +903,10 @@ WalkDriver::WalkDriver(const std::string& name)
         check("enhanced_progress_loaded");
         // Enable Cut Content (not built: stays off), No Fail Mode, Autoplay,
         // Forgiving Hammer-ons and Pull-offs.
-        row(kX), row(kX), row(kX), row(kX);
+        row(kX), row(kX), row(kX);
+        // Song Speed and Track Speed (GDALL-053 / 054): left at 100 % and 1x.
+        press(kDown), wait(120), press(kDown), wait(120);
+        row(kX);
         check("enhanced_cheats");
         // The port's cheats back off (the walk's own save; tidy).
         press(kUp), wait(120), press(kX), wait(150), press(kUp), wait(120), press(kX), wait(150);

@@ -558,6 +558,11 @@ Band::Band(World& world, const GameData& data, const SongInfo& song, Config conf
 
 Band::~Band() {
     if (rbCheck_) rbCheckReport();
+    if (log || rbCheck_) {
+        std::string ev;
+        for (const auto& [e, n] : clipEventCounts_) ev += " " + e + " " + std::to_string(n);
+        SDL_Log("band: clip events sent to their clips:%s", ev.empty() ? " none" : ev.c_str());
+    }
     Interp& in = world_.interp();
     auto drop = [&](ScriptObject* o) {
         if (!o) return;
@@ -720,8 +725,11 @@ void Band::makeScripts(const DataNode* objects) {
             d->onPlay = [this, &m](const scene::CharClipSamples& clip, uint32_t) {
                 if (onClip) onClip(beat_, m.slot, clip.name);
                 if (log) SDL_Log("band: %8.2f %s %s", beat_, m.slot.c_str(), clip.name.c_str());
+                rbFaceGroup(m, clip);
             };
         }
+        if (chr::ClipDriver* d = c.driver("main_add.drv"))
+            d->onPlay = [this, &m](const scene::CharClipSamples& clip, uint32_t) { rbFaceGroup(m, clip); };
     }
 }
 
@@ -765,9 +773,18 @@ void Band::setupFace(Member& m, scene::Object* servo) {
             m.lip->setup(graph, names, entries);
             const std::string voc = m.type == "rb_vocals" ? facefx::singerVocPath(midiFile_) : facefx::kBlinkTrackPath;
             if (data_.exists(voc)) m.lip->play(std::make_shared<facefx::Anim>(facefx::loadAnim(data_, voc)));
+            // set_blink_song (LIPSERVO_COMMON) [C data]: looped, at a random
+            // offset per servo, so the band does not blink together (GD05-106
+            // A6; GD05_BLINK_LEGACY=1: from 0, once). Its own generator [I: RB
+            // draws from the one global; the band's clip picks stay as they were].
+            static const bool blinkLegacy = [] {
+                const char* e = SDL_getenv("GD05_BLINK_LEGACY");
+                return e && *e && *e != '0';
+            }();
+            if (m.type != "rb_vocals" && !blinkLegacy) m.lip->setLoop(true, faceRng_.real(0.0f, 1000.0f));
             m.character->setRbFace(set, names);
             m.character->attachFace(m.lip.get());
-            if (log) SDL_Log("band: %s face %s, %zu visemes, %s", m.slot.c_str(), fac.c_str(), names.size(), voc.c_str());
+            if (log) SDL_Log("band: %s face %s, %zu visemes (%s), %s", m.slot.c_str(), fac.c_str(), names.size(), set ? set->path().c_str() : "-", voc.c_str());
         } catch (const std::exception& e) {
             SDL_Log("band: %s lip.servo: %s", m.slot.c_str(), e.what());
         }
@@ -915,8 +932,51 @@ void Band::enter() {
     entered_ = true;
 }
 
+namespace {
+// A CharClip as a script object: its type's handlers (char_objects.dta
+// CharClip musician: set_leftarm_true {|= [flags] kLeftArm} ...) and [flags],
+// the clip's own flags, which the main driver's flag weights read (the weight
+// setters hand the arms to the hand drivers / IK by kLeftArm / kRightArm).
+class ClipObj : public ScriptObject {
+public:
+    explicit ClipObj(scene::CharClipSamples& c) : ScriptObject(c.name, "CharClip"), clip_(c) {}
+    Value getProp(Interp& in, const std::string& key) override {
+        if (key == "flags") return Value::integer(int(clip_.flags));
+        return ScriptObject::getProp(in, key);
+    }
+    void setProp(Interp& in, const std::string& key, const Value& v) override {
+        if (key == "flags") clip_.flags = uint32_t(v.integerValue());
+        else ScriptObject::setProp(in, key, v);
+    }
+
+private:
+    scene::CharClipSamples& clip_;
+};
+}  // namespace
+
 void Band::runClipScript(Member& m, const std::string& script) {
     if (script.empty()) return;
+    // RB's clip events are handler names (set_leftarm_true, freeze,
+    // sfx_mic_drop ...): sent to the clip, whose CharClip type answers them.
+    chr::ClipDriver* drv = m.character->mainDriver();
+    const scene::CharClipSamples* clip = drv ? drv->scriptClip : nullptr;
+    if (clip && script.find_first_of("{( ") == std::string::npos && objects_) {
+        auto& o = clipObjs_[clip];
+        if (!o) {
+            o = std::make_unique<ClipObj>(const_cast<scene::CharClipSamples&>(*clip));
+            if (const DataNode* def = typeDef(objects_, "CharClip", clip->header.type.empty() ? std::string("musician") : clip->header.type))
+                o->setTypeDef(def, 1);
+        }
+        if (o->handler(script)) {
+            Interp& in = world_.interp();
+            const Value saved = in.var("dude"), savedClip = in.var("clip.dude");
+            in.var("dude") = in.var("clip.dude") = Value::obj(m.script.get());
+            in.send(o.get(), script, {}, false);
+            in.var("dude") = saved, in.var("clip.dude") = savedClip;
+            ++clipEventCounts_[script];
+            return;
+        }
+    }
     auto it = scripts_.find(script);
     if (it == scripts_.end()) {
         DataNode tree;

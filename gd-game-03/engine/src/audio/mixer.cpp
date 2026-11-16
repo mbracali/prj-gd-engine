@@ -74,6 +74,7 @@ void Mixer::play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks,
     written_ = 0, read_ = 0, sourceEnded_ = false, underruns_ = 0;
     source_ = std::move(stream);
     leadInFrames_ = static_cast<int64_t>(leadInMs * rate_ / 1000.0);
+    leadInMs_ = leadInMs;
     leadIn_ = leadInFrames_;
     songFrames_ = 0;
     guitarGain_ = 1, guitarTarget_ = 1;
@@ -102,8 +103,22 @@ void Mixer::setSpeed(float speed) {
     if (stream_) SDL_SetAudioStreamFrequencyRatio(stream_, std::clamp(speed, 0.01f, 100.0f));
 }
 
+void Mixer::setTempo(double tempo) {
+    if (!stream_) return;
+    SDL_LockAudioStream(stream_);
+    tempo_ = std::fabs(tempo - 1.0) < 1e-6 ? 1.0 : std::clamp(tempo, 0.25, 4.0);
+    stretch_.reset(int(ring_.size()), rate_);
+    stretch_.setTempo(tempo_);
+    // The lead-in passes at the tempo too: the song clock starts where play()
+    // put it (-leadInMs) and reaches 0 as the song's first frame plays.
+    leadInFrames_ = static_cast<int64_t>(leadInMs_ / tempo_.load() * rate_ / 1000.0);
+    leadIn_ = leadInFrames_;
+    SDL_UnlockAudioStream(stream_);
+}
+
 void Mixer::stop() {
     clockScale_ = 1, clockOffsetMs_ = 0;
+    tempo_ = 1;
     pitch_ = {}, grainStart_ = -1;
     if (!stream_) return;
     stopWorker();
@@ -122,7 +137,7 @@ void Mixer::setPaused(bool paused) {
     } else {
         // Re-anchor so the clock resumes where it stopped.
         anchorNs_ = SDL_GetTicksNS();
-        anchorFrames_ = static_cast<int64_t>(((pausedTimeMs_ - clockOffsetMs_) / 1000.0) * rate_) + leadIn_;
+        anchorFrames_ = static_cast<int64_t>(((pausedTimeMs_ - clockOffsetMs_) / tempo_.load() / 1000.0) * rate_) + leadIn_;
         paused_ = false;
     }
     frameNs_ = 0;
@@ -133,7 +148,7 @@ double Mixer::songTimeMs(uint64_t ticksNs) const {
     if (ticksNs == 0) ticksNs = SDL_GetTicksNS();
     double elapsed = (double(ticksNs) - double(anchorNs_.load())) / 1e9;
     double frames = double(anchorFrames_.load()) + std::max(0.0, elapsed) * rate_ * clockScale_;
-    return clockOffsetMs_ + (frames - double(leadIn_.load())) * 1000.0 / rate_;
+    return clockOffsetMs_ + (frames - double(leadIn_.load())) * 1000.0 / rate_ * tempo_.load();
 }
 
 double Mixer::frameTimeMs() {
@@ -143,7 +158,7 @@ double Mixer::frameTimeMs() {
         frameMs_ = raw, frameNs_ = now;
         return raw;
     }
-    double predicted = frameMs_ + double(now - frameNs_) / 1e6 * clockScale_;
+    double predicted = frameMs_ + double(now - frameNs_) / 1e6 * clockScale_ * tempo_.load();
     double err = raw - predicted;
     // Big jumps (resume, a stalled device) snap; small ones ease in at 5 % a
     // frame, never moving the clock backwards (gd01).
@@ -180,7 +195,32 @@ void Mixer::fill(int frames) {
     int64_t r = read_.load(std::memory_order_relaxed);
     int64_t available = written_.load(std::memory_order_acquire) - r;
     int n = int(std::min<int64_t>(audible, available));
-    if (n < audible && !sourceEnded_.load()) underruns_ += audible - n;
+    // Song Speed (GDALL-053): the frames come out of the stretcher, which
+    // reads the ring at the tempo; silence once the song has ended.
+    const double tempo = tempo_.load();
+    const bool stretch = tempo != 1.0 && stretch_.channels() == int(ring_.size());
+    int64_t readTo = r + n;
+    if (stretch) {
+        if (stretched_.size() != ring_.size()) stretched_.assign(ring_.size(), {});
+        stretchPtrs_.resize(ring_.size());
+        for (size_t c = 0; c < ring_.size(); ++c) stretched_[c].resize(size_t(audible)), stretchPtrs_[c] = stretched_[c].data();
+        const bool ended = sourceEnded_.load();
+        const int64_t w = written_.load(std::memory_order_acquire);
+        int64_t pos = r;
+        stretch_.process(stretchPtrs_.data(), audible, [&](float* const* d, int want) {
+            const int got = int(std::clamp<int64_t>(w - pos, 0, want));
+            for (size_t c = 0; c < ring_.size(); ++c)
+                for (int i = 0; i < got; ++i) d[c][i] = ring_[c][size_t((pos + i) & (kRing - 1))];
+            pos += got;
+            if (got < want && !ended) {  // the decoder is behind: silence, not the end
+                underruns_ += want - got;
+                for (size_t c = 0; c < ring_.size(); ++c) std::fill(d[c] + got, d[c] + want, 0.0f);
+                return want;
+            }
+            return got;
+        });
+        n = audible, readTo = pos;
+    } else if (n < audible && !sourceEnded_.load()) underruns_ += audible - n;
 
     const float target = guitarTarget_.load(), target2 = guitar2Target_.load();
     const float vTarget = volumeTarget_.load(), vStep = volumeStep_.load();
@@ -225,7 +265,7 @@ void Mixer::fill(int frames) {
         const bool mono = audiodev::mono();
         for (size_t c = 0; c < tracks_.size(); ++c) {
             const Track& t = tracks_[c];
-            float x = ring_[c][at];
+            float x = stretch ? stretched_[c][size_t(i)] : ring_[c][at];
             if (correct && t.guitar) {
                 x = wNew * partSample(c, double(grainStart_) + grainAge_ / speed, written);
                 if (wOld > 0) x += wOld * partSample(c, double(oldStart_) + oldAge_ / speed, written);
@@ -255,7 +295,7 @@ void Mixer::fill(int frames) {
         for (int k = 0; k < 2; ++k) slip_[size_t(k)].lag = std::min(slip_[size_t(k)].lag + slipStep[k], maxLag);
     }
     for (Slip& s : slip_) s.lagMs.store(s.lag * 1000.0 / rate_);
-    read_.store(r + n, std::memory_order_release);
+    read_.store(readTo, std::memory_order_release);
 }
 
 // The player's part read ahead of the stream (pitch correction), between

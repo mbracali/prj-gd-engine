@@ -32,6 +32,9 @@ public:
     Player(const Song& song, Difficulty difficulty, const Rules& rules, ControllerMode mode, bool noFail);
 
     void fretDown(int fret, float t);
+    // The controller's mode (Require Strum on: Guitar), from the device that plays (GD01-326).
+    void setMode(ControllerMode mode) { mode_ = mode; }
+    ControllerMode mode() const { return mode_; }
     void fretUp(int fret, float t);
     void strum(float t);
     void starPowerButton(float t);

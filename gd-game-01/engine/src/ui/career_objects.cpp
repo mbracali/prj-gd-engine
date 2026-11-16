@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstdio>
 
+#include <SDL3/SDL.h>
+
 #include "game/campaign.h"
 
 namespace {
@@ -82,7 +84,10 @@ public:
             return true;
         }
         if (msg == "finish_song") {  // FUN_00138ec0
-            Campaign::FinishResult fr = c.finishSong(d, ctx_.song(), input(in, arg(0)).integerValue(), ctx_.starsOf);
+            // Song Speed not 100 %: nothing saved, the outputs stay empty (GDALL-053).
+            const bool noSave = ctx_.noSave && ctx_.noSave();
+            if (noSave) SDL_Log("campaign: finish_song %s: song speed not 100 %%, not saved", ctx_.song().c_str());
+            Campaign::FinishResult fr = noSave ? Campaign::FinishResult{false, "", c.status(d)} : c.finishSong(d, ctx_.song(), input(in, arg(0)).integerValue(), ctx_.starsOf);
             if (a.size() > 1) in.var(varName(a[1])) = sym(fr.newVenue);
             if (a.size() > 2) in.var(varName(a[2])) = integer(fr.newStatus);
             changed();
@@ -166,7 +171,8 @@ public:
         Campaign& c = *ctx_.campaign;
         auto arg = [&](size_t k) { return k < a.size() ? a[k] : Value::integer(0); };
         r = integer(0);
-        if (msg == "check_highscore") return r = integer(c.checkHighScore(ctx_.song(), ctx_.difficulty(), arg(0).integerValue())), true;
+        const bool noSave = ctx_.noSave && ctx_.noSave();  // Song Speed not 100 % (GDALL-053)
+        if (msg == "check_highscore") return r = integer(noSave ? -1 : c.checkHighScore(ctx_.song(), ctx_.difficulty(), arg(0).integerValue())), true;
         if (msg == "get_highscore") {
             const auto& l = c.highScores(ctx_.song(), ctx_.difficulty());
             size_t i = size_t(std::clamp(input(in, arg(0)).integerValue(), 0, 4));
@@ -174,7 +180,7 @@ public:
             if (a.size() > 2) in.var(varName(a[2])) = integer(i < l.size() ? l[i].score : 0);
             return true;
         }
-        if (msg == "add") return c.addHighScore(ctx_.song(), ctx_.difficulty(), arg(0).str(), arg(1).integerValue()), true;
+        if (msg == "add") return noSave || (c.addHighScore(ctx_.song(), ctx_.difficulty(), arg(0).str(), arg(1).integerValue()), true);
         return false;
     }
 

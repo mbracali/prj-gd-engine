@@ -169,6 +169,9 @@ public:
     // the picture, as end() would); the caller then draws no world. Call
     // once a frame before begin().
     bool hold();
+    // The world's rate while paced (the PostProc's emulate_fps rounded:
+    // 24 under ProFilm), 0 when the world draws every frame.
+    int worldFps() const { return paced_ ? paceFps_ : 0; }
 
     // Starts drawing the world into the HDR buffer (sized to the picture),
     // cleared to `clear` (rgba 0..1, stored / 4) with its depth. Returns

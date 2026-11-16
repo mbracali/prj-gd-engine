@@ -23,14 +23,14 @@ std::string utf8(const std::filesystem::path& p) {
     return std::string(u.begin(), u.end());
 }
 
-// The first .iso in `dir`, or "".
+// The first .iso or .chd (GDUL-030) in `dir`, or "".
 std::string findIsoIn(const std::string& dir) {
     if (dir.empty()) return {};
     std::error_code ec;
     for (const auto& e : std::filesystem::directory_iterator(std::filesystem::path(std::u8string(dir.begin(), dir.end())), ec)) {
         std::string ext = utf8(e.path().extension());
         for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
-        if (ext == ".iso" && e.is_regular_file(ec)) return utf8(e.path());
+        if ((ext == ".iso" || ext == ".chd") && e.is_regular_file(ec)) return utf8(e.path());
     }
     return {};
 }
@@ -94,8 +94,10 @@ void DiscPicker::open(SDL_Window* window) {
         std::lock_guard lock(mutex_);
         status_ = "Choose your Guitar Hero III: Legends of Rock (Xbox 360) disc image...";
     }
-    static const SDL_DialogFileFilter kIso[] = {{"Xbox 360 disc image (.iso)", "iso;ISO"}};
-    SDL_ShowOpenFileDialog(picked, this, window, kIso, 1, nullptr, false);
+    // .chd too (GDUL-030); "All files" as well: Android has no MIME type for .chd,
+    // so its file dialog would hide them behind the .iso filter alone.
+    static const SDL_DialogFileFilter kIso[] = {{"Xbox 360 disc image (.iso, .chd)", "iso;ISO;chd;CHD"}, {"All files", "*"}};
+    SDL_ShowOpenFileDialog(picked, this, window, kIso, 2, nullptr, false);
 }
 
 void DiscPicker::picked(void* self, const char* const* files, int) {

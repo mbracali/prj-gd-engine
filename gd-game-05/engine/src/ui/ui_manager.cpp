@@ -772,6 +772,29 @@ void UiManager::switchScreens() {
     if (from && !push)
         for (PanelObj* p : from->panels())
             if (p->loaded && !to->hasPanel(p) && p->path.rfind("world/", 0) == 0) p->unload();
+    // GD05-114: the part / difficulty panels' unload (seldiff.dta
+    // SELDIFF_PANEL_HANDLERS, hth_split_seldiff_panel: {session
+    // set_all_local_ready_status FALSE}) runs when the next screen does not
+    // hold them, as RB's UIPanel Unload would; the port keeps the panel
+    // loaded, so the players stayed ready and the next song's part select
+    // went straight on to loading (pause > New Song: no part, the drums)
+    // [C data; I: only these panels' unload handlers are run so far, the
+    // others (game, loading, shop, ...) are not]. GD05_READYRESET_LEGACY=1.
+    // GD05-114 (reopened): the panels are really unloaded, as RB's UIPanel
+    // Unload frees the panel's milo, so the next part select loads a fresh
+    // seldiff milo. Only the unload handler (D116) kept the first visit's
+    // component states: once ready, the slot's update hid every BandButton
+    // but the chosen difficulty ({$this iterate BandButton $b ... {$b
+    // set_showing {! $ready}}}), guitar.btn / bass.btn among them, and
+    // nothing shows them again (selpart.grp / guitar.grp do, not the
+    // buttons): New Song's part select came up without its guitar / bass
+    // labels. GD05_SELDIFFRELOAD_LEGACY=1: the handler only, as D116.
+    if (from && !push && !SDL_getenv("GD05_READYRESET_LEGACY"))
+        for (PanelObj* p : from->panels())
+            if (!to->hasPanel(p) && (p->name() == "seldiff_panel" || p->name() == "seldiff_solo_panel" || p->name() == "hth_split_seldiff_panel")) {
+                if (SDL_getenv("GD05_SELDIFFRELOAD_LEGACY") || !p->loaded) callScript(p, "unload");
+                else p->unload();  // runs its unload handler, then frees the milo
+            }
     current_ = to;
     currentSinceMs_ = uiMs_;
     // The keyboard's split layout (P2 on H J K L ;, N / M, B, O) while the

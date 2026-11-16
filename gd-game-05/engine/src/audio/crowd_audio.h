@@ -136,5 +136,6 @@ private:
     int level_ = 2;            // +0x40: the last level
     float volumeDb_ = 0;       // +0x2c set_volume
     float fxDb_ = 0;           // 0x822DF140
+    float crowdVolumeDb_ = -2.0f;  // +0x30 crowd_volume: config/sound.dta (GH2 -2 [C data]; RB -4, read from it, GD05-115)
     std::vector<std::pair<double, int>> pending_;  // excitement_loop messages: (time, level)
 };

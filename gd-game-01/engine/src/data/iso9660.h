@@ -8,6 +8,8 @@
 #include <optional>
 #include <string>
 
+#include "gd/core/platform/file.h"
+
 // A file opened for 64-bit random access reads.
 class RandomFile {
 public:
@@ -24,6 +26,8 @@ private:
     RandomFile(std::FILE* f, uint64_t size) : f_(f), size_(size) {}
     std::FILE* f_;
     uint64_t size_;
+    // A CHD disc image, read as the image it holds by gd-engine-core (GDUL-030).
+    std::unique_ptr<gd::core::platform::RandomAccessFile> core_;
 };
 
 // Minimal read-only ISO 9660 directory lookup (enough for PS2 DVD images).

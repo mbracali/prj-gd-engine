@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <cstring>
 
 #include "script/script.h"
@@ -29,12 +30,21 @@ Value arith(const Value& a, const Value& b, char op) {
     case '-': r = x - y; break;
     case '*': r = x * y; break;
     case '/': r = y != 0 ? x / y : 0; break;
-    case '%': r = y != 0 ? std::fmod(x, y) : 0; break;
+    case '%':
+        // Harmonix's Mod: the remainder wrapped into [0, y) (fmod and C's %
+        // keep the sign): {mod {+ idx -1} n} on the first item gives n - 1
+        // (gd01's GD01-319; GD02-167).
+        r = y != 0 ? std::fmod(x, y) : 0;
+        if (r != 0 && (r < 0) != (y < 0)) r += y;
+        break;
     }
     if (op == '/' && a.type == Value::Type::Int && b.type == Value::Type::Int && b.i != 0 && a.i % b.i == 0)
         return Value::integer(a.i / b.i);
-    if (op == '%' && a.type == Value::Type::Int && b.type == Value::Type::Int)
-        return Value::integer(b.i != 0 ? a.i % b.i : 0);
+    if (op == '%' && a.type == Value::Type::Int && b.type == Value::Type::Int) {
+        int m = b.i != 0 ? a.i % b.i : 0;
+        if (m != 0 && (m < 0) != (b.i < 0)) m += b.i;
+        return Value::integer(m);
+    }
     return real ? Value::real(r) : Value::integer(static_cast<int>(r));
 }
 
@@ -327,6 +337,78 @@ void Interp::installCoreBuiltins() {
         int r = a.empty() ? 0 : a[0].integerValue();
         for (size_t k = 1; k < a.size(); ++k) r &= a[k].integerValue();
         return Value::integer(r);
+    });
+    // RB's bitwise assignments and not (char_objects.dta's arm flags:
+    // {|= [flags] kLeftArm}, {&= [flags] {~ kLeftArm}}; GD05-101).
+    for (const char* op : {"|=", "&="}) {
+        const bool orOp = op[0] == '|';
+        addBuiltin(op, [orOp, arg](Interp& in, const DataNode& c) {
+            if (c.children.size() < 3) return Value::integer(0);
+            Place p{in, c.children[1]};
+            const int a = p.get().integerValue(), b = arg(in, c, 2).integerValue();
+            Value v = Value::integer(orOp ? (a | b) : (a & b));
+            p.set(v);
+            return v;
+        });
+    }
+    addBuiltin("~", [arg](Interp& in, const DataNode& c) { return Value::integer(~arg(in, c, 1).integerValue()); });
+    // {with obj body...}: the body with $this = obj, the last value returned
+    // (Harmonix's DataWith).
+    addBuiltin("with", [](Interp& in, const DataNode& c) {
+        if (c.children.size() < 2) return Value::integer(0);
+        Value o = in.eval(c.children[1]);
+        if (o.type != Value::Type::Object)
+            if (ScriptObject* f = in.findObject(o.str())) o = Value::obj(f);
+        Value saved = in.var("this");
+        in.var("this") = o;
+        Value r;
+        try {
+            r = in.runBody(c.children, 2);
+        } catch (...) {
+            in.var("this") = saved;
+            throw;
+        }
+        in.var("this") = saved;
+        return r;
+    });
+    // {sort array}: in place, numbers by value, text case-insensitively,
+    // lists by their first element (Harmonix's DataArray::SortNodes).
+    addBuiltin("sort", [arg](Interp& in, const DataNode& c) {
+        Value a = arg(in, c, 1);
+        if (auto* l = listOf(a)) {
+            std::function<bool(const Value&, const Value&)> less = [&](const Value& x, const Value& y) -> bool {
+                if (x.type == Value::Type::Array) {
+                    const auto* lx = listOf(x);
+                    const auto* ly = listOf(y);
+                    if (!lx || !ly || lx->empty() || ly->empty()) return false;
+                    return less(lx->front(), ly->front());
+                }
+                if (x.isText()) {
+                    const std::string a = x.str(), b = y.str();
+                    return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end(), [](char p, char q) {
+                        return std::tolower(static_cast<unsigned char>(p)) < std::tolower(static_cast<unsigned char>(q));
+                    });
+                }
+                return x.number() < y.number();
+            };
+            std::stable_sort(l->begin(), l->end(), less);
+        }
+        return Value::integer(0);
+    });
+    // {search_replace src old new $out}: every `old` replaced, the result in
+    // $out, true when anything changed (ui/game.dta's "_short" songs).
+    addBuiltin("search_replace", [arg](Interp& in, const DataNode& c) {
+        if (c.children.size() < 5) return Value::integer(0);
+        std::string src = arg(in, c, 1).str();
+        const std::string from = arg(in, c, 2).str(), to = arg(in, c, 3).str();
+        bool changed = false;
+        if (!from.empty())
+            for (size_t k = src.find(from); k != std::string::npos; k = src.find(from, k + to.size())) {
+                src.replace(k, from.size(), to);
+                changed = true;
+            }
+        Place{in, c.children[4]}.set(Value::string(src));
+        return Value::integer(changed ? 1 : 0);
     });
     addBuiltin("max", [](Interp& in, const DataNode& c) {
         std::vector<Value> a = in.evalArgs(c);

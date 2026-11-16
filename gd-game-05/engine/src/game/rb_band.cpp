@@ -25,7 +25,11 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <set>
 #include <functional>
 #include <map>
@@ -158,6 +162,7 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
         const std::map<std::string, std::string> outfits = rbOutfitMilos(data, gender, instrument, pieces, kind, &missing);
         for (const std::string& path : missing) problems_.push_back(text(pre, 0) + ": no " + path);
         auto m = std::make_unique<Member>();
+        m->rbGender = gender;
         m->slot = it->first;
         m->miloPath = base;
         m->object = it->second;
@@ -778,6 +783,19 @@ void Band::rbPlayGroup(Member& m) {
     if (log) SDL_Log("band: %8.2f %s %s %s (flags %#x)", beat_, m.slot.c_str(), d->name().c_str(), clip->name.c_str(), m.rbFlags);
 }
 
+// The musician / shell CharClip types' enter (char_objects.dta) [C data]:
+// {if [viseme_group] {$clip.dude change_face_group [viseme_group]}}, the
+// type's default `normal`; BandCharacter change_face_group (RB 0x822E5850 ->
+// 0x822E4C58) plays a clip of that group on expression.drv (GD05-106 A3).
+void Band::rbFaceGroup(Member& m, const scene::CharClipSamples& clip) {
+    if (!startsWith(m.type, "rb_") || !m.character->rbFace()) return;
+    const std::string& t = clip.header.type;
+    if (t != "musician" && t != "shell") return;
+    std::string g = headerProp(clip.header, "viseme_group");
+    if (g.empty()) g = "normal";
+    if (m.character->changeFaceGroup(g) && log) SDL_Log("band: %8.2f %s expr %s <- %s", beat_, m.slot.c_str(), g.c_str(), clip.name.c_str());
+}
+
 // CharDriverMidi midi_parser (RB 0x82342168) [C]: the clip starts `length`
 // before its first frame (seconds x its rate for a realtime clip) and
 // blends in over that length.
@@ -787,8 +805,26 @@ bool Band::rbDriverClip(Member& m, const std::string& driver, scene::CharClipSam
     float frames = length;
     if (clip->playFlags & kPlayRealTime) frames *= clip->framesPerSec;
     if (frames < 0) frames = 0;
-    d->playAt(clip, 0, clip->startFrame - frames, 0, frames);
-    if (log) SDL_Log("band: %8.2f %s %s %s over %.2f", beat_, m.slot.c_str(), driver.c_str(), clip->name.c_str(), frames);
+    // The node's frame is the value passed, -length (RB 0x82312CB0 ->
+    // 0x82361620: node +0x10 = f1) [C]: the clip's frame 0, where the hand
+    // clips touch their pad (their data: the pad's target nearest it at
+    // frame 0), lands on the note; their lead-in sits at negative frames
+    // (-0.7..-0.85 beats). GD05_MIDICLIP_LEGACY=1: from the clip's first
+    // frame, as before (the drummer's hits 0.7..0.85 beats late, GD05-108).
+    static const bool legacy = [] {
+        const char* e = SDL_getenv("GD05_MIDICLIP_LEGACY");
+        return e && *e && *e != '0';
+    }();
+    d->playAt(clip, 0, (legacy ? clip->startFrame : 0.0f) - frames, 0, frames);
+    if (rbCheck_ && song_ && m.type == "rb_drum" && (driver == "left_hand.dmidi" || driver == "right_hand.dmidi")) {
+        // bandcheck drum reach: the note, `length` from now (frame 0 lands there;
+        // GD05_MIDICLIP_LEGACY: the clip's first frame).
+        const double div = song_->tempo.division();
+        const double now = song_->tempo.tickToMs(beat_ * div);
+        const double at = (clip->playFlags & kPlayRealTime) ? now + double(length) * 1000.0 : song_->tempo.tickToMs((beat_ + double(length)) * div);
+        rbCheckDrumHit(at, driver == "left_hand.dmidi" ? 0 : 1, clip);
+    }
+    if (log) SDL_Log("band: %8.2f %s %s %s over %.2f (start %.2f)", beat_, m.slot.c_str(), driver.c_str(), clip->name.c_str(), frames, double(clip->startFrame));
     return true;
 }
 
@@ -904,6 +940,85 @@ struct Band::RbCheck {
     // The face's rest (GD05-097): each member's jaw from its bind (degrees),
     // the most over the run.
     std::map<std::string, float> jawWorst;
+    // Faces (GD05-106): per member, the eyes' turn from bind (degrees, the
+    // most, and frames over 2), blinks (the servo's Blink rising past 0.8),
+    // each blink's song time, the upper lid's turn, expressions.
+    struct Face {
+        float eyeMax = 0, lidMax = 0;
+        int eyeFrames = 0, eyeMoved = 0;
+        float eyeMin = 1e30f, eyeTop = 0;
+        // Eye in socket (GD05-112): either eye's position off its bind in
+        // the head (its parent) frame, its look direction's yaw / pitch past
+        // its look-at's limits (degrees), and the frames each went wrong.
+        float eyePosMax = 0, eyeOutMax = 0;
+        int eyePosFrames = 0, eyeOutFrames = 0;
+        // Head rig (GD05-116): either eye's local position off the place
+        // its head outfit gives it (head_<n>.milo's bone_L-eye / _R-eye), and
+        // the brows' (bone_*brow*), the most per frame; frames over 0.05.
+        float headEyeMax = 0, headBrowMax = 0;
+        int headEyeFrames = 0, headFrames = 0;
+        double eyePosMs = 0, eyeOutMs = 0;
+        // The upper lid following the eye (RB 0x82329588): per frame with
+        // the Blink weight under 0.3, the eye's vertical turn (its look's x,
+        // degrees) and the upper lid's turn about its z from its bind; their
+        // least-squares slope (RB: about -1, the lid turned by -the look's x).
+        double lidSx = 0, lidSy = 0, lidSxx = 0, lidSxy = 0;
+        int lidN = 0;
+        int blinks = 0;
+        bool blinkHigh = false;
+        std::vector<double> blinkMs;
+        int expFrames = 0, faceFrames = 0;
+        double firstMs = -1, lastMs = 0;
+        std::set<std::string> expClips;
+        std::string firstGroup;
+    };
+    std::map<std::string, Face> face;
+    // Drum reach (GD05-108 B1): each hand clip the drum parsers start, its hit
+    // time (the clip's first frame), the pad its IK target calls, the stick
+    // tip's distance to that target / the pad at the hit, the closest approach
+    // and its time against the hit, the hand IK's weight at the hit.
+    struct DrumHit {
+        double ms = 0;
+        int hand = 0;  // 0 left, 1 right
+        std::string clip;
+        bool noted = false;
+        std::string pad;
+        float bestLocal = 1e30f, localAtNote = -1;
+        float clipMin = 1e30f, clipMinFrame = 0, clipStart = 0;
+        double bestLocalMs = 0;
+        float tipAtNote = -1, padAtNote = -1, ikAtNote = -1;
+        float minPad = 1e30f;
+        double minPadMs = 0;
+    };
+    std::vector<DrumHit> drumHits;
+    // Arms (GD05-110): per member, the arm chain's bones (clavicle, upper
+    // arm, fore arm, the twist bones, the hand, both sides): the local
+    // rotation's change between consecutive frames (degrees), the twist /
+    // fore arm bones' turn from their bind, the hands' world moves per frame.
+    struct Arm {
+        std::vector<int> bones;
+        std::vector<std::array<float, 9>> prev;
+        std::array<std::array<float, 3>, 2> prevHand{};
+        bool havePrev = false;
+        std::vector<float> jumps, handJumps;
+        float jumpMax = 0, twistMax = 0;
+        std::string jumpBone, twistBone;
+        double jumpMs = 0;
+        int over30 = 0, frames = 0, twistFrames = 0;
+        // The skin's twist along each arm (S bends): the skinned segments
+        // upper twist 1, 2, fore twist 1, 2, hand; between neighbours, the
+        // turn about the lower one's long axis (x), which a bend leaves 0.
+        std::array<std::vector<int>, 2> chain;
+        std::vector<float> segTwist;
+        float segMax = 0;
+        std::string segPair;
+        double segMs = 0;
+        int segFrames = 0;
+    };
+    std::map<std::string, Arm> arms;
+    // Hair (GD05-113): each member's CharHair collision after every hair
+    // step (chr::RigHairStats), summed over the run.
+    std::map<std::string, chr::RigHairStats> hair;
 };
 
 bool Band::rbLegacy() {
@@ -977,10 +1092,26 @@ void Band::rbCheckFrame() {
             if (rest < 0.5f) continue;
             const float r = len3(sk.local(i).pos) / rest;
             if (r > k.maxStretch[m.slot]) k.maxStretch[m.slot] = r, k.worstBone[m.slot] = sk.name(i);
-            if (r > 1.2f) bad = true;
+            if (r > 1.2f) {
+                static const bool slog = SDL_getenv("GD05_STRETCH_LOG") != nullptr;
+                if (slog && !bad) SDL_Log("stretch: %.0f %s %s %.2f", ms, m.slot.c_str(), sk.name(i).c_str(), double(r));
+                bad = true;
+            }
             if (auto it = k.minStretch.find(m.slot); it == k.minStretch.end() || r < it->second) k.minStretch[m.slot] = r, k.shortBone[m.slot] = sk.name(i);
         }
         if (bad) ++k.stretchFrames[m.slot];
+        // Hair: the rig's measure since the last frame (the first call starts it).
+        {
+            chr::RigHairStats h = c.rig().takeHairStats();
+            chr::RigHairStats& a = k.hair[m.slot];
+            a.collides = h.collides, a.points = h.points, a.rbPairs = h.rbPairs, a.usedPairs = h.usedPairs;
+            a.steps += h.steps, a.pairSamples += h.pairSamples, a.pointSamples += h.pointSamples;
+            a.pen.insert(a.pen.end(), h.pen.begin(), h.pen.end());
+            a.penBetween.insert(a.penBetween.end(), h.penBetween.begin(), h.penBetween.end());
+            a.penAll.insert(a.penAll.end(), h.penAll.begin(), h.penAll.end());
+            a.penMid.insert(a.penMid.end(), h.penMid.begin(), h.penMid.end());
+            a.motion += h.motion, a.motionSeconds += h.motionSeconds;
+        }
         // Channels against their clips' largest values.
         auto& ch = c.bones().channels();
         auto& bound = k.channelBound[m.slot];
@@ -1002,6 +1133,24 @@ void Band::rbCheckFrame() {
             }
             for (size_t i = 0; i < ch.size(); ++i)
                 if (ch[i].name.rfind("bone_facing", 0) == 0) bound[i] = 0;
+            // The channel's start: its bone's bind (CharBonesMeshes
+            // ReallocateInternal RB 0x82364508, GD05-110), which stays in it
+            // as far as the drivers' blend leaves it.
+            static const bool posLegacy = [] {
+                const char* e = SDL_getenv("GD05_SERVOPOS_LEGACY");
+                const char* f = SDL_getenv("GD05_SERVOBIND_LEGACY");
+                return (e && *e && *e != '0') || (f && *f && *f != '0');
+            }();
+            for (size_t i = 0; i < ch.size() && !posLegacy; ++i) {
+                if (bound[i] <= 0 || ch[i].type != scene::CharBonesSamples::kPos) continue;
+                const std::string base = scene::CharBonesSamples::boneOf(ch[i].name);
+                int b = sk.find(base + ".trans");
+                if (b < 0) b = sk.find(base + ".mesh");
+                if (b >= 0) {
+                    const auto& p = sk.bind(b).pos;
+                    bound[i] += std::max({std::fabs(p[0]), std::fabs(p[1]), std::fabs(p[2])});
+                }
+            }
         }
         bool over = false;
         for (size_t i = 0; i < ch.size(); ++i) {
@@ -1020,6 +1169,272 @@ void Band::rbCheckFrame() {
             out = sk.world(i).pos;
             return true;
         };
+        if (ms > 0) {
+            RbCheck::Arm& am = k.arms[m.slot];
+            if (am.bones.empty()) {
+                static const char* parts[] = {"clavicle", "upperarm", "uppertwist", "forearm", "foretwist", "hand.mesh"};
+                for (int i = 0; i < sk.size(); ++i) {
+                    std::string n = sk.name(i);
+                    if (n.rfind("bone_L-", 0) != 0 && n.rfind("bone_R-", 0) != 0) continue;
+                    for (char& ch : n) ch = char(std::tolower(static_cast<unsigned char>(ch)));
+                    for (const char* p : parts)
+                        if (n.compare(7, std::strlen(p), p) == 0) am.bones.push_back(i);
+                }
+                am.prev.resize(am.bones.size());
+            }
+            const int hands[2] = {sk.find("bone_L-hand.mesh"), sk.find("bone_R-hand.mesh")};
+            int twisted = 0;
+            ++am.frames;
+            for (size_t j = 0; j < am.bones.size(); ++j) {
+                const int b = am.bones[j];
+                const auto& r = sk.local(b).rot;
+                if (am.havePrev) {
+                    const float d = angleBetween(r, am.prev[j]);
+                    am.jumps.push_back(d);
+                    if (d > am.jumpMax) am.jumpMax = d, am.jumpBone = sk.name(b), am.jumpMs = ms;
+                    if (d > 30) ++am.over30;
+                }
+                am.prev[j] = r;
+                const std::string& n = sk.name(b);
+                std::string ln = n;
+                for (char& ch : ln) ch = char(std::tolower(static_cast<unsigned char>(ch)));
+                if (ln.find("twist") != std::string::npos || ln.find("forearm") != std::string::npos) {
+                    const float t = angleBetween(r, sk.bind(b).rot);
+                    if (t > am.twistMax) am.twistMax = t, am.twistBone = n;
+                    if (t > 90) ++twisted;
+                }
+            }
+            if (twisted) ++am.twistFrames;
+            if (am.chain[0].empty() && am.chain[1].empty())
+                for (int h = 0; h < 2; ++h) {
+                    const std::string side = h ? "bone_R-" : "bone_L-";
+                    for (const char* n : {"upperTwist1", "upperTwist2", "foreTwist1", "foreTwist2", "hand"}) {
+                        const int b = sk.find(side + n + ".mesh");
+                        if (b >= 0) am.chain[size_t(h)].push_back(b);
+                    }
+                }
+            bool sBend = false;
+            // Rotations are rows (the axes): world = local x parent's world.
+            using R3 = std::array<float, 9>;
+            auto mulR = [](const R3& x, const R3& y) {
+                R3 r{};
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        for (int q = 0; q < 3; ++q) r[size_t(i * 3 + j)] += x[size_t(i * 3 + q)] * y[size_t(q * 3 + j)];
+                return r;
+            };
+            auto trR = [](const R3& x) {
+                R3 r{};
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j) r[size_t(i * 3 + j)] = x[size_t(j * 3 + i)];
+                return r;
+            };
+            auto ortho = [](R3 x) {  // rows to unit length (no scale)
+                for (int i = 0; i < 3; ++i) {
+                    const float l = std::sqrt(x[size_t(i * 3)] * x[size_t(i * 3)] + x[size_t(i * 3 + 1)] * x[size_t(i * 3 + 1)] + x[size_t(i * 3 + 2)] * x[size_t(i * 3 + 2)]);
+                    if (l > 1e-6f)
+                        for (int j = 0; j < 3; ++j) x[size_t(i * 3 + j)] /= l;
+                }
+                return x;
+            };
+            auto bindWorld = [&](int i) {
+                R3 r = ortho(sk.bind(i).rot);
+                for (int p = sk.parent(i); p >= 0; p = sk.parent(p)) r = mulR(r, ortho(sk.bind(p).rot));
+                return r;
+            };
+            for (const auto& c : am.chain)
+                for (size_t j = 1; j < c.size(); ++j) {
+                    // b's turn against a since the bind, in b's frame; its
+                    // twist about b's long axis (x, as CharForeTwist turns it).
+                    const R3 rel = mulR(ortho(sk.world(c[j]).rot), trR(ortho(sk.world(c[j - 1]).rot)));
+                    const R3 relBind = mulR(bindWorld(c[j]), trR(bindWorld(c[j - 1])));
+                    const R3 e = mulR(rel, trR(relBind));
+                    const float t = std::fabs(std::atan2(e[5] - e[7], e[4] + e[8])) * 57.29578f;
+                    am.segTwist.push_back(t);
+                    if (t > am.segMax) am.segMax = t, am.segPair = sk.name(c[j - 1]) + ">" + sk.name(c[j]), am.segMs = ms;
+                    if (t > 75) sBend = true;
+                }
+            if (sBend) ++am.segFrames;
+            for (int h = 0; h < 2; ++h) {
+                if (hands[h] < 0) continue;
+                const auto w = sk.world(hands[h]).pos;
+                if (am.havePrev) am.handJumps.push_back(dist3(w, am.prevHand[size_t(h)]));
+                am.prevHand[size_t(h)] = w;
+            }
+            am.havePrev = true;
+            // GD05_ARMDUMP=<file>: each frame's elbows and hands (world), to
+            // compare two runs frame by frame (tools: agents/scratch).
+            static FILE* dump = [] {
+                const char* f = SDL_getenv("GD05_ARMDUMP");
+                return f && *f ? std::fopen(f, "w") : nullptr;
+            }();
+            if (dump) {
+                std::fprintf(dump, "%.1f %s", ms, m.slot.c_str());
+                for (const char* n : {"bone_L-foreArm.mesh", "bone_L-hand.mesh", "bone_R-foreArm.mesh", "bone_R-hand.mesh"}) {
+                    const int b = sk.find(n);
+                    const auto w = b >= 0 ? sk.world(b).pos : std::array<float, 3>{};
+                    std::fprintf(dump, " %.3f %.3f %.3f", double(w[0]), double(w[1]), double(w[2]));
+                }
+                std::fputc('\n', dump);
+            }
+        }
+        if (c.rbFace() && ms > 0) {
+            RbCheck::Face& f = k.face[m.slot];
+            ++f.faceFrames;
+            if (f.firstMs < 0) f.firstMs = ms;
+            f.lastMs = ms;
+            const int le = sk.find("bone_L-eye.mesh"), lid = sk.find("bone_L-lid.mesh");
+            if (le >= 0) {
+                const float ang = angleBetween(sk.local(le).rot, sk.bind(le).rot);
+                f.eyeMax = std::max(f.eyeMax, ang);
+                f.eyeMin = std::min(f.eyeMin, ang), f.eyeTop = std::max(f.eyeTop, ang);
+                ++f.eyeFrames;
+                if (ang > 2) ++f.eyeMoved;
+            }
+            if (lid >= 0) f.lidMax = std::max(f.lidMax, angleBetween(sk.local(lid).rot, sk.bind(lid).rot));
+            if (const auto& placed = c.outfitBoneLocals(); !placed.empty()) {
+                float eyeOff = 0, browOff = 0;
+                for (const auto& [name, x] : placed) {
+                    const bool eye = name == "bone_L-eye.mesh" || name == "bone_R-eye.mesh", brow = name.find("brow") != std::string::npos;
+                    const int b = (eye || brow) ? sk.find(name) : -1;
+                    if (b < 0) continue;
+                    const auto& p = sk.local(b).pos;
+                    const float d = std::sqrt((p[0] - x.pos[0]) * (p[0] - x.pos[0]) + (p[1] - x.pos[1]) * (p[1] - x.pos[1]) + (p[2] - x.pos[2]) * (p[2] - x.pos[2]));
+                    (eye ? eyeOff : browOff) = std::max(eye ? eyeOff : browOff, d);
+                }
+                f.headEyeMax = std::max(f.headEyeMax, eyeOff), f.headBrowMax = std::max(f.headBrowMax, browOff);
+                f.headEyeFrames += eyeOff > 0.05f;
+                ++f.headFrames;
+            }
+            {
+                // Eye in socket (GD05-112): each eye look-at's source (its
+                // pivot when it has none, RB 0x82321A48): the local position
+                // against the bind, and the local y (the look) against the
+                // look-at's yaw (x) / pitch (z) limits in the parent's frame.
+                static std::map<const chr::Character*, std::vector<std::pair<int, std::array<float, 4>>>> eyesOf;
+                static std::map<const chr::Character*, std::pair<int, int>> lidOf;  // the first eye's look-at source, its upper lid
+                auto& ev = eyesOf[&c];
+                if (ev.empty()) {
+                    c.forEachObject([&](scene::Object& o) {
+                        auto* ce = o.as<scene::CharEyes>();
+                        if (!ce || ce->eyes.empty() || ce->upperLids.empty() || lidOf.count(&c)) return;
+                        int src = -1;
+                        c.forEachObject([&](scene::Object& q) {
+                            if (auto* l = q.as<scene::CharLookAt>(); l && q.name == ce->eyes[0]) src = sk.find(l->source.empty() ? l->pivot : l->source);
+                        });
+                        lidOf[&c] = {src, sk.find(ce->upperLids[0])};
+                    });
+                    c.forEachObject([&](scene::Object& o) {
+                        if (auto* l = o.as<scene::CharLookAt>()) {
+                            const int b = sk.find(l->source.empty() ? l->pivot : l->source);
+                            if (b >= 0 && sk.name(b).find("-eye") != std::string::npos)
+                                ev.push_back({b, {l->values[1], l->values[2], l->values[3], l->values[4]}});
+                        }
+                    });
+                    if (ev.empty()) ev.push_back({-1, {}});
+                }
+                float posOff = 0, out = 0;
+                for (const auto& [b, lim] : ev) {
+                    if (b < 0) continue;
+                    const auto& lp = sk.local(b).pos;
+                    const auto& bp = sk.bind(b).pos;
+                    posOff = std::max(posOff, std::sqrt((lp[0] - bp[0]) * (lp[0] - bp[0]) + (lp[1] - bp[1]) * (lp[1] - bp[1]) + (lp[2] - bp[2]) * (lp[2] - bp[2])));
+                    const auto& r = sk.local(b).rot;  // row 1: the look in the parent's frame
+                    const float ax = std::atan2(r[3], r[4]) * 57.29578f, az = std::atan2(r[5], r[4]) * 57.29578f;
+                    // values: half time, min / max yaw, min / max pitch; the
+                    // box bounds x by the pitch pair, z by the yaw pair (RB
+                    // 0x82321FB8) [C].
+                    const float yawLo = std::clamp(lim[0], -80.0f, 80.0f), yawHi = std::clamp(lim[1], -80.0f, 80.0f);
+                    const float pitchLo = std::clamp(lim[2], -80.0f, 80.0f), pitchHi = std::clamp(lim[3], -80.0f, 80.0f);
+                    out = std::max({out, pitchLo - ax, ax - pitchHi, yawLo - az, az - yawHi});
+                    static const bool log = [] { const char* e = SDL_getenv("GD05_EYELOG"); return e && *e && *e != '0'; }();
+                    if (log)
+                        SDL_Log("eyelog %.0f %s %s pos %.3f %.3f %.3f (bind %.3f %.3f %.3f) x %.1f z %.1f deg, turn %.1f", ms, m.slot.c_str(),
+                                sk.name(b).c_str(), double(lp[0]), double(lp[1]), double(lp[2]), double(bp[0]), double(bp[1]), double(bp[2]), double(ax),
+                                double(az), double(angleBetween(sk.local(b).rot, sk.bind(b).rot)));
+                }
+                if (auto it = lidOf.find(&c); it != lidOf.end() && it->second.first >= 0 && it->second.second >= 0 && c.blinkValue() < 0.3f) {
+                    const auto& er = sk.local(it->second.first).rot;
+                    const auto& lr = sk.local(it->second.second).rot;
+                    const auto& lb = sk.bind(it->second.second).rot;
+                    const double x = std::asin(std::clamp(double(er[3]), -1.0, 1.0)) * 57.29578;
+                    double y = (std::atan2(double(lr[1]), double(lr[0])) - std::atan2(double(lb[1]), double(lb[0]))) * 57.29578;
+                    while (y > 180) y -= 360;
+                    while (y < -180) y += 360;
+                    f.lidSx += x, f.lidSy += y, f.lidSxx += x * x, f.lidSxy += x * y, ++f.lidN;
+                }
+                if (posOff > f.eyePosMax) f.eyePosMax = posOff, f.eyePosMs = ms;
+                if (out > f.eyeOutMax) f.eyeOutMax = out, f.eyeOutMs = ms;
+                f.eyePosFrames += posOff > 0.05f;
+                f.eyeOutFrames += out > 1.0f;
+            }
+            const float bv = c.blinkValue();
+            if (bv > 0.8f && !f.blinkHigh) ++f.blinks, f.blinkMs.push_back(ms);
+            f.blinkHigh = bv > 0.8f;
+            if (const auto* e = c.expressionClip()) {
+                ++f.expFrames;
+                f.expClips.insert(e->name);
+                if (f.firstGroup.empty()) f.firstGroup = c.faceGroup();
+            }
+        }
+        if (m.type == "rb_drum" && !k.drumHits.empty()) {
+            static std::map<const chr::Character*, std::array<std::vector<int>, 2>> targetsOf;
+            static std::map<const chr::Character*, std::array<std::string, 2>> ikOf;
+            auto& tg = targetsOf[&c];
+            if (tg[0].empty() && tg[1].empty()) {
+                for (int i = 0; i < sk.size(); ++i)
+                    for (int h = 0; h < 2; ++h)
+                        if (sk.name(i).rfind(h ? "bone_R-tip_" : "bone_L-tip_", 0) == 0) tg[size_t(h)].push_back(i);
+                c.forEachObject([&](scene::Object& o) {
+                    if (auto* ik = o.as<scene::CharIKHand>()) {
+                        if (ik->finger == "bone_L-tip.mesh") ikOf[&c][0] = o.name;
+                        if (ik->finger == "bone_R-tip.mesh") ikOf[&c][1] = o.name;
+                    }
+                });
+            }
+            const int tips[2] = {sk.find("bone_L-tip.mesh"), sk.find("bone_R-tip.mesh")};
+            for (auto& h : k.drumHits) {
+                if (ms < h.ms - 250 || ms > h.ms + 250 || tips[h.hand] < 0) continue;
+                // The pad the clip hits, from its name (hihat_norm_01 -> hihat,
+                // tom_l_* -> L-tom ...): its target bone_X-tip_<pad>.
+                static const std::pair<const char*, const char*> padOf[] = {
+                    {"hihat", "hihat"},       {"snare", "snare"},       {"tom_l", "L-tom"}, {"tom_r", "R-tom"},
+                    {"floor", "floor_tom"},   {"cymbal_l", "L-cymbal"}, {"cymbal_r", "R-cymbal"}, {"ride", "ride"}};
+                if (h.pad.empty()) {
+                    h.pad = "?";
+                    for (const auto& [pre, pad] : padOf)
+                        if (h.clip.rfind(pre, 0) == 0) h.pad = pad;
+                }
+                const int best = sk.find(std::string(h.hand ? "bone_R-tip_" : "bone_L-tip_") + h.pad + ".mesh");
+                if (best < 0) continue;
+                const float bl = len3(sk.local(best).pos);
+                const auto tip = sk.world(tips[h.hand]).pos;
+                const int pad = sk.parent(best);
+                const float dPad = pad >= 0 ? dist3(tip, sk.world(pad).pos) : -1;
+                if (!h.noted && ms >= h.ms) {
+                    static const bool dlog = SDL_getenv("GD05_DRUMREACH_LOG") != nullptr;
+                    if (dlog) {
+                        std::string t;
+                        for (int x : tg[size_t(h.hand)]) {
+                            char b[96];
+                            SDL_snprintf(b, sizeof b, " %s=%.1f/%.1f", sk.name(x).c_str() + 11, double(len3(sk.local(x).pos)),
+                                         double(dist3(sk.world(tips[h.hand]).pos, sk.world(x).pos)));
+                            t += b;
+                        }
+                        SDL_Log("drumreach: %.0f %c %s ik %.2f:%s", h.ms, h.hand ? 'R' : 'L', h.clip.c_str(),
+                                double(ikOf[&c][size_t(h.hand)].empty() ? -1.0f : c.rig().weightOf(ikOf[&c][size_t(h.hand)])), t.c_str());
+                    }
+                    h.noted = true;
+                    h.localAtNote = bl;
+                    h.tipAtNote = dist3(tip, sk.world(best).pos);
+                    h.padAtNote = dPad;
+                    const std::string& ik = ikOf[&c][size_t(h.hand)];
+                    h.ikAtNote = ik.empty() ? -1 : c.rig().weightOf(ik);
+                }
+                if (bl < h.bestLocal) h.bestLocal = bl, h.bestLocalMs = ms;
+                if (dPad >= 0 && dPad < h.minPad) h.minPad = dPad, h.minPadMs = ms;
+            }
+        }
         std::array<float, 3> a{}, b{};
         if (m.type == "rb_guitar" || m.type == "rb_bass") {
             if (c.rig().weightOf("left_hand.weight") >= 0.99f && at("bone_tip.mesh", a) && at("bone_tip_fret.mesh", b)) k.reachFret[m.slot].push_back(dist3(a, b)), ++k.ikFrames[m.slot];
@@ -1058,6 +1473,30 @@ void Band::rbCheckFrame() {
     }
 }
 
+void Band::rbCheckDrumHit(double ms, int hand, const scene::CharClipSamples* clip) {
+    RbCheck::DrumHit h;
+    h.ms = ms, h.hand = hand, h.clip = clip->name;
+    // The clip's own data: the frame where its pad's target (bone_X-tip_<pad>)
+    // is nearest its pad, and how near.
+    static const std::pair<const char*, const char*> padOf[] = {
+        {"hihat", "hihat"}, {"snare", "snare"}, {"tom_l", "L-tom"}, {"tom_r", "R-tom"}, {"floor", "floor_tom"}, {"cymbal_l", "L-cymbal"}, {"cymbal_r", "R-cymbal"}, {"ride", "ride"}};
+    std::string pad;
+    for (const auto& [pre, pd] : padOf)
+        if (h.clip.rfind(pre, 0) == 0) pad = pd;
+    const std::string ch = std::string(hand ? "bone_R-tip_" : "bone_L-tip_") + pad + ".pos";
+    const scene::CharBonesSamples& set = clip->full;
+    for (size_t b = 0; b < set.bones.size() && !pad.empty(); ++b) {
+        if (set.bones[b].name != ch) continue;
+        for (uint32_t i = 0; i < set.count; ++i) {
+            const float* v = set.sample(i) + set.offset[b];
+            const float l = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            if (l < h.clipMin) h.clipMin = l, h.clipMinFrame = clip->startFrame + (set.count > 1 ? float(i) / float(set.count - 1) * clip->length() : 0.0f);
+        }
+    }
+    h.clipStart = clip->startFrame;
+    rbCheck_->drumHits.push_back(h);
+}
+
 void Band::rbCheckReport() {
     const RbCheck& k = *rbCheck_;
     int problems = 0;
@@ -1065,7 +1504,7 @@ void Band::rbCheckReport() {
         if (!ok) ++problems;
         SDL_Log("bandcheck: %s %s", ok ? "ok  " : "FAIL", what.c_str());
     };
-    char buf[256];
+    char buf[512];
     for (auto& mp : members_) {
         const Member& m = *mp;
         const float st = k.maxStretch.count(m.slot) ? k.maxStretch.at(m.slot) : 0;
@@ -1075,6 +1514,51 @@ void Band::rbCheckReport() {
         SDL_snprintf(buf, sizeof buf, "%s stretch: worst %.3f x bind (%s), %d of %d frames past 1.2", m.slot.c_str(), st,
                      k.worstBone.count(m.slot) ? k.worstBone.at(m.slot).c_str() : "-", sf, k.frames);
         line(sf == 0, buf);
+        // Hair (GD05-113): every (point, collide) pair Rock Band's hookup makes
+        // (RB 0x823392A0) is tested by the step, and after each step no hooked
+        // point is inside its collide by more than 0.01 (RB pushes it to the
+        // hard radius in the same step, RB 0x82335B10), unless a later collide
+        // of its list pushed it back in (counted apart: RB's one ordered pass
+        // does that too). The points against
+        // every collide and the segments' midpoints are informative: RB tests
+        // neither (hookup flags and segments let hair through in RB too).
+        if (auto hi = k.hair.find(m.slot); hi != k.hair.end() && hi->second.points > 0) {
+            const chr::RigHairStats& h = hi->second;
+            const float mx = h.pen.empty() ? 0.0f : percentile(h.pen, 1);
+            SDL_snprintf(buf, sizeof buf, "hair %s: %d points, %d collides, %d hooked pairs (RB's hookup %d), %d hair-steps: hooked pairs inside on %zu of %ld pair-steps, "
+                         "p99 of those %.3f, max %.3f; pushed into it from another hooked collide %zu (max %.3f)",
+                         m.slot.c_str(), h.points, h.collides, h.usedPairs, h.rbPairs, h.steps, h.pen.size(), h.pairSamples, double(percentile(h.pen, 0.99f)), double(mx),
+                         h.penBetween.size(), double(percentile(h.penBetween, 1)));
+            line(h.steps > 0 && h.usedPairs == h.rbPairs && h.rbPairs > 0 && mx <= 0.01f, buf);
+            SDL_Log("bandcheck: info hair %s: points inside any collide on %zu of %ld point-steps (p99 %.3f, max %.3f), segment midpoints %zu (p99 %.3f, max %.3f); "
+                    "points move %.2f units/s against their strand root",
+                    m.slot.c_str(), h.penAll.size(), h.pointSamples, double(percentile(h.penAll, 0.99f)), double(percentile(h.penAll, 1)), h.penMid.size(),
+                    double(percentile(h.penMid, 0.99f)), double(percentile(h.penMid, 1)), h.motionSeconds > 0 ? h.motion / h.motionSeconds : 0.0);
+        }
+        // Arms (GD05-110): the arm chain's bones turn more than 30 deg in one
+        // frame on at most 1 in 1000 bone-frames (a clip's blend or the IK
+        // moves them a few degrees a frame; the odd unblended clip change or
+        // cut snaps one). A drummer whose stick targets are out of reach
+        // flips his arms every frame (shouldistay before the fix: 2225 of
+        // 90000). The twist from bind is informative: these rigs' bind is not
+        // their rest, their twist bones pass 90 deg in every build.
+        if (auto ai = k.arms.find(m.slot); ai != k.arms.end()) {
+            const RbCheck::Arm& am = ai->second;
+            SDL_snprintf(buf, sizeof buf, "%s arms: %zu bones, turn per frame p99 %.1f max %.1f deg (%s at %.0f ms), %d of %zu bone-frames over 30; hand moves p99 %.2f max %.2f",
+                         m.slot.c_str(), am.bones.size(), double(percentile(am.jumps, 0.99f)), double(am.jumpMax), am.jumpBone.empty() ? "-" : am.jumpBone.c_str(),
+                         am.jumpMs, am.over30, am.jumps.size(), double(percentile(am.handJumps, 0.99f)), double(percentile(am.handJumps, 1)));
+            line(!am.bones.empty() && size_t(am.over30) * 1000 <= am.jumps.size(), buf);
+            // The skin twisted between neighbouring segments (an S bend): the
+            // twisters spread the hand's and the upper arm's twist in thirds,
+            // so neighbours stay within ~60 deg (inbloom after GD05-110: 55-64
+            // at most); with the twisters polled before the arm's IK the
+            // guitarist's forearm reached 107 (bass 95).
+            SDL_snprintf(buf, sizeof buf, "%s arm skin twist between segments: p99 %.1f max %.1f deg (%s at %.0f ms), %d of %d frames over 75", m.slot.c_str(),
+                         double(percentile(am.segTwist, 0.99f)), double(am.segMax), am.segPair.empty() ? "-" : am.segPair.c_str(), am.segMs, am.segFrames, am.frames);
+            line(size_t(am.segFrames) * 1000 <= size_t(am.frames), buf);
+            SDL_Log("bandcheck: info %s arm twist: fore arm / twist bones up to %.1f deg from bind (%s), %d of %d frames over 90", m.slot.c_str(),
+                    double(am.twistMax), am.twistBone.empty() ? "-" : am.twistBone.c_str(), am.twistFrames, am.frames);
+        }
         const int cf = k.channelFrames.count(m.slot) ? k.channelFrames.at(m.slot) : 0;
         SDL_snprintf(buf, sizeof buf, "%s channels within their clips: worst %.3f x (%s), %d of %d frames past 1.01", m.slot.c_str(),
                      k.channelWorst.count(m.slot) ? double(k.channelWorst.at(m.slot)) : 0.0,
@@ -1112,6 +1596,97 @@ void Band::rbCheckReport() {
             SDL_snprintf(buf, sizeof buf, "%s mic: to the nearer hand p95 %.2f, hands.grp draws %s", m.slot.c_str(), percentile(k.micDist, 0.95f),
                          k.micDrawOnly.empty() ? "every member" : k.micDrawOnly.c_str());
             line(!k.micDist.empty() && percentile(k.micDist, 0.95f) < 8 && k.micDrawOnly == "mic.grp", buf);
+        }
+    }
+    // Faces (GD05-106): informative lines (RB's numbers are not measured;
+    // the study's expectations: eyes > 2 deg on every member, blinks on all
+    // four, expressions playing on the non-singers).
+    for (auto& mp : members_) {
+        const Member& m = *mp;
+        auto it = k.face.find(m.slot);
+        if (it == k.face.end()) continue;
+        const RbCheck::Face& f = it->second;
+        const double minutes = (f.lastMs - f.firstMs) / 60000.0;
+        SDL_Log("bandcheck: face %s eyes: up to %.1f deg from bind (range %.1f), over 2 deg on %d of %d frames, %d gaze points", m.slot.c_str(),
+                double(f.eyeMax), double(f.eyeTop - std::min(f.eyeMin, f.eyeTop)), f.eyeMoved, f.eyeFrames, m.character->rig().eyeRetargets());
+        // Eye in socket (GD05-112): fails when an eye leaves its bind spot in
+        // the head (over 0.05 units) or looks past its look-at's limits (over
+        // 1 deg), on more than 1 frame in 1000.
+        SDL_snprintf(buf, sizeof buf, "face %s eye in socket: off its bind spot up to %.3f units (%d frames over 0.05, worst at %.0f ms), past the look-at limits up to %.1f deg (%d frames over 1, worst at %.0f ms), of %d frames",
+                     m.slot.c_str(), double(f.eyePosMax), f.eyePosFrames, f.eyePosMs, double(f.eyeOutMax), f.eyeOutFrames, f.eyeOutMs, f.eyeFrames);
+        line(f.eyePosFrames * 1000 <= f.eyeFrames && f.eyeOutFrames * 1000 <= f.eyeFrames, buf);
+        // Head rig (GD05-116): fails when an eye sits off its head's own
+        // place (over 0.05 units) on any frame: the eyeball out of the socket.
+        if (f.headFrames > 0) {
+            SDL_snprintf(buf, sizeof buf, "face %s eyes on the head's rig: off the head outfit's eye place up to %.3f units (%d of %d frames over 0.05); brows off the head's up to %.3f (info: the visemes' Base poses them)",
+                         m.slot.c_str(), double(f.headEyeMax), f.headEyeFrames, f.headFrames, double(f.headBrowMax));
+            line(f.headEyeFrames == 0, buf);
+        }
+        if (f.lidN > 0) {
+            const double n = f.lidN, var = f.lidSxx / n - (f.lidSx / n) * (f.lidSx / n);
+            const double slope = var > 1e-6 ? (f.lidSxy / n - (f.lidSx / n) * (f.lidSy / n)) / var : 0;
+            // Fails when the upper lid does not follow the eye's vertical
+            // turn (RB's rule: slope about -1; the legacy port 0: the iris
+            // under a still lid, the white bared, the eye looks popped out).
+            SDL_snprintf(buf, sizeof buf, "face %s lid follows the eye: upper lid turn per degree of the eye's vertical turn %.2f (RB -1), eye vertical turn sd %.1f deg, %d frames",
+                         m.slot.c_str(), slope, std::sqrt(std::max(0.0, var)), f.lidN);
+            line(slope < -0.6 && slope > -1.4, buf);
+        }
+        SDL_Log("bandcheck: face %s blinks: %d (%.1f a minute), upper lid up to %.1f deg", m.slot.c_str(), f.blinks,
+                minutes > 0 ? double(f.blinks) / minutes : 0.0, double(f.lidMax));
+        std::string clips;
+        for (const auto& n : f.expClips) clips += (clips.empty() ? "" : " ") + n;
+        SDL_Log("bandcheck: face %s expressions: %d started, a clip on %d of %d frames, %zu distinct (%s), first group %s", m.slot.c_str(),
+                m.character->expressionsPlayed(), f.expFrames, f.faceFrames, f.expClips.size(), clips.empty() ? "-" : clips.c_str(),
+                f.firstGroup.empty() ? "-" : f.firstGroup.c_str());
+    }
+    {
+        // Blinks together: a blink within 50 ms of another member's.
+        int all = 0, together = 0;
+        for (const auto& [slot, f] : k.face)
+            for (double t : f.blinkMs) {
+                ++all;
+                for (const auto& [slot2, g] : k.face) {
+                    if (slot2 == slot) continue;
+                    bool hit = false;
+                    for (double u : g.blinkMs) hit = hit || std::fabs(u - t) <= 50;
+                    if (hit) {
+                        ++together;
+                        break;
+                    }
+                }
+            }
+        if (all) SDL_Log("bandcheck: face blinks within 50 ms of another member's: %d of %d", together, all);
+    }
+    if (!k.drumHits.empty()) {
+        // Drum reach (GD05-108 B1), per hand and pad.
+        std::map<std::string, std::vector<const RbCheck::DrumHit*>> by;
+        // Hits with the hand IK off (main.drv's clip flags the arm: a
+        // directed shot's or an idle clip) counted apart.
+        int off = 0, noted = 0;
+        for (const auto& h : k.drumHits) {
+            if (!h.noted) continue;
+            ++noted;
+            if (h.ikAtNote < 0.99f) ++off;
+            else by[std::string(h.hand ? "R " : "L ") + h.pad].push_back(&h);
+        }
+        SDL_Log("bandcheck: drum reach: %d hand hits, %d with the hand IK under 0.99 (left out below)", noted, off);
+        for (const auto& [key, v] : by) {
+            std::vector<float> tip, pad, minPad, dt, ik, loc, minLoc, ldt, cmin, cfr, cst;
+            for (const auto* h : v) {
+                if (h->clipMin < 1e29f) cmin.push_back(h->clipMin), cfr.push_back(h->clipMinFrame), cst.push_back(h->clipStart);
+                tip.push_back(h->tipAtNote), pad.push_back(h->padAtNote), ik.push_back(h->ikAtNote), loc.push_back(h->localAtNote);
+                if (h->minPad < 1e29f) minPad.push_back(h->minPad), dt.push_back(float(h->minPadMs - h->ms));
+                if (h->bestLocal < 1e29f) minLoc.push_back(h->bestLocal), ldt.push_back(float(h->bestLocalMs - h->ms));
+            }
+            SDL_Log("bandcheck: drum reach %-12s n %3zu at the hit: tip to target p50 %.2f p95 %.2f, tip to pad p50 %.2f p95 %.2f, the clip's "
+                    "target offset p50 %.2f p95 %.2f; closest: offset p50 %.2f at %+.0f ms, tip to pad p50 %.2f at %+.0f ms; IK weight p50 %.2f min %.2f",
+                    key.c_str(), v.size(), percentile(tip, 0.5f), percentile(tip, 0.95f), percentile(pad, 0.5f), percentile(pad, 0.95f),
+                    percentile(loc, 0.5f), percentile(loc, 0.95f), percentile(minLoc, 0.5f), percentile(ldt, 0.5f), percentile(minPad, 0.5f),
+                    percentile(dt, 0.5f), percentile(ik, 0.5f), percentile(ik, 0));
+            SDL_Log("bandcheck: drum reach %-12s the clips' data: their pad's target nearest its pad p50 %.2f p95 %.2f, at frame p50 %+.2f (clip "
+                    "start p50 %+.2f)",
+                    key.c_str(), percentile(cmin, 0.5f), percentile(cmin, 0.95f), percentile(cfr, 0.5f), percentile(cst, 0.5f));
         }
     }
     SDL_Log("bandcheck: %s (%d problem(s), %d frames)", problems ? "FAILED" : "passed", problems, k.frames);

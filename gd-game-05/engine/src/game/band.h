@@ -141,6 +141,7 @@ public:
         // main_add.drv while he plays), the mode the parser asked for
         // (cur_play) and whether the player plays (playing).
         uint32_t rbFlags = 0;
+        std::string rbGender;  // RB: male / female (the directed cuts' valid_male / valid_female)
         std::string rbGroup;
         chr::ClipDriver* rbActive = nullptr;
         uint32_t rbCurPlay = 0;
@@ -209,6 +210,8 @@ public:
     MidiParserSet* parsers() { return parsers_.get(); }
     // Messages that fired a member's EventTriggers (the drum kit), by event.
     const std::map<std::string, int>& triggerCounts() const { return triggerCounts_; }
+    // Clip events sent to their clip's type handlers, by event (set_leftarm_true...).
+    const std::map<std::string, int>& clipEventCounts() const { return clipEventCounts_; }
     const std::vector<std::string>& problems() const { return problems_; }
     double beat() const { return beat_; }
 
@@ -230,6 +233,7 @@ private:
     void rbChangePlay(Member& m, uint32_t mode);                       // char_objects.dta change_play
     void rbChangeGroup(Member& m, const std::string& group, uint32_t flags, bool force);  // RB 0x822E5908
     void rbPlayGroup(Member& m);                                       // RB 0x822E4A80
+    void rbFaceGroup(Member& m, const scene::CharClipSamples& clip);   // CharClip enter change_face_group (RB 0x822E5850)
     bool rbDriverClip(Member& m, const std::string& driver, scene::CharClipSamples* clip, float length);  // RB 0x82342168
     class RbPart;
     friend class RbPart;
@@ -242,6 +246,7 @@ private:
     std::shared_ptr<RbCheck> rbCheck_;
     void rbCheckFrame();
     void rbCheckReport();
+    void rbCheckDrumHit(double ms, int hand, const scene::CharClipSamples* clip);
 public:
     static bool rbLegacy();
 private:
@@ -299,8 +304,13 @@ private:
     std::vector<std::unique_ptr<ScriptObject>> parts_;  // scoped sub-objects (main.drv...)
     std::array<std::unique_ptr<ScriptObject>, 2> players_;  // {$this player}
     std::map<std::string, DataNode> scripts_;            // parsed clip scripts
+    // The clips' script objects (a CharClip type's handlers, [flags] the
+    // clip's own): a clip event names one of its handlers (GD05-101).
+    std::map<const scene::CharClipSamples*, std::unique_ptr<ScriptObject>> clipObjs_;
+    std::map<std::string, int> clipEventCounts_;
     const DataNode* objects_ = nullptr;
     chr::Random rng_;
+    chr::Random faceRng_{0x464143u};  // the blink tracks' offsets (GD05-106)
     std::vector<std::string> problems_;
     std::map<std::string, int> triggerCounts_;
     double seconds_ = 0, beat_ = 0;

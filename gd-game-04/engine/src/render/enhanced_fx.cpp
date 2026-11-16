@@ -819,7 +819,14 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
         const int lv = std::clamp(s.starBlur, 1, 4);
         EnhBlock k = b;
         put(k.prevViewProj, starPrev_);
-        k.pass[0] = kScale[lv] * f.starBlur, k.pass[1] = kRadial[lv] * f.starBlur, k.pass[2] = kFeedback[lv] * f.starBlur;
+        // The values are per 60 Hz frame (gd01's): at other frame rates the
+        // smear (a frame's camera motion) is scaled to a 60 Hz frame's and the
+        // trail keeps fb^(frames at 60 Hz), so 240 FPS looks as 60 (GD04-122).
+        const uint64_t now = SDL_GetTicksNS();
+        const float frames60 = valid && starNs_ ? std::clamp(float(now - starNs_) / 1e9f * 60.0f, 0.05f, 4.0f) : 1.0f;
+        starNs_ = now;
+        k.pass[0] = kScale[lv] * f.starBlur / frames60, k.pass[1] = kRadial[lv] * f.starBlur;
+        k.pass[2] = std::pow(kFeedback[lv] * f.starBlur, frames60);
         k.pass[3] = valid ? 1.0f : 0.0f;
         const TextureId t[3] = {cur, depth, device_.targetTexture(prev.id)};
         pass(Pass::StarBlur, &next, t, 3, &k, sizeof k, "starblur");

@@ -82,6 +82,8 @@ public:
     bool hasText(const std::string& component) const { return overrides_.count(component) != 0; }
     // The string a label shows now (its override, else its localized token / text).
     std::string text(const std::string& component) const;
+    // The same for a label object itself (a player slot's copy; "" for no label).
+    std::string text(const scene::Object* o) const;
     // The focused component (a button draws focus_color and focus_scale).
     void setFocus(const std::string& component) { focus_ = component; }
     // The panel holds the UI's focus (RB's BandHighlight: normal, else disabled).
