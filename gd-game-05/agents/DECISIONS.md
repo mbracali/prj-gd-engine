@@ -2331,3 +2331,18 @@ pattern). Each says what, why and how to undo it.
 - **Undo:** GD05_BACKDROPCAM_LEGACY=1 (the same picture as before, byte for
   byte in small_club_01). Development aids: GD05_BACKDROP_VENUE,
   GD05_BACKDROP_CAM, GD05_BACKDROP_SHOTS.
+
+## D127
+- **What (2026-11-16, GD05-104):** each player plays by its instrument's
+  rules, rulesForInstrument (scoring.dtb (points (<instrument> ...)) and
+  (streaks (multipliers (bass ...) / (vocals ...) / (singleplayer ...)))
+  [C data; which table an instrument uses: I]); the selftest always did,
+  the game passed rules_ (singleplayer, 4x) to every Player. The bass's
+  table goes to 6x, so its super streak (BassSuperStreak_ON.trig, D102)
+  now fires. Guitar and drum points are the same table values (scores
+  unchanged).
+- **Measured (`--song inbloom --autoplay`, end-of-song line, new "top
+  multiplier" and "bass super streaks"):** bass to 45 s: 4x -> 6x, super
+  streaks 0 -> 1, score 13,403 -> 18,553; guitar to 45 s 15,344 both ways;
+  drums to 20 s 6,775 both ways.
+- **Undo:** GD05_PARTRULES_LEGACY=1.

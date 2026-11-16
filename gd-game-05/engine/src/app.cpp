@@ -559,6 +559,17 @@ private:
     Mixer mixer_;
     std::unique_ptr<GameData> data_;
     Rules rules_;
+    // The rules each instrument plays by (D127, GD05-104): its (points ...)
+    // and its streak multipliers, rulesForInstrument (the bass's to 6x, RB's
+    // bass super streak); the selftest always used them, the game played
+    // every part by the singleplayer table (4x). GD05_PARTRULES_LEGACY=1:
+    // rules_ for every part. partRules_[n]: player_ / player2_'s.
+    Rules partRules_[2];
+    Rules rulesFor(Part part) const {
+        static const bool legacy = envOn("GD05_PARTRULES_LEGACY");
+        if (legacy) return rules_;
+        return rulesForInstrument(rules_, part == Part::Drums ? "drum" : part == Part::Bass ? "bass" : part == Part::Vocals ? "vocals" : "guitar");
+    }
     std::vector<SongInfo> songs_;
     bool running_ = true;
     bool restart_ = false;  // Enhanced's Restart Now: runApp starts the game again
@@ -622,6 +633,7 @@ private:
     struct RbSeat {
         std::string part;
         int pad = 1, difficulty = 3;
+        std::unique_ptr<Rules> rules;  // its instrument's (D127); before player: it outlives it
         std::unique_ptr<Player> player;
         std::unique_ptr<VocalPlayer> vocal;
         std::unique_ptr<VocalInput> mic;
@@ -1334,7 +1346,9 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
                     if (input_.gh2Type(d.id).find("joypad") != std::string::npos) return ControllerMode::Joypad;
             return ControllerMode::Guitar;
         };
-        player_ = std::make_unique<Player>(*song_, part0, static_cast<Difficulty>(difficulties_[0]), rules_,
+        player_.reset();  // its rules change below
+        partRules_[0] = rulesFor(part0);
+        player_ = std::make_unique<Player>(*song_, part0, static_cast<Difficulty>(difficulties_[0]), partRules_[0],
                                            part0 == Part::Drums ? ControllerMode::Joypad : two ? modeOfPad(pads_[0]) : input_.lastMode(), noFail,
                                            faceOff ? 0 : -1, config);
         player_->setCalibrationMs(calibrationMs());
@@ -1373,7 +1387,8 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         guitarHeard_ = true;
         activeGem_ = 0, activePlayers_ = 0;
         if (two) {
-            player2_ = std::make_unique<Player>(*song_, part1, static_cast<Difficulty>(difficulties_[1]), rules_, autoplay || !ui_ ? ControllerMode::Guitar : modeOfPad(pads_[1]),
+            partRules_[1] = rulesFor(part1);
+            player2_ = std::make_unique<Player>(*song_, part1, static_cast<Difficulty>(difficulties_[1]), partRules_[1], autoplay || !ui_ ? ControllerMode::Guitar : modeOfPad(pads_[1]),
                                                 true, faceOff ? 1 : -1, config);
             player2_->setNumber(1);
             player2_->setCalibrationMs(calibrationMs());
@@ -1792,9 +1807,10 @@ void App::endSong() {
         ui_->gameEvent("game_outro");
     }
     input_.setTouchLanes(0, {}), input_.setTouchLanes(1, {});  // no lanes for the fingers until the next song
-    SDL_Log("%s: score %d, %d/%d notes, longest streak %d%s (audio underruns: %lld frames)", info_->id.c_str(),
+    SDL_Log("%s: score %d, %d/%d notes, longest streak %d (top multiplier %dx, bass super streaks %d)%s (audio underruns: %lld frames)", info_->id.c_str(),
             player_->score(), player_->notesHit(), int(player_->chart().gems.size()), player_->longestStreak(),
-            player_->failed() ? ", failed" : "", static_cast<long long>(mixer_.underruns()));
+            partRules_[0].multiplierForStreak(player_->longestStreak()), RbTrackView::fxStats().superStreaks, player_->failed() ? ", failed" : "",
+            static_cast<long long>(mixer_.underruns()));
     for (int i = 0; i < 2; ++i) {
         const Player* p = i == 0 ? player_.get() : player2_.get();
         SongResult& res = lastResult_[size_t(i)];
@@ -2153,7 +2169,8 @@ void App::makeSeats(bool autoplay) {
         if (part == Part::Vocals && (song_->vocals.empty() || haveVocals)) part = Part::Guitar;
         if (part == Part::Vocals) haveVocals = true;
         st.part = part == Part::Drums ? "drum" : part == Part::Bass ? "bass" : part == Part::Vocals ? "vocals" : "guitar";
-        const Rules& r = rules_;
+        st.rules = std::make_unique<Rules>(rulesFor(part));
+        const Rules& r = *st.rules;
         st.player = std::make_unique<Player>(*song_, part, static_cast<Difficulty>(st.difficulty), r,
                                              part == Part::Drums ? ControllerMode::Joypad : ControllerMode::Guitar, true, -1, nullptr);
         st.player->setNumber(int(seats_.size()) + 1);
