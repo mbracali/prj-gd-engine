@@ -2810,6 +2810,17 @@ void App::updateSong(float t) {
                 if (gfx::dot(dir, dir) < 1e-6f) dir = {0, -1, 0};
                 dir = gfx::normalize(dir);
                 dir = {dir.x * std::cos(turn) - dir.y * std::sin(turn), dir.x * std::sin(turn) + dir.y * std::cos(turn), 0};
+                // <degrees> "f": in front of the face (level, square to the
+                // line between the eyes, on the side the eyes look), whatever
+                // way the member turns; <bone> then is only the target
+                // (GD05-112 close shots).
+                scene::Xfm el, er;
+                if (f.size() > 2 && f[2] == "f" && band_->objectXfm(who, "bone_L-eye.mesh", el) && band_->objectXfm(who, "bone_R-eye.mesh", er)) {
+                    const gfx::Vec3 across{er.pos[0] - el.pos[0], er.pos[1] - el.pos[1], 0};
+                    gfx::Vec3 fwd = gfx::normalize(gfx::Vec3{-across.y, across.x, 0});
+                    if (fwd.x * el.rot[3] + fwd.y * el.rot[4] < 0) fwd = fwd * -1.0f;
+                    dir = fwd;
+                }
                 const gfx::Vec3 eye = target + dir * dist + gfx::Vec3{0, 0, up};
                 gfx::Camera cam = gfx::Camera::lookAt(eye, target);
                 cam.yFov = 0.6f;

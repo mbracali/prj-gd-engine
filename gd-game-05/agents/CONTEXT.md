@@ -271,3 +271,13 @@ RB focus 11-16 (GD05-114 New Song part):
   controller, track, character, slot and ready flag; the part / difficulty
   screen must come up not ready in the guitar slot, the song played on the
   guitar. GD05_READYRESET_LEGACY=1 fails (D116).
+
+RB focus 11-16 (GD05-112 eyes):
+- bandcheck adds `face <member> eye in socket` (the eye bone off its bind
+  position, its look past the look-at limits) and `face <member> lid follows
+  the eye` (slope of the upper lid's turn against the eye's vertical turn,
+  RB about -1; GD05_LIDS_LEGACY=1 fails). GD05_EYELOG=1 logs each frame's
+  eye bones (`eyelog` lines).
+- GD05_FACE_CAM=<member>:<distance>:f:<bone>: the camera in front of the
+  face (square to the line between the eye bones), whatever way the member
+  turns, aimed at <bone> (e.g. player_vocals0:12:f:bone_R-eye.mesh).

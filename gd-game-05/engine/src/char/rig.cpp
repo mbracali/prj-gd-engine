@@ -43,6 +43,12 @@ bool gazeLegacy() {
     static const bool v = envSwitch("GD05_GAZE_LEGACY");
     return v;
 }
+// GD05_LIDS_LEGACY=1: the eyelids do not follow the eyes (the port before
+// GD05-112).
+bool lidsLegacy() {
+    static const bool v = envSwitch("GD05_LIDS_LEGACY");
+    return v;
+}
 
 V3 sub(const V3& a, const V3& b) { return {a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }
 V3 add(const V3& a, const V3& b) { return {a[0] + b[0], a[1] + b[1], a[2] + b[2]}; }
@@ -278,6 +284,15 @@ struct Rig::Impl {
         bool blinkArmed = false;   // RB: the servo's Blink went under 0.3
         float blinkLast = 0;       // RB: the servo's Blink last poll
         int retargets = 0;         // diagnostics (bandcheck)
+        // RB rev 7: each eye's upper and lower lid (bones, -1 for none), and
+        // the lid's local as the follow last left it with the pose before
+        // it (a lid no servo wrote again this poll starts from that pose).
+        struct Lid {
+            int bone = -1;
+            scene::Xfm before, after;
+            bool has = false;
+        };
+        std::vector<std::array<Lid, 2>> lids;  // per look-at of `lookats`: upper, lower
         std::vector<std::pair<int, float>> interests;  // (object, radius); none on the disc
     };
     // CharHair (Poll 0x8217B898, reset 0x8217B6F0).
@@ -355,6 +370,7 @@ struct Rig::Impl {
     void pollUpper(UpperTwist& u);
     void pollFore(ForeTwist& f);
     void pollLookAt(LookAt& l, const RigContext& ctx);
+    void followLids(Eyes& e);
     void retarget(Eyes& e);
     void pollEyes(Eyes& e, const RigContext& ctx);
     void resetHair(Hair& h);
@@ -475,6 +491,12 @@ void Rig::Impl::build() {
             p.kind = kEyes, p.index = eyes.size() - 1;
             // 0x82170FD0: changed by its look-ats and the head.
             p.reads = e->eyes;
+            // RB (0x82329588): the lids follow the eyes after the face servo
+            // posed them (GD05-112).
+            if (!lidsLegacy()) {
+                for (const auto& n : e->upperLids) if (!n.empty()) p.reads.push_back(n), p.writes.push_back(n);
+                for (const auto& n : e->lowerLids) if (!n.empty()) p.reads.push_back(n), p.writes.push_back(n);
+            }
         } else if (auto* h = o->as<scene::CharHair>()) {
             Hair k;
             k.name = o->name;
@@ -538,9 +560,15 @@ void Rig::Impl::build() {
     for (Eyes& e : eyes) {
         const auto* def = dir.get(e.name) ? dir.get(e.name)->as<scene::CharEyes>() : nullptr;
         if (!def) continue;
-        for (const auto& n : def->eyes)
+        for (size_t j = 0; j < def->eyes.size(); ++j)
             for (size_t i = 0; i < lookats.size(); ++i)
-                if (lookats[i].name == n) e.lookats.push_back(i);
+                if (lookats[i].name == def->eyes[j]) {
+                    e.lookats.push_back(i);
+                    std::array<Eyes::Lid, 2> lp;
+                    lp[0].bone = j < def->upperLids.size() ? bone(def->upperLids[j]) : -1;
+                    lp[1].bone = j < def->lowerLids.size() ? bone(def->lowerLids[j]) : -1;
+                    e.lids.push_back(lp);
+                }
         if (!e.lookats.empty()) {
             const LookAt& l = lookats[e.lookats[0]];
             const int piv = l.pivot >= 0 ? l.pivot : l.source;
@@ -1026,6 +1054,42 @@ void Rig::Impl::pollEyes(Eyes& e, const RigContext& ctx) {
     }
     e.lastDot = d;
     e.lastForward = row(sk.world(e.head).rot, 1);
+    if (!lidsLegacy()) followLids(e);
+}
+
+// Rock Band's CharEyes Poll (RB 0x82329588) [C], after each eye's look-at:
+// a = the eye's look (its local y) x component x (1 - the face servo's Blink
+// weight); the upper lid's local turned by -a about its z (0x8238ED60: each
+// row (x, y) -> (x cos - y sin, x sin + y cos)), the lower lid's local x
+// moved by 0.75 a. The port polls the look-ats before the eyes [I: RB polls
+// them from here]; a lid no servo wrote since the last follow starts again
+// from its pose before it.
+void Rig::Impl::followLids(Eyes& e) {
+    const float blink = blinkValue >= 0 ? blinkValue : 0.0f;
+    for (size_t i = 0; i < e.lookats.size() && i < e.lids.size(); ++i) {
+        const LookAt& l = lookats[e.lookats[i]];
+        if (l.source < 0) continue;
+        const float a = sk.local(l.source).rot[3] * (1 - blink);
+        for (int k = 0; k < 2; ++k) {
+            Eyes::Lid& lid = e.lids[i][size_t(k)];
+            if (lid.bone < 0) continue;
+            scene::Xfm x = sk.local(lid.bone);
+            if (lid.has && x.rot == lid.after.rot && x.pos == lid.after.pos) x = lid.before;
+            lid.before = x;
+            if (k == 0) {
+                const float c = std::cos(-a), sn = std::sin(-a);
+                for (int r = 0; r < 3; ++r) {
+                    const float x0 = x.rot[size_t(r * 3)], y0 = x.rot[size_t(r * 3 + 1)];
+                    x.rot[size_t(r * 3)] = x0 * c - y0 * sn;
+                    x.rot[size_t(r * 3 + 1)] = x0 * sn + y0 * c;
+                }
+            } else {
+                x.pos[0] += a * 0.75f;
+            }
+            sk.setLocal(lid.bone, x);
+            lid.after = x, lid.has = true;
+        }
+    }
 }
 
 // ---- CharHair --------------------------------------------------------------

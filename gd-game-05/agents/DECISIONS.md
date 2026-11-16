@@ -2026,3 +2026,30 @@ pattern). Each says what, why and how to undo it.
   screen unchanged (ready 0, guitar slot, part select) both ways.
   rb_pause_quit, rb_qp_locked OK.
 - **Undo:** GD05_READYRESET_LEGACY=1.
+
+## D117
+- **What (2026-11-16, GD05-112):** the eyelids follow the eyes. Rock Band's
+  CharEyes Poll (RB 0x82329588) [C], after each eye's look-at: a = the eye's
+  look (its local y) x component x (1 - the face servo's Blink weight); the
+  upper lid's local is turned by -a about its z (0x8238ED60), the lower
+  lid's local x moved by 0.75 a. D108 turned the eyes (up to 16 deg down / 5
+  up, often at those limits) but the lids stayed where the face servo left
+  them: the iris went down and the white showed bared above it, the eye
+  standing out of the face (owner: "popping out of their skulls", the
+  singer). The eyeball itself never leaves its socket: eye-L / eye-R.mesh
+  are spheres (r 0.87) centred within 0.17 of their bone, the bone's local
+  position stays its bind, its look within the limits box (RB 0x82321FB8:
+  x by the pitch pair, z by the yaw pair, as the port) [measured]. The lids
+  are written after the face servo (they join the eyes' poll reads /
+  writes); a lid no servo wrote again starts from its pose before the
+  follow [I: RB polls the look-ats from CharEyes; the port before it].
+- **Measured (bandcheck, new lines "eye in socket" and "lid follows the
+  eye": the least-squares slope of the upper lid's turn about z from its
+  bind against the eye's vertical turn, frames with Blink under 0.3; RB's
+  rule gives about -1):** inbloom 60 s guitar / bass / drums / vocals -0.06 /
+  -0.07 / 0.13 / -0.08 -> -0.98 / -1.01 / -0.86 / -1.06; highwaystar 45 s ->
+  -0.80 / -0.83 / -1.00 / -1.16. Eye in socket 0.000 units, 0 deg past the
+  limits both ways. Close shots (GD05_FACE_CAM=player_vocals0:12:f:...,
+  GD05_PREFAB_VOCALS=vocals2, 20.06 / 41.24 s): legacy, white above the
+  iris; now the lid comes down with the look.
+- **Undo:** GD05_LIDS_LEGACY=1.

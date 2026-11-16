@@ -947,6 +947,18 @@ struct Band::RbCheck {
         float eyeMax = 0, lidMax = 0;
         int eyeFrames = 0, eyeMoved = 0;
         float eyeMin = 1e30f, eyeTop = 0;
+        // Eye in socket (GD05-112): either eye's position off its bind in
+        // the head (its parent) frame, its look direction's yaw / pitch past
+        // its look-at's limits (degrees), and the frames each went wrong.
+        float eyePosMax = 0, eyeOutMax = 0;
+        int eyePosFrames = 0, eyeOutFrames = 0;
+        double eyePosMs = 0, eyeOutMs = 0;
+        // The upper lid following the eye (RB 0x82329588): per frame with
+        // the Blink weight under 0.3, the eye's vertical turn (its look's x,
+        // degrees) and the upper lid's turn about its z from its bind; their
+        // least-squares slope (RB: about -1, the lid turned by -the look's x).
+        double lidSx = 0, lidSy = 0, lidSxx = 0, lidSxy = 0;
+        int lidN = 0;
         int blinks = 0;
         bool blinkHigh = false;
         std::vector<double> blinkMs;
@@ -1260,6 +1272,68 @@ void Band::rbCheckFrame() {
                 if (ang > 2) ++f.eyeMoved;
             }
             if (lid >= 0) f.lidMax = std::max(f.lidMax, angleBetween(sk.local(lid).rot, sk.bind(lid).rot));
+            {
+                // Eye in socket (GD05-112): each eye look-at's source (its
+                // pivot when it has none, RB 0x82321A48): the local position
+                // against the bind, and the local y (the look) against the
+                // look-at's yaw (x) / pitch (z) limits in the parent's frame.
+                static std::map<const chr::Character*, std::vector<std::pair<int, std::array<float, 4>>>> eyesOf;
+                static std::map<const chr::Character*, std::pair<int, int>> lidOf;  // the first eye's look-at source, its upper lid
+                auto& ev = eyesOf[&c];
+                if (ev.empty()) {
+                    c.forEachObject([&](scene::Object& o) {
+                        auto* ce = o.as<scene::CharEyes>();
+                        if (!ce || ce->eyes.empty() || ce->upperLids.empty() || lidOf.count(&c)) return;
+                        int src = -1;
+                        c.forEachObject([&](scene::Object& q) {
+                            if (auto* l = q.as<scene::CharLookAt>(); l && q.name == ce->eyes[0]) src = sk.find(l->source.empty() ? l->pivot : l->source);
+                        });
+                        lidOf[&c] = {src, sk.find(ce->upperLids[0])};
+                    });
+                    c.forEachObject([&](scene::Object& o) {
+                        if (auto* l = o.as<scene::CharLookAt>()) {
+                            const int b = sk.find(l->source.empty() ? l->pivot : l->source);
+                            if (b >= 0 && sk.name(b).find("-eye") != std::string::npos)
+                                ev.push_back({b, {l->values[1], l->values[2], l->values[3], l->values[4]}});
+                        }
+                    });
+                    if (ev.empty()) ev.push_back({-1, {}});
+                }
+                float posOff = 0, out = 0;
+                for (const auto& [b, lim] : ev) {
+                    if (b < 0) continue;
+                    const auto& lp = sk.local(b).pos;
+                    const auto& bp = sk.bind(b).pos;
+                    posOff = std::max(posOff, std::sqrt((lp[0] - bp[0]) * (lp[0] - bp[0]) + (lp[1] - bp[1]) * (lp[1] - bp[1]) + (lp[2] - bp[2]) * (lp[2] - bp[2])));
+                    const auto& r = sk.local(b).rot;  // row 1: the look in the parent's frame
+                    const float ax = std::atan2(r[3], r[4]) * 57.29578f, az = std::atan2(r[5], r[4]) * 57.29578f;
+                    // values: half time, min / max yaw, min / max pitch; the
+                    // box bounds x by the pitch pair, z by the yaw pair (RB
+                    // 0x82321FB8) [C].
+                    const float yawLo = std::clamp(lim[0], -80.0f, 80.0f), yawHi = std::clamp(lim[1], -80.0f, 80.0f);
+                    const float pitchLo = std::clamp(lim[2], -80.0f, 80.0f), pitchHi = std::clamp(lim[3], -80.0f, 80.0f);
+                    out = std::max({out, pitchLo - ax, ax - pitchHi, yawLo - az, az - yawHi});
+                    static const bool log = [] { const char* e = SDL_getenv("GD05_EYELOG"); return e && *e && *e != '0'; }();
+                    if (log)
+                        SDL_Log("eyelog %.0f %s %s pos %.3f %.3f %.3f (bind %.3f %.3f %.3f) x %.1f z %.1f deg, turn %.1f", ms, m.slot.c_str(),
+                                sk.name(b).c_str(), double(lp[0]), double(lp[1]), double(lp[2]), double(bp[0]), double(bp[1]), double(bp[2]), double(ax),
+                                double(az), double(angleBetween(sk.local(b).rot, sk.bind(b).rot)));
+                }
+                if (auto it = lidOf.find(&c); it != lidOf.end() && it->second.first >= 0 && it->second.second >= 0 && c.blinkValue() < 0.3f) {
+                    const auto& er = sk.local(it->second.first).rot;
+                    const auto& lr = sk.local(it->second.second).rot;
+                    const auto& lb = sk.bind(it->second.second).rot;
+                    const double x = std::asin(std::clamp(double(er[3]), -1.0, 1.0)) * 57.29578;
+                    double y = (std::atan2(double(lr[1]), double(lr[0])) - std::atan2(double(lb[1]), double(lb[0]))) * 57.29578;
+                    while (y > 180) y -= 360;
+                    while (y < -180) y += 360;
+                    f.lidSx += x, f.lidSy += y, f.lidSxx += x * x, f.lidSxy += x * y, ++f.lidN;
+                }
+                if (posOff > f.eyePosMax) f.eyePosMax = posOff, f.eyePosMs = ms;
+                if (out > f.eyeOutMax) f.eyeOutMax = out, f.eyeOutMs = ms;
+                f.eyePosFrames += posOff > 0.05f;
+                f.eyeOutFrames += out > 1.0f;
+            }
             const float bv = c.blinkValue();
             if (bv > 0.8f && !f.blinkHigh) ++f.blinks, f.blinkMs.push_back(ms);
             f.blinkHigh = bv > 0.8f;
@@ -1396,7 +1470,7 @@ void Band::rbCheckReport() {
         if (!ok) ++problems;
         SDL_Log("bandcheck: %s %s", ok ? "ok  " : "FAIL", what.c_str());
     };
-    char buf[256];
+    char buf[512];
     for (auto& mp : members_) {
         const Member& m = *mp;
         const float st = k.maxStretch.count(m.slot) ? k.maxStretch.at(m.slot) : 0;
@@ -1480,6 +1554,22 @@ void Band::rbCheckReport() {
         const double minutes = (f.lastMs - f.firstMs) / 60000.0;
         SDL_Log("bandcheck: face %s eyes: up to %.1f deg from bind (range %.1f), over 2 deg on %d of %d frames, %d gaze points", m.slot.c_str(),
                 double(f.eyeMax), double(f.eyeTop - std::min(f.eyeMin, f.eyeTop)), f.eyeMoved, f.eyeFrames, m.character->rig().eyeRetargets());
+        // Eye in socket (GD05-112): fails when an eye leaves its bind spot in
+        // the head (over 0.05 units) or looks past its look-at's limits (over
+        // 1 deg), on more than 1 frame in 1000.
+        SDL_snprintf(buf, sizeof buf, "face %s eye in socket: off its bind spot up to %.3f units (%d frames over 0.05, worst at %.0f ms), past the look-at limits up to %.1f deg (%d frames over 1, worst at %.0f ms), of %d frames",
+                     m.slot.c_str(), double(f.eyePosMax), f.eyePosFrames, f.eyePosMs, double(f.eyeOutMax), f.eyeOutFrames, f.eyeOutMs, f.eyeFrames);
+        line(f.eyePosFrames * 1000 <= f.eyeFrames && f.eyeOutFrames * 1000 <= f.eyeFrames, buf);
+        if (f.lidN > 0) {
+            const double n = f.lidN, var = f.lidSxx / n - (f.lidSx / n) * (f.lidSx / n);
+            const double slope = var > 1e-6 ? (f.lidSxy / n - (f.lidSx / n) * (f.lidSy / n)) / var : 0;
+            // Fails when the upper lid does not follow the eye's vertical
+            // turn (RB's rule: slope about -1; the legacy port 0: the iris
+            // under a still lid, the white bared, the eye looks popped out).
+            SDL_snprintf(buf, sizeof buf, "face %s lid follows the eye: upper lid turn per degree of the eye's vertical turn %.2f (RB -1), eye vertical turn sd %.1f deg, %d frames",
+                         m.slot.c_str(), slope, std::sqrt(std::max(0.0, var)), f.lidN);
+            line(slope < -0.6 && slope > -1.4, buf);
+        }
         SDL_Log("bandcheck: face %s blinks: %d (%.1f a minute), upper lid up to %.1f deg", m.slot.c_str(), f.blinks,
                 minutes > 0 ? double(f.blinks) / minutes : 0.0, double(f.lidMax));
         std::string clips;
