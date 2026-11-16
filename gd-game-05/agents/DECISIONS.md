@@ -2346,3 +2346,22 @@ pattern). Each says what, why and how to undo it.
   streaks 0 -> 1, score 13,403 -> 18,553; guitar to 45 s 15,344 both ways;
   drums to 20 s 6,775 both ways.
 - **Undo:** GD05_PARTRULES_LEGACY=1.
+
+## D128
+- **What (2026-11-16, GD05-099):** the selftest's 7 Star Power / co-op
+  FAIL lines (reported, not counted: exit 0) were the tests, not the game:
+  its test songs marked their phrases on GH2's Star Power pitch 103, which
+  in RB is the solo marker; RB's Overdrive phrase is 116 (chart parser,
+  RB 0x8249F990) [C], so no phrase was ever captured (meter 0). On 116, the
+  drain and whammy checks then expected GH2's 0.25 a phrase where RB's is
+  scoring's spotlight_phrase 0.251 (drain 1 / deploy_beats 32 a beat =
+  0.125 a 4/4 measure, as GH2's; end 10,710 ms, not <= 10,700) [C data].
+  The two shared-meter co-op checks and the co-op stars check test GH2's
+  co-op mode (one meter both engage; badreputation's max_scores): RB has
+  none, each member has its own Overdrive meter [I]; they print SKIP when
+  the disc has no badreputation max_scores. The rule checks now count in
+  the exit code. GD05_SELFTEST_RULES=1 runs only them (a few seconds).
+- **Measured (GD05_SELFTEST_RULES=1):** FAIL 7 -> 0 (3 SKIP), exit 0;
+  with GD05_SELFTEST_PHRASE_LEGACY=1 (pitch 103, 0.25) 4 FAIL, exit 1.
+- **Undo:** GD05_SELFTEST_PHRASE_LEGACY=1 (the old songs' pitch and
+  phrase value), GD05_SELFTEST_COUNT_LEGACY=1 (not counted).

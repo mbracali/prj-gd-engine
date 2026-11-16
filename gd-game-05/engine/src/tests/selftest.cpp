@@ -306,7 +306,9 @@ Song makeSong(const std::vector<NoteSpec>& notes, const std::vector<std::pair<in
                 if (n.frets & (1 << f)) raw.push_back({uint32_t(n.tick), true, 96 + f}), raw.push_back({uint32_t(n.tick + n.len), false, 96 + f});
             last = std::max(last, n.tick + n.len);
         }
-        for (const auto& [a, b] : ps) raw.push_back({uint32_t(a), true, 103}), raw.push_back({uint32_t(b), false, 103});
+        // Phrases on RB's Overdrive pitch, 116 (RB 0x8249F990; GH2's Star Power 103 is RB's solo marker, D128).
+        static const int phrasePitch = std::getenv("GD05_SELFTEST_PHRASE_LEGACY") ? 103 : 116;
+        for (const auto& [a, b] : ps) raw.push_back({uint32_t(a), true, phrasePitch}), raw.push_back({uint32_t(b), false, phrasePitch});
         for (const Section& sec : secs)
             raw.push_back({uint32_t(sec.start), true, 105 + sec.player}), raw.push_back({uint32_t(sec.end), false, 105 + sec.player});
         // Note-offs first at a tick, then the face-off sections' note-ons, then the frets'.
@@ -425,7 +427,15 @@ int runTwoPlayerChecks(const Rules& rules) {
         std::printf("%s  %s\n", ok ? "PASS" : "FAIL", name);
         failures += !ok;
     };
-    {  // Co-op Star Power: one meter, both must engage, both drain it.
+    // GH2's co-op mode (one shared Star Power meter, GH2's max_scores stars):
+    // Rock Band has no such mode, each band member has its own Overdrive
+    // meter and the band's stars are RB's [I] (D128): reported as skipped.
+    auto skip = [](const char* name) { std::printf("SKIP  %s (GH2's co-op mode; RB has none)\n", name); };
+    if (rules.coopMaxScores.find("badreputation") == rules.coopMaxScores.end()) {
+        skip("co-op: each player's phrase fills the one shared meter (0.25 + 0.25 = ready for both)");
+        skip("co-op: the second engage deploys both; both polls drain the meter (0.5 lasts 3 measures)");
+        skip("co-op stars: 4 at 2.0 x max_scores[1], 5 at 2.0 x max_scores[3], a song without max_scores 5");
+    } else {  // Co-op Star Power: one meter, both must engage, both drain it.
         Song s = makeSong({{1000, G}, {1300, G}, {12000, G}}, {{1000, 1400}}, 170, {{2000, G}, {2300, G}, {12500, G}}, {{2000, 2400}});
         const std::string k0 = strums({1000, 1300}) + ",3000:starpower";
         const std::string k1 = strums({2000, 2300});
@@ -516,7 +526,8 @@ int runTwoPlayerChecks(const Rules& rules) {
         check("pro face-off: a player whose meter empties does not fail (competitive, 0x822B37F8)",
               r->p[0]->rockMeter() == 0 && !r->p[0]->failed() && !r->p[1]->failed() && r->count(0, K::Failed) == 0);
     }
-    {  // The band's stars (0x822CE5D8): badreputation's max_scores (30243 48406 74261 95811).
+    if (!(rules.coopMaxScores.find("badreputation") == rules.coopMaxScores.end())) {
+        // The band's stars (0x822CE5D8): badreputation's max_scores (30243 48406 74261 95811).
         check("co-op stars: 4 at 2.0 x max_scores[1], 5 at 2.0 x max_scores[3], a song without max_scores 5",
               rules.coopStars("badreputation", 96811) == 3 && rules.coopStars("badreputation", 96812) == 4 &&
                   rules.coopStars("badreputation", 191621) == 4 && rules.coopStars("badreputation", 191622) == 5 &&
@@ -697,10 +708,14 @@ int runRuleChecks(const Rules& rules) {
         check("Star Power: two phrases (0.25 each) make it ready; a phrase during Star Power is not captured",
               captured == 2 && ready && r.count(K::StarPowerStart) == 1);
         check("Star Power: x2 score while deployed (4 x 50 + 3 x 100 + 50 = 550)", r.p->score() == 550);
-        // Drain: 0.5 at 0.125 a measure = 4 measures = 7680 ms after 3000.
-        Play r2 = play(s, rules, keys, 10670);
-        Play r3 = play(s, rules, keys, 10700);
-        check("Star Power: drains 0.125 a measure (0.5 lasts 4 measures)",
+        // Drain: two phrases at 0.125 a measure, 1 / deploy_beats a beat in RB
+        // (32: 0.125 a 4/4 measure); RB's phrase is spotlight_phrase (0.251),
+        // GH2's 0.25 (0.5 lasts 4 measures = 7680 ms after 3000) (D128).
+        const float phrase = std::getenv("GD05_SELFTEST_PHRASE_LEGACY") ? 0.25f : rules.rb.spotlightPhrase;
+        const int endMs = 3000 + int(std::lround(2 * phrase * 4 / 0.125f * 480));
+        Play r2 = play(s, rules, keys, float(endMs - 15));
+        Play r3 = play(s, rules, keys, float(endMs + 15));
+        check("Star Power: drains 0.125 a measure (two phrases' 0.5 lasts 4 measures)",
               r2.count(K::StarPowerEnd) == 0 && r3.count(K::StarPowerEnd) == 1);
     }
     {
@@ -714,9 +729,11 @@ int runRuleChecks(const Rules& rules) {
         Play r2 = play(s, rules, slow, 3500);
         const float m = r.p->starMeter(), m2 = r2.p->starMeter();
         std::printf("      (whammy: meter %.4f with a moving bar, %.4f with a slow one)\n", m, m2);
-        // 0.25 + 0.034 × (2920 - 1120) / 480 = 0.3775: from the first movement to the sustain's end.
+        // 0.25 + 0.034 × (2920 - 1120) / 480 = 0.3775: from the first movement to
+        // the sustain's end; the slow bar leaves the phrase's own (RB 0.251, D128).
+        const float phrase = std::getenv("GD05_SELFTEST_PHRASE_LEGACY") ? 0.25f : rules.rb.spotlightPhrase;
         check("whammy fills 0.034 a beat on a captured phrase's sustain; a bar slower than 0.0005/ms does not",
-              m > 0.37f && m < 0.385f && std::abs(m2 - 0.25f) < 1e-6f && r.count(K::WhammyStart) == 1);
+              m > 0.37f && m < 0.385f && std::abs(m2 - phrase) < 1e-6f && r.count(K::WhammyStart) == 1);
     }
     {
         std::vector<NoteSpec> notes;
@@ -844,8 +861,17 @@ int runSelfTest(const std::string& dataPath) {
         const int modFailures = scriptModSelfTest();
         GameData data(dataPath);
         std::printf("%s\n", data.description().c_str());
-        int scriptFailures = checkScripts(data);
         Rules rules = loadRules(data);
+        // GD05_SELFTEST_RULES=1 (development aid): only the judge's rule checks (seconds, not the songs).
+        if (const char* only = std::getenv("GD05_SELFTEST_RULES"); only && *only == '1') {
+            Rules gh2 = rules;  // as the full run: the GH2 judge's values
+            gh2.headPoints = 50, gh2.tailPoints = 25, gh2.streaks = {{0, 1}, {10, 2}, {20, 3}, {30, 4}};
+            int f = runRuleChecks(gh2);
+            f += runTwoPlayerChecks(gh2);
+            std::printf("%d rule check(s) failed\n", f);
+            return f ? 1 : 0;
+        }
+        int scriptFailures = checkScripts(data);
         std::vector<SongInfo> songs = loadSongs(data);
         std::printf("%zu songs; slop %.0f ms, head %d, tail %d, hopo_threshold %d ticks\n", songs.size(), rules.slopMs,
                     rules.headPoints, rules.tailPoints, rules.hopoThresholdTicks);
@@ -1046,11 +1072,15 @@ int runSelfTest(const std::string& dataPath) {
         // counted, until RB's own rule checks replace them (GD05-004) [I].
         Rules gh2 = rules;
         gh2.headPoints = 50, gh2.tailPoints = 25, gh2.streaks = {{0, 1}, {10, 2}, {20, 3}, {30, 4}};
-        std::printf("GH2 judge regression checks (informational, GH2's values):\n");
+        std::printf("judge rule checks (GH2's points and streaks; RB's phrases):\n");
         int gh2Failures = runRuleChecks(gh2);
         gh2Failures += runTwoPlayerChecks(gh2);
-        std::printf("%d GH2 regression check(s) differ (not RB rules; not counted)\n", gh2Failures);
-        const int ruleFailures = 0;
+        // Counted (GD05-099, D128): the checks now place phrases on RB's
+        // Overdrive pitch and RB's phrase value; GH2's co-op mode is skipped.
+        // GD05_SELFTEST_COUNT_LEGACY=1: reported, not counted.
+        static const bool countLegacy = std::getenv("GD05_SELFTEST_COUNT_LEGACY") != nullptr;
+        std::printf(countLegacy ? "%d GH2 regression check(s) differ (not RB rules; not counted)\n" : "%d judge rule check(s) failed\n", gh2Failures);
+        const int ruleFailures = countLegacy ? 0 : gh2Failures;
         std::printf("input checks (virtual controllers):\n");
         const int inputFailures = runInputChecks();
         std::printf(inputFailures ? "%d input check(s) failed\n" : "all input checks passed\n", inputFailures);
