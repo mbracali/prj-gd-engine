@@ -114,6 +114,9 @@ struct Element {
     // (UiSystem::drawCount): the mouse hit-tests what was drawn last.
     mutable float bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
     mutable uint64_t drawnIn = 0;
+    // Its last "\b" button glyph as drawn (screen units) and in which draw (the help bar check, GD10-062).
+    mutable float gx0 = 0, gy0 = 0, gx1 = 0, gy1 = 0;
+    mutable uint64_t glyphIn = 0;
     mutable bool updated = false;  // laid out by a draw (GetScreenElementPosition summed)
     // Its place in GH3's one draw list: (re)inserted when it becomes
     // visible or its z changes, in front of the older equals there, i.e.
@@ -216,6 +219,15 @@ public:
         float x0, y0, x1, y1;
     };
     std::vector<HelpPillHit> helperPills() const;
+    // gh4's help bar as drawn in the last frame (helper_pills / helper_pill
+    // descs, GD10-062): each pill's button glyph, its text's box and the
+    // bar's body sprite (screen units). Empty: no help bar drawn.
+    struct HelpBarPill {
+        float glyphX0, glyphY0, glyphX1, glyphY1;
+        float textX0, textY0, textX1, textY1;
+        float bodyY0, bodyY1;
+    };
+    std::vector<HelpBarPill> helpBarLayout() const;
     // The drawn bounds of an element (false: not drawn in the last frame).
     bool drawnBounds(uint32_t id, float& x0, float& y0, float& x1, float& y1) const;
     uint64_t drawCount() const { return drawCount_; }

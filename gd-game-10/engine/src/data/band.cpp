@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <stdexcept>
 
@@ -608,10 +609,18 @@ void Library::load(const Disc& disc) {
             SDL_Log("band: skeleton %s: %s", qbkey::names().get(e.name).c_str(), ex.what());
         }
     }
-    // gh4: perm_anims_in_game.pak (the hands' strums, frets and chords) [C data].
+    // gh4: perm_anims.pak (the hands' strums, frets and chords) and, in a
+    // song, perm_anims_in_game.pak (load_perm_ingame_anims: the crowd peds'
+    // GH3xp1_Crowd_* dances, the band's short intros); the two share no
+    // clip [C script guitar_gems.qb, data]. GD10_CROWD_ANIMS_LEGACY=1: the
+    // first only (before GD10-064: every crowd clip missing, a still crowd).
     const char* perm = "DATA/COMPRESSED/PAK/perm_anims.pak.xen";
-    if (!disc.exists(perm)) perm = "DATA/COMPRESSED/PAK/perm_anims_in_game.pak.xen";
+    const char* inGame = "DATA/COMPRESSED/PAK/perm_anims_in_game.pak.xen";
+    static const bool legacy = std::getenv("GD10_CROWD_ANIMS_LEGACY") != nullptr;
+    if (!disc.exists(perm)) perm = inGame;
     if (disc.exists(perm)) perm_ = readClips(*Pak::shared(disc, perm));
+    if (!legacy && perm != inGame && disc.exists(inGame))
+        for (auto& [k, c] : readClips(*Pak::shared(disc, inGame))) perm_.emplace(k, std::move(c));
 }
 
 std::shared_ptr<Library> Library::shared(const Disc& disc) {

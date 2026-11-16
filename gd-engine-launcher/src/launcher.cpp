@@ -142,7 +142,8 @@ bool Launcher::init() {
 
     log_.add("launcher started (gdul " + catalog_.launcherVersion() + ", " + platform::kOs + "-" + platform::kArch + ", " +
              std::to_string(catalog_.games().size()) + " games, " + std::to_string(catalog_.discsFound()) + " disc images found" +
-             (platform::isSteamDeck() ? ", Steam Deck: the games get their handheld settings" : "") + ")");
+             (platform::isSteamDeck() ? ", Steam Deck: the games get their handheld settings" : "") +
+             (platform::bigPicture() ? ", RecompLauncher Big Picture: full screen" : "") + ")");
     for (const Catalog::DiscDir& d : catalog_.discDirInfo())
         log_.add("disc folder " + d.path + " (" + d.what + "): " +
                  (d.problem.empty() ? std::to_string(d.isos) + " .iso, " + std::to_string(d.known) + " known" : d.problem));
@@ -332,14 +333,24 @@ void Launcher::rememberWindow() {
 }
 
 // After a game (and at start): the launcher's title, icon and app id again,
-// and always a window, never full screen, at the size and place it had.
+// and always a window, never full screen, at the size and place it had. In
+// RecompLauncher's Big Picture mode (platform::bigPicture) full screen
+// instead: the desktop's own mode, no border.
 void Launcher::restoreWindow() {
     SDL_SetAppMetadata(kTitle, catalog_.launcherVersion().c_str(), "io.github.mbracali.gdul");
     SDL_SetWindowTitle(window_, kTitle);
     if (icon_) SDL_SetWindowIcon(window_, icon_);
     SDL_GL_SetSwapInterval(1);
 #if !defined(__ANDROID__)  // Android has no window mode: its settings are left alone
-    leaveFullscreen();
+    if (platform::bigPicture()) {
+        SDL_SetWindowFullscreenMode(window_, nullptr);  // no exclusive mode left over from a game
+        if (!(SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN)) {
+            SDL_SetWindowFullscreen(window_, true);
+            SDL_SyncWindow(window_);
+        }
+    } else {
+        leaveFullscreen();
+    }
     SDL_SetWindowBordered(window_, true);
     SDL_SetWindowResizable(window_, true);
     SDL_SetWindowAlwaysOnTop(window_, false);
@@ -613,7 +624,7 @@ void Launcher::handle(const SDL_Event& e) {
         break;
     case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:  // the launcher is always a window (desktops; Android has no window mode)
 #if !defined(__ANDROID__)
-        SDL_SetWindowFullscreen(window_, false);
+        if (!platform::bigPicture()) SDL_SetWindowFullscreen(window_, false);  // Big Picture: full screen
 #endif
         break;
     case SDL_EVENT_DROP_BEGIN:

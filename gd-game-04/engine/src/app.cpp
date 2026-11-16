@@ -845,7 +845,16 @@ bool App::importProgress(const std::string& file) {
 void App::applyEnhanced(const std::string& key) {
     auto is = [&](const char* k) { return key.empty() || key == k; };
     if (is("screen_mode") && window_) {
-        const std::string m = enhanced_.get("screen_mode");
+        std::string m = enhanced_.get("screen_mode");
+        // RecompLauncher's Big Picture mode (GD04_FULLSCREEN=1, module_entry.cpp):
+        // Windowed counts as Full Screen (No Border) for this run; the saved
+        // setting stays.
+        if (const char* fs = SDL_getenv("GD04_FULLSCREEN"); fs && std::string(fs) == "1" && m == "windowed") {
+            static bool logged = false;
+            if (!logged) SDL_Log("gd04: full screen (RecompLauncher Big Picture): Windowed is not used this run");
+            logged = true;
+            m = "borderless";
+        }
         if (m == "windowed") {
             SDL_SetWindowFullscreen(window_, false);
         } else {

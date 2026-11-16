@@ -144,7 +144,7 @@ struct HostSetup {
         host.save_dir = saveDir.c_str();
         host.log = &hostLogLine;
         host.log_user = &logUser;
-        host.flags = platform::isSteamDeck() ? GD_HOST_HANDHELD : 0u;
+        host.flags = (platform::isSteamDeck() ? GD_HOST_HANDHELD : 0u) | (platform::bigPicture() ? GD_HOST_FULLSCREEN : 0u);
     }
 
     // The game's SDL_Log lines into logs/<file> in the save folder too.
@@ -269,6 +269,12 @@ GameRun runGameModule(SDL_Window*& window, SDL_GLContext& context, const Game& g
     run.started = true;
     run.exitCode = entry(&setup.host);
     run.seconds = double(SDL_GetTicksNS() - t0) / 1e9;
+    {  // How the game left the window (full screen in Big Picture mode, GD_HOST_FULLSCREEN).
+        int w = 0, h = 0;
+        SDL_GetWindowSizeInPixels(window, &w, &h);
+        SDL_Log("gdul: %s ended, window %s %dx%d", game.id.c_str(),
+                (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) ? "fullscreen" : "windowed", w, h);
+    }
 
     // Take everything back: the OpenGL window first, if the game had it made
     // for another API.

@@ -75,6 +75,12 @@ std::string displayName(const std::string& path);
 // board name "Jupiter" (LCD) or "Galileo" (OLED). Always false on Android.
 bool isSteamDeck();
 
+// RecompLauncher's Big Picture mode (GDUL-032): it starts a game with
+// RECOMPLAUNCHER_MODE=bigpicture when Play was pressed there (desktop
+// otherwise). The launcher and the game it starts are then full screen.
+// Always false on Android (no window mode there).
+bool bigPicture();
+
 // Shared libraries (the game modules).
 void* openLibrary(const std::string& path, std::string& error);
 void* librarySymbol(void* lib, const char* name);

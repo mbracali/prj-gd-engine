@@ -78,7 +78,13 @@ void main() {
     // softedge / softedgescale: the particle fades out where it nears the
     // scene behind it (uSoft.x the scale in metres, 0 off) [C data; I: the fade].
     if (uSoft.x > 0.0) {
-        float scene = gdViewZ(texture(sDepth, gl_FragCoord.xy * uSoft.yz).r);
+        // The scene's depth copy (ScreenFx::depthSnapshot) holds its rows
+        // reversed (copyDepth: as GH3's shaders read a screen texture, v =
+        // 0.5 - 0.5 y): this pixel's own row is the mirrored one (uSoft.w 1;
+        // 0 read the mirrored row: an upside-down band in the smoke, GD10-066).
+        vec2 at = gl_FragCoord.xy * uSoft.yz;
+        if (uSoft.w > 0.0) at.y = 1.0 - at.y;
+        float scene = gdViewZ(texture(sDepth, at).r);
         float fade = clamp((scene - gdViewZ(gl_FragCoord.z)) / uSoft.x, 0.0, 1.0);
         c.a *= fade;
         if (uParams.z > 0.0) c.rgb *= fade;
@@ -1356,8 +1362,11 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
         } u{};
         std::memcpy(u.vp, vp.m, sizeof u.vp);
         u.params[0] = b.alphaCut, u.params[1] = b.burn, u.params[2] = b.blend == 5 ? 1.0f : 0.0f;
-        if (sceneDepth && depthW > 0 && depthH > 0 && b.softEdge > 0)
-            u.soft[0] = b.softEdge, u.soft[1] = 1.0f / float(depthW), u.soft[2] = 1.0f / float(depthH);
+        // GD10_SOFT_DEPTH_LEGACY=1: the depth copy read unmirrored (before GD10-066).
+        static const bool softLegacy = SDL_getenv("GD10_SOFT_DEPTH_LEGACY") != nullptr;
+        static const bool noSoft = SDL_getenv("GD10_NO_SOFT_EDGE") != nullptr;  // development aid: the particles without their fade
+        if (sceneDepth && depthW > 0 && depthH > 0 && b.softEdge > 0 && !noSoft)
+            u.soft[0] = b.softEdge, u.soft[1] = 1.0f / float(depthW), u.soft[2] = 1.0f / float(depthH), u.soft[3] = softLegacy ? 0.0f : 1.0f;
         u.clip[0] = 0.05f, u.clip[1] = 4000.0f;
         c.textures[1] = sceneDepth ? sceneDepth : white_;
         c.samplers[1] = {gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};

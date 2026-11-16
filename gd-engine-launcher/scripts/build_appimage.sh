@@ -2,10 +2,15 @@
 # SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 # Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 # Packs a Linux launcher build folder (gdul-<v>-linux-x86_64, from build.sh
-# linux or build_linux_portable.sh) into gdul-<v>-x86_64.AppImage and its
-# .zsync, the same files as the .tar.gz in one program (GitHub issue #83).
+# linux or build_linux_portable.sh) into gdul-<v>-linux-x86_64.AppImage and
+# its .zsync, the same files as the .tar.gz in one program (GitHub issue #83),
+# and copies the build's recomplauncher.json next to it (GDUL-032: the release
+# publishes it beside the AppImage, RecompLauncher's Linux download).
 # The AppImage carries its update information (the GitHub releases' newest
 # gdul-*-x86_64.AppImage.zsync), so AppImageUpdate and AppManager update it.
+# That pattern matches the names up to 1.1.15 (gdul-<v>-x86_64.AppImage) and
+# after (gdul-<v>-linux-x86_64.AppImage), so an older AppImage updates to a
+# newer one: keep it as it is.
 # Inside it the launcher finds discs next to the .AppImage file
 # ($APPIMAGE), saves in the usual XDG folder and loads the game modules
 # from the mount. verify_bundle.sh checks the result.
@@ -19,7 +24,7 @@ set -euo pipefail
 shopt -s inherit_errexit
 here="$(cd "$(dirname "$0")" && pwd)"
 launcher="$(cd "$here/.." && pwd)"
-[ $# -eq 2 ] || { sed -n '4,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -eq 2 ] || { sed -n '4,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 build="$(cd "$1" && pwd)"
 mkdir -p "$2"
 out="$(cd "$2" && pwd)"
@@ -78,12 +83,14 @@ Categories=Game;
 X-AppImage-Version=$version
 EOF
 
-name="gdul-$version-x86_64.AppImage"
-rm -f "$out/$name" "$out/$name.zsync"
+name="gdul-$version-linux-x86_64.AppImage"
+rm -f "$out/$name" "$out/$name.zsync" "$out/recomplauncher.json"
 say "Packing $name (appimagetool $APPIMAGETOOL_VERSION, runtime $RUNTIME_VERSION)"
 (cd "$out" && ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 NO_APPSTREAM=1 \
   "$cache/appimagetool-$APPIMAGETOOL_VERSION-x86_64.AppImage" --no-appstream \
   --runtime-file "$cache/runtime-$RUNTIME_VERSION-x86_64" -u "$UPDATE_INFO" "$appdir" "$out/$name")
 [ -s "$out/$name" ] || { echo "build_appimage.sh: $name was not made" >&2; exit 1; }
 [ -s "$out/$name.zsync" ] || { echo "build_appimage.sh: $name.zsync was not made" >&2; exit 1; }
-say "Ready: $out/$name (+ .zsync)"
+# RecompLauncher's manifest next to the AppImage (it is inside it too).
+if [ -f "$build/recomplauncher.json" ]; then cp "$build/recomplauncher.json" "$out/"; fi
+say "Ready: $out/$name (+ .zsync, recomplauncher.json)"

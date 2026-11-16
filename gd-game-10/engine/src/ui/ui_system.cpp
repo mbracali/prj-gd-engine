@@ -1523,7 +1523,13 @@ void UiSystem::drawElementText(Canvas& c, const Element& e, const FontEntry& fe,
             if (!g) g = &f.glyphFor(uint16_t(line[i]));
             const font::Font& gff = gf->f;
             const float x0 = pen - (float(g->xOffset) + bearing) * lsx;
-            const float y0 = lineY + gff.lineHeight - (g->height - g->baseline) - float(gff.vShift);
+            float y0 = lineY + gff.lineHeight - (g->height - g->baseline) - float(gff.vShift);
+            // A "\b" glyph moves by (the text font's line height - the
+            // buttons font's) / 2: centred on the text's line (the help bar's
+            // buttons sat ~10 px over their pills, GD10-062) [C 0x82454C78].
+            // GD10_HELPER_LEGACY=1: the old placement.
+            static const bool helperLegacy = SDL_getenv("GD10_HELPER_LEGACY") != nullptr;
+            if (button && !helperLegacy) y0 -= (gff.lineHeight - f.lineHeight) * 0.5f;
             if (button) {
                 // A button glyph: its own texture, white unless the text is
                 // black (a shadow) [C 0x8232B5E8].
@@ -1531,6 +1537,11 @@ void UiSystem::drawElementText(Canvas& c, const Element& e, const FontEntry& fe,
                 if (bc[0] || bc[1] || bc[2]) bc = {255, 255, 255, col[3]};
                 std::vector<Vertex> q;
                 quad(q, *g, x0, y0, bc);
+                if (!shadowPass) {
+                    e.gx0 = e.gx1 = q[0].x, e.gy0 = e.gy1 = q[0].y, e.glyphIn = drawCount_;
+                    for (const Vertex& vx : q)
+                        e.gx0 = std::min(e.gx0, vx.x), e.gy0 = std::min(e.gy0, vx.y), e.gx1 = std::max(e.gx1, vx.x), e.gy1 = std::max(e.gy1, vx.y);
+                }
                 if (!verts.empty()) c.draw(verts.data(), verts.size(), int(fe.tex.id), Blend::Alpha), verts.clear();
                 c.draw(q.data(), q.size(), int(gf->tex.id), Blend::Alpha);
             } else {
@@ -1754,6 +1765,37 @@ std::vector<UiSystem::HelpPillHit> UiSystem::helperPills() const {
             best->x0 = std::min(best->x0, sp->bx0), best->y0 = std::min(best->y0, sp->by0);
             best->x1 = std::max(best->x1, sp->bx1), best->y1 = std::max(best->y1, sp->by1);
         }
+    return out;
+}
+
+std::vector<UiSystem::HelpBarPill> UiSystem::helpBarLayout() const {
+    // add_user_control_helper's tree: user_control_container (helper_pills)
+    // > helper_pill_bg (its helper_pill_body sprite) and helper_pill_menu >
+    // one helper_pill desc a helper: its helper_pill_menu holds
+    // helper_button ("\b<n>") then helper_description [C data, script].
+    std::vector<HelpBarPill> out;
+    const Element* box = find(K("user_control_container"));
+    if (!box) return out;
+    const Element* body = nullptr;
+    std::vector<const Element*> stack{box};
+    std::vector<std::pair<const Element*, const Element*>> pairs;  // (button, description)
+    while (!stack.empty()) {
+        const Element* n = stack.back();
+        stack.pop_back();
+        if (n->hidden) continue;
+        if (!body && n->texture == K("helper_pill_body") && n->drawnIn == drawCount_) body = n;
+        for (size_t i = 0; i + 1 < n->children.size(); ++i) {
+            const Element* b = n->children[i].get();
+            if (b->glyphIn == drawCount_ && b->drawnIn == drawCount_) pairs.emplace_back(b, n->children[i + 1].get());
+        }
+        for (const auto& c : n->children) stack.push_back(c.get());
+    }
+    if (!body) return out;
+    for (const auto& [b, d] : pairs) {
+        if (d->drawnIn != drawCount_) continue;
+        out.push_back({b->gx0, b->gy0, b->gx1, b->gy1, d->bx0, d->by0, d->bx1, d->by1, body->by0, body->by1});
+    }
+    std::sort(out.begin(), out.end(), [](const HelpBarPill& a, const HelpBarPill& b) { return a.glyphX0 < b.glyphX0; });
     return out;
 }
 
@@ -2309,9 +2351,45 @@ void UiSystem::addNatives() {
         return !arr.arr->values.empty();
     });
     vm_.addNative("ResolveScreenElementID", [this](Vm&, ScriptRun& run, qb::Struct& p) {
-        Element* e = resolve(Vm::param(p, K("id")));
+        // id = <id> | {<id> child = ...} | [{id = <id>} {local_id = <l>} ...]
+        // (a path: each local id under the last, a child first, else any
+        // descendant [I]); the result into `param` (default resolved_id):
+        // HUD_attach_widget_* take `param = id` (GD10-063) [C scripts].
+        // GD10_HUD_LEGACY=1: as before (resolved_id, no paths).
+        static const bool legacy = SDL_getenv("GD10_HUD_LEGACY") != nullptr;
+        const qb::Value* idv = Vm::param(p, K("id"));
+        Element* e = nullptr;
+        if (!legacy && idv && idv->type == qb::Type::Array && idv->arr) {
+            for (const qb::Value& step : idv->arr->values) {
+                if (!step.st) {
+                    e = nullptr;
+                    break;
+                }
+                if (const qb::Value* first = step.st->find(K("id"))) {
+                    e = resolve(first);
+                } else if (const qb::Value* lid = step.st->find(K("local_id")); lid && e) {
+                    Element* found = nullptr;
+                    for (auto& c : e->children)
+                        if (c->localId == lid->key) found = c.get();
+                    std::vector<Element*> q{e};
+                    for (size_t i = 0; !found && i < q.size(); ++i)
+                        for (auto& c : q[i]->children) {
+                            if (c->localId == lid->key) {
+                                found = c.get();
+                                break;
+                            }
+                            q.push_back(c.get());
+                        }
+                    e = found;
+                }
+                if (!e) break;
+            }
+        } else {
+            e = resolve(idv);
+        }
         if (!e) return false;
-        if (qb::Struct* l = locals(run)) Vm::set(*l, K("resolved_id"), Vm::makeKey(e->id));
+        const qb::Value* pn = legacy ? nullptr : Vm::param(p, K("param"));
+        if (qb::Struct* l = locals(run)) Vm::set(*l, pn && pn->key ? pn->key : K("resolved_id"), Vm::makeKey(e->id));
         return true;
     });
     vm_.addNative("LaunchEvent", [this](Vm&, ScriptRun&, qb::Struct& p) {

@@ -66,6 +66,10 @@ public:
                                       const std::array<uint8_t, 4>& rgba, uint32_t align, const TextStyle& style)>;
     using WidthFn = std::function<float(uint32_t font, const std::string&, float scale, float spacing)>;
     void setText(TextFn text, WidthFn width) { text_ = std::move(text), width_ = std::move(width); }
+    // gh4's own HUD is up (ui/hud_widgets.h, GD10-063): only the alerts
+    // ("<n> Note Streak!", "Star Power Ready", their glow burst and
+    // lightning) draw here, not GH3's rock meter, score body and counter.
+    void setAlertsOnly(bool on) { alertsOnly_ = on; }
 
     // The song's start (current_starttime, ms): the intro's times count from it.
     void setStart(double startMs) { startMs_ = startMs; }
@@ -142,6 +146,7 @@ private:
     Track rock_, score_, note_;
     std::array<Track, 3> bigTube_;  // tubes 4..6: initial (0,0) -> final (0,-170)
     bool started_ = false;
+    bool alertsOnly_ = false;
 };
 
 // The HUD alerts' scripts, shared by both HUDs [C scripts hud_show_note_streak_combo,

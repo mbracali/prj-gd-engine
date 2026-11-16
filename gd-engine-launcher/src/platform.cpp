@@ -396,6 +396,15 @@ bool isSteamDeck() {
 #endif
 }
 
+bool bigPicture() {
+#if defined(__ANDROID__)
+    return false;
+#else
+    const char* m = SDL_getenv("RECOMPLAUNCHER_MODE");
+    return m && std::string(m) == "bigpicture";
+#endif
+}
+
 void* openLibrary(const std::string& path, std::string& error) {
 #ifdef _WIN32
     // The module's own folder first for its DLLs (FFmpeg), then the launcher's (SDL3).

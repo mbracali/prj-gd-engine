@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/natives_gh4.h"
 
+#include <SDL3/SDL_stdinc.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -75,6 +77,40 @@ void addGh4Natives(qs::Vm& vm) {
         }
         return true;
     });
+    // PlayerInfoEquals <n> <field> = <value> ...: every named field of
+    // player n's info equal (HUD_attach_widget_player_multiplier's
+    // part = vocals; cash milestones, the results' notes hit) [C scripts; I:
+    // the comparison].
+    // GD10_HUD_LEGACY=1: these three stay unhandled (false), as before.
+    const bool hudLegacy = SDL_getenv("GD10_HUD_LEGACY") != nullptr;
+    if (!hudLegacy) vm.addNative("PlayerInfoEquals", [](Vm& v, ScriptRun&, qb::Struct& p) {
+        int player;
+        uint32_t field;
+        args(p, player, field);
+        qb::Struct* st = status(v, player);
+        if (!st) return false;
+        bool any = false;
+        for (const qb::Item& it : p.items) {
+            if (!it.name) continue;
+            const qb::Value* have = st->find(it.name);
+            if (!have) return false;
+            any = true;
+            const bool keyish = it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr;
+            if (keyish ? have->key != it.value.key : have->number() != it.value.number()) return false;
+        }
+        return any;
+    });
+    // GameMode_IsBandScoring: one score for the band (the cooperative modes,
+    // <mode>_props cooperative = true) [C data gamemodes.qb; I: the rule].
+    // GameMode_IsBandBattle: false (Metallica has no band battle mode) [I].
+    if (!hudLegacy) vm.addNative("GameMode_IsBandScoring", [](Vm& v, ScriptRun&, qb::Struct&) {
+        const qb::Value* gm = v.global(K("game_mode"));
+        if (!gm) return false;
+        if (const qb::Value* ps = v.global(qbkey::key(qbkey::name(gm->key) + "_props")); ps && ps->st)
+            if (const qb::Value* c = v.globals().field(*ps->st, K("cooperative"))) return c->key == K("true") || c->number() != 0;
+        return false;
+    });
+    if (!hudLegacy) vm.addNative("GameMode_IsBandBattle", [](Vm&, ScriptRun&, qb::Struct&) { return false; });
     // SetPlayerInfo <n> <field> = <value> (named items set those fields).
     vm.addNative("SetPlayerInfo", [](Vm& v, ScriptRun&, qb::Struct& p) {
         int player;

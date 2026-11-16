@@ -124,6 +124,7 @@ target_sources(gd10 PRIVATE
   src/tests/venuetest.cpp
   src/ui/song_screen.cpp
   src/ui/song_hooks.cpp
+  src/ui/hud_widgets.cpp
   src/ui/song_preview.cpp
   src/ui/fx2d.cpp
   src/ui/front_end.cpp

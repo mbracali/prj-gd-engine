@@ -1,0 +1,298 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "Guitar Dream Universal Launcher",
+  "repo": "mbracali/prj-gd-engine",
+  "start": {
+    "program": [
+      "Guitar Dream Universal Launcher.exe",
+      "Guitar Dream Universal Launcher",
+      "Guitar Dream Universal Launcher.app/Contents/MacOS/Guitar Dream Universal Launcher"
+    ],
+    "args": []
+  },
+  "inputs": [
+    {
+      "id": "gd01",
+      "label": "Your disc image of Guitar Hero for PlayStation 2 (USA, serial SLUS-21224): .iso or .chd",
+      "role": "game",
+      "formats": [
+        {
+          "type": "file",
+          "extensions": [
+            "iso",
+            "chd"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gd02",
+      "label": "Your disc image of Guitar Hero II for Xbox 360 (USA, Rev 1): .iso or .chd",
+      "role": "game",
+      "formats": [
+        {
+          "type": "file",
+          "extensions": [
+            "iso",
+            "chd"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gd03",
+      "label": "Your disc image of Guitar Hero Encore: Rocks the 80s for PlayStation 2 (USA, serial SLUS-21586): .iso or .chd",
+      "role": "game",
+      "formats": [
+        {
+          "type": "file",
+          "extensions": [
+            "iso",
+            "chd"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gd04",
+      "label": "Your disc image of Guitar Hero III: Legends of Rock for Xbox 360 (USA, Rev 1): .iso or .chd",
+      "role": "game",
+      "formats": [
+        {
+          "type": "file",
+          "extensions": [
+            "iso",
+            "chd"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gd05",
+      "label": "Your disc image of Rock Band for Xbox 360 (USA): .iso or .chd",
+      "role": "game",
+      "formats": [
+        {
+          "type": "file",
+          "extensions": [
+            "iso",
+            "chd"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gd10",
+      "label": "Your disc image of Guitar Hero: Metallica for Xbox 360 (USA, Europe): .iso or .chd",
+      "role": "game",
+      "formats": [
+        {
+          "type": "file",
+          "extensions": [
+            "iso",
+            "chd"
+          ]
+        }
+      ]
+    }
+  ],
+  "games": [
+    {
+      "id": "gd01",
+      "name": "Guitar Hero",
+      "args": [
+        "--play",
+        "gd01",
+        "--exit-after",
+        "--iso",
+        "{input:gd01}"
+      ],
+      "inputs": [
+        "gd01"
+      ],
+      "saves": [
+        "{config}/gd-engine/gd01/*.json",
+        "{local}/gd-engine/gd01/*.json",
+        "{home}/Library/Application Support/gd-engine/gd01/*.json"
+      ]
+    },
+    {
+      "id": "gd02",
+      "name": "Guitar Hero II",
+      "args": [
+        "--play",
+        "gd02",
+        "--exit-after",
+        "--iso",
+        "{input:gd02}"
+      ],
+      "title_id": "415607E7",
+      "inputs": [
+        "gd02"
+      ],
+      "saves": [
+        "{config}/gd-engine/gd02/*.json",
+        "{local}/gd-engine/gd02/*.json",
+        "{home}/Library/Application Support/gd-engine/gd02/*.json"
+      ]
+    },
+    {
+      "id": "gd03",
+      "name": "Guitar Hero Encore: Rocks the 80s",
+      "args": [
+        "--play",
+        "gd03",
+        "--exit-after",
+        "--iso",
+        "{input:gd03}"
+      ],
+      "inputs": [
+        "gd03"
+      ],
+      "saves": [
+        "{config}/gd-engine/gd03/*.json",
+        "{local}/gd-engine/gd03/*.json",
+        "{home}/Library/Application Support/gd-engine/gd03/*.json"
+      ]
+    },
+    {
+      "id": "gd04",
+      "name": "Guitar Hero III: Legends of Rock",
+      "args": [
+        "--play",
+        "gd04",
+        "--exit-after",
+        "--iso",
+        "{input:gd04}"
+      ],
+      "title_id": "415607F7",
+      "inputs": [
+        "gd04"
+      ],
+      "saves": [
+        "{config}/gd-engine/gd04/*.json",
+        "{local}/gd-engine/gd04/*.json",
+        "{home}/Library/Application Support/gd-engine/gd04/*.json"
+      ]
+    },
+    {
+      "id": "gd05",
+      "name": "Rock Band",
+      "args": [
+        "--play",
+        "gd05",
+        "--exit-after",
+        "--iso",
+        "{input:gd05}"
+      ],
+      "title_id": "45410829",
+      "inputs": [
+        "gd05"
+      ],
+      "saves": [
+        "{config}/gd-engine/gd05/*.json",
+        "{local}/gd-engine/gd05/*.json",
+        "{home}/Library/Application Support/gd-engine/gd05/*.json"
+      ]
+    },
+    {
+      "id": "gd10",
+      "name": "Guitar Hero: Metallica",
+      "args": [
+        "--play",
+        "gd10",
+        "--exit-after",
+        "--iso",
+        "{input:gd10}"
+      ],
+      "title_id": "41560830",
+      "inputs": [
+        "gd10"
+      ],
+      "saves": [
+        "{config}/gd-engine/gd10/*.json",
+        "{local}/gd-engine/gd10/*.json",
+        "{home}/Library/Application Support/gd-engine/gd10/*.json"
+      ]
+    }
+  ],
+  "saves": [
+    "{config}/gd-engine/gd01/*.json",
+    "{local}/gd-engine/gd01/*.json",
+    "{home}/Library/Application Support/gd-engine/gd01/*.json",
+    "{config}/gd-engine/gd02/*.json",
+    "{local}/gd-engine/gd02/*.json",
+    "{home}/Library/Application Support/gd-engine/gd02/*.json",
+    "{config}/gd-engine/gd03/*.json",
+    "{local}/gd-engine/gd03/*.json",
+    "{home}/Library/Application Support/gd-engine/gd03/*.json",
+    "{config}/gd-engine/gd04/*.json",
+    "{local}/gd-engine/gd04/*.json",
+    "{home}/Library/Application Support/gd-engine/gd04/*.json",
+    "{config}/gd-engine/gd05/*.json",
+    "{local}/gd-engine/gd05/*.json",
+    "{home}/Library/Application Support/gd-engine/gd05/*.json",
+    "{config}/gd-engine/gd10/*.json",
+    "{local}/gd-engine/gd10/*.json",
+    "{home}/Library/Application Support/gd-engine/gd10/*.json"
+  ],
+  "folders": {
+    "saves": [
+      {
+        "path": "{config}/gd-engine",
+        "if": "{config}/gd-engine/gdul"
+      },
+      {
+        "path": "{home}/Library/Application Support/gd-engine",
+        "if": "{home}/Library/Application Support/gd-engine/gdul"
+      },
+      {
+        "path": "{local}/gd-engine"
+      }
+    ],
+    "logs": [
+      {
+        "path": "{config}/gd-engine/gdul/logs",
+        "if": "{config}/gd-engine/gdul/logs"
+      },
+      {
+        "path": "{home}/Library/Application Support/gd-engine/gdul/logs",
+        "if": "{home}/Library/Application Support/gd-engine/gdul/logs"
+      },
+      {
+        "path": "{local}/gd-engine/gdul/logs"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "id": "saves",
+      "label": "Saves and settings",
+      "help": "Each game's folder (gd01, gd02...): careers, Enhanced Options, controllers. gdul is the launcher's.",
+      "open": "saves"
+    },
+    {
+      "id": "logs",
+      "label": "Logs",
+      "help": "One log per game from its last run, to send with a bug report.",
+      "open": "logs"
+    }
+  ],
+  "exit_codes": {
+    "0": "ok",
+    "1": "The game didn't start, or stopped on an error. Its log (Logs, under the settings) says why; a missing or wrong disc image is the usual cause.",
+    "2": "Guitar Dream didn't understand its command line. Remove any launch options you added on the game's page."
+  },
+  "looks": {
+    "allowed": false,
+    "reason": "Each game has its own picture options (Enhanced Options: sharpening, film grain, colour, bloom, AI upscaling), and its graphics API can change between games in the same window, which ReShade doesn't follow."
+  },
+  "requires": [
+    "start",
+    "start.linux",
+    "start.macos",
+    "exit_codes"
+  ],
+  "min": "0.90.0-beta.36"
+}

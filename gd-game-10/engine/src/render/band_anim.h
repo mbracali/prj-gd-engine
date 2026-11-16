@@ -155,6 +155,18 @@ public:
     // ragdoll_markforreset's song times so far (gh4 handle_moment_anim_blending
     // / end_moment_anim: a mocap clip's start and end) [C scripts].
     const std::vector<double>& ragdollResets() const { return ragdollResets_; }
+    // The node the member stands on at song time t (after advancing to t):
+    // a Band_PlayClip clip's startnodes.<member> ('drummer_start': the
+    // zone's TRG_Waypoint_drummer_start) while it plays, "" for its own
+    // start node (band_movetostartnode a game frame after the clip ends)
+    // [C scripts Band_PlayClip, end_moment_anim, return_characters_to_idle_at_song_time;
+    // data: the clip structs' startnodes; I: Band_PlayClip_Finish_CFunc teleports].
+    const std::string& startNodeAt(double t) const {
+        static const std::string own;
+        for (auto it = nodeHist_.rbegin(); it != nodeHist_.rend(); ++it)
+            if (it->first <= t) return it->second;
+        return own;
+    }
 
     struct Stats {
         int bodyAnims = 0, strums = 0, frets = 0, chords = 0, drumHits = 0, cymbals = 0, facials = 0, perfEvents = 0;
@@ -245,8 +257,11 @@ private:
         float startFrame = 0;
         float endFrame = -1;  // Band_PlayClip's endframe (-1: none)
         const qb::Struct* arms = nullptr;
+        std::string startNode;  // the clip struct's startnodes.<member> ("": none)
     };
     std::vector<Mocap> mocaps_;
+    std::vector<std::pair<double, std::string>> nodeHist_;  // startNodeAt: (song ms, node), ascending
+    void moveToNode(double t, const std::string& node);
 
     Rig rig_;
     const band::Model* model_ = nullptr;

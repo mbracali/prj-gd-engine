@@ -2125,6 +2125,13 @@ void App::applyEnhanced() {
 #ifdef __ANDROID__
     if (mode == "windowed") mode = "borderless";  // always full screen (immersive) on phones
 #endif
+    // RecompLauncher's Big Picture mode (GD01_FULLSCREEN=1, module_entry.cpp):
+    // Windowed counts as Full Screen (No Border) for this run; the saved
+    // setting stays.
+    if (const char* fs = SDL_getenv("GD01_FULLSCREEN"); fs && std::string(fs) == "1" && mode == "windowed") {
+        if (screenModeApplied_ != "borderless") SDL_Log("gd01: full screen (RecompLauncher Big Picture): Windowed is not used this run");
+        mode = "borderless";
+    }
     if (window_ && mode != screenModeApplied_) {
         bool ok = true;
         if (mode == "windowed") {

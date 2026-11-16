@@ -11,6 +11,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <iterator>
 #include <sstream>
@@ -27,6 +28,7 @@
 #include "script/vm.h"
 #include "ui/front_end.h"
 #include "ui/port_screens.h"
+#include "ui/ui_system.h"
 
 namespace {
 
@@ -187,7 +189,8 @@ Walk::Walk(const std::string& name) : name_(name) {
         // optional: with the prompt first (D23) the first set list visit already started it.
         steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000, true});
         steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, "wait", C}, 20000});
-        steps_.push_back({"song", {}, 30000});
+        // gh4's HUD in the song (GD10-063), 12 s in (the streak past 10, the nixie up).
+        steps_.push_back({"song", {Op("wait", 12000), "check:hud", "shot:hud@"}, 30000});
         steps_.push_back({"song_over", {}, 600000});
         // The results (song breakdown), then on.
         steps_.push_back({"uistate_song_breakdown", {"wait", "wait", "wait", "wait", "wait", "wait", C}, 30000});
@@ -1050,6 +1053,7 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
             SDL_Log("ui-dump of %s:", s.state.c_str());
             fe.ui().dump();
         }
+        if (name_ == "menus" || name_ == "qp_pause") checkHelpBar(fe, s.state);
         return out;
     }
     if (key_ < s.keys.size()) {
@@ -1200,6 +1204,32 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
 }
 
 // The port's walks' acts (mouse, gamepads, stickyaxis).
+void Walk::checkHelpBar(FrontEnd& fe, const std::string& where) {
+    // The help bar (GD10-062): each pill's button glyph centred on the bar's
+    // body (0x82454C78 centres a "\\b" glyph on its line) within 2 units,
+    // left of its text, and the pills apart (each glyph right of the
+    // previous pill's text).
+    const auto pills = fe.ui().helpBarLayout();
+    if (pills.empty()) return;
+    float worstDy = 0, worstOverlap = -1e9f;
+    for (size_t i = 0; i < pills.size(); ++i) {
+        const auto& h = pills[i];
+        const float dy = (h.glyphY0 + h.glyphY1) / 2 - (h.bodyY0 + h.bodyY1) / 2;
+        if (std::fabs(dy) > std::fabs(worstDy)) worstDy = dy;
+        worstOverlap = std::max(worstOverlap, h.glyphX1 - h.textX0);
+        if (i > 0) worstOverlap = std::max(worstOverlap, pills[i - 1].textX1 - h.glyphX0);
+    }
+    SDL_Log("walk: help bar at %s: %zu pills, glyph centre - body centre %.1f, worst overlap %.1f", where.c_str(), pills.size(), worstDy,
+            worstOverlap);
+    if (std::fabs(worstDy) > 2 || worstOverlap > 0) {
+        failed_ = true;
+        char b[200];
+        std::snprintf(b, sizeof b, "help bar at %s: glyph off its body by %.1f, overlap %.1f", where.c_str(), worstDy, worstOverlap);
+        failure_ = b;
+        SDL_Log("walk: FAILED: %s", failure_.c_str());
+    }
+}
+
 bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
     auto fail = [&](const std::string& why) {
         failure_ = why;
@@ -1350,6 +1380,87 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         qs::Vm::set(*copy, qbkey::key("style"), qs::Vm::makeInt(sy));
         st->st = copy;
         std::printf("  character: %s outfit %d style %d\n", v.c_str(), o, sy);
+        return true;
+    }
+    if (what == "check:hud") {
+        // gh4's in-song HUD (GD10-063): setup_band_hud's desc built (every
+        // element of the layout's desc and the descs inside it), its visible
+        // sprites and texts drawn on screen, and the widgets' outputs equal to
+        // the player's values: the score text, the needle (health 0..2 ->
+        // -66..66), the nixie (the multiplier's texture) [C scripts guitar_hud.qb, hud_widgets.qb].
+        ui::UiSystem& ui = fe.ui();
+        qs::Vm& vm = fe.vm();
+        const ui::Element* root = ui.find(qbkey::key("hud_root"));
+        if (!root) return fail("no gh4 HUD (hud_root)");
+        std::function<int(const qb::Value*)> countEl = [&](const qb::Value* el) -> int {
+            if (!el || !el->st) return 0;
+            int n = 1;
+            if (const qb::Value* pr = el->st->find(qbkey::key("props")); pr && pr->st)
+                if (const qb::Value* d = pr->st->find(qbkey::key("desc")); d && (d->type == qb::Type::String || d->type == qb::Type::WString))
+                    if (const qb::Value* g = vm.global(qbkey::key("uidesc_" + d->str)); g && g->st) n += countEl(g->st->find(qbkey::key("elements")));
+            if (const qb::Value* ch = el->st->find(qbkey::key("children")); ch && ch->arr)
+                for (const qb::Value& c : ch->arr->values) n += countEl(&c);
+            return n;
+        };
+        const qb::Value* used = vm.global(qbkey::key("g_hud_2d_struct_used"));
+        const qb::Value* dn = used && used->st ? used->st->find(qbkey::key("desc_interface")) : nullptr;
+        const qb::Value* desc = dn ? vm.global(qbkey::key("uidesc_" + dn->str)) : nullptr;
+        const int want = desc && desc->st ? countEl(desc->st->find(qbkey::key("elements"))) : -1;
+        int have = 0, visible = 0, drawn = 0, offscreen = 0;
+        std::function<void(const ui::Element&, bool)> walkEl = [&](const ui::Element& e, bool shown) {
+            for (const auto& c : e.children) {
+                ++have;
+                const bool sh = shown && !c->hidden && c->alpha > 0.01f && c->rgba[3] > 0;
+                if (sh && (c->texture || !c->text.empty())) {
+                    ++visible;
+                    if (c->drawnIn == ui.drawCount()) {
+                        ++drawn;
+                        if (c->bx1 < 0 || c->by1 < 0 || c->bx0 > 1280 || c->by0 > 720) ++offscreen;
+                    } else {
+                        std::printf("  hud: not drawn: %s (texture %s, text '%s')\n", qbkey::name(c->localId).c_str(), qbkey::name(c->texture).c_str(),
+                                    c->text.c_str());
+                    }
+                }
+                walkEl(*c, sh);
+            }
+        };
+        walkEl(*root, true);
+        std::printf("  hud: %s, %d elements (desc %d), %d visible sprites / texts, %d drawn, %d off screen\n", dn ? dn->str.c_str() : "?", have, want,
+                    visible, drawn, offscreen);
+        if (have != want) return fail("HUD elements " + std::to_string(have) + " of the desc's " + std::to_string(want));
+        if (visible == 0 || drawn != visible || offscreen) return fail("HUD drawn " + std::to_string(drawn) + " of " + std::to_string(visible));
+        auto findLocal = [&](const char* lid) -> const ui::Element* {
+            std::vector<const ui::Element*> q{root};
+            for (size_t i = 0; i < q.size(); ++i) {
+                if (q[i]->localId == qbkey::key(lid) && !q[i]->hidden) return q[i];
+                for (const auto& c : q[i]->children) q.push_back(c.get());
+            }
+            return nullptr;
+        };
+        const qb::Value* ps = vm.global(qbkey::key("player1_status"));
+        if (!ps || !ps->st) return fail("no player1_status");
+        const long long score = (long long)std::floor(qs::Vm::number(ps->st->find(qbkey::key("score")), -1));
+        const float health = qs::Vm::number(ps->st->find(qbkey::key("current_health")), -1);
+        const ui::Element* sc = findLocal("Score");
+        const ui::Element* needle = findLocal("needle");
+        std::printf("  hud: score %lld, text '%s'; health %.3f, needle %.2f\n", score, sc ? sc->text.c_str() : "-", double(health),
+                    needle ? double(needle->rot) : -999.0);
+        if (!sc || sc->text != std::to_string(score)) return fail("HUD score text");
+        if (!needle || std::fabs(needle->rot - (-66.0f + 132.0f * std::clamp(health / 2, 0.0f, 1.0f))) > 0.5f) return fail("HUD needle");
+        // The coloured nixie: band_hud_score_<x>a (<2x>b in Star Power).
+        const int run = int(qs::Vm::number(ps->st->find(qbkey::key("current_run")), 0));
+        const int base = run < 10 ? 1 : run < 20 ? 2 : run < 30 ? 3 : 4;
+        const bool sp = qs::Vm::number(ps->st->find(qbkey::key("star_power_used")), 0) != 0;
+        char nx[40];
+        std::snprintf(nx, sizeof nx, sp ? "band_hud_score_%db" : "band_hud_score_%da", sp ? base * 2 : base);
+        bool nixieOk = false;
+        std::vector<const ui::Element*> q{root};
+        for (size_t i = 0; i < q.size(); ++i) {
+            if (q[i]->localId == qbkey::key("nixie") && q[i]->texture == qbkey::key(nx)) nixieOk = true;
+            for (const auto& c : q[i]->children) q.push_back(c.get());
+        }
+        std::printf("  hud: streak %d, nixie %s %s\n", run, nx, nixieOk ? "shown" : "MISSING");
+        if (!nixieOk) return fail(std::string("HUD nixie ") + nx);
         return true;
     }
     if (what == "check:mag_photo") {
@@ -1761,7 +1872,8 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
             fe.ui().dump();
         }
         menuShots_.push_back(n);
-        return true;
+        if (name_ == "menus" || name_ == "qp_pause") checkHelpBar(fe, n);
+        return !failed_;
     }
     if (what == "dialog:savedir") {  // GD10_DIALOG: the user-file dialogs answered with the walk's save folder
         SDL_setenv_unsafe("GD10_DIALOG", host.walkSaveDir().c_str(), 1);

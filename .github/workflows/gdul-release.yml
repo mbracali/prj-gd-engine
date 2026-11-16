@@ -11,9 +11,11 @@
 # too for the game to ship. Builds Linux x86_64, Windows x86_64, macOS arm64
 # and Android arm64 with gd-engine-launcher/scripts/build.sh, and the Steam
 # Deck download (Linux built in the Steam Runtime "sniper" SDK), and publishes
-# gdul-<v>-<os>-<arch> (.tar.gz, .zip, .apk; os: linux, steamdeck, windows,
-# macos, android), the Linux build also as gdul-<v>-x86_64.AppImage (+ .zsync)
-# and SHA256SUMS.txt.
+# gdul-<v>-<os>-<arch> (.zip, .apk, .tar.gz; os: windows, macos, android,
+# steamdeck), the Linux build as gdul-<v>-linux-x86_64.AppImage (+ .zsync, and
+# its recomplauncher.json next to it) and as gdul-<v>-portable-x86_64.tar.gz,
+# and SHA256SUMS.txt. RecompLauncher (GDUL-032) takes the file whose name has
+# the system and the processor: "linux" is only in the AppImage's name.
 # See docs/platform/release-process.md.
 name: gdul release
 
@@ -162,10 +164,11 @@ jobs:
         with:
           name: previous
           path: ${{ runner.temp }}/previous-all
+      # (gdul-*-linux-x86_64.tar.gz up to 1.1.15, gdul-*-portable-x86_64.tar.gz since.)
       - name: Unpack the previous Linux download
         run: |
           mkdir -p "$RUNNER_TEMP/previous"
-          for f in "$RUNNER_TEMP"/previous-all/gdul-*-linux-x86_64.tar.gz; do
+          for f in "$RUNNER_TEMP"/previous-all/gdul-*-portable-x86_64.tar.gz "$RUNNER_TEMP"/previous-all/gdul-*-linux-x86_64.tar.gz; do
             [ -f "$f" ] && tar -xzf "$f" -C "$RUNNER_TEMP/previous"
           done
           ls "$RUNNER_TEMP/previous"
@@ -175,15 +178,16 @@ jobs:
       - name: Package
         run: |
           mkdir -p out
-          tar -C gd-engine-launcher/local_builds -czf "out/gdul-$V-linux-x86_64.tar.gz" "gdul-$V-linux-x86_64"
+          tar -C gd-engine-launcher/local_builds -czf "out/gdul-$V-portable-x86_64.tar.gz" "gdul-$V-linux-x86_64"
       - name: Verify the download (every ready game's module and libraries)
-        run: gd-engine-launcher/scripts/verify_bundle.sh "out/gdul-$V-linux-x86_64.tar.gz"
-      # The same build as an AppImage (#83), with its update information and
-      # .zsync for AppImageUpdate / AppManager; the .tar.gz stays as it is.
+        run: gd-engine-launcher/scripts/verify_bundle.sh "out/gdul-$V-portable-x86_64.tar.gz"
+      # The same build as an AppImage (#83), the Linux download: with its
+      # update information, its .zsync for AppImageUpdate / AppManager and
+      # recomplauncher.json next to it (a release asset, for RecompLauncher).
       - name: AppImage
         run: gd-engine-launcher/scripts/build_appimage.sh "gd-engine-launcher/local_builds/gdul-$V-linux-x86_64" out
-      - name: Verify the AppImage (every ready game's module and libraries, update information, .zsync)
-        run: gd-engine-launcher/scripts/verify_bundle.sh "out/gdul-$V-x86_64.AppImage"
+      - name: Verify the AppImage (every ready game's module and libraries, update information, .zsync, recomplauncher.json)
+        run: gd-engine-launcher/scripts/verify_bundle.sh "out/gdul-$V-linux-x86_64.AppImage"
       - name: Build logs (on failure)
         if: failure()
         uses: actions/upload-artifact@v7
@@ -609,8 +613,8 @@ jobs:
             echo "| System | Download | Then |"
             echo "|---|---|---|"
             echo "| **Windows** 10/11 | \`gdul-$V-windows-x86_64.zip\` | Extract it and run \`Guitar Dream Universal Launcher.exe\`. |"
-            echo "| **Linux** (any distribution from 2022 on) | \`gdul-$V-linux-x86_64.tar.gz\` | Extract it and run \`Guitar Dream Universal Launcher\`. |"
-            echo "| **Linux AppImage** | \`gdul-$V-x86_64.AppImage\` | Make it executable and run it; put your discs next to it (or in \`original_isos/\` next to it). AppImageUpdate and AppManager can update it. |"
+            echo "| **Linux** (any distribution from 2022 on) | \`gdul-$V-linux-x86_64.AppImage\` | Make it executable and run it; put your discs next to it (or in \`original_isos/\` next to it). AppImageUpdate and AppManager can update it. |"
+            echo "| **Linux** (.tar.gz, the same files) | \`gdul-$V-portable-x86_64.tar.gz\` | Extract it and run \`Guitar Dream Universal Launcher\`. |"
             echo "| **Steam Deck** | \`gdul-$V-steamdeck-x86_64.tar.gz\` | In Desktop Mode, extract it, put your discs in \`original_isos/\`, add \`Guitar Dream Universal Launcher\` to Steam as a non-Steam game, play in Gaming Mode (see \`STEAM-DECK.txt\`). The games start with the Deck's settings. |"
             if [ -f "dist/gdul-$V-macos-arm64.zip" ]; then
               echo "| **macOS** (Apple silicon) | \`gdul-$V-macos-arm64.zip\` | Extract it, move the extracted folder out of Downloads with the Finder (so macOS runs the app where it is and finds \`original_isos/\`), then right-click \`Guitar Dream Universal Launcher.app\` > Open (it is not notarised). |"

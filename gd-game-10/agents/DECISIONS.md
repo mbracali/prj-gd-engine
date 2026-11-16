@@ -579,3 +579,84 @@ Why: misc_fx.qb / bg_screenfx.qb / guitar_cameras.qb [C]; the blend's curve
 is the engine's (not read) [I]. A note at its own shot's cut is dropped
 with the cut (the original kills it a game frame later).
 Undo: the cameraNoteFx call in VenueStage::draw.
+
+## D112. The in-game perm anims: perm_anims_in_game.pak too [C script, data] (2026-11-16, world agent)
+
+What: band::Library reads perm_anims.pak and perm_anims_in_game.pak
+(load_perm_ingame_anims, guitar_gems.qb, loads it for a song); the two
+share no clip. The second holds every GH3xp1_Crowd_* dance the crowd
+peds' anim sets name (and the band's short intros).
+Why: GD10-064: with perm_anims.pak alone every crowd pick was missing
+(756 of 756 in a Battery run), so the peds stood in their bind pose and
+the cards never changed.
+Undo: GD10_CROWD_ANIMS_LEGACY=1 (data/band.cpp Library::load).
+
+## D113. A Band_PlayClip clip plays on its startnodes [data; C scripts; I the teleport] (2026-11-16, world agent)
+
+What: each clip struct names startnodes.<member> ('drummer_start', ...:
+<zone>_TRG_Waypoint_<node>); while the clip plays the member stands on that
+node, a game frame after it ends on its own start node again
+(end_moment_anim / return_characters_to_idle_at_song_time:
+band_movetostartnode after a gameframe wait) [C scripts]. That
+Band_PlayClip_Finish_CFunc (a gameframe after the clip starts) is what
+moves the member is [I]; the port moves it with the clip's start.
+Why: GD10-065: the clips' root motion is relative to that node; 97 clips
+(Battery, Creeping Death, For Whom the Bell Tolls, Master of Puppets, Seek
+and Destroy, The Unforgiven) put the guitarist, bassist and singer on
+drummer_start. Played from their own nodes they walked up to 3.5 m past the
+stage's front and into each other (the clips' cameras, on their own nodes,
+framed empty stage). Now: 0..51 samples > 1 m past the front waypoint (was
+3395..6964), 0..6 member pairs < 0.5 m apart (was 48..341) in z_mop.
+Undo: GD10_BAND_STARTNODES_LEGACY=1 (render/band_anim.cpp moveToNode).
+
+## D114. Soft particles read the depth copy's mirrored row [I] (2026-11-16, world agent)
+
+What: the particles' soft edge reads ScreenFx::depthSnapshot at v = 1 -
+gl_FragCoord.y / h: copyDepth stores the rows reversed (for GH3's own
+shaders, which read a screen texture at v = 0.5 - 0.5 y).
+Why: GD10-066: read at gl_FragCoord.y, the smoke faded by the depth of the
+mirrored row: holes in the smoke and dark copies shaped like the band (and
+the drums, sticks, trusses) upside down. Same on local, opengl3 and vulkan.
+Undo: GD10_SOFT_DEPTH_LEGACY=1 (render/particles.cpp, uSoft.w).
+
+## D115. A "\b" button glyph centred on its text's line [C 0x82454C78] (2026-11-16, UI agent)
+
+What: drawElementText places a buttons-font glyph inside a text of another
+font (bLH - tLH) / 2 higher, i.e. (tLH - bLH) / 2 lower for the help bar's
+fontgrid_title_a1 (84) and buttons_x360 (57): +13.5 font units, the draw's
+`(buttons line height - text font line height) * 0.5` for a \b / \B code
+[C 0x82454C78].
+Why: GD10-062: the help bar's button glyphs sat 10.9 px over their pills'
+middle (the "legend overlapping, out of place"); now 0.8 px, on every
+screen the menus and qp_pause walks reach (the walks check it: glyph
+centre - body centre within 2, glyph left of its text, pills apart).
+Undo: GD10_HELPER_LEGACY=1 (ui/ui_system.cpp drawElementText).
+
+## D116. gh4's own HUD: setup_band_hud's desc and AttachHudWidget [C scripts; I the widget rules] (2026-11-16, UI agent)
+
+What: one-player songs run start_gem_scroller's setup_band_hud (after
+hud_parent = alias_g1, as get_highway_pos_and_scale): update_hud_layout
+picks hud_1g (z_in_game), the HUD_attach_widget_* scripts attach widgets
+through the new native AttachHudWidget (ui/hud_widgets.cpp): each frame
+the input (Score, note_streak, starpower_amount / _active, health,
+multiplier, projected_song_stars, has_missed_note, time) sets the outputs
+(descpropertyfloat, descpropertypair, screenelementconditionalfloat,
+seinttostring, setubes, sestarmeter, screenelementalphatoggle /
+rgbaswitch, senotestreaklights, semultipliernixie,
+screenelementplayerhealthblink). hud_root fades in (0.25 s) at
+current_intro's hud_start_time + hud_move_time (move_2d_elements_to_default);
+player1_streak_started / _ended (streak over 9, C 0x82118710) and
+starpower_bulbs_unhide / _hide (across 50) reach the HUD's handlers; GH3's
+Hud2D keeps only its alerts. Also: ResolveScreenElementID takes `param`
+and the [{id} {local_id}] path form (the widgets' targets were never
+found), PlayerInfoEquals, GameMode_IsBandScoring (cooperative),
+GameMode_IsBandBattle (false).
+[I]: the C widget types are not decoded; their rules come from their
+parameters (value_range / range / textures / colors), GH3's tube fill and
+streak-light rules (0x821164D0, 0x82117204) and Function_82118C30's star
+projection (score / judged base score: 3 + to star4's cutoff, 4 + to
+star5's). Two-player modes keep render/hud2p.
+Why: GD10-063: the port drew GH3's HUD sprites by GH3's names; most are not
+on gh4's disc (13,357 missing texture draws in a quickplay song).
+Undo: GD10_HUD_LEGACY=1 (no setup_band_hud, GH3's Hud2D, the old
+ResolveScreenElementID).
