@@ -1019,12 +1019,19 @@ int runSelfTest(const std::string& dataPath) {
         std::printf(inputFailures ? "%d input check(s) failed\n" : "all input checks passed\n", inputFailures);
         const int calibrationFailures = checkCalibration(data, songs, rules);
         const int speedFailures = checkSongSpeed(data, songs, rules);
+        // GD03-108 (#105): Android renders 900 lines (gd01's default), not the panel's own; the Deck 800; the desktop the window's (0).
+        auto pd = [](const char* key, bool deck, bool android) { const char* v = ui::platformDefault(key, deck, android); return std::string(v ? v : "-"); };
+        const bool resOk = pd("internal_res", false, true) == "900" && pd("internal_res", true, false) == "800" && pd("internal_res", false, false) == "-" &&
+                           pd("touch", false, true) == "on" && ui::enhancedSetting("internal_res")->values.front() == std::string("0");
+        std::printf("platform defaults: internal_res Android %s, Steam Deck %s, desktop %s; touch on Android %s%s\n", pd("internal_res", false, true).c_str(),
+                    pd("internal_res", true, false).c_str(), pd("internal_res", false, false).c_str(), pd("touch", false, true).c_str(), resOk ? "" : " FAILED");
+        const int platformFailures = !resOk;
         const int wordingFailures = checkPcWording(data);
         std::printf(wordingFailures ? "%d string(s) still name the PS2 or a console\n" : "PC wording: no PS2 or console in any language\n",
                     wordingFailures);
         std::printf("%d song audio file(s) with problems, %d script(s) not decoded\n", audioFailures, scriptFailures);
         std::printf(chartFailures ? "%d chart(s) not fully hit\n" : "all charts fully hit\n", chartFailures);
-        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || wordingFailures || calibrationFailures || speedFailures ? 1 : 0;
+        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || wordingFailures || calibrationFailures || speedFailures || platformFailures ? 1 : 0;
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;

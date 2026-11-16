@@ -2720,9 +2720,12 @@ std::string App::hdrStatus() {
 // full screen, 60 FPS, no FPS counter, 800 lines, touch on; the Steam Deck
 // download (-DGD03_STEAM_DECK=ON) and a launcher that sees a Deck
 // (GD03_HANDHELD=1, module_entry.cpp). Saved settings still win.
+// Android: touch on and 900 lines (ui::platformDefault, GD03-108).
 static const char* deckDefault(const std::string& key) {
 #if defined(__ANDROID__)
-    if (key == "touch") return "on";
+    const bool android = true;
+#else
+    const bool android = false;
 #endif
 #if defined(GD03_STEAM_DECK)
     const bool deck = true;
@@ -2730,13 +2733,7 @@ static const char* deckDefault(const std::string& key) {
     const char* h = SDL_getenv("GD03_HANDHELD");
     const bool deck = h && h[0] == '1';
 #endif
-    if (!deck) return nullptr;
-    if (key == "screen_mode") return "fullscreen";
-    if (key == "max_fps") return "60";
-    if (key == "fps_counter") return "off";
-    if (key == "internal_res") return "800";
-    if (key == "touch") return "on";  // on by default on the Steam Deck and Android (universal_mechanisms.md 1.2.2)
-    return nullptr;
+    return ui::platformDefault(key, deck, android);
 }
 
 std::string App::enhancedValue(const std::string& key) {

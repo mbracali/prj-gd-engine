@@ -100,6 +100,18 @@ const EnhancedSetting* enhancedSetting(const std::string& key) {
     return nullptr;
 }
 
+const char* platformDefault(const std::string& key, bool deck, bool android) {
+    if (deck) {
+        if (key == "screen_mode") return "fullscreen";
+        if (key == "max_fps") return "60";
+        if (key == "fps_counter") return "off";
+        if (key == "internal_res") return "800";
+    }
+    if (key == "touch" && (deck || android)) return "on";  // on by default on the Steam Deck and Android (universal_mechanisms.md 1.2.2)
+    if (key == "internal_res" && android) return "900";      // gd01's Android default (GD03-108, #105)
+    return nullptr;
+}
+
 bool enhancedValid(const EnhancedSetting& s, const std::string& value) {
     if (s.values.empty()) {
         char* end = nullptr;
