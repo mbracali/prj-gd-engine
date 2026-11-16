@@ -10,6 +10,7 @@
 #include <cstring>
 #include <mutex>
 
+#include "gd/core/platform/chd.h"
 #include "gd/core/platform/paths.h"
 #include "utf8.h"
 
@@ -190,7 +191,10 @@ std::FILE* openFile(const std::string& path, const char* mode) {
 #endif
 }
 
-std::unique_ptr<RandomAccessFile> RandomAccessFile::open(const std::string& path, std::string* error) {
+namespace {
+
+// The file's own bytes, whatever they hold.
+std::unique_ptr<RandomAccessFile> openPlain(const std::string& path, std::string* error) {
     if (isContentUri(path)) return openSdl(path, error);
 #ifdef __ANDROID__
     if (std::FILE* f = openFile(path, "rb")) {
@@ -217,12 +221,28 @@ std::unique_ptr<RandomAccessFile> RandomAccessFile::open(const std::string& path
 #endif
 }
 
+}  // namespace
+
+std::unique_ptr<RandomAccessFile> RandomAccessFile::open(const std::string& path, std::string* error) {
+    std::unique_ptr<RandomAccessFile> f = openPlain(path, error);
+    // A CHD disc image (GDUL-030): the image it holds, so every reader of a
+    // disc gets .chd next to .iso. Known by its signature, never by the name.
+    uint8_t sig[kChdSignatureBytes];
+    if (f && f->size() >= 124 && f->read(0, sig, sizeof(sig)) && isChdSignature(sig, sizeof(sig))) {
+        std::string why;
+        auto chd = openChd(std::shared_ptr<RandomAccessFile>(std::move(f)), &why);
+        if (!chd) setError(error, path + ": " + why);
+        return chd;
+    }
+    return f;
+}
+
 std::unique_ptr<RandomAccessFile> RandomAccessFile::fromMemory(std::vector<uint8_t> bytes) {
     return std::make_unique<MemoryFile>(std::move(bytes));
 }
 
 bool readFile(const std::string& path, std::vector<uint8_t>& out, std::string* error) {
-    auto f = RandomAccessFile::open(path, error);
+    auto f = openPlain(path, error);
     if (!f) return false;
     if (f->size() > uint64_t(SIZE_MAX / 2)) {
         setError(error, path + ": too large to read at once");

@@ -919,7 +919,7 @@ void SDLCALL onPicked(void* user, const char* const* files, int) {
 
 void Launcher::pickDisc(Game& g) {
     log_.add("load disc for " + g.id + ": file dialog opened");
-    static const SDL_DialogFileFilter kFilters[] = {{"Disc images (*.iso)", "iso;ISO"}, {"All files", "*"}};
+    static const SDL_DialogFileFilter kFilters[] = {{"Disc images (*.iso, *.chd)", "iso;ISO;chd;CHD"}, {"All files", "*"}};
     std::string start;
     if (!g.iso.empty()) start = platform::parentDir(g.iso);
     for (const std::string& d : catalog_.discDirs())

@@ -344,7 +344,7 @@ std::string loadRememberedPath() {
         for (const auto& e : std::filesystem::directory_iterator(std::filesystem::path(base), ec)) {
             std::string ext = e.path().extension().string();
             for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
-            if (ext == ".iso" && e.is_regular_file(ec)) return e.path().string();
+            if ((ext == ".iso" || ext == ".chd") && e.is_regular_file(ec)) return e.path().string();
         }
     }
 #endif
@@ -1922,8 +1922,10 @@ void App::userFiles(const std::string& action) {
         SDL_ShowOpenFolderDialog(dialogDone, req, window_, nullptr, false);
     } else if (action == "locate_iso") {
         // The first screen: pick the disc image instead of dropping it on the window.
-        static const SDL_DialogFileFilter kIso[] = {{"Guitar Hero (PS2) disc image", "iso;ISO"}};
-        SDL_ShowOpenFileDialog(dialogDone, req, window_, kIso, 1, nullptr, false);
+        // .chd too (GDUL-030); "All files" as well: Android has no MIME type for .chd,
+        // so its file dialog would hide them behind the .iso filter alone.
+        static const SDL_DialogFileFilter kIso[] = {{"Guitar Hero (PS2) disc image (.iso, .chd)", "iso;ISO;chd;CHD"}, {"All files", "*"}};
+        SDL_ShowOpenFileDialog(dialogDone, req, window_, kIso, 2, nullptr, false);
     } else {
         static const SDL_DialogFileFilter kJson[] = {{"GD01 settings", "json"}};
         SDL_ShowOpenFileDialog(dialogDone, req, window_, kJson, 1, nullptr, false);
