@@ -74,6 +74,7 @@ void Mixer::play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks,
     written_ = 0, read_ = 0, sourceEnded_ = false, underruns_ = 0;
     source_ = std::move(stream);
     leadInFrames_ = static_cast<int64_t>(leadInMs * rate_ / 1000.0);
+    leadInMs_ = leadInMs;
     leadIn_ = leadInFrames_;
     songFrames_ = 0;
     guitarGain_ = 1, guitarTarget_ = 1;
@@ -107,6 +108,10 @@ void Mixer::setTempo(double tempo) {
     tempo_ = std::fabs(tempo - 1.0) < 1e-6 ? 1.0 : std::clamp(tempo, 0.25, 4.0);
     stretch_.reset(int(ring_.size()), rate_);
     stretch_.setTempo(tempo_);
+    // The lead-in passes at the tempo too: the song clock starts where play()
+    // put it (-leadInMs) and reaches 0 as the song's first frame plays.
+    leadInFrames_ = static_cast<int64_t>(leadInMs_ / tempo_.load() * rate_ / 1000.0);
+    leadIn_ = leadInFrames_;
     SDL_UnlockAudioStream(stream_);
 }
 

@@ -151,6 +151,7 @@ private:
     // Song Speed: the stretcher (audio thread once set), its tempo and its output per channel.
     gd::core::audio::TimeStretch stretch_;
     std::atomic<double> tempo_{1};
+    double leadInMs_ = 0;  // play()'s
     std::vector<std::vector<float>> stretched_;
     std::vector<float*> stretchPtrs_;
     std::atomic<float> backgroundGain_{1};

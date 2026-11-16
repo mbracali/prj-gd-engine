@@ -200,4 +200,5 @@ private:
     double songFrac_ = 0;
     gd::core::audio::TimeStretch stretch_;  // Song Speed (under mutex_)
     std::atomic<double> tempo_{1};
+    double leadInMs_ = 0;  // play()'s
 };

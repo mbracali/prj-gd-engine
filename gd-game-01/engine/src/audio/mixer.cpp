@@ -158,6 +158,7 @@ void Mixer::play(std::unique_ptr<VgsStream> stream, std::vector<Track> tracks, d
         scratch_.assign(stream->channels(), {});
         vgs_ = std::move(stream);
         leadInFrames_ = static_cast<int64_t>(leadInMs * rate_ / 1000.0);
+        leadInMs_ = leadInMs;
         leadIn_ = leadInFrames_;
         fixedT_ = -leadInMs;
         framesPushed_ = 0;
@@ -185,6 +186,10 @@ void Mixer::setTempo(double tempo) {
         tempo_ = std::fabs(tempo - 1.0) < 1e-6 ? 1.0 : std::clamp(tempo, 0.25, 4.0);
         stretch_.reset(int(scratch_.size()), rate_);
         stretch_.setTempo(tempo_);
+        // The lead-in passes at the tempo too: the song clock starts where
+        // play() put it (-leadInMs) and reaches 0 as the song's first frame plays.
+        leadInFrames_ = static_cast<int64_t>(leadInMs_ / tempo_.load() * rate_ / 1000.0);
+        leadIn_ = leadInFrames_;
     }
     SDL_UnlockAudioStream(stream_);
 }
