@@ -2139,6 +2139,11 @@ pattern). Each says what, why and how to undo it.
   crowd was heard only from crowd_begin and the song's own crowd channels
   once the music ran. Now the RB config is read; want_intro is followed.
   [I: the stream cross-fade (+0x3c old stream) and pan 3 are not done.]
+  Follow-up (11-16): there is no cross-fade [C]: a new stream moves the
+  playing one to +0x3c (0x824399D8); the poll (0x8243AEC8) starts the new
+  one once it is ready (stream vtable +0x8, then +0x14) and deletes the old
+  there. The port's streams are decoded in memory, so its switch is the
+  same cut.
 - **Measured (GD05_SFXLOG=1 `crowd timing` lines, GD05_END_AT=20000):**
   orangecrush (theater_08, --song): intro stream none -> crowd_theater_intro
   at song -2582 ms (the track extends at -2000), first level loop none ->
