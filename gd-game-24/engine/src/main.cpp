@@ -7,6 +7,8 @@
 //   gd24 <disc>                  the game: for now our own status screen (the
 //                                disc's title and songs), ENHANCED and GAMEPADS
 //   gd24 --formattest <disc>     every file the port reads, parsed; one line per failure
+//   gd24 --charttest <disc> [<song> | all] [--notes]
+//                                BEATMATCH.STR: difficulty images, gem lists, tempo-map check
 //   gd24 --inputtest             the input layer with virtual controllers (no disc)
 //   gd24 --audiotest <disc> [<song> | all] [--play]
 //                                decodes the song previews (ATRAC3plus) and checks them
@@ -23,6 +25,7 @@
 #include "data/text_table.h"
 #include "data/umd.h"
 #include "tests/audiotest.h"
+#include "tests/charttest.h"
 #include "tests/inputtest.h"
 
 namespace {
@@ -109,14 +112,16 @@ int formatTest(const gd24::Umd& umd) {
 }  // namespace
 
 int gd24Main(int argc, char** argv) {
-    bool formattest = false, audiotest = false, play = false;
+    bool formattest = false, audiotest = false, charttest = false, play = false, notes = false;
     std::string disc, song;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--formattest") formattest = true;
         else if (a == "--audiotest") audiotest = true;
+        else if (a == "--charttest") charttest = true;
         else if (a == "--play") play = true;
-        else if (audiotest && !disc.empty() && !a.empty() && a[0] != '-') song = a;
+        else if (a == "--notes") notes = true;
+        else if ((audiotest || charttest) && !disc.empty() && !a.empty() && a[0] != '-') song = a;
         else if (a == "--inputtest") return inputTest();
         else if (a == "--version") return std::printf("gd24 %s\n", GD24_VERSION), 0;
         else if (!a.empty() && a[0] != '-') disc = a;
@@ -134,6 +139,7 @@ int gd24Main(int argc, char** argv) {
     SDL_Log("gd24 %s: disc %s (%zu files)", GD24_VERSION, umd->discId().c_str(), umd->files().size());
     if (formattest) return formatTest(*umd);
     if (audiotest) return audioTest(*umd, song, play);
+    if (charttest) return chartTest(*umd, song, notes);
     umd.reset();
     Options opt;
     opt.disc = disc;

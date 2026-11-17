@@ -19,6 +19,7 @@ target_sources(gd24 PRIVATE
   src/app.cpp
   src/audio/at3_preview.cpp
   src/audio/audio_out.cpp
+  src/data/beatmatch.cpp
   src/data/json.cpp
   src/data/param_sfo.cpp
   src/data/song_list.cpp
@@ -31,6 +32,7 @@ target_sources(gd24 PRIVATE
   src/platform/settings.cpp
   src/render/canvas.cpp
   src/tests/audiotest.cpp
+  src/tests/charttest.cpp
   src/tests/inputtest.cpp
   src/ui/gamepads_screen.cpp
 )
