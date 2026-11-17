@@ -170,3 +170,43 @@ draw code is not found yet), Overdrive / phrases / scoring (GD24-003), the
 PSP controls' real defaults (the DTA's slots are the PS2 legacy), Easy vs
 Medium lists (same counts on several songs: which vector is which [I]),
 the venue behind the see-through tracks (GD24-005).
+
+## GD24-003 gameplay rules (11-17, about 4 h)
+
+Done (commits d0e7afb and the docs):
+
+- Small fix: the song screen's bottom bar (score / streak) no longer runs
+  into the help line (help at the top, smaller).
+- Time signatures read from the BEATMATCH images [C data, all 55 files];
+  bars from them.
+- The rules from the code (FORMATS.md "Gameplay rules", DECISIONS D7-D9):
+  phrases (2-bar windows [I]) and the Phrase Indicator, capture (the track
+  plays on its own, released after 8 bars / 11 at x2+ [C]), multiplier int +
+  1 up to 5, reset by a phrase miss after the capture timer [C], gem /
+  capture points x multiplier [C, values I], Overdrive doubling (5 -> 11)
+  [C], Overdrive runs fill the Energy meter, deploy at half (Space / Cross),
+  failed tracks rescued [C text], per-track health, crowd meter, failed
+  tracks, song failure [C structure, values I]; Easy / Medium protection [C].
+- Song screen: our HUD (score, multiplier, streak, Energy, crowd, healths),
+  the indicator frame, track tints, the results panel at the preview's end
+  (or at a failure); GD24_AUTOPLAY now changes tracks and deploys Overdrive.
+- `gd24 --rulestest "$ISO" [song|all] [--difficulty n]` (headless, < 1 s
+  for 41 songs): perfect autoplay passes every song and its score replays
+  from the event log by the rule alone; an idle player fails at the time
+  predicted from the chart alone (ABC Expert 41,133 ms vs 41,120 predicted;
+  all 41 songs within one frame); a gem left out after five captures sets
+  the multiplier back to 1. 41/41 songs pass on Easy, Medium, Hard, Expert.
+  ABC Expert perfect: 174,675 (gems 78,175 + captures 96,500), 35 / 35
+  phrases, x5 at the 4th capture, x11 in Overdrive, 2 Overdrives.
+- Screenshots looked at: ABC Expert autoplay mid-song (HUD, captured
+  tracks), the indicator frame on Vocals, the results panel.
+
+Not found: the tuning block's source (0x08b5a440: no code writes it, no
+disc file holds the DTA's values as floats), so all point / health values
+are [I]; the DTA's `max_points` is ~11x our perfect scores.
+
+Left: the real numbers; solo sections (0x08000000 gems); sustains (no
+duration field identified); stars (min / max points); the original's HUD,
+indicator and results UI (GD24-004); stem muting (needs the song audio);
+the capture queue's finer rules; bouncing arrows; Quick Switch / Track
+Wrapping options.

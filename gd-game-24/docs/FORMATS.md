@@ -346,3 +346,57 @@ licence we do not have [C header]. Not needed; DLC is out of scope.
   or character) [C data], `ROCKERMAKER.STR` 18 MB (character parts).
 - UI: `UI_0..2.STR`, 24 MB, UIList / UIElement / UIAnim / UITextBox objects
   ("script linking not valid in stream builds") [C strings].
+
+## Gameplay rules (GD24-003)
+
+What the disc and the executable say about the rules, and what gd24 uses
+(`src/game/song_play.*`, `gd24 --rulestest`). Our own words.
+
+**Bars** [C data, all 55 BEATMATCH files]: each image holds the song's time
+signatures as 16-byte records {u32 bar, u32 numerator, u32 denominator,
+u32 tick}, the first at bar 0 / tick 0, pointed to by a vector {pointer,
+count, capacity = count} (seven equal copies per image); the ticks agree
+with the bars (tick difference = bar difference x num x 1920 / den). E.g.
+ABC: 4/4, bar 19 3/4, bar 20 4/4, ... (9 changes). Next to them: the tempo
+map, 12-byte records {u32 tick, u32 microseconds per beat, f32 ms}, and a
+beat list of 16-byte records every 960 ticks (not used yet).
+
+**Gem flags** [C data, I meaning]: the gem record's last word carries
+0x02000000 on runs of about 6 gems, the last one 0x06000000 (0x04000000 =
+the run's end): the Overdrive phrases ("glowing white notes"); 0x08000000
+on drum-solo gems (the code raises the multiplier per such gem in a solo
+mode [C 0x08a91240], not done).
+
+**The rules in the code** (the gameplay object at `*0x08b7d5a8`, one 0x130
+block per track from +0x40; the tuning values sit in a block at 0x08b5a440
+that no code writes: loaded at run time from a source not found, so every
+number is [I]):
+
+| What | Where | Rule |
+|---|---|---|
+| Multiplier | 0x08a0a204 and its copies | float at +0x67c; shown = int part clamped 1..5; Overdrive (+0x664 bit 8) doubles it, 5 -> 11 (the `pa_2x..11x` badges); no-phrase modes use notes / 10 + 1 [C] |
+| Gem hit | 0x08a91240 | score (+0x688) += gem points x shown multiplier; the track's health (+0xd0) += a per-mode amount (x another in Overdrive; in Overdrive all four tracks) [C] |
+| Capture | 0x08a86368 | multiplier = int + 1 (at most 5), bonus = capture points x shown multiplier added to the score, the track's captured count +1, a timer set [C] |
+| Miss | 0x08a8de08 | only for gems inside the track's phrase: health -= a per-difficulty amount (x a factor off the active track, x another in Overdrive); after the capture timer, multiplier = 1 [C] |
+| Release | 0x08a80ad8 | captured tracks queue with their bar; one is released once more than 7 bars went by (unless the multiplier is 2+ and fewer than 11) or when no other track has a phrase coming [C, the queue's finer rules I] |
+| Crowd | 0x08af608c | mean of the four healths - (+0x69c) x a per-difficulty amount, shown in 5 steps; Easy keeps healths at 2 x the miss amount for the first 50 % of the song, Medium 30 % [C] |
+
+**The rules in the text** [C, STR_EN_GAMEPLAY_TIPS.TXT]: hit all the notes in
+the Phrase Indicator to play a phrase; the instrument then plays on its own
+for a while; the indicator follows the player's track; a red track is in
+danger, blinking about to fail; a failed instrument can't be played and
+Overdrive rescues it; glowing white notes hit perfectly fill the Energy
+meter, half full deploys Overdrive (two buttons); "With no failed
+instruments, go into Overdrive to double your score multiplier"; "wait to
+deploy Overdrive until your multiplier is at 5x"; misses outside the
+indicator don't break the streak, notes outside it still score; the results
+count the longest streak in phrases and each instrument's phrases.
+
+**The DTA** in every image (`(game (player (health (init 0.6) (failure
+-0.04 .. -0.07) (capture 0.06)) (max_streak 8) (scoring (gem_value 25)
+(max_bar_value 500) ...)))`, `(beatmatcher (phrases (finder (bar 2))
+(capturer (abp 2 2))))`, per song `(max_points ...)` / `(min_points ...)`)
+is largely inherited from Harmonix's earlier games; gd24 takes its numbers
+where the code's are missing [I]. `max_points` is about 1,000 x the song's
+gem count on all four tracks (760..1,520), far above our perfect scores
+(about 1/11): the real point values are larger or the formula differs [I].

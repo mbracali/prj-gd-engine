@@ -52,3 +52,46 @@ no key is searched for. Songs play their unencrypted `<SONG>_PREVIEW.AT3`
 from the player's disc. Everything is read at run time from the player's
 own disc, like the other games.
 Why: owner. Undo: none planned.
+
+## D7. Gameplay rules: the code's structure, the numbers inferred (GD24-003, 2026-11-17)
+
+What: `src/game/song_play.*` follows the code's rules (FORMATS.md "Gameplay
+rules": multiplier int + 1 per capture up to 5, doubled in Overdrive with 5
+-> 11, gem / capture points x multiplier, misses inside the phrase reset it
+after the capture timer, release after 8 bars / 11 at x2+, crowd = mean
+health - failed tracks, Easy / Medium protection) [C]. The numbers come from
+a tuning block the code reads at run time and that was not found, so they
+are [I]: gem 25 and capture 500 points (DTA gem_value / max_bar_value),
+health 0.6 at the start, -0.04..-0.07 per missed phrase (DTA), +0.02 per hit,
++0.06 per capture, an unplayed phrase on another track costs the same as a
+miss (once per phrase), red under 0.3, blinking under 0.15, crowd penalty
+0.15 per failed track, capture timer 1.5 s, an Overdrive run +1/4 meter, a
+full meter 32 beats.
+Why: the owner wants the original's rules; the structure is known, the
+values are not. Undo: replace `Rules` (song_play.h) when the tuning block's
+source is found.
+
+## D8. Phrases are 2-bar windows; the song fails at an empty crowd meter [I] (2026-11-17)
+
+What: a phrase = a track's gems inside bars [2k, 2k + 2) of the song's own
+time signatures (the DTA's `(phrases (finder (bar 2)))`); the indicator
+takes the first phrase that has not started when the player gets there,
+moves to the next after a capture or a miss; a wrong press during the
+phrase fails it ("Go easy on the buttons!"); captured / failed tracks can't
+be played (their gems play on their own / are lost); switching never skips
+tracks. The song fails when the crowd meter reaches 0. Overdrive rescues
+failed tracks (health back to 0.6).
+Why: the PhraseFinder / BarFinder code was not followed to the end; the
+tips describe the behaviour. Undo: when the finder's rule is decoded.
+
+## D9. Our own HUD, Phrase Indicator frame and results screen for now (2026-11-17)
+
+What: the song's bottom bar shows score, multiplier, phrase streak, Energy,
+crowd and the four healths; the active track's phrase is framed in orange
+(beat-bar strips); tracks are tinted (captured dim, danger red / blinking,
+failed dark red); the song ends with its preview (the full audio is not
+played) and shows a results panel with the original's numbers (score,
+longest streak in phrases, each instrument's phrases captured / attempted,
+notes, best multiplier, Overdrive). The original's HUD / results UI (UI_*.STR)
+is GD24-004.
+Why: the original's UI is not decoded yet. Undo: GD24-004.

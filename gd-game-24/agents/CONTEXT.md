@@ -67,6 +67,7 @@ gd-game-24/engine/build/dev/gd24 --charttest "$ISO"   # 41 songs x 4 tracks x 4 
 gd-game-24/engine/build/dev/gd24 --charttest "$ISO" abc --notes   # one song's gems
 GD24_SAVE_DIR=/tmp/x gd-game-24/engine/build/dev/gd24 --inputtest  # virtual pads, 33 checks
 gd-game-24/engine/build/dev/gd24 --synctest "$ISO"    # the previews' place in the charts (3 s)
+gd-game-24/engine/build/dev/gd24 --rulestest "$ISO" [song|all] [--difficulty 0..3]   # the gameplay rules, headless (< 1 s)
 ```
 
 ## Decrypting EBOOT.BIN (done once, local only)
