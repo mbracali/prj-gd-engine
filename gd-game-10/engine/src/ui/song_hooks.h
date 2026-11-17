@@ -158,6 +158,8 @@ private:
     void frameHud(SongScreen& s, double now);
     HudWidgets hud_;
     bool gh4Hud_ = false, hudShown_ = false;
-    std::vector<double> basePrefix_;   // base score of notes [0, i) (projected_song_stars)
-    bool streakOn_ = false, bulbsOn_ = false;  // player1_streak_started / starpower_bulbs_unhide raised
+    std::array<std::vector<double>, 2> basePrefix_;  // each player's base score of notes [0, i) (projected_song_stars)
+    std::array<bool, 2> streakOn_{};                  // player<n>_streak_started raised
+    bool bulbsOn_ = false;                            // starpower_bulbs_unhide raised
+    int hudPlayers_ = 1;                              // the gh4 HUD's players (GD10-067: 2 in face-off)
 };

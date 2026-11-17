@@ -125,6 +125,7 @@ public:
     double songMs() const { return lastMs_; }
     Hud2D& hud() { return hud_; }
     // The HUD texts' font functions (both HUDs).
+    void setHud2pAlertsOnly(bool on) { hud2p_.setAlertsOnly(on); }
     void setHudText(Hud2D::TextFn text, Hud2D::WidthFn width) {
         hud_.setText(text, width);
         introText_ = text;

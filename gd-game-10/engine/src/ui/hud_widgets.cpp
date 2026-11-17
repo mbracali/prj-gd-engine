@@ -61,6 +61,14 @@ float clamp01(float t) { return std::clamp(t, 0.0f, 1.0f); }
 void segment(const std::vector<float>& vr, float v, size_t& k, float& t) {
     k = 0, t = 0;
     if (vr.size() < 2) return;
+    // A falling value_range (face-off's needle: [1 -1] -> [-51.5 51.5],
+    // GD10-067) read mirrored: v from the first point to the last.
+    if (vr.back() < vr.front()) {
+        std::vector<float> m(vr.size());
+        for (size_t i = 0; i < vr.size(); ++i) m[i] = -vr[i];
+        segment(m, -v, k, t);
+        return;
+    }
     if (v <= vr.front()) return;
     for (k = 0; k + 2 < vr.size() && v > vr[k + 1]; ++k) {
     }
@@ -107,6 +115,11 @@ void HudWidgets::addNatives(qs::Vm& vm, ui::UiSystem& ui) {
         if (!in || !in->st) return false;
         Widget w;
         w.value = keyOf(field(*in->st, "value"));
+        {
+            const std::string vn = qbkey::name(w.value);
+            if (vn.rfind("band2_", 0) == 0) w.team = 1;
+            else if (vn.rfind("band", 0) == 0 || vn == "faceoff_ratio") w.team = 0;
+        }
         if (const uint32_t obj = keyOf(field(*in->st, "object")))
             for (int n = 1; n <= 4; ++n)
                 if (obj == qbkey::key("player" + std::to_string(n) + "_status")) w.player = n - 1;
@@ -123,6 +136,11 @@ void HudWidgets::addNatives(qs::Vm& vm, ui::UiSystem& ui) {
             w.outs.push_back(std::move(out));
         }
         w.id = nextId_++;
+        // GD10_HUDLOG=1 (development aid): each widget as it is attached.
+        static const bool log = SDL_getenv("GD10_HUDLOG") != nullptr;
+        if (log)
+            SDL_Log("hud widget %d: player %d team %d value %s, %zu outputs (first %s)", w.id, w.player + 1, w.team, qbkey::name(w.value).c_str(), w.outs.size(),
+                    w.outs.empty() ? "-" : qbkey::name(w.outs[0].type).c_str());
         if (!run.frames.empty()) {
             if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
             Vm::set(*run.frames.back().locals, K("observer_id"), Vm::makeInt(w.id));
@@ -132,9 +150,22 @@ void HudWidgets::addNatives(qs::Vm& vm, ui::UiSystem& ui) {
     });
 }
 
-double HudWidgets::input(const Widget& w, const std::array<Values, 4>& players, double nowMs) const {
-    const Values& pl = players[size_t(std::clamp(w.player, 0, 3))];
+double HudWidgets::input(const Widget& w, const std::array<Values, 4>& players, double nowMs, const Band& band) const {
     const uint32_t v = w.value;
+    if (band.on && w.team >= 0) {
+        // Two or more players: the band's values (GD10-067) [I: the C's band values not decoded].
+        const Values& t = band.team[size_t(w.team)];
+        if (v == K("faceoff_ratio")) return band.faceoffRatio;
+        if (v == K("band1_score") || v == K("band2_score")) return t.score;
+        if (v == K("band1_streak") || v == K("band2_streak")) return t.streak;
+        if (v == K("band1_multiplier") || v == K("band2_multiplier")) return t.multiplier;
+        if (v == K("band1_starpower") || v == K("band2_starpower")) return t.starPower;
+        if (v == K("band_projected_song_stars")) return t.stars;
+        if (v == K("band_has_missed_note")) return t.missedNote ? 1 : 0;
+        if (v == K("band_health")) return t.health;
+        return 0;
+    }
+    const Values& pl = players[size_t(std::clamp(w.player, 0, 3))];
     if (v == K("score") || v == K("band1_score")) return pl.score;
     if (v == K("note_streak") || v == K("band1_streak")) return pl.streak;
     if (v == K("starpower_amount")) return pl.starPower;
@@ -284,11 +315,11 @@ void HudWidgets::apply(Widget& w, Output& o, double value, const Values& pl, dou
     }
 }
 
-void HudWidgets::update(const std::array<Values, 4>& players, int count, double nowMs) {
+void HudWidgets::update(const std::array<Values, 4>& players, int count, double nowMs, const Band& band) {
     (void)count;
     for (Widget& w : widgets_) {
-        const double v = input(w, players, nowMs);
-        const Values& pl = players[size_t(std::clamp(w.player, 0, 3))];
+        const double v = input(w, players, nowMs, band);
+        const Values& pl = band.on && w.team >= 0 ? band.team[size_t(w.team)] : players[size_t(std::clamp(w.player, 0, 3))];
         for (Output& o : w.outs) apply(w, o, v, pl, nowMs);
     }
 }

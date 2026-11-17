@@ -32,6 +32,8 @@ public:
     void setStart(double startMs) { startMs_ = startMs; }
     // devil_finish: player 2's rock meter off screen, no death meter [C script setup_hud].
     void setDevilFinish(bool on) { devilFinish_ = on; }
+    // gh4's own HUD is up (GD10-067): only the alerts and prompts are drawn here.
+    void setAlertsOnly(bool on) { alertsOnly_ = on; }
     // The song (current_song): the boss's death icon and death meter end time.
     void setSong(uint32_t songKey) { song_ = songKey; }
     void update(const Match& m, double nowMs);
@@ -117,6 +119,7 @@ public:
 
 private:
     bool started_ = false;
+    bool alertsOnly_ = false;
     double startMs_ = 0;
     uint32_t song_ = 0;
     // Battle pieces drawn over the HUD (battlemode_container) [C scripts

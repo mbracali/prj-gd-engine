@@ -1427,7 +1427,12 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         walkEl(*root, true);
         std::printf("  hud: %s, %d elements (desc %d), %d visible sprites / texts, %d drawn, %d off screen\n", dn ? dn->str.c_str() : "?", have, want,
                     visible, drawn, offscreen);
-        if (have != want) return fail("HUD elements " + std::to_string(have) + " of the desc's " + std::to_string(want));
+        const int nPlayers = int(qs::Vm::number(vm.global(qbkey::key("current_num_players")), 1));
+        // Two players (GD10-067): setup_band_hud kills the meters the mode
+        // has no use for (face-off: band_meter, boss_battle, both side
+        // meters), so fewer elements than the desc's.
+        if (nPlayers == 1 && have != want) return fail("HUD elements " + std::to_string(have) + " of the desc's " + std::to_string(want));
+        if (nPlayers > 1 && (have <= 0 || have > want)) return fail("HUD elements " + std::to_string(have) + " of the desc's " + std::to_string(want));
         if (visible == 0 || drawn != visible || offscreen) return fail("HUD drawn " + std::to_string(drawn) + " of " + std::to_string(visible));
         auto findLocal = [&](const char* lid) -> const ui::Element* {
             std::vector<const ui::Element*> q{root};
@@ -1437,6 +1442,40 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
             }
             return nullptr;
         };
+        auto nixieName = [&](const qb::Struct& st) {
+            const int run = int(qs::Vm::number(st.find(qbkey::key("current_run")), 0));
+            const int base = run < 10 ? 1 : run < 20 ? 2 : run < 30 ? 3 : 4;
+            const bool sp = qs::Vm::number(st.find(qbkey::key("star_power_used")), 0) != 0;
+            char nx[40];
+            std::snprintf(nx, sizeof nx, sp ? "band_hud_score_%db" : "band_hud_score_%da", sp ? base * 2 : base);
+            return std::string(nx);
+        };
+        if (nPlayers == 2) {
+            // Face-off's meter (HUD_band_battle): each player's score text and
+            // nixie, the needle at faceoff_ratio's angle ((s1 - s2) / (s1 +
+            // s2): 1 -> -51.5, -1 -> 51.5) [C scripts HUD_attach_widget_band_faceoff_meter].
+            double sc[2] = {0, 0};
+            for (int p = 0; p < 2; ++p) {
+                const qb::Value* ps = vm.global(qbkey::key(p ? "player2_status" : "player1_status"));
+                if (!ps || !ps->st) return fail("no player status");
+                sc[p] = std::floor(qs::Vm::number(ps->st->find(qbkey::key("score")), -1));
+                const ui::Element* t = findLocal(p ? "score_2" : "score_1");
+                const std::string nx = nixieName(*ps->st);
+                const ui::Element* nix = findLocal(p ? "HUD_bb_multiplier_nixie_2" : "HUD_bb_multiplier_nixie_1");
+                std::printf("  hud: player %d score %.0f, text '%s'; nixie %s, shown %s\n", p + 1, sc[p], t ? t->text.c_str() : "-", nx.c_str(),
+                            nix ? qbkey::name(nix->texture).c_str() : "-");
+                if (!t || t->text != std::to_string((long long)sc[p])) return fail("HUD score text " + std::to_string(p + 1));
+                // The meter's nixies are HUD_score_nixie_<x>a / <2x>b (its widget's textures).
+                if (!nix || nix->texture != qbkey::key("HUD_score_nixie_" + nx.substr(nx.rfind('_') + 1))) return fail("HUD nixie " + std::to_string(p + 1));
+            }
+            const double sum = sc[0] + sc[1];
+            const float ratio = sum > 0 ? float((sc[0] - sc[1]) / sum) : 0.0f;
+            const float want = -51.5f * std::clamp(ratio, -1.0f, 1.0f);
+            const ui::Element* nd = findLocal("HUD_band_battle_meter_needle");
+            std::printf("  hud: face-off ratio %.3f, needle %.2f (want %.2f)\n", double(ratio), nd ? double(nd->rot) : -999.0, double(want));
+            if (!nd || std::fabs(nd->rot - want) > 0.5f) return fail("HUD face-off needle");
+            return true;
+        }
         const qb::Value* ps = vm.global(qbkey::key("player1_status"));
         if (!ps || !ps->st) return fail("no player1_status");
         const long long score = (long long)std::floor(qs::Vm::number(ps->st->find(qbkey::key("score")), -1));

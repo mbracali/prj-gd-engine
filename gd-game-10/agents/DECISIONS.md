@@ -660,3 +660,29 @@ Why: GD10-063: the port drew GH3's HUD sprites by GH3's names; most are not
 on gh4's disc (13,357 missing texture draws in a quickplay song).
 Undo: GD10_HUD_LEGACY=1 (no setup_band_hud, GH3's Hud2D, the old
 ResolveScreenElementID).
+
+## D117. gh4's two-player HUD: hud_2g for face-off [C scripts; I the band values, faceoff_ratio] (2026-11-17, lane A)
+
+What: face-off and pro face-off run setup_band_hud as one player does, with
+player1_status.hud_parent = alias_g1 and player2_status's alias_g2
+(get_highway_pos_and_scale, two non-vocal players) [C script].
+update_hud_layout picks hud_2g; setup_band_hud kills its band_meter, boss
+meter and the side meters and attaches HUD_band_battle as the face-off
+meter (HUD_attach_widget_band_faceoff_meter: score_1/2, nixies, tubes,
+streaks, the needle) [C scripts]. Each player's streak raises
+player<n>_streak_started / _ended (band<n>_ in a band-scoring mode). The
+port's Hud2P draws only its alerts and the co-op raise-axe prompt then.
+Battle (p2_battle -> battle_hud_2d_elements, no desc_interface) and co-op
+keep Hud2P [C update_hud_layout].
+[I]: faceoff_ratio = (score1 - score2) / (score1 + score2) (its needle's
+value_range [1 -1] -> [-51.5 51.5], amber lit 0 .. 0.1: player 1 ahead >
+0); band1_* with two players: summed score, average health (co-op's fail
+rule, 0x8210FD18), the lower streak / multiplier / Star Power. The C keeps
+these as registered HUD values (0x82160000's constructor names them) whose
+setters are not decoded. A falling value_range is read mirrored (the only
+one is the face-off needle's).
+Dev aid: GD10_DEV_GAME_MODE=<p2 mode> starts the quickplay walk's song in
+that two-player mode (gh4's MULTIPLAYER lobby stops in the character hub);
+GD10_HUDLOG=1 logs each widget.
+Why: GD10-067.
+Undo: GD10_HUD2P_LEGACY=1 (ui/song_hooks.cpp beginHud).
