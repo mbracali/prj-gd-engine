@@ -44,7 +44,7 @@ constexpr float kTrackGap = 0.1f;  // [I]
 const char* const kGemModel[4] = {"gem_4a", "gem_4b", "gem_4c", "gem_4d"};
 const char* const kCrashModel[4] = {"gem_4a_crash", "gem_4b_crash", "gem_4c_crash", "gem_4d_crash"};
 const char* const kPlateModel[4] = {"plate_4a", "plate_4b", "plate_4c", "plate_4d"};
-// The tracks' icons on the track plane, drums / bass / guitar / vocals [I: names].
+// The tracks' icons on the track plane, drums / bass / guitar / vocals.
 const char* const kIcon[4] = {"icon_drum", "icon_bass", "icon_guitar", "icon_mic"};
 const char* const kShortName[4] = {"Drums", "Bass", "Guitar", "Vocals"};
 
@@ -69,6 +69,7 @@ bool SongScreen::start(const gd24::Umd& umd, const gd24::SongEntry& song, int di
             error = assetsError_;
             return false;
         }
+        for (int t = 0; t < 4; ++t) iconTex_[t] = assets_.texture(kIcon[t]);
         if (!assets_.laneMarks(laneX_, strikeY_)) SDL_Log("song: the strike line's lane marks were not found: default lanes");
         SDL_Log("song: lanes x %.3f %.3f %.3f %.3f, strike line y %.3f", double(laneX_[0]), double(laneX_[1]), double(laneX_[2]),
                 double(laneX_[3]), double(strikeY_));
@@ -248,7 +249,12 @@ gr::Texture SongScreen::draw3d(gr::Device& dev, gr::Texture overlay) {
             d.blendedPass = blended;
             tint(d, t);
             d.model = gd24::Mat4::translate(x, 0, 0);
-            renderer_.draw("track_plane_A", d);
+            // The track's instrument icon: materials track_instrument_icon0..3
+            // use icon_drum / bass / guitar / mic [C data]; the plane's own
+            // icon material has a placeholder (file4, black).
+            gd24::HighwayRenderer::Draw pd = d;
+            pd.swapSub = "track_instrument_icon", pd.swapTexture = iconTex_[t];
+            renderer_.draw("track_plane_A", pd);
             // Beat lines from the chart's ticks (a bar every 4 beats [I: 4/4]).
             if (blended) {
                 const double t0 = play_.msToTick(songMs_ - behindMs), t1 = play_.msToTick(songMs_ + aheadMs);
@@ -292,6 +298,5 @@ gr::Texture SongScreen::draw3d(gr::Device& dev, gr::Texture overlay) {
             }
         }
     }
-    (void)kIcon;
     return renderer_.end(overlay);
 }

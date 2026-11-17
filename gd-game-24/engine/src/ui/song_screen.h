@@ -86,6 +86,7 @@ private:
     uint64_t lastNs_ = 0;
     bool lanesDown_[4] = {};
     bool autoplay_ = false;
+    int iconTex_[4] = {-1, -1, -1, -1};
     float laneX_[4] = {-1.11f, -0.37f, 0.37f, 1.11f}, strikeY_ = -4.49f;  // from the track plane (laneMarks)
     double laneFlash_[4] = {-1e9, -1e9, -1e9, -1e9};
 };

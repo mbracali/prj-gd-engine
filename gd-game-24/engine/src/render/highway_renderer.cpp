@@ -281,7 +281,8 @@ void HighwayRenderer::draw(const std::string& name, const Draw& d) {
     for (const Sub& s : m->subs) {
         if (!s.count || s.blended != d.blendedPass || (s.overdrive && !d.overdrive)) continue;
         if (!d.onlySub.empty() && s.material != d.onlySub) continue;
-        const int ti = d.textureOverride >= 0 ? d.textureOverride : s.texture;
+        int ti = d.textureOverride >= 0 ? d.textureOverride : s.texture;
+        if (d.swapTexture >= 0 && s.material == d.swapSub) ti = d.swapTexture;
         const gr::Texture tex = ti >= 0 && ti < int(textures_.size()) && textures_[size_t(ti)] ? textures_[size_t(ti)] : white_;
         u.params[0] = d.uvOffset[0], u.params[1] = d.uvOffset[1];
         u.params[2] = s.blended ? 0.0f : 0.02f, u.params[3] = 0;

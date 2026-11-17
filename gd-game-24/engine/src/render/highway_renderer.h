@@ -45,6 +45,8 @@ public:
         bool blendedPass = false;   // false: the alpha-blended sub-meshes, true: the additive ones
         float uvOffset[2] = {0, 0};
         std::string onlySub;        // only the sub-mesh with this material name
+        std::string swapSub;        // this material's sub-mesh drawn with
+        int swapTexture = -1;       // this texture instead
     };
     void draw(const std::string& model, const Draw& d);
     gd::core::render::Texture end(gd::core::render::Texture overlay);
