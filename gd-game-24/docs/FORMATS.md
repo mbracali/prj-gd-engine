@@ -87,6 +87,10 @@ There is no relocation table: a port reads the objects through their class
 layouts (vtable address = class), so every class a feature needs must be
 described from the EBOOT. This is the main cost of the port.
 
+`JUKEBOX.STR` is not this container: it starts with u32 55 (the song count)
+and holds a song table (ids, hashes, short names such as `3sand7s`) [C data;
+layout for M1].
+
 `GLOBAL_BINARY.STR` has a different header (`{0x1B800, 0xFB000, 0x116800}`
 = two parts and the total) and is the always-resident heap (pointers in
 0x08C5xxxx .. 0x08EFxxxx, i.e. right after the BSS) [I]. Song and venue
@@ -157,9 +161,9 @@ PSMF: a 0x800 header, then an MPEG program stream with H.264 Main 480x272
 
 ## TEXT: strings
 
-UTF-8 text. Line 1: `<count>\t1`; line 2: the language name ("English");
-then `count` strings, one per line, `\n` written as the two characters
-[C data]. Strings are referred to by index. Sets: `STR_<L>.TXT` (= GLOBALS,
+UTF-8 text. Line 1: `<count>\t1`; then `count` strings, one per line, the
+first being the language name ("English"); `\n` written as the two
+characters [C data: every table has exactly count + 1 lines]. Strings are referred to by index. Sets: `STR_<L>.TXT` (= GLOBALS,
 2,549 strings), `_MUSIC` (title / artist / album per song), `_JUKEBOX`,
 `_GAMEPLAY_TIPS`, `_BANDNAME_A/B`, `_MEMBERNAME_MALE/FEMALE`; languages EN,
 FR, GE, IT, SP.

@@ -31,6 +31,7 @@ std::vector<IsoSignature> signaturesOf(const yaml::Node& list, const std::string
         s.ps2Boot = n["ps2_boot"].str();
         s.volumeId = n["volume_id"].str();
         s.xexTitleId = n["xex_title_id"].str();
+        s.pspDiscId = n["psp_disc_id"].str();
         s.files = n["files"].strings();
         out.push_back(s);
     }

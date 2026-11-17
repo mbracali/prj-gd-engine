@@ -19,6 +19,25 @@ gd-game-24 section.
 `extracted/` and `ghidra/` are git-ignored: never commit them, never paste
 decompiler output into tracked files (`docs/legal.md`).
 
+## Build (Linux dev build, -j2; check `free -g` first)
+
+```sh
+cmake -S gd-game-24/engine -B gd-game-24/engine/build/dev -G Ninja -DCMAKE_BUILD_TYPE=Release -DGD24_MODULE=ON
+ninja -C gd-game-24/engine/build/dev -j2 gd24 gd24_module   # gd24 + gd-game-24.so
+```
+
+gd-engine-core comes in through `add_subdirectory` (the disc reader: .iso
+and .chd); its OpenAL sub-build runs its own jobs, so the first build uses
+more than two cores for about a minute.
+
+## Tests (quick; one at a time)
+
+```sh
+ISO="$PWD/original_isos/PSP - Rock Band Unplugged (USA).iso"
+gd-game-24/engine/build/dev/gd24 --formattest "$ISO"   # "formattest: all 184 files parse"
+gd-game-24/engine/build/dev/gd24 --formattest <a .chd of the disc>   # same output
+```
+
 ## Decrypting EBOOT.BIN (done once, local only)
 
 pspdecrypt (https://github.com/John-K/pspdecrypt, GPL-3.0, libkirk) built
