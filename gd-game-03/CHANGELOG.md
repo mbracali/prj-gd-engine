@@ -5,6 +5,17 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [1.1.9] - 2026-11-16
+
+### Added
+- Song Speed (50-200 %, the pitch kept) and Track Speed (0.5-3.5x) in Enhanced > Cheats & Enhancers.
+- CHD disc images (.chd) next to .iso (#112).
+- Starts in full screen when RecompLauncher opens it in Big Picture mode.
+
+### Fixed
+- Android: Internal Resolution defaults to 900 lines, so big tablets no longer run in slow motion (#105).
+- The store: pressing Up on the first item goes to the last one.
+
 ## [1.1.8] - 2026-11-13
 
 ### Fixed

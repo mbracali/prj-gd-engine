@@ -5,6 +5,15 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [1.1.8] - 2026-11-16
+
+### Added
+- CHD disc images (.chd) next to .iso (#112).
+- Starts in full screen when RecompLauncher opens it in Big Picture mode.
+
+### Fixed
+- The Star Power blur keeps the same length at any Max FPS (it was 4x shorter at 240 FPS).
+
 ## [1.1.7] - 2026-11-13
 
 ### Fixed
