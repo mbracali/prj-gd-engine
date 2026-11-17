@@ -352,7 +352,10 @@ void App::drawStatus() {
     }
     if (!songs_.empty()) {
         const gd24::SongEntry& s = songs_[size_t(sel_)];
-        canvas_.text(32, kListY + kRows * kRowH + 12, s.album.empty() ? s.folder : s.album, kDim, 2);
+        // The album from STR_<L>_MUSIC.TXT; the disc says "Unknown" for
+        // singles, which is not shown.
+        if (!s.album.empty() && s.album != "Unknown")
+            canvas_.text(32, kListY + kRows * kRowH + 12, "Album: " + s.album, kDim, 2);
     }
     if (!status_.empty()) canvas_.text(32, kListY + kRows * kRowH + 34, status_, kText, 2);
     if (playingSong_ >= 0 && audio_.playing()) {

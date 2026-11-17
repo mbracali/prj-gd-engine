@@ -192,12 +192,17 @@ void GamepadsScreen::draw(Canvas& c) {
             const bool sel = !locked && focus_ == f;
             if (sel) c.fill(kBoxX + 124, fy - 4, kBoxW - 132, 22, kRow);
             c.text(kBoxX + 130, fy + 2, label, locked ? kMuted : kDim, 1.5f);
-            c.text(kBoxX + 268, fy + 2, "[" + value + " v]", sel ? kAccent : locked ? kMuted : kText, 1.5f);
+            // The value fitted to the box: "[<name> v]", the name cut with
+            // "..." when it does not fit (as gd02's dropdowns).
+            const float room = kBoxX + kBoxW - 10 - (kBoxX + 268);
+            std::string v = value;
+            const size_t maxChars = size_t(room / 12.0f) - 4;  // 12 px per glyph at 1.5; "[", " v]"
+            if (v.size() > maxChars) v = v.substr(0, maxChars - 3) + "...";
+            c.text(kBoxX + 268, fy + 2, "[" + v + " v]", sel ? kAccent : locked ? kMuted : kText, 1.5f);
             hits_.push_back({kBoxX + 124, fy - 4, kBoxW - 132, 22, f, -1});
         };
         field(kInstrument, y + 12, "Instrument", Input::instrumentName(input_.instrument(dev)));
         std::string bindTo = input_.detecting() ? "press a button..." : devName;
-        if (bindTo.size() > 17) bindTo = bindTo.substr(0, 16) + ".";
         field(kBind, y + 38, "Bind to:", bindTo);
         const bool sel = !locked && focus_ == kCustomize;
         c.fill(kBoxX + 10, y + 66, kBoxW - 20, 24, sel ? kRow : kBg);
