@@ -24,3 +24,8 @@ side touches only its own game; shared files (backlog, launcher) only for its ow
 
 ## Progress
 
+- 11-17 GD06-001 done (about 45 min): disc extracted (806 files), XEX in Ghidra (`gha.gpr`, 33,178 functions,
+  `analysis/` exported); Aerosmith is GH3's engine (`GH3_xp1`): all formats but the `.ska` rotation keys parse with
+  gd04's decoders, ~97% of the XEX's functions pair with GH3's. Recommendation: copy gd04's engine without its song
+  decryption (gd-game-06/agents/DECISIONS.md D2); milestones M1..M6, about 11-18 h of agent time
+  (gd-game-06/agents/PROGRESS.md); owner questions in gd-game-06/agents/OPEN_QUESTIONS.md; backlog GD06-002..008.
