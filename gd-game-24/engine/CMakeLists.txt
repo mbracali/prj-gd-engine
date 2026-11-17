@@ -17,6 +17,8 @@ add_executable(gd24 WIN32 MACOSX_BUNDLE)
 target_sources(gd24 PRIVATE
   src/main.cpp
   src/app.cpp
+  src/audio/at3_preview.cpp
+  src/audio/audio_out.cpp
   src/data/param_sfo.cpp
   src/data/song_list.cpp
   src/data/str_file.cpp
@@ -26,12 +28,34 @@ target_sources(gd24 PRIVATE
   src/platform/paths.cpp
   src/platform/settings.cpp
   src/render/canvas.cpp
+  src/tests/audiotest.cpp
 )
 target_include_directories(gd24 PRIVATE src)
 target_compile_definitions(gd24 PRIVATE GD24_VERSION="${PROJECT_VERSION}")
 target_link_libraries(gd24 PRIVATE SDL3::SDL3)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(gd24 PRIVATE -Wall -Wextra)
+endif()
+
+# FFmpeg (the song previews' ATRAC3plus, src/audio/at3_preview.cpp): gd24's
+# own minimal LGPL build (build_common.sh, build_ffmpeg.sh) in GD24_FFMPEG_DIR,
+# shared libraries next to the program / module, as gd-game-10's. Without it
+# the previews are silent (a log line).
+set(GD24_FFMPEG_DIR "" CACHE PATH "FFmpeg install prefix (include/, lib/): build_ffmpeg.sh's build/ffmpeg/linux/ffmpeg-prefix")
+set(gd24_ffmpeg_libs "")
+if(GD24_FFMPEG_DIR)
+  target_include_directories(gd24 SYSTEM PRIVATE "${GD24_FFMPEG_DIR}/include")
+  foreach(lib avcodec avutil)
+    find_library(GD24_FFMPEG_${lib} NAMES ${lib} PATHS "${GD24_FFMPEG_DIR}/lib" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+    if(NOT GD24_FFMPEG_${lib})
+      message(FATAL_ERROR "GD24_FFMPEG_DIR: no ${lib} library in ${GD24_FFMPEG_DIR}/lib")
+    endif()
+    target_link_libraries(gd24 PRIVATE ${GD24_FFMPEG_${lib}})
+  endforeach()
+  target_compile_definitions(gd24 PRIVATE GD24_FFMPEG=1)
+  message(STATUS "gd24: song previews with FFmpeg (${GD24_FFMPEG_DIR})")
+else()
+  message(STATUS "gd24: no FFmpeg (GD24_FFMPEG_DIR empty): the song previews are silent")
 endif()
 
 # gd-engine-core (../../gd-engine-core/docs/README.md): the disc image reader

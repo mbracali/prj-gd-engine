@@ -8,10 +8,12 @@
 
 #include <SDL3/SDL.h>
 
+#include <future>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "audio/audio_out.h"
 #include "data/song_list.h"
 #include "platform/settings.h"
 #include "render/canvas.h"
@@ -47,6 +49,9 @@ private:
     void drawEnhanced();
     void drawHelp(const std::vector<std::pair<std::string, std::string>>& items);
     void reloadSongs();
+    void playPreview(int song);
+    void pollPreview();
+    void applyVolume();
     std::string songCounts() const;
 
     Options opt_;
@@ -60,6 +65,9 @@ private:
     int sel_ = 0, scroll_ = 0;  // the song list
     int esel_ = 0;              // ENHANCED's row
     std::string status_;        // a line under the list
+    AudioOut audio_;
+    std::future<std::shared_ptr<PcmClip>> decoding_;  // a preview being decoded
+    int decodingSong_ = -1, playingSong_ = -1;
     bool quit_ = false;
     uint64_t startNs_ = 0;
 };

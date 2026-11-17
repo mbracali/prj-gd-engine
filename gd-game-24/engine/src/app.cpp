@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <chrono>
 #include <cstring>
 
 #include "app_ids.h"
@@ -109,6 +110,8 @@ int App::run(const Options& opt) {
         SDL_Quit();
         return 2;
     }
+    if (!audio_.open(error)) SDL_Log("audio: %s (continuing without sound)", error.c_str());
+    applyVolume();
     DevAids aids;
     startNs_ = SDL_GetTicksNS();
     while (!quit_) {
@@ -116,11 +119,14 @@ int App::run(const Options& opt) {
         while (SDL_PollEvent(&e)) handleEvent(e);
         const uint64_t ms = (SDL_GetTicksNS() - startNs_) / 1000000;
         for (const SDL_Event& k : aids.keysDue(ms)) handleEvent(k);
+        pollPreview();
         draw();
         aids.afterDraw(ms, canvas_);
         canvas_.present();
         if (aids.quitDue(ms)) quit_ = true;
     }
+    if (decoding_.valid()) decoding_.wait();
+    audio_.close();
     canvas_.shutdown();
     SDL_DestroyWindow(window_);
     window_ = nullptr;
@@ -187,7 +193,8 @@ void App::menu(Menu m) {
         else if (m == Menu::Left && n) sel_ = std::max(0, sel_ - kRows);
         else if (m == Menu::Right && n) sel_ = std::min(n - 1, sel_ + kRows);
         else if (m == Menu::Start) screen_ = Screen::Enhanced, esel_ = 0;
-        else if (m == Menu::Confirm && n) status_ = "Preview of " + songs_[size_t(sel_)].title + ": not wired yet";
+        else if (m == Menu::Confirm && n) playPreview(sel_);
+        else if (m == Menu::Back) audio_.stop(), playingSong_ = -1, status_.clear();
         if (sel_ < scroll_) scroll_ = sel_;
         if (sel_ >= scroll_ + kRows) scroll_ = sel_ - kRows + 1;
         return;
@@ -203,11 +210,64 @@ void App::menu(Menu m) {
         settings_.save();
         if (std::strcmp(o.key, "screen_mode") == 0) applyScreenMode();
         if (std::strcmp(o.key, "language") == 0) reloadSongs();
+        if (std::strcmp(o.key, "volume") == 0) applyVolume();
     } else if (m == Menu::Back || m == Menu::Start || (m == Menu::Confirm && esel_ == int(opts.size()))) {
         screen_ = Screen::Status;
     } else if (m == Menu::Confirm && esel_ == int(opts.size()) + 1) {
         quit_ = true;
     }
+}
+
+void App::applyVolume() { audio_.setVolume(float(std::atoi(settings_.get("volume").c_str())) / 100.0f); }
+
+// The song's <SONG>_PREVIEW.AT3 (the full .ATM audio is encrypted and out
+// of scope, DECISIONS D6), decoded on a worker thread, then looped.
+void App::playPreview(int song) {
+    const gd24::SongEntry& s = songs_[size_t(song)];
+    if (!s.hasPreview) {
+        status_ = s.title + ": no preview on the disc";
+        return;
+    }
+    if (decoding_.valid()) decoding_.wait();
+    audio_.stop();
+    playingSong_ = -1, decodingSong_ = song;
+    status_ = "Loading the preview of " + s.title + "...";
+    const gd24::Umd* umd = umd_.get();
+    const std::string path = s.previewPath();
+    decoding_ = std::async(std::launch::async, [umd, path]() -> std::shared_ptr<PcmClip> {
+        std::vector<uint8_t> bytes;
+        auto clip = std::make_shared<PcmClip>();
+        std::string error;
+        const uint64_t t0 = SDL_GetTicksNS();
+        if (!umd->read(path, bytes) || !decodeAt3(bytes, *clip, error)) {
+            SDL_Log("preview %s: %s", path.c_str(), error.empty() ? "cannot read" : error.c_str());
+            return nullptr;
+        }
+        SDL_Log("preview %s: %zu samples (%.2f s), %d errors, decoded in %.0f ms", path.c_str(), clip->frames(), clip->seconds(),
+                clip->errors, double(SDL_GetTicksNS() - t0) / 1e6);
+        return clip;
+    });
+}
+
+void App::pollPreview() {
+    if (!decoding_.valid() || decoding_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+    std::shared_ptr<PcmClip> clip = decoding_.get();
+    const int song = decodingSong_;
+    decodingSong_ = -1;
+    if (song < 0 || song >= int(songs_.size())) return;
+    if (!clip) {
+        status_ = songs_[size_t(song)].title + ": the preview did not decode" + (at3Available() ? "" : " (no FFmpeg in this build)");
+        return;
+    }
+    if (!audio_.isOpen()) {
+        status_ = songs_[size_t(song)].title + ": no sound device";
+        return;
+    }
+    audio_.play(clip, true);
+    playingSong_ = song;
+    char len[32];
+    std::snprintf(len, sizeof len, " (%.0f s)", clip->seconds());
+    status_ = "Playing the preview of " + songs_[size_t(song)].title + len;
 }
 
 void App::click(float x, float y) {
@@ -279,7 +339,12 @@ void App::drawStatus() {
         canvas_.text(32, kListY + kRows * kRowH + 12, s.album.empty() ? s.folder : s.album, kDim, 2);
     }
     if (!status_.empty()) canvas_.text(32, kListY + kRows * kRowH + 34, status_, kText, 2);
-    drawHelp({{"Up/Down", "song"}, {"Confirm", "preview"}, {"Start", "ENHANCED"}});
+    if (playingSong_ >= 0 && audio_.playing()) {
+        char t[32];
+        std::snprintf(t, sizeof t, "%5.1f s", audio_.positionSec());
+        canvas_.text(Canvas::kW - 32 - Canvas::textWidth(t, 2), kListY + kRows * kRowH + 34, t, kDim, 2);
+    }
+    drawHelp({{"Up/Down", "song"}, {"Confirm", "preview"}, {"Back", "stop"}, {"Start", "ENHANCED"}});
 }
 
 void App::drawEnhanced() {
