@@ -123,56 +123,17 @@ BASS / DRUMS / VOCALS`) and the star-power phrases are found through the
 SongData object graph: to map next (GD24-002) from GameGemDB.cpp /
 SongData.cpp users (strings at 0x08B40964, 0x08B40B88).
 
-## ATM: song audio (5 stems, encrypted ATRAC3plus)
+## ATM: song audio (5 stems, encrypted): out of scope
 
-[C data, all 55 folders]:
+[C data, all 55 folders]: a 0x38-byte header (stream count 5, frame size
+0x190, the 5 stream sizes), then 400-byte frames interleaved round-robin
+over the 5 streams (guitar, bass, drums, vocals, backing [I]); a stream
+that ends early is padded with zero frames. The frames are **encrypted**.
 
-- Header 0x38 bytes: u32 (random-looking, per file), u32 stream count 5,
-  u32 (random), u32 frame size 0x190, u32 (random), then 5 x u32 stream
-  sizes, then 16 bytes (random). The random words look like a key / seed.
-- Data from 0x38: **400-byte frames interleaved round-robin over the 5
-  streams**; a stream that ends early is padded with zero frames (DELUXE:
-  stream 2 shorter, its padding is exactly the missing size); file size =
-  0x38 + 5 x the largest stream size.
-- 400-byte frames = ATRAC3plus at ~69 kbit/s per stream [I], but the frames
-  are **encrypted**: half start with a set first bit (a plain ATRAC3plus
-  frame always starts with 0), and FFmpeg's atrac3plus decoder rejects
-  them. The zero padding frames are left in clear.
-- The cipher is **HC-128** (the eSTREAM stream cipher, 128-bit key and
-  IV), in its "optimized" reference form [C: the table layout P / Q, the
-  X / Y windows, the 1,024-step counter, the init expansion with
-  f1 / f2 and the 64 setup updates match the published algorithm; our
-  own Python HC-128 reproduces the spec's test vectors]:
-  - FUN_089b4fdc (ATRAC stream reader) -> FUN_088f4c90: splits the file
-    data into the 5 per-stream buffers by frame (position / frame size mod
-    5), then, once per file, sets up one HC-128 state per stream (states of
-    0x10CC bytes at 0x08B7DDC8 + 0x10CC x stream), and XORs each stream's
-    bytes with its keystream, 64 bytes per block (FUN_0888ec50 = 16 output
-    words; FUN_0888fa1c = the setup update).
-  - IV of stream s: 16 bytes made from the header's 16 bytes at 0x28: byte
-    j takes `b = hdr[0x28 + 2s + j mod 3]` (for 5 streams: step (12/5)+1
-    = 3, minus s) and `iv[j] = b XOR (iv[j-1] + NOT b + j + s)` (bytes,
-    iv[-1] = 0) [C FUN_088f4c90].
-  - Key: four words at 0x08B83250..5C, written by four script natives
-    (FUN_0888ea68 / ea94 / eac0 / eaec, registered with hashes 0xF92220FB,
-    0x8E25106D, 0x172C41D7, 0x602B7141, category 0xDB, registry indices
-    513..516) as `argument XOR hdr[0x10]`, `XOR hdr[0x08]`, `XOR hdr[0x34]`,
-    `XOR hdr[0x00]` [C]. Before the setup FUN_088f4c90 calls a callback
-    (pointer at 0x08B83260, set to 0x089E01C0 at 0x08A5ECDC) that posts
-    message 0x1C37E923 to the script system and runs script tasks
-    (FUN_089DFBE4) until the first key word is set [C]. So the four
-    arguments come from a **script** (data in `GLOBAL_BINARY.STR`: the
-    message's handler record is at file offset 0x6CE50) [C], not from code.
-    Not found yet: the four script constants. A quick test with four
-    32-bit constants found near the handler (24 orders, both byte orders,
-    with / without the header words) does not decrypt [C: no valid frames].
-  - After decryption, the first two words of each stream's first block are
-    XORed once more with the sum of the 5 stream sizes [C].
-  - The keystream runs on whole 64-byte blocks; a partial block at the
-    end of a read is kept for the next read (field +0x88) [I: detail].
-- The 5 stems are guitar, bass, drums, vocals and the backing track, each
-  muted when its track is missed, as in Frequency / Amplitude [I: order to
-  confirm].
+Owner's decision (2026-11-17): the project never breaks a protection. The
+full 5-track audio is **out of scope**; the engine does not read or decrypt
+the `.ATM` files. Songs play their unencrypted `<SONG>_PREVIEW.AT3` from the
+player's disc instead (below).
 
 `<SONG>_PREVIEW.AT3`: a plain RIFF WAVE, WAVEFORMATEXTENSIBLE ATRAC3plus
 (GUID BFAA23E9-58CB-7144-A119-FFFA01E4CE62), stereo 44.1 kHz, 2048-byte

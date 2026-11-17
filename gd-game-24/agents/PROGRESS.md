@@ -25,7 +25,7 @@ standard.
 | Milestone | Content | Estimate |
 |---|---|---|
 | M0 set-up | Folder from gd-game-02's layout (engine/, build_commands/, CMake, `gd24`, FFmpeg with atrac3p + h264 + mpegps), disc reader (ISO 9660 + UMD paths) | 1-2 h |
-| M1 data layer | STR container + heap-image reader (chunk bases from the loader, vtable -> class table); ATM decrypt + de-interleave -> FFmpeg atrac3plus; TEXT; SBlk/ADPCM (gd01's decoder); PMF through FFmpeg; `--formattest` | 4-6 h |
+| M1 data layer | STR container + heap-image reader (chunk bases from the loader, vtable -> class table); preview AT3 -> FFmpeg atrac3plus; TEXT; SBlk/ADPCM (gd01's decoder); PMF through FFmpeg; `--formattest` | 4-6 h |
 | M2 first boot (GD24-002) | One song: the four tracks' gems for one difficulty, tempo map, sections from BEATMATCH; the 5 stems in sync; 4-lane highway (debug look unless Q2 says otherwise), autoplay and real input, one track at a time | 4-6 h |
 | M3 gameplay rules | Track switching, phrase capture and the auto-play "deploy" of captured phrases, overdrive (energy), multiplier, scoring, fail, stem muting, results; from BeatMatcher / PhraseDB / TrackWatcher | 6-10 h |
 | M4 menus | UI heap images (UIList / UIElement / UIAnim / UITextBox), fonts, quickplay flow, settings, GAMEPADS / Enhanced menu per the guidelines | 10-15 h |
@@ -49,14 +49,14 @@ Total about 50-80 h of agent time; the first boot (M0-M2) about 9-14 h.
 
 - Heap images: every needed class layout must be read from the EBOOT
   (vtable map); cost grows with each feature (UI and venues the most).
-- The ATM cipher: custom, two 3 KB routines; until it is reversed there is
-  no song audio (the previews play).
+- The song audio: the `.ATM` stems are encrypted and out of scope (D6);
+  the previews play.
 - The function export splits some functions (FindPspFunctions); the
   decompiled C needs a check against the assembly in tricky places.
 - PSP rendering data (GE display lists, swizzled 4/8-bit textures, VFPU
   math) for M5.
 
-## GD24-002 start (2026-11-17): owner's answers in, ATM cipher first
+## GD24-002 start (2026-11-17): owner's answers in
 
 Owner approved the plan (OPEN_QUESTIONS 1-5, DECISIONS D5): the first boot
 shows the **original** highway (no debug highway), the launcher recognises
@@ -66,12 +66,8 @@ Re-estimate of the first boot with the original highway: the highway is an
 object graph in a heap image (meshes, materials, swizzled PSP textures,
 the gem models), so M2 also needs the heap-image reader for those classes
 and a small GE-format mesh / texture renderer: +6-10 h. M0-M2 now about
-15-25 h of agent time, plus the ATM key (below).
+15-25 h of agent time.
 
-ATM cipher: identified as **HC-128** (FORMATS.md "ATM"); IV derivation
-from the header confirmed in the code. Blocker: the 128-bit key comes from
-four values a **script** passes to four natives when the player asks for
-the key (message 0x1C37E923 in GLOBAL_BINARY's script data); the script VM
-is not mapped yet. Options for the owner: reverse the script VM until the
-four values are found (3-6 h, uncertain), or start the first boot meanwhile
-with the songs' 30 s preview AT3 (plain ATRAC3plus) as the audio.
+Song audio: the `.ATM` files are encrypted. Owner 11-17: no protection is
+ever broken, so the full 5-track audio is out of scope and the key work was
+dropped (D6); songs play their unencrypted preview AT3 from the disc.

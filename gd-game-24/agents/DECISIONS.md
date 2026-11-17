@@ -44,3 +44,11 @@ recognition (.iso and .chd) in the launcher with the first boot, the game
 not ready_to_play; controls = the PSP mapping from the code + GAMEPADS
 screen + guitar controllers (frets = lanes); DLC out of scope.
 Why: owner (OPEN_QUESTIONS 1-5). Undo: the owner decides otherwise.
+
+## D6. No protection is broken: the .ATM audio is out of scope (2026-11-17)
+
+What: the `.ATM` song audio is encrypted; the engine never decrypts it and
+no key is searched for. Songs play their unencrypted `<SONG>_PREVIEW.AT3`
+from the player's disc. Everything is read at run time from the player's
+own disc, like the other games.
+Why: owner. Undo: none planned.

@@ -18,6 +18,8 @@ For the owner unless marked "agent". Answered ones keep the answer.
 5. **DLC.** Answered 11-17: out of scope.
 6. (agent) Exact chunk load addresses of each STR kind, from the stream
    loader instead of the pointer-density estimate.
-7. (agent) The ATM cipher (FUN_0888ec50 / FUN_0888fa1c) and the stem order.
+7. **Song audio.** Answered 11-17: the `.ATM` 5-track audio is encrypted;
+   no protection is broken, so it is out of scope. Songs play their
+   unencrypted `<SONG>_PREVIEW.AT3` from the player's disc for now.
 8. (agent) The highway: which heap image holds it (COMMON / GLOBAL_BINARY
    [I]), its classes, textures and how the gems are drawn.

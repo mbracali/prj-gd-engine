@@ -79,5 +79,5 @@ trusting its decompiled C.
   `../src/rock/m2game/*` named in asserts (strings 0x08B4xxxx) [C].
 - Key functions so far: FAT open by sector FUN_08a23f5c; song paths
   FUN_089f191c / FUN_089f1b30 / FUN_089f2648; ATRAC player FUN_089b65b4
-  (sets up), FUN_089b5948 (decode loop), FUN_089b4fdc (reads ATM data);
-  ATM demux + decrypt FUN_088f4c90 -> FUN_0888ec50, FUN_0888fa1c.
+  (sets up), FUN_089b5948 (decode loop). The `.ATM` song audio is
+  encrypted and out of scope (DECISIONS D6): do not work on it.
