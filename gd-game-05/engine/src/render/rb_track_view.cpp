@@ -1364,6 +1364,20 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
             const scene::Mat* starMat = star && gfx::highwayLegacy() ? tails_->find<scene::Mat>("tail_star.mat") : nullptr;
             const float* col = starMat ? starMat->color.data() : mat->color.data();
             const float x = slotX(f) + c.offsetX;
+            // GD05-133: the tail on its slot's curve as the gem (the slot's
+            // smasher x / z and roll, RB 0x828167F0 / MakeSecondsXfm [C]; the
+            // tail builder's use of that xfm is I): a row's point (px, y, pz)
+            // goes to (cx, 0, cz) + px * row0 + y * row1 + pz * row2.
+            // GD05_TAILCURVE_LEGACY=1: flat at the data's slot x, z 0.
+            static const bool tailCurveLegacy = SDL_getenv("GD05_TAILCURVE_LEGACY") != nullptr;
+            const SlotCurve* sc = !tailCurveLegacy && !gemCurveLegacy() && slotCurve_[size_t(f)].set ? &slotCurve_[size_t(f)] : nullptr;
+            std::array<float, 9> R{1, 0, 0, 0, 1, 0, 0, 0, 1};
+            float ox = x, oz = 0;
+            if (sc) {
+                R = sc->rot;
+                if (lefty_) R[2] = -R[2], R[6] = -R[6];
+                ox = (lefty_ ? -sc->x : sc->x) + c.offsetX * R[0], oz = sc->z + c.offsetX * R[2];
+            }
             const uint16_t base = uint16_t(tailVerts_.size() / 16);
             const size_t n = row.size();
             int rows = 0;
@@ -1378,11 +1392,30 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
                 const float shift = held ? ts.ring[size_t(((ts.head - int(d * 0.5f)) % 300 + 300) % 300)] : 0.0f;
                 float a = alpha;
                 if (len - d < c.fadeDistance) a *= std::max(0.0f, (len - d) / c.fadeDistance);
-                for (const auto& p : row)
-                    tailVerts_.insert(tailVerts_.end(),
-                                      {x + (lastRow ? 0.0f : p[0]) + shift, y, p[1], 0, 0, 1, col[0], col[1], col[2], col[3] * a, p[2], p[3], 1, 0, 0, 1});
+                for (const auto& p : row) {
+                    if (!sc) {
+                        tailVerts_.insert(tailVerts_.end(),
+                                          {x + (lastRow ? 0.0f : p[0]) + shift, y, p[1], 0, 0, 1, col[0], col[1], col[2], col[3] * a, p[2], p[3], 1, 0, 0, 1});
+                        continue;
+                    }
+                    const float px = (lastRow ? 0.0f : p[0]) + shift, pz = p[1];
+                    const float wx = ox + px * R[0] + y * R[3] + pz * R[6], wy = px * R[1] + y * R[4] + pz * R[7], wz = oz + px * R[2] + y * R[5] + pz * R[8];
+                    tailVerts_.insert(tailVerts_.end(), {wx, wy, wz, R[6], R[7], R[8], col[0], col[1], col[2], col[3] * a, p[2], p[3], 1, 0, 0, 1});
+                }
                 ++rows;
                 if (lastRow) break;
+            }
+            // GD05_TAILCURVE_LOG=1: the tail's first row's middle against its
+            // slot's smasher (x, z), and its roll against the smasher's: the
+            // tail sits on the curve when both are ~0 on every lane.
+            if (static unsigned tl = 0; SDL_getenv("GD05_TAILCURVE_LOG") && !(tl & (1u << f)) && rows > 0 && slotCurve_[size_t(f)].set) {
+                tl |= 1u << f;
+                const size_t mid = (base + n / 2) * size_t(16);
+                const SlotCurve& k = slotCurve_[size_t(f)];
+                const float d[3] = {tailVerts_[mid] - (lefty_ ? -k.x : k.x), tailVerts_[mid + 1] - y0, tailVerts_[mid + 2] - k.z};
+                float o[3];  // in the smasher's frame (rows are its axes)
+                for (int i = 0; i < 3; ++i) o[i] = d[0] * k.rot[i * 3] + d[1] * k.rot[i * 3 + 1] + d[2] * k.rot[i * 3 + 2];
+                SDL_Log("RB track: tail curve lane %d: tail middle - smasher (smasher frame) x %+.3f z %+.3f%s", f, double(o[0]), double(o[2]), sc ? "" : " (flat)");
             }
             if (base + rows * n > 65000) break;
             const int first = int(tailIndices_.size());

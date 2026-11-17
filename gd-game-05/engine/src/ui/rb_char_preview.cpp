@@ -55,6 +55,26 @@ bool RbCharPreview::set(UiManager& ui, const Look& look) {
     Band::rbSkin(ui.data(), *ch_, nullptr, look.skin);
     Band::rbPatches(ui.data(), *ch_, look.patches);
     chr::applyDeform(*ch_, look.weight, look.height);
+    // GD05-132: in the shell RB's main driver takes the shell clips
+    // (char_objects.dta CharDriver main change_clips: anim/<gender>_<inst>
+    // _shell.milo) and the shell character plays its "attitude" then its
+    // "shell" group (RB 0x82842738 [C]); the port played the song's stand
+    // clips, whose arm flags held the hands' IKs on with no strum / fret
+    // driver playing (the strum hand raised to bone_pick_strum).
+    // GD05_SHELLCLIPS_LEGACY=1: the stand group as before.
+    if (chr::ClipDriver* d = ch_->mainDriver(); d && !SDL_getenv("GD05_SHELLCLIPS_LEGACY")) {
+        const std::string shellInst = inst == "vocals" ? "vocal" : inst;
+        if (chr::ClipSet* shell = clips_->get(base, "anim/" + look.gender + "_" + shellInst + "_shell.milo")) {
+            if (scene::CharClipGroup* g = shell->group("shell"); g && !g->clips.empty()) {
+                d->setClipSet(shell);
+                scene::CharClipSamples* clip = look.attitude ? shell->nextMatching(*g, look.attitude) : nullptr;
+                if (!clip) clip = shell->next(*g);
+                if (clip) d->playClip(clip, 0);
+                if (inst == "vocals") ch_->setDrawOnly("hands.grp", "mic.grp");
+                return true;
+            }
+        }
+    }
     // The main driver's stand group (a drummer's sit), a clip with the
     // attitude's flag if one has it [I: the shell's attitude groups].
     if (chr::ClipDriver* d = ch_->mainDriver(); d && d->clipSet())

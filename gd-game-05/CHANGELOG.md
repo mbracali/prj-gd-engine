@@ -6,8 +6,14 @@ inside the Guitar Dream Universal Launcher's release
 
 ## [Unreleased]
 
+### Added
+- Band games: the camera shows the player who failed out, and the one who saves them, as in Rock Band.
+
 ### Fixed
 - Solo sections turn the highway blue, as in Rock Band.
+- The band and character profile screens have their dark patterned background again (it was bright yellow and hard to read).
+- Sustain tails follow the highway's curve like the notes.
+- Band hub: the band stands in Rock Band's own idle poses (the guitarist's arm no longer shoots up).
 
 ## [0.0.8] - 2026-11-16
 
