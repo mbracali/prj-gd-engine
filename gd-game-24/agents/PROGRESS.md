@@ -205,8 +205,9 @@ Not found: the tuning block's source (0x08b5a440: no code writes it, no
 disc file holds the DTA's values as floats), so all point / health values
 are [I]; the DTA's `max_points` is ~11x our perfect scores.
 
-Left: the real numbers; solo sections (0x08000000 gems); sustains (no
-duration field identified); stars (min / max points); the original's HUD,
+Left: the real numbers; solo sections (0x08000000 gems); sustains (found
+after the commit: gem flag bit 0x02 clear + the length at +0x0A, FORMATS.md;
+not judged / drawn yet: the tail texture is probably `susTttt`); stars (min / max points); the original's HUD,
 indicator and results UI (GD24-004); stem muting (needs the song audio);
 the capture queue's finer rules; bouncing arrows; Quick Switch / Track
 Wrapping options.

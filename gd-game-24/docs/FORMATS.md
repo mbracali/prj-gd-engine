@@ -119,10 +119,10 @@ record, 20 bytes:
 |---|---|---|
 | 0x00 | f32 | time in ms |
 | 0x04 | u32 | tick (480 per beat: 2952.4 ms = tick 2160 at ABC's tempo) |
-| 0x08 | u16, u16 | duration (ms?, ticks?) [I] |
+| 0x08 | u16, u16 | lengths in ms: the second = the note's length (sustains up to ~10 s), the first = the second minus a per-song constant (48..74 ms) [I: WOULD, EVERLONG, AQUALUNG] |
 | 0x0C | u8 | MIDI pitch-like id (0x3A, 0x3C...) [I] |
 | 0x0E | u8 | lane bit mask 1 / 2 / 4 / 8: **four lanes**; chords OR them (5, 10, ...) [C data] |
-| 0x0F | u8 | flags (0x0A / 0x0B) [I] |
+| 0x0F | u8 | flags: 0x0A / 0x0B most gems; bit 0x02 clear (0x08 / 0x09) = a sustain [I: those have lengths up to 9,982 ms, the others at most 405] |
 | 0x10 | u32 | flags (0, 0x02000000 seen) [I] |
 
 The tracks [C data, all 41 songs]: one object per instrument holds a
