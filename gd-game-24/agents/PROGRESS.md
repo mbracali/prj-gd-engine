@@ -110,3 +110,28 @@ Not done: the original highway (GD24-002's main part: the highway heap
 image, GE meshes / textures), playing a chart (autoplay, hit detection),
 tempo map / phrases / Overdrive objects, the controls' real defaults, the
 tutorials' charts, packaging (`build.sh` module recipe; not ready_to_play).
+
+## GD24-002 highway, first part (11-17, about 2 h)
+
+Small fixes: the status screen's album line ("Unknown" not shown), the
+GAMEPADS dropdowns fitted with "...".
+
+Done: the highway's data decode (`src/data/psp_gfx`, `--highwaytest`): the
+heap-image textures (swizzled 4/8 bpp + palette) and GE display-list meshes
+of COMMON.STR; every highway piece found (FORMATS.md "Graphics in the heap
+images"); the four gem textures measured red / yellow / green / blue.
+
+Next (the rest of the first boot), in order:
+1. The placement: the scene-graph objects around the mesh objects (node
+   transforms, the mesh scale from its bounds), starting from the track
+   plane object (five material / block pairs) and the plate meshes; the
+   resource directory lists (FUN_088dc2d4) to walk them properly; the code
+   that spawns gems on lanes (search the EBOOT for the float constants of
+   the lane x positions, or trace the users of the gem list objects, the
+   GameGemList asserts at 0x08b40c37 / 0x08b4195c) and the camera.
+2. A small renderer on gd-engine-core's device for these meshes / textures
+   (the canvas becomes a 2D overlay on it).
+3. The chart scrolling with the preview (the preview covers ~30 s of the
+   song: its offset into the song is not known yet, [I]), input judged
+   against the gems (hit / miss), track switching.
+Estimate: 6-10 h of agent time, most of it step 1.

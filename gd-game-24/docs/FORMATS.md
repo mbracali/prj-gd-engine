@@ -190,6 +190,50 @@ characters [C data: every table has exactly count + 1 lines]. Strings are referr
 `_GAMEPLAY_TIPS`, `_BANDNAME_A/B`, `_MEMBERNAME_MALE/FEMALE`; languages EN,
 FR, GE, IT, SP.
 
+## Graphics in the heap images (the highway: COMMON.STR)
+
+COMMON.STR's chunk 0 loads at 0x08F36600 (65 name pointers agree) and
+chunk 1 at 0x091C32E0 (the track plane's sub-mesh pointers land on its
+blocks) [C]. Pointers to texture pixels and mesh blocks are 0x80 past the
+data in the file (string pointers are not) [C data; why: not known].
+
+The engine's resource directory (dump function FUN_088dc2d4) keeps lists:
+textures (+0x04), materials (+0x10), animations (+0x1C), meshes (+0x28),
+another list (+0x34); a mesh records vertices, triangles and a type 1
+Scenery / 2 Skinned / 3 Prop [C code].
+
+**Texture**, 0x54-byte object [C data, 80 in COMMON]: +0x00 u32 0x54, +0x04
+u16 width, height, +0x08 the same again, +0x0E bits per pixel (4 / 8),
++0x11 flags (2; 32 on some 8-bit effects), +0x18 / +0x1C pixel and palette
+pointers, +0x20 {1, log2 width, log2 height}, +0x2C 0x77359400, +0x30 the
+list node, name at +0x3D. Pixels at +0x50, **PSP-swizzled** (16-byte x
+8-row blocks), the palette right after (RGBA8888, alpha 0x80 = opaque)
+[C: decoded images are the gems, rails, badges, emblems, plates; chosen by
+the smoothest image over start offsets]. A few character textures (e.g.
+the 128x128 head) still decode wrong [I: another layout].
+
+**Mesh block** [C data, 46 in COMMON]: {u32 size, u32 vertices, u32
+primitives, u32 0, u32 vertex data offset, u32 1, u32 -1, ...} (skinned:
+{..., 1, offset, -1}), then a GE display list (VTYPE, PRIM..., RET) and the
+vertices at the offset, in the GE's VTYPE layout. gem_4a: VTYPE 0xA1 (8-bit
+UV, normal, position), 8 triangle strips, 139 vertices. Positions are
+normalized (8 / 16-bit: -1..1); the mesh object before the block holds
+bounds (gem_4a: x -0.347..0.347, centre (0, 0.02, 0.13), 0.35) that give
+the scale [I], and material / block pairs (track_plane_A: five sub-meshes).
+
+The highway's pieces [C names]: `track_plane_A` (with the `rails`,
+`rails_glow`, `surface`, `seekerRail` textures [I]), `plate_4a..d` (the lane
+plates, skinned, red / yellow / green / blue textures), `beat_bar_a`,
+`beat_bar2_a`, `gem_4a..d` + `PBT_Gem4A..D` (red, yellow, green, blue:
+RED / YELLOW / GREEN / BLUE NOTE [C: measured colours]), `gem_4od`,
+`gem_4pass` (Prism pass), the `*_crash` pieces, `OD_glow_ray_A`, the
+multiplier badges `pa_2x..11x`, `OD_drums/bass/guitar/vocals`. The
+executable has none of these names (objects are looked up by hash [I]).
+`src/data/psp_gfx.*`, `gd24 --highwaytest [--sheet f.bmp]`.
+
+Not known yet: how the scene places them (node transforms, the per-mesh
+scale, the camera), the lane positions and the track's length / speed.
+
 ## Controls (what the data say)
 
 [C] STR_EN.TXT lists the original's Options > Controls actions: TRACK SWITCH
