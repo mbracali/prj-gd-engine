@@ -21,6 +21,9 @@ extern "C" GD_MODULE_EXPORT int gd_game_run(const GdHost* host) {
     // A Steam Deck (the launcher's handheld profile): the Steam Deck settings
     // are the Enhanced Options' defaults (App::enhancedValue).
     gdshim_setenv("GD02_HANDHELD", (GD_HOST_FLAGS(host) & GD_HOST_HANDHELD) ? "1" : "0");
+    // RecompLauncher's Big Picture mode (GD_HOST_FULLSCREEN): Windowed counts
+    // as Full Screen (No Border) for this run (App's screen mode).
+    gdshim_setenv("GD02_FULLSCREEN", (GD_HOST_FLAGS(host) & GD_HOST_FULLSCREEN) ? "1" : "0");
     std::vector<std::string> args(host->argv, host->argv + host->argc);
     if (args.empty()) args.emplace_back("gd02");
     std::vector<char*> argv;

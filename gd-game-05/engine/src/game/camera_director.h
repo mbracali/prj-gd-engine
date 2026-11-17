@@ -87,6 +87,9 @@ public:
     void setStarPower(bool on) { starPower_ = on; }
     // The shots' camera shake shown (Enhanced Options > Disable Shaky Camera turns it off).
     void setShake(bool on) { shake_ = on; }
+    // The world clock the shake steps on (Hz): the world's paced rate (24
+    // under ProFilm), 60 (GH2's) when the world draws every frame (GD05-102).
+    void setShakeStepHz(float hz) { shakeHz_ = hz > 0 ? hz : 60; }
     bool shake() const { return shake_; }
     bool starPower() const { return starPower_; }
 
@@ -128,6 +131,11 @@ public:
     std::function<void(const std::string&)> onShot;
     // For the crowd: a shot started (its crowd, crowd3d, crowd_face_camera).
     std::function<void(const scene::CamShot&)> onShotStarted;
+    // RB's BandCamShot shot_over (band_objects.dta: next_shot, else the
+    // world's camshot_end) [C data]: a non-looping shot reached its last
+    // frame with no sequence left (CamShot SetFrame RB 0x82292968 [C]); the
+    // host plays its next_shot or ends it (App::rbCamshotEnd).
+    std::function<void(const scene::CamShot&)> onShotOver;
     int shotsStarted() const { return started_; }
     int failedPicks() const { return failedPicks_; }
 
@@ -203,6 +211,7 @@ private:
     Dof dof_;
     bool starPower_ = false;
     bool shake_ = true;
+    float shakeHz_ = 60;
     bool pickEnabled_ = true, freeCam_ = false;
     std::vector<const scene::CamShot*> sequence_;
     int ppCalls_ = 0;                             // pp_blend_task / PostProc select calls

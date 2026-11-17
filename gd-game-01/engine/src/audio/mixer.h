@@ -13,6 +13,7 @@
 
 #include "audio/spu.h"
 #include "data/vgs.h"
+#include "gd/core/audio/time_stretch.h"
 
 // Enhanced > Audio backend (audio_backend; gd-engine-core/docs/audio.md): an
 // output of gd-engine-core (miniaudio, OpenAL, FAudio) playing an SDL audio
@@ -108,6 +109,12 @@ public:
     Spu& spu() { return spu_; }
     // Song playback speed (game_lost slows the music to 0 over 2 s).
     void setSongSpeed(float speed) { songSpeed_.store(speed); }
+    // Enhanced > Song Speed (GDALL-053): the song plays `tempo` x as fast
+    // with its pitch kept (gd-engine-core's TimeStretch, WSOLA) and the song
+    // clock runs at the tempo, so the chart follows. 1 = off (the original
+    // path, untouched). Set after play(); play() resets it to 1.
+    void setTempo(double tempo);
+    double tempo() const { return tempo_.load(); }
 
     // Song time in ms at `ticksNs` (SDL_GetTicksNS clock), or now if 0.
     double songTimeMs(uint64_t ticksNs = 0) const;
@@ -191,4 +198,7 @@ private:
     Spu spu_;
     std::atomic<float> songSpeed_{1};
     double songFrac_ = 0;
+    gd::core::audio::TimeStretch stretch_;  // Song Speed (under mutex_)
+    std::atomic<double> tempo_{1};
+    double leadInMs_ = 0;  // play()'s
 };

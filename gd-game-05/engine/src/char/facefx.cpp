@@ -565,6 +565,15 @@ void LipSync::tickPlayer(float uiSeconds, float songSeconds) {
     } else {
         playerTime_ = float(uiSeconds - playerStart_) - playerOffset_;
     }
+    if (loop_) {
+        playerTime_ += songOffset_;
+        const float len = anim_->endTime - anim_->startTime;
+        if (len > 0) {
+            float r = std::fmod(playerTime_ - anim_->startTime, len);
+            if (r < 0) r += len;
+            playerTime_ = anim_->startTime + r;
+        }
+    }
     if (playerTime_ <= anim_->endTime) {
         evaluateCurves(playerTime_);
     } else {  // past the end: stop (0x82387490)

@@ -125,6 +125,19 @@ Wave G06 band (GD05-066/067/068):
   `GD05_PREFAB_VOCALS=vocals2` (any instrument: GD05_PREFAB_GUITAR, _BASS,
   _DRUM) picks the premade; bandcheck's "face rest" line checks each
   member's jaw against its face clips (D94).
+- GD05-106 / 108 (D108-D112): bandcheck also prints informative `face
+  <member> eyes / blinks / expressions` lines, blinks together, and `drum
+  reach` per hand and pad (stick tip to its IK target and to the pad at the
+  note, closest approach and its time, the hand IK weight; hits with the IK
+  off counted apart). GD05_DRUMREACH_LOG=1 logs each hit's targets,
+  GD05_STRETCH_LOG=1 each stretched frame. Legacy switches: GD05_EYES /
+  GAZE / BLINK / EXPR / MIDICLIP / SERVOBIND_LEGACY=1.
+- GD05-110 (D113, D114): bandcheck `arms` (arm chain bones turning over 30
+  deg in one frame, at most 1 in 1000) and `arm skin twist between
+  segments` (twist segments against each other, over 75 deg on at most 1
+  frame in 1000); `info ... arm twist` is informative. GD05_ARMDUMP=<file>
+  writes each frame's elbows / hands (agents/scratch/armcmp.py compares two
+  runs). Switches GD05_SERVOPOS_LEGACY=1, GD05_POLLSORT_LEGACY=1.
 
 Wave G06 highway and crowd (GD05-070 / GD05-071):
 - `--walktest rb_highway`: App::rbProbes under every frame: the Overdrive
@@ -225,3 +238,100 @@ Wave G06 lobby, shops, deform, menu characters (GD05-082 / 083 / 084, D80..D83):
   and without it, RbCharPreview::hidden).
 - `agents/scratch/car8/gate_par.sh [jobs]` (git-ignored; WALKS="..."
   for a subset, B_OVERRIDE=<binary>).
+
+RB focus 11-16 (GD05-105 / GD05-109):
+- `--walktest rb_songlist_tiers`: the quick play list (every song) with
+  player 0 on a guitar, then on a drum kit (`song_tiers:<controller
+  type>:<instrument>`): prints each section and its songs (rank, * bonus),
+  each song's section recomputed from the data (D103).
+  GD05_SONGTIERS_LEGACY=1 fails.
+- `--walktest rb_loading_icons`: quick play's first song; through 3 s of
+  the loading screens each band icon's texture (`loading_icon_frames`):
+  every icon must change frames; GD05_WALK_SHOTS=<dir> also saves a shot
+  every 100 ms (loading_icons_<n>.bmp; the icons sit at about x 1170-1600,
+  y 820-970 of 1920 x 1080). GD05_LOADICON_LEGACY=1 fails (D104).
+
+RB focus 11-16 (GD05-107 cameras):
+- `--walktest rb_camera_cuts` (quick play solo) / `rb_camera_cuts_band`
+  (band quick play, four players): 60 s of the song with a shot every
+  2.5 s (GD05_WALK_SHOTS: title_cam_NN.bmp; GD05_SHOTLOG=1 names the shots
+  and logs `cut aim` per cut), then App::rbCamSimRun: the camera alone
+  through each song of GD05_CAMSIM_SONGS (comma list, default the one
+  playing) on its own clock (seconds a song): `camsim <song> cut ...` per
+  cut, per song the longest hold, the longest time past a shot's last
+  frame, the venue's disabled shots picked and the directed cuts started at
+  event - zero_time; counters rb_camsim_*, rb_cut_aim_*. GD05_VENUE picks
+  the venue (big_club_11 lists 34 disabled shots, arena_07 19).
+  GD05_CAMRULES_LEGACY=1 runs the camera of 1.1.15 (D105-D107).
+
+RB focus 11-16 (GD05-114 New Song part):
+- `--walktest rb_newsong_part` (keyboard) / `rb_newsong_part_pad` (an Xbox
+  360 pad works the menus): solo quick play, a song, pause > NEW SONG >
+  yes, another song: `newsong_part first|again|game` print player 0's
+  controller, track, character, slot and ready flag; the part / difficulty
+  screen must come up not ready in the guitar slot, the song played on the
+  guitar. GD05_READYRESET_LEGACY=1 fails (D116).
+
+RB focus 11-16 (GD05-112 eyes):
+- bandcheck adds `face <member> eye in socket` (the eye bone off its bind
+  position, its look past the look-at limits) and `face <member> lid follows
+  the eye` (slope of the upper lid's turn against the eye's vertical turn,
+  RB about -1; GD05_LIDS_LEGACY=1 fails). GD05_EYELOG=1 logs each frame's
+  eye bones (`eyelog` lines).
+- GD05_FACE_CAM=<member>:<distance>:f:<bone>: the camera in front of the
+  face (square to the line between the eye bones), whatever way the member
+  turns, aimed at <bone> (e.g. player_vocals0:12:f:bone_R-eye.mesh).
+
+RB focus 11-16 (GD05-113 hair):
+- bandcheck adds `hair <slot>` (D118): the (point, collide) pairs RB's
+  hookup makes, the pairs the step tests, and after every hair step the
+  hooked points inside their collide (RB's hard radius; pass max <= 0.01;
+  points pushed back in by a later collide of their list counted apart);
+  `info hair <slot>`: points / segment midpoints inside any collide (RB
+  tests neither) and the points' motion against their strand root.
+  GD05_HAIRLOG=1 logs each hair's hookup and the character's collides.
+  Switches GD05_HAIRCOLLIDE / HAIRGRAVITY / HAIRSLACK / HAIRRESET_LEGACY=1.
+
+Career rundown 11-16 (GD05-118..120, agents/CAREER_AUDIT_20261116.md):
+- Test aid (tests/walktest_career.cpp): `rb_full_solo_autoplay` /
+  `rb_full_band_autoplay` complete the tours' gigs through the tour
+  objects' natives as ui/endgame.dta does (complete_song 5 stars per set
+  song, complete_event, the hints' advance) and recompute the
+  expectations from the data; the gig that ends a tour is left for the
+  menus. Walk checks `rb_to_screen:<a|b>` (X through hints / results until
+  a screen, never on a song or a load) and `rb_focus_row:<provider>:<sym>`
+  (final / final_town / final_venue: the autoplay's GD05_WALK_FINAL).
+- `--walktest rb_full_solo` (GD05_INSTRUMENT=drum / vocals for the other
+  instruments, GD05_WALK_EASY=1 Easy): the whole Solo Tour, the winning
+  gig through the menus (tour_solo_win_screen, credits, send-off), then a
+  restart. GD05_TOURWIN_LEGACY=1 / GD05_DOWNLOADGIG_LEGACY=1 fail (D124).
+- `--walktest rb_full_band`: a guitarist, a restart, a new band (boston):
+  every gig of all 17 towns through the natives, the hall of fame through
+  the menus (8 songs, tour_band_win_screen), the endless setlist through
+  the natives, a restart. GD05_BWTTOWNS_LEGACY=1 fails (D123). ~6 min.
+- `--walktest rb_bwt_diy`: the hometown small club's Make a Setlist gig
+  through tour_selsong_screen twice, the set checked (`rb_bwt_diy_set`).
+
+Career rundown 2, 11-16 (GD05-122..128, agents/CAREER_AUDIT_20261116.md):
+- `--walktest rb_career_screens_band` (~90 s): RB's band lobby (guitarist
+  and drummer make characters there), a new band, the hub, a first gig
+  through the natives, the gig guide's venue / event screens, the
+  difficulty screen, the shop, band profile, band roster.
+  `--walktest rb_career_screens_solo` (~70 s): a new guitarist, the hub,
+  the difficulty, the gig guide (a first gig through the natives; the
+  unlock row: mode 1 and back), the shop, the character profile.
+- Checks: `rb_texts:<tag>` (once the screen rests: a shot <tag>.bmp in
+  GD05_WALK_SHOTS, every label shown with no text or "Loading";
+  `rb_texts_end` fails if any screen had one; GD05_TEXTS_ALLOW=<tags>);
+  `rb_hub_chars:<n>` (the practice space with / without the previews: the
+  members' pixels, left half); `rb_gig_rows:<provider>:<labels>` (each
+  row's texts; each label filled on a row); `rb_solo_mode:<n>`;
+  `rb_solo_first_gig`; `rb_seldiff_min:<town>/<venue>/<event>|none` (the
+  difficulties disabled for the gig's min_difficulty); `rb_hometowns`;
+  `rb_bwt_min_difficulty`.
+- rb_full_band's test aid plays at Expert (RB's buzz caps by difficulty)
+  and takes every moment offered, checking its reward (x2 / x4 / x0 / x3);
+  GD05_MOMENTLOG=1 logs each gig's moment, buzz gain, cap, state;
+  GD05_MOMENT_SEED=<n> fixes the moments' draws. rb_full_band_end checks
+  the win instruments; rb_full_solo_won the golden instrument.
+

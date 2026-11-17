@@ -94,6 +94,11 @@ struct Session {
     std::vector<std::string> voiceDropped;
     // The game panel's state.
     bool gameOver = false;
+    // The song plays itself (Enhanced > Autoplay): its result is not saved,
+    // no record, stars, perfect (gold) flag, cash or high score (GD02-168,
+    // #104). [I] GH2's own autoplay is a debug cheat that nothing checks;
+    // GH2DX turns saving off under autoplay (docs/spikes/study_gh2dx.md).
+    bool noSave = false;
     std::string lastPreview;
 };
 

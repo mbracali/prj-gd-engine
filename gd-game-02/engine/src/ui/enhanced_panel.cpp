@@ -76,6 +76,10 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"autoplay", {"off", "on"}},
         {"hopo_mode", {"original", "forgiving"}},
         {"easy_chords", {"off", "on"}},  // Accessibility (GDALL-039): off, as the original
+        // Cheats & Enhancers > Song Speed / Track Speed (GDALL-053 / 054): the
+        // keys and values of every game (gd-engine-core speed_options.h).
+        {"song_speed", {"100", "50", "60", "70", "80", "90", "110", "120", "130", "140", "150", "160", "170", "180", "190", "200"}},
+        {"track_speed", {"1", "0.5", "0.75", "1.25", "1.5", "1.75", "2", "2.25", "2.5", "2.75", "3", "3.25", "3.5"}},
         {"dev_key_cheats", {"off", "on"}},
         {"audio_offset", {}, -300, 500},
         {"video_offset", {}, -300, 500},
@@ -451,6 +455,18 @@ const std::vector<Item>& items() {
         {Kind::Check, "cut_content", "Enable Cut Content", false, "Loads content left unused on the original disc into the game."},
         {Kind::Check, "no_fail", "No Fail Mode", true, "The rock meter cannot fail you: every song plays to the end."},
         {Kind::Check, "autoplay", "Autoplay", true, "The game plays every note of a song by itself, without a miss."},
+        {Kind::Choice, "song_speed", "Song Speed", true,
+         "Plays the songs slower or faster, from 50 % to 200 %, with the music at its own pitch. The notes keep their "
+         "speed on the highway; above 100 % the timing window grows with the speed. A song not at 100 % saves no "
+         "score, stars or record, like practice.",
+         {{"50", "50 %"}, {"60", "60 %"}, {"70", "70 %"}, {"80", "80 %"}, {"90", "90 %"}, {"100", "100 % (original)"},
+          {"110", "110 %"}, {"120", "120 %"}, {"130", "130 %"}, {"140", "140 %"}, {"150", "150 %"}, {"160", "160 %"},
+          {"170", "170 %"}, {"180", "180 %"}, {"190", "190 %"}, {"200", "200 %"}}},
+        {Kind::Choice, "track_speed", "Track Speed", true,
+         "How fast the notes come down the highway, times the difficulty's own speed (1x, as the original). Higher "
+         "spreads the notes out and shows them for less time. The same choice in every game.",
+         {{"0.5", "0.5x"}, {"0.75", "0.75x"}, {"1", "1x (original)"}, {"1.25", "1.25x"}, {"1.5", "1.5x"}, {"1.75", "1.75x"},
+          {"2", "2x"}, {"2.25", "2.25x"}, {"2.5", "2.5x"}, {"2.75", "2.75x"}, {"3", "3x"}, {"3.25", "3.25x"}, {"3.5", "3.5x"}}},
         {Kind::Choice, "hopo_mode", "Forgiving Hammer-ons and Pull-offs", true,
          "Notes with a coloured top can be played without strumming. Off (as on the Xbox 360): a fret pressed or let go "
          "within the note's window after the previous note was hit, and a wrong hammer-on locks the note out. On "
@@ -914,6 +930,7 @@ private:
         const float rowTop = rowY(dropdown_), h = rowHeight(it), n = float(it.options.size());
         ddTop_ = rowTop + h - 2;
         if (ddTop_ + n * kDdRow > kScreenH - 70) ddTop_ = rowTop + 2 - n * kDdRow;  // no room below: open upward
+        ddTop_ = std::max(ddTop_, 8.0f);  // a long list (Song Speed) stays on the screen
         const float o = d_.offset(), x0 = kDdPopX0 + o, x1 = kCtrlX1 + o;
         d_.quad(x0, ddTop_, x1, ddTop_ + n * kDdRow, {0.08f, 0.07f, 0.06f, 0.97f});
         d_.frame(x0, ddTop_, x1, ddTop_ + n * kDdRow, 2, kAccent);

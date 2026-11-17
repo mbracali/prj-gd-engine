@@ -163,6 +163,73 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
         driverByName_[drv->name] = cd.get();
         drivers_.push_back(std::move(cd));
     }
+    // The servo's channels start at their bones' pose (GD05-108, GD05-110):
+    // CharBonesMeshes ReallocateInternal (RB 0x82364508) [C] reads each
+    // channel's mesh once its meshes are found: positions = the mesh's local
+    // position, scales (0x8238E178) and quaternions (0x8238E4C0) from its
+    // local matrix, the x / y / z angles (0x8238E328 / 358 / 388) from it too,
+    // the rest 0. Bones::add starts every channel at 0 (a quaternion at the
+    // identity), so a channel no driver had written yet put its bone there:
+    // the drum kit's bone_R-cymbal_stand (rotation, written only by
+    // right_crash.dmidi's crash clips) 141 degrees off its bind, and
+    // bone_hihat_pos (position, written only by hihat.dmidi's clips) at the
+    // stand's foot, 28 units under its bind: the hi-hat's stick targets on the
+    // floor until the first hi-hat note, the drummer's arms stretched up to
+    // 3 x and flipping (GD05-110). Channels the drivers write are unchanged
+    // once written. GD05_SERVOBIND_LEGACY=1: all at 0 / the identity;
+    // GD05_SERVOPOS_LEGACY=1: only the quaternions at the bind (D112).
+    static const bool servoBindLegacy = [] {
+        const char* e = SDL_getenv("GD05_SERVOBIND_LEGACY");
+        return e && *e && *e != '0';
+    }();
+    if (!servoBindLegacy) {
+        for (auto& c : bones_.channels()) {
+            const std::string base = scene::CharBonesSamples::boneOf(c.name);
+            if (startsWith(base, "bone_facing")) continue;
+            int b = skeleton_.find(base + ".trans");
+            if (b < 0) b = skeleton_.find(base + ".mesh");
+            if (b < 0) continue;
+            const scene::Xfm& x = skeleton_.bind(b);
+            static const bool posLegacy = [] {
+                const char* e = SDL_getenv("GD05_SERVOPOS_LEGACY");
+                return e && *e && *e != '0';
+            }();
+            const auto& r = x.rot;
+            if (!posLegacy) switch (c.type) {
+                case scene::CharBonesSamples::kPos:
+                    std::copy(x.pos.begin(), x.pos.end(), c.v);
+                    break;
+                case scene::CharBonesSamples::kScale:  // each axis row's length
+                    for (int k = 0; k < 3; ++k) c.v[k] = std::sqrt(r[size_t(k * 3)] * r[size_t(k * 3)] + r[size_t(k * 3 + 1)] * r[size_t(k * 3 + 1)] + r[size_t(k * 3 + 2)] * r[size_t(k * 3 + 2)]);
+                    break;
+                // The inverse of axisRot [I: RB's angle readers not read].
+                case scene::CharBonesSamples::kRotX: c.v[0] = std::atan2(r[5], r[4]); break;
+                case scene::CharBonesSamples::kRotY: c.v[0] = std::atan2(r[6], r[0]); break;
+                case scene::CharBonesSamples::kRotZ: c.v[0] = std::atan2(r[1], r[0]); break;
+                default: break;
+                }
+            if (c.type == scene::CharBonesSamples::kQuat) {
+                // The inverse of scene::quatToRot.
+                const auto& m = x.rot;
+                float q[4];
+                const float tr = m[0] + m[4] + m[8];
+                if (tr > 0) {
+                    const float w = 0.5f * std::sqrt(1 + tr), k = 0.25f / w;
+                    q[0] = (m[5] - m[7]) * k, q[1] = (m[6] - m[2]) * k, q[2] = (m[1] - m[3]) * k, q[3] = w;
+                } else if (m[0] >= m[4] && m[0] >= m[8]) {
+                    const float v = 0.5f * std::sqrt(std::max(0.0f, 1 + m[0] - m[4] - m[8])), k = 0.25f / v;
+                    q[0] = v, q[1] = (m[1] + m[3]) * k, q[2] = (m[2] + m[6]) * k, q[3] = (m[5] - m[7]) * k;
+                } else if (m[4] >= m[8]) {
+                    const float v = 0.5f * std::sqrt(std::max(0.0f, 1 - m[0] + m[4] - m[8])), k = 0.25f / v;
+                    q[0] = (m[1] + m[3]) * k, q[1] = v, q[2] = (m[5] + m[7]) * k, q[3] = (m[6] - m[2]) * k;
+                } else {
+                    const float v = 0.5f * std::sqrt(std::max(0.0f, 1 - m[0] - m[4] + m[8])), k = 0.25f / v;
+                    q[0] = (m[2] + m[6]) * k, q[1] = (m[5] + m[7]) * k, q[2] = v, q[3] = (m[1] - m[3]) * k;
+                }
+                std::copy(q, q + 4, c.v);
+            }
+        }
+    }
     // The servo's root channels and the pelvis (0x821884D8); "move self"
     // when the clips carry bone_facing_delta (0x821895C8).
     facingDeltaPos_ = bones_.find("bone_facing_delta.pos");
@@ -275,6 +342,36 @@ void Character::loadOutfit(const GameData& data, const std::string& outfitPath) 
                 if (auto* og = o->as<scene::Group>())
                     for (const auto& n : og->objects)
                         if (std::find(g->objects.begin(), g->objects.end(), n) == g->objects.end()) g->objects.push_back(n);
+            // The head's face rig (GD05-116, D121): each head outfit
+            // (outfits/heads/gen/head_<n>.milo) carries its own facial
+            // bones, placed for its own skull [C data: head_3's
+            // bone_L-eye.mesh at 2.24 3.87 1.23 under bone_head.mesh, the
+            // base character's (head_1's) at 2.64 4.33 1.51; 41 of the
+            // head's 55 bones differ on heads 2..6, by up to 1.1 units; the
+            // body pieces' bones all match the base's]. Its meshes (eye-L,
+            // eyebrows, head<n>) are skinned to those places, and the viseme
+            // set's Base poses the brows, lids and lips but never the eyes,
+            // so a head on the base's bones wore its eyeballs 0.4..0.7 units
+            // forward and out of the sockets (the singer's eyes "popping out
+            // of the skull"). A head piece's bone under the same parent as
+            // the character's gives it its place; a parentless one is the
+            // piece's stub of the chain (bone_spine2, bone_head_nod) and stays
+            // the character's [I: RB's outfit merge not read; the faces only
+            // fit this way]. Only the heads: the instruments' and the kits'
+            // bones (strings, nut, cymbals) stay as the port had them.
+            // GD05_HEADBONES_LEGACY=1: every bone the character's.
+            static const bool headBonesLegacy = [] {
+                const char* e = SDL_getenv("GD05_HEADBONES_LEGACY");
+                return e && *e && *e != '0';
+            }();
+            static const std::string kHeads = "/outfits/heads/";
+            const bool headPiece = outfitPath.find(kHeads) != std::string::npos;
+            const scene::Trans* ot = gfx::transOf(o.get());
+            auto* et = const_cast<scene::Trans*>(gfx::transOf(existing));
+            if (headPiece && ot && et && !ot->parent.empty() && ot->parent == et->parent) {
+                outfitBoneLocal_[o->name] = ot->local;  // for the bandcheck's face line
+                if (!headBonesLegacy) et->local = ot->local, et->world = ot->world;
+            }
             continue;  // kKeep: the character's bone
         }
         const scene::Trans* t = gfx::transOf(o.get());
@@ -727,7 +824,68 @@ void Character::setRbFace(ClipSet* set, const std::vector<std::string>& names) {
     faceChannelBone_.clear();
     faceMapped_ = 0;
     set->listChannels(faceBones_, false);
-    for (const std::string& n : names) faceClips_.push_back(set->clip(n));
+    faceBlinkFrame_ = -1;
+    for (const std::string& n : names) {
+        if (n == "Blink") faceBlinkFrame_ = int(faceClips_.size());
+        faceClips_.push_back(set->clip(n));
+    }
+    exp_ = expPrev_ = {};
+    expGroup_.clear();
+}
+
+// GD05_EXPR_LEGACY=1: no expressions (the port before GD05-106).
+static bool exprLegacy() {
+    static const bool v = [] {
+        const char* e = SDL_getenv("GD05_EXPR_LEGACY");
+        return e && *e && *e != '0';
+    }();
+    return v;
+}
+
+bool Character::changeFaceGroup(const std::string& group) {
+    if (exprLegacy() || !faceSet_ || !faceBase_) return false;
+    // RB 0x822E4C58 [C]: FindClipGroup in expression.drv's clips (the face
+    // set, CHAR_COMMON sync_objects); [I] the same group keeps its clip.
+    if (group == expGroup_ && exp_.clip) return false;
+    scene::CharClipGroup* g = faceSet_->group(group);
+    if (!g) return false;
+    // The clip with 0x80000 first (kExpressionFirst [I]), else the group's next.
+    scene::CharClipSamples* clip = faceSet_->nextMatching(*g, 0x80000);
+    if (!clip) clip = faceSet_->next(*g);
+    if (!clip) return false;
+    expGroup_ = group;
+    startExpression(clip, clip->blendWidth);
+    return true;
+}
+
+// CharDriver Play of the picked clip: the old one blends out over the new
+// one's blend width (beats) [I: the driver's default blend].
+void Character::startExpression(const scene::CharClipSamples* clip, float fadeBeats) {
+    expPrev_ = exp_;
+    exp_.clip = clip;
+    exp_.frame = clip->startFrame;
+    expFadeBeats_ = fadeBeats;
+    expFade_ = expPrev_.clip && fadeBeats > 0 ? 0.0f : 1.0f;
+    ++expPlayed_;
+    static const bool log = SDL_getenv("GD05_BANDLOG") != nullptr;
+    if (log) SDL_Log("char %s: expr %s %s (%.1f..%.1f, %s, blend %.2f)", name_.c_str(), expGroup_.c_str(), clip->name.c_str(), double(clip->startFrame),
+                     double(clip->endFrame), (clip->playFlags & 0x200) ? "realtime" : "beats", double(fadeBeats));
+}
+
+void Character::advanceExpression(ExpPlay& e, float dBeats, float dSeconds) {
+    if (!e.clip) return;
+    e.frame += (e.clip->playFlags & 0x200) ? e.clip->framesPerSec * dSeconds : dBeats;
+}
+
+const Bones& Character::expressionPose(const ExpPlay& e) {
+    if (expBones_.channels().size() != faceBones_.channels().size()) {
+        expBones_ = Bones();
+        for (const auto& c : faceBones_.channels()) expBones_.add(c.name);
+    }
+    for (auto& c : expBones_.channels()) c.weight = 0;
+    expBones_.scaleDown(*e.clip, 0);
+    expBones_.scaleAdd(*e.clip, 1, std::min(e.frame, e.clip->endFrame), 0);
+    return expBones_;
 }
 
 const Bones& Character::facePoseOf(const scene::CharClipSamples& clip) {
@@ -783,11 +941,39 @@ void Character::pollFace(const RigContext& ctx) {
         // keeps that) [I: RB's relative clip blend not read; composed on the
         // bone's side, the jaw opens on the open vowels].
         static const bool facePoseLegacy = SDL_getenv("GD05_FACEPOSE_LEGACY") != nullptr;
+        // GD05_BLINK_LEGACY=1: the whole face x the servo's weight, nothing
+        // when it is 0 (the port before GD05-106: the guitarists and the
+        // drummer, weight owner singalong.weight, never blinked).
+        static const bool blinkLegacy = [] {
+            const char* e = SDL_getenv("GD05_BLINK_LEGACY");
+            return e && *e && *e != '0';
+        }();
         const float servoWeight = faceServo_ ? rig_->weightOf(faceServo_->name) : 1.0f;
         std::vector<float> values;
         for (const auto& [b, axis] : faceEntries_) values.push_back(b >= 0 ? facefx::eyeAngle(skeleton_.local(b).rot.data(), axis) : 0.0f);
         facefx::FacePose pose;
-        if (servoWeight <= 0 || !lip_->poll(ctx.faceSongSeconds, ctx.faceUiSeconds, values.data(), values.size(), pose)) return;
+        // The expression clip runs on its own driver (expression.drv), whatever the servo does.
+        if (exp_.clip) {
+            advanceExpression(exp_, ctx.dBeats, ctx.dSeconds);
+            advanceExpression(expPrev_, ctx.dBeats, ctx.dSeconds);
+            if (expFade_ < 1) expFade_ = expFadeBeats_ > 0 ? std::min(1.0f, expFade_ + ctx.dBeats / expFadeBeats_) : 1.0f;
+            if (expFade_ >= 1) expPrev_ = {};
+            // BandCharacter poll (RB 0x822E6360) [C]: the clip done, another of the group.
+            if (exp_.frame >= exp_.clip->endFrame && exp_.clip->endFrame > exp_.clip->startFrame)
+                if (scene::CharClipGroup* g = faceSet_->group(expGroup_))
+                    if (scene::CharClipSamples* next = faceSet_->next(*g)) startExpression(next, next->blendWidth);
+        }
+        blinkValue_ = -1;
+        rig_->setBlinkValue(-1);
+        if ((blinkLegacy && servoWeight <= 0) || !lip_->poll(ctx.faceSongSeconds, ctx.faceUiSeconds, values.data(), values.size(), pose)) return;
+        // FaceFxLipSyncServo Poll (RB 0x82324110) [C]: the node whose clip is
+        // the set's Blink goes in at its full value (enable_blink its only
+        // gate, TRUE but for the band snapshot), kept at +0x10c for the eyes;
+        // the other nodes x the servo's weight.
+        blinkValue_ = 0;
+        for (const auto& f : pose.frames)
+            if (f.frame == faceBlinkFrame_) blinkValue_ = f.weight;
+        rig_->setBlinkValue(blinkValue_);
         const Bones& base = facePoseOf(*faceBase_);
         auto& out = faceBones_.channels();
         for (size_t i = 0; i < out.size(); ++i) {
@@ -800,10 +986,8 @@ void Character::pollFace(const RigContext& ctx) {
             r[2] = x[3] * y[2] + x[0] * y[1] - x[1] * y[0] + x[2] * y[3];
             r[3] = x[3] * y[3] - x[0] * y[0] - x[1] * y[1] - x[2] * y[2];
         };
-        for (const auto& f : pose.frames) {
-            if (f.frame < 0 || size_t(f.frame) >= faceClips_.size() || !faceClips_[size_t(f.frame)]) continue;
-            const Bones& vis = facePoseOf(*faceClips_[size_t(f.frame)]);
-            const float w = f.weight * servoWeight;
+        // An offset layer (a viseme, an expression) at weight w onto the face.
+        auto layer = [&](const Bones& vis, float w) {
             for (size_t i = 0; i < out.size(); ++i) {
                 const auto& a = vis.channels()[i];
                 const auto& b = base.channels()[i];
@@ -829,6 +1013,19 @@ void Character::pollFace(const RigContext& ctx) {
                     for (int k = 0; k < 3; ++k) out[i].v[k] += w * a.v[k];
                 }
             }
+        };
+        // expression.drv under the visemes, at its own weight [I: its place
+        // in the servo's blend not read].
+        if (exp_.clip) {
+            const float we = rig_->weightOf("expression.drv");
+            if (expPrev_.clip && we * (1 - expFade_) > 0) layer(expressionPose(expPrev_), we * (1 - expFade_));
+            if (we * expFade_ > 0) layer(expressionPose(exp_), we * expFade_);
+        }
+        for (const auto& f : pose.frames) {
+            if (f.frame < 0 || size_t(f.frame) >= faceClips_.size() || !faceClips_[size_t(f.frame)]) continue;
+            const float w = f.weight * (!blinkLegacy && f.frame == faceBlinkFrame_ ? 1.0f : servoWeight);
+            if (w == 0) continue;
+            layer(facePoseOf(*faceClips_[size_t(f.frame)]), w);
         }
         poseMeshes(faceBones_, faceChannelBone_, faceMapped_);
         lastFace_ = std::move(pose);

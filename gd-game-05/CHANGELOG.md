@@ -6,6 +6,21 @@ inside the Guitar Dream Universal Launcher's release
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-11-16
+
+### Added
+- CHD disc images (.chd) next to .iso (#112).
+- Starts in full screen when RecompLauncher opens it in Big Picture mode.
+
+### Fixed
+- The band: faces, eyes and eyelids follow Rock Band's own face rigs; the drummer and the arms of the whole band play as in the original; hair no longer clips through the body.
+- Cameras follow Rock Band's shot rules; the drum highway bounces on each kick; camera shake and hair move at the venue's pace.
+- The strike line: the outer gems land on their smashers.
+- Song list sections are Rock Band's tiers for your instrument; the loading icon is the right one.
+- Pause > New Song no longer forces drums, and its guitar / bass labels are back; the crowd cheers in time.
+- Solo Tour and Band World Tour play to their end; the band hub shows your band; the bass reaches 6x.
+- The FPS counter shows the real frame rate; the Enhanced Options backdrop frames the band.
+
 ## [0.0.7] - 2026-11-13
 
 ### Fixed

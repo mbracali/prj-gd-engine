@@ -18,6 +18,7 @@
 #include "ui/char_select.h"
 #include "ui/natives.h"
 #include "ui/ui_host.h"
+#include "gd/core/audio/speed_options.h"
 #include "ui/ui_objects.h"
 
 namespace ui {
@@ -256,6 +257,7 @@ public:
         setup.song = s.song;
         setup.difficulty = s.players[0].difficulty;
         setup.autoplay = gameCfgValue(ui, "force_autoplay").truthy() || SDL_getenv("GD03_AUTOPLAY") != nullptr;
+        s.noSave = !gd::core::speed::savesRecords(gd::core::speed::songSpeed(ui.host().enhancedValue("song_speed")));  // GDALL-053
         const Career::Options& o = ui.career().options;
         setup.lefty = o.lefty[0];
         setup.syncOffsetMs = o.syncOffsetMs;

@@ -31,6 +31,8 @@ public:
     virtual bool read(uint64_t offset, void* dst, size_t n) = 0;
 
     // Opens `path` (any of the kinds above); nullptr and `error` on failure.
+    // A CHD disc image (chd.h) opens as the image it holds: its size and
+    // bytes are the .iso's (GDUL-030). readFile() keeps a file's own bytes.
     static std::unique_ptr<RandomAccessFile> open(const std::string& path, std::string* error = nullptr);
     // A file held in memory (tests, unpacked archives).
     static std::unique_ptr<RandomAccessFile> fromMemory(std::vector<uint8_t> bytes);

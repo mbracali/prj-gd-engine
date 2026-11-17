@@ -1,5 +1,21 @@
 # Guitar Dream Universal Launcher: changes
 
+## 1.1.16
+
+Highlights
+- Guitar Hero: Metallica: its own in-song HUD, a dancing crowd, the band staying on stage, aligned menus and no more upside-down band in the smoke. Now 69%.
+- Rock Band: a big round on the band (faces, eyes, drummer, arms, hair), cameras, the strike line, New Song and both tours. Now 78%.
+- CHD disc images (.chd) work like .iso in every game (#112).
+- Song Speed (50-200 %) and Track Speed in GH1, GH2 and Rocks the 80s.
+- RecompLauncher: one-click install, and full screen in Big Picture mode.
+
+Details
+- Linux: the AppImage is now the main Linux download (gdul-<version>-linux-x86_64.AppImage); the .tar.gz is called gdul-<version>-portable-x86_64.tar.gz. Installed AppImages keep updating.
+- gd01 1.1.14: the tutorials' pause menu with the guitar and Require Strum fixed (#98).
+- gd02 1.1.16: the More Stats screen's lighting (#115), no records from Autoplay runs (#104).
+- gd03 1.1.9: Android's default resolution, no more slow motion on big tablets (#105).
+- gd04 1.1.8, gd05 0.0.8, gd10 0.0.2: see each game's changelog.
+
 ## 1.1.15
 
 Highlights

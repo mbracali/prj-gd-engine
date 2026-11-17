@@ -84,10 +84,17 @@ bool g_unlockAllSongs = false;
 // song_provider, Rock Band's (ui/selsong.dta): the songs of the disc that
 // have a rank (songs.dtb), shown by the display RB's song select cycles
 // (rank first: band_ui / song_groupings in band.dtb), each group under a
-// heading, "random_song" first. Grouping by rank: the songs sorted by the
-// player's instrument's rank (the band's for a band), split into the nine
-// generic_tier groups by count [I: the original's grouping, RB 0x82404A10
-// -> 0x824024F0, is not read yet; DECISIONS D5].
+// heading, "random_song" first. Grouping by rank (RB 0x82404A10) [C]: the
+// songs sorted by the list instrument's rank, equal ranks by the song's
+// symbol (0x82400348), each under the heading of its tier (0x82431958:
+// the first tier whose top rank is at least the song's), the tiers' top
+// ranks from SongMgr's ranked list of the instrument (0x82434020: the
+// songs neither downloaded nor (unlockable TRUE) cut into the nine
+// song_groupings rank tiers by count, the remainder to the last tiers),
+// the heading the tier's entry for the instrument (band.dta). The
+// instrument (0x824024F0): the leader's character's in a solo mode or
+// outside a band arrangement, else the band's (DECISIONS D103, GD05-109).
+// GD05_SONGTIERS_LEGACY=1: the band rank split into nine equal groups (D5).
 class RbSongProvider : public ListProvider {
 public:
     explicit RbSongProvider(UiManager& ui) : ListProvider("song_provider", "SongProvider"), ui_(ui) {}
@@ -163,6 +170,7 @@ public:
         if (msg == "get_display") return r = Value::integer(display_), true;
         // The instrument the list ranks by: player 0's controller [I: one local player].
         if (msg == "get_instrument") {
+            if (!SDL_getenv("GD05_SONGTIERS_LEGACY")) return r = Value::symbol(listInstrument()), true;
             const Value cfg = in.send("game", "get_player_config", {Value::integer(0)});
             r = cfg.type == Value::Type::Object ? in.send(cfg.object, "get_controller_sym", {}) : Value::symbol("guitar");
             return true;
@@ -234,18 +242,99 @@ private:
             }
             songs.push_back(&s);
         }
-        const std::string inst = "band";
-        std::stable_sort(songs.begin(), songs.end(), [&](const SongInfo* a, const SongInfo* b) {
-            auto ra = a->rank.count(inst) ? a->rank.at(inst) : 0, rb = b->rank.count(inst) ? b->rank.at(inst) : 0;
-            return ra < rb;
-        });
-        const int tiers = 9, n = int(songs.size());
-        for (int i = 0; i < n; ++i) {
-            const int tier = n ? i * tiers / n : 0;
-            if (i == 0 || tier != (i - 1) * tiers / n)
-                headers_.push_back({int(data_.size()), ui_.localize("generic_tier" + std::to_string(tier + 1))});
-            data_.push_back(songs[size_t(i)]->id);
+        if (SDL_getenv("GD05_SONGTIERS_LEGACY")) {  // D5: the band rank in nine equal groups
+            const std::string inst = "band";
+            std::stable_sort(songs.begin(), songs.end(), [&](const SongInfo* a, const SongInfo* b) {
+                auto ra = a->rank.count(inst) ? a->rank.at(inst) : 0, rb = b->rank.count(inst) ? b->rank.at(inst) : 0;
+                return ra < rb;
+            });
+            const int tiers = 9, n = int(songs.size());
+            for (int i = 0; i < n; ++i) {
+                const int tier = n ? i * tiers / n : 0;
+                if (i == 0 || tier != (i - 1) * tiers / n)
+                    headers_.push_back({int(data_.size()), ui_.localize("generic_tier" + std::to_string(tier + 1))});
+                data_.push_back(songs[size_t(i)]->id);
+            }
+            return;
         }
+        const std::string inst = listInstrument();
+        auto rankOf = [&](const SongInfo* s) { return s->rank.count(inst) ? s->rank.at(inst) : 0; };
+        std::sort(songs.begin(), songs.end(), [&](const SongInfo* a, const SongInfo* b) {
+            const int ra = rankOf(a), rb = rankOf(b);
+            return ra != rb ? ra < rb : a->id < b->id;
+        });
+        const std::vector<int> tops = tierTops(inst);
+        int last = -1;
+        for (const SongInfo* s : songs) {
+            const int tier = tierOf(tops, rankOf(s));
+            if (tier != last) headers_.push_back({int(data_.size()), ui_.localize(tierHeading(tier, inst))}), last = tier;
+            data_.push_back(s->id);
+        }
+    }
+
+    // The tiers' groups: band.dta's (song_groupings (rank (<tier>) ...)), each
+    // tier a list of (<instrument> <heading>) [C data].
+    const DataNode* rankTiers() {
+        const DataNode* g = ui_.bootTree() ? ui_.bootTree()->find("song_groupings") : nullptr;
+        return g ? g->find("rank") : nullptr;
+    }
+    std::string tierHeading(int tier, const std::string& inst) {
+        if (const DataNode* r = rankTiers(); r && tier >= 0 && size_t(tier) + 1 < r->children.size())
+            if (const DataNode* e = r->children[size_t(tier) + 1].find(inst); e && e->children.size() > 1 && e->children[1].isText())
+                return e->children[1].s;
+        return "generic_tier" + std::to_string(tier + 1);
+    }
+    // SongMgr's tiers (RB 0x82434020) [C]: the ranked songs neither
+    // downloaded nor (unlockable TRUE), by the instrument's rank, cut into
+    // the tiers by count (n / tiers each, one more for the last n % tiers);
+    // each tier's top is its last song's rank.
+    std::vector<int> tierTops(const std::string& inst) {
+        const DataNode* r = rankTiers();
+        const int numTiers = r ? int(r->children.size()) - 1 : 9;
+        std::vector<int> ranks;
+        for (const SongInfo& s : ui_.host().songs())
+            if (!s.tutorial && !s.unlockable && s.rank.count(inst)) ranks.push_back(s.rank.at(inst));
+        std::sort(ranks.begin(), ranks.end());
+        std::vector<int> tops;
+        if (numTiers <= 0 || ranks.empty()) return tops;
+        const int n = int(ranks.size()), q = n / numTiers, rem = n % numTiers;
+        int start = 0;
+        for (int i = 0; i < numTiers; ++i) {
+            const int size = q + (i >= numTiers - rem ? 1 : 0);
+            start += size;
+            tops.push_back(ranks[size_t(std::clamp(start - 1, 0, n - 1))]);
+        }
+        return tops;
+    }
+    // RB 0x82431958 [C]: the first tier whose top is at least the rank, else the last.
+    static int tierOf(const std::vector<int>& tops, int rank) {
+        for (size_t i = 0; i < tops.size(); ++i)
+            if (rank <= tops[i]) return int(i);
+        return tops.empty() ? 0 : int(tops.size()) - 1;
+    }
+    // The instrument the list ranks by (RB 0x824024F0) [C]: the band's in
+    // the leaderboards [I: the leaderboard's own instrument is not in the
+    // port] and in a band arrangement that is not solo; otherwise the
+    // leader's character's instrument (guitar for a bass player's
+    // character), the band's with no player in the session.
+    std::string listInstrument() {
+        if (mode_ == "leaderboards") return "band";
+        Interp& in = ui_.interp();
+        const bool solo = in.send("gamemode", "is_solo", {}).truthy();
+        const bool bandArrangement = in.send("gamemode", "is_band_arrangement", {}).truthy();
+        const Session& s = ui_.session();
+        if (s.numJoined() == 0 || (!solo && bandArrangement)) return "band";
+        int leader = gameCfgValue(ui_, "leader_num").integerValue();
+        if (!s.joined(leader))
+            for (int p = 0; p < 4; ++p)
+                if (s.joined(p)) {
+                    leader = p;
+                    break;
+                }
+        const Value cfg = in.send("game", "get_player_config", {Value::integer(leader)});
+        const Value ch = cfg.type == Value::Type::Object ? in.send(cfg.object, "get_char", {}) : Value::integer(0);
+        const Value inst = ch.type == Value::Type::Object ? in.send(ch.object, "get_instrument", {}) : Value::integer(0);
+        return inst.isText() && !inst.str().empty() ? inst.str() : "band";
     }
 
 public:
@@ -360,7 +449,34 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         for (ScriptObject* o : sinks) ui.callScript(o, "start_loading_msg");
         return Value::integer(0);
     });
-    session->quiet({"update_game_data", "send_to_all", "send_to_player", "set_all_local_ready_status", "set_invites_allowed", "ignore_remote_messages", "done_loading"});
+    session->quiet({"update_game_data", "send_to_all", "send_to_player", "set_invites_allowed", "ignore_remote_messages", "done_loading"});
+    // {session end_game kQuit} (pause.dta's exit_new_song / exit_change_band
+    // / exit_new_section, before their meta_loading screen): a local session
+    // has no sinks for it (pause_panel adds itself only online); the
+    // meta_loading screen that follows clears the song [I: Session EndGame
+    // not read]. It was logged unhandled on pause > New Song (GD05-114).
+    session->quiet({"end_game"});
+    // GD05-114: Session SetAllLocalReadyStatus (RB 0x82372F30) [C]: every
+    // local player whose ready flag differs gets the new one (0x8236EEC8).
+    // seldiff's panels send it FALSE as they unload (SELDIFF_PANEL_HANDLERS);
+    // the port ignored it, so the next song's part / difficulty screen came
+    // back with player 0 still ready: it went straight on to loading with no
+    // part picked (track none: the song's first instrument, the drums).
+    // GD05_READYRESET_LEGACY=1: ignored as before.
+    if (SDL_getenv("GD05_READYRESET_LEGACY")) {
+        session->quiet({"set_all_local_ready_status"});
+    } else {
+        session->on("set_all_local_ready_status", [&ui](std::vector<Value>& a) {
+            const bool ready = !a.empty() && a[0].truthy();
+            Interp& in = ui.interp();
+            for (int p = 0; p < 4; ++p) {
+                if (!ui.session().joined(p)) continue;
+                const Value cfg = in.send("game", "get_player_config", {Value::integer(p)});
+                if (cfg.object && in.send(cfg.object, "is_ready", {}).truthy() != ready) in.send(cfg.object, "set_ready", {Value::integer(ready ? 1 : 0)});
+            }
+            return Value::integer(0);
+        });
+    }
     RbHost* platform = add(std::make_unique<RbHost>(ui, "platform_mgr"));
     // Signed in: every local player has the port's profile (rb_profile.json,
     // ui/rb_meta.cpp), never a guest; the Xbox save screens stay skipped

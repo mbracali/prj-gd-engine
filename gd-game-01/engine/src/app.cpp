@@ -49,6 +49,8 @@
 #include "platform/gpu_select.h"
 #include "platform/paths.h"
 #include "platform/app_icon.h"
+#include "gd/core/audio/speed_options.h"
+#include "gd/core/audio/time_stretch.h"
 #include <cctype>
 #include <filesystem>
 #ifdef __ANDROID__
@@ -192,6 +194,10 @@ const std::map<std::string, Json>& enhancedDefaults() {
         {"cut_content", Json::boolean(false)},    {"no_fail", Json::boolean(false)},
         {"autoplay", Json::boolean(false)},
         {"easy_chords", Json::boolean(false)},  // Enhanced > Accessibility (GDALL-039): off, as the original
+        // Cheats & Enhancers > Song Speed / Track Speed (GDALL-053 / 054): the
+        // keys and values of every game (gd-engine-core speed_options.h).
+        {"song_speed", Json::string(gd::core::speed::kSongSpeedDefault)},
+        {"track_speed", Json::string(gd::core::speed::kTrackSpeedDefault)},
         {"cheat_air_guitar", Json::boolean(false)}, {"cheat_gh_guitar", Json::boolean(false)},
         {"cheat_unlock_all", Json::boolean(false)}, {"cheat_full_meter", Json::boolean(false)},
         {"cheat_no_venue", Json::boolean(false)},   {"cheat_monkey_crowd", Json::boolean(false)},
@@ -236,7 +242,9 @@ const std::map<std::string, std::set<std::string>>& enhancedChoices() {
         {"graphics_backend", {"local", "sdl3", "vulkan", "opengl3"}},
 #endif
         {"audio_backend", {"local", "miniaudio", "openal", "faudio"}},
-        {"hopo_mode", {"original", "forgiving"}}};
+        {"hopo_mode", {"original", "forgiving"}},
+        {"song_speed", std::set<std::string>(std::begin(gd::core::speed::kSongSpeeds), std::end(gd::core::speed::kSongSpeeds))},
+        {"track_speed", std::set<std::string>(std::begin(gd::core::speed::kTrackSpeeds), std::end(gd::core::speed::kTrackSpeeds))}};
     return c;
 }
 // The ranged choices in order, weakest first (enhancedLevel).
@@ -344,7 +352,7 @@ std::string loadRememberedPath() {
         for (const auto& e : std::filesystem::directory_iterator(std::filesystem::path(base), ec)) {
             std::string ext = e.path().extension().string();
             for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
-            if (ext == ".iso" && e.is_regular_file(ec)) return e.path().string();
+            if ((ext == ".iso" || ext == ".chd") && e.is_regular_file(ec)) return e.path().string();
         }
     }
 #endif
@@ -354,6 +362,15 @@ std::string loadRememberedPath() {
 void rememberPath(const std::string& path) {
     std::ofstream out(configPath());
     out << "data=" << path << "\n";
+}
+
+// Require Strum (#98, GD01-326): the device that plays decides, not the one
+// last used in the menus. The player was made with the menus' last mode, so
+// a guitar's d-pad Left / Right (sent as a joypad's), the mouse or another
+// pad there left a guitar with Require Strum on playing as a joypad (a fret
+// alone hit) for the whole song or tutorial lesson.
+void followPlayMode(Player& pl, const InputEvent& e) {
+    if (e.down && (isFret(e.action) || e.action == Action::Strum)) pl.setMode(e.mode);
 }
 
 class App {
@@ -449,11 +466,22 @@ private:
     double mouseUsedMs_ = -1e9;
     void cursorEvent(const SDL_Event& e);
     void updateCursor();
+    // A tutorial's pause menu is up (the game stays Playing under it, #98).
+    bool tutorialMenuUp() const { return tutorial_ && ui_ && ui_->currentScreen().rfind("tut_pause", 0) == 0; }
     Screen screen_ = Screen::NeedData;
     std::string message_;
 
     std::unique_ptr<GameData> data_;
     Rules rules_;
+    // Enhanced > Song Speed / Track Speed (GDALL-053 / 054), read when a song
+    // loads: the song's speed, the factor on the difficulty's track speed, and
+    // the rules the players use (the hit window x the song speed above 100 %).
+    double songSpeed_ = 1;
+    float trackFactor_ = 1;
+    Rules playRules_;
+    float trackSpeedNow() const {
+        return gd::core::speed::scrollSpeed(rules_.trackSpeed[size_t(difficulty_)], trackFactor_, songSpeed_);
+    }
     std::vector<SongInfo> songs_;
     size_t selected_ = 0;
     int difficulty_;
@@ -671,6 +699,8 @@ void App::tryLoadData(const std::string& path) {
             hooks.saveCampaign = [this] {
                 if (campaign_ && !campaign_->save(careerPath())) SDL_Log("career: could not save %s", careerPath().c_str());
             };
+            // A song not at 100 % Song Speed saves no record (GDALL-053).
+            hooks.noSave = [this] { return !gd::core::speed::savesRecords(songSpeed_); };
             hooks.starsOf = [this](int score) {
                 int base = baseScore();
                 return base <= 0 ? 3 : score >= 3 * base ? 5 : score >= 2 * base ? 4 : 3;
@@ -950,7 +980,13 @@ void App::startSong(size_t index, ControllerMode mode) {
         const bool noFail = opt_.noFail || enhancedOn("no_fail"), autoplay = opt_.autoplay || enhancedOn("autoplay") || attractAutoplay_;
         if (ui_ && !attractAutoplay_) ui_->setTrackShowing(true);  // only the attract mode hides it
         attractAutoplay_ = false;
-        player_ = std::make_unique<Player>(*song_, static_cast<Difficulty>(difficulty_), rules_, mode, noFail);
+        songSpeed_ = gd::core::speed::songSpeed(enhanced("song_speed").str());
+        trackFactor_ = float(gd::core::speed::trackSpeedFactor(enhanced("track_speed").str()));
+        playRules_ = rules_;
+        playRules_.slopMs = gd::core::speed::slopMs(rules_.slopMs, songSpeed_);
+        if (!gd::core::speed::isNormalSpeed(songSpeed_) || trackFactor_ != 1.0f)
+            SDL_Log("song speed %.0f %%, track speed x%.2f, hit window %.0f ms", songSpeed_ * 100, double(trackFactor_), double(playRules_.slopMs));
+        player_ = std::make_unique<Player>(*song_, static_cast<Difficulty>(difficulty_), playRules_, mode, noFail);
         autoplay_ = autoplay ? std::make_unique<Autoplay>(player_->chart()) : nullptr;
         // Face-off: P1 and P2 own their sections' gems; P2's score is scaled by B0 / B1.
         player2_.reset();
@@ -960,7 +996,7 @@ void App::startSong(size_t index, ControllerMode mode) {
         if (multi_) {
             int b0 = baseScore(0), b1 = baseScore(1);
             player_->setFaceOff(0, 1);
-            player2_ = std::make_unique<Player>(*song_, static_cast<Difficulty>(difficulty_), rules_, mode2_, true);
+            player2_ = std::make_unique<Player>(*song_, static_cast<Difficulty>(difficulty_), playRules_, mode2_, true);
             player2_->setFaceOff(1, b1 > 0 ? float(b0) / float(b1) : 1.0f);
             if (autoplay) {
                 autoplay_ = std::make_unique<Autoplay>(player_->chart(), 0);
@@ -984,6 +1020,7 @@ void App::startSong(size_t index, ControllerMode mode) {
         heldBeforeLive_[0] = heldBeforeLive_[1] = 0;
         bool uiGame = ui_ && ui_->inGame();
         mixer_.play(std::move(vgs), std::move(tracks), uiGame ? kIntroMs : kLeadInMs);
+        if (!gd::core::speed::isNormalSpeed(songSpeed_)) mixer_.setTempo(songSpeed_);  // Song Speed, pitch kept (GDALL-053)
         setupGuitarCopies();
         playingIndex_ = index;
         screen_ = Screen::Playing;
@@ -1045,6 +1082,7 @@ void App::tutorialLoad(size_t index) {
         venueEvent_ = 0;
         venueTrigger_ = 0;
         venueMs_ = -1e9f;
+        songSpeed_ = 1;  // the lessons play at their own speed
         player_ = std::make_unique<Player>(*song_, Difficulty(difficulty_), rules_, uiMode_, opt_.noFail);
         player_->setTutorialMode(true);
         autoplay_ = opt_.autoplay ? std::make_unique<Autoplay>(player_->chart()) : nullptr;
@@ -1227,7 +1265,7 @@ void App::updateTouchLanes() {
     for (int p = 0; p < 2; ++p) {
         Input::TouchLanes l;
         TrackRenderer* tr = p == 0 ? track_.get() : multi_ ? track2_.get() : nullptr;
-        l.active = tr && screen_ == Screen::Playing && (!ui_ || (ui_->inGame() && ui_->trackShowing()));
+        l.active = tr && screen_ == Screen::Playing && !tutorialMenuUp() && (!ui_ || (ui_->inGame() && ui_->trackShowing()));  // a menu: Enter selects
         // The strike line, and 25 units up the highway (its nearer part, where the gems are readable).
         for (int f = 0; f < 5 && l.active; ++f)
             l.active = tr->laneScreen(f, 0, l.nearX[size_t(f)], l.nearY[size_t(f)]) && tr->laneScreen(f, 25, l.farX[size_t(f)], l.farY[size_t(f)]);
@@ -1362,6 +1400,7 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
             continue;
         }
         if (key.edge >= 2) {
+            mouseUsedMs_ = double(SDL_GetTicksNS()) / 1e6;  // as a real mouse motion (cursorEvent)
             if (ui_) ui_->mouse(key.mx, key.my, key.edge == 3);
             continue;
         }
@@ -1910,8 +1949,10 @@ void App::userFiles(const std::string& action) {
         SDL_ShowOpenFolderDialog(dialogDone, req, window_, nullptr, false);
     } else if (action == "locate_iso") {
         // The first screen: pick the disc image instead of dropping it on the window.
-        static const SDL_DialogFileFilter kIso[] = {{"Guitar Hero (PS2) disc image", "iso;ISO"}};
-        SDL_ShowOpenFileDialog(dialogDone, req, window_, kIso, 1, nullptr, false);
+        // .chd too (GDUL-030); "All files" as well: Android has no MIME type for .chd,
+        // so its file dialog would hide them behind the .iso filter alone.
+        static const SDL_DialogFileFilter kIso[] = {{"Guitar Hero (PS2) disc image (.iso, .chd)", "iso;ISO;chd;CHD"}, {"All files", "*"}};
+        SDL_ShowOpenFileDialog(dialogDone, req, window_, kIso, 2, nullptr, false);
     } else {
         static const SDL_DialogFileFilter kJson[] = {{"GD01 settings", "json"}};
         SDL_ShowOpenFileDialog(dialogDone, req, window_, kJson, 1, nullptr, false);
@@ -2084,6 +2125,13 @@ void App::applyEnhanced() {
 #ifdef __ANDROID__
     if (mode == "windowed") mode = "borderless";  // always full screen (immersive) on phones
 #endif
+    // RecompLauncher's Big Picture mode (GD01_FULLSCREEN=1, module_entry.cpp):
+    // Windowed counts as Full Screen (No Border) for this run; the saved
+    // setting stays.
+    if (const char* fs = SDL_getenv("GD01_FULLSCREEN"); fs && std::string(fs) == "1" && mode == "windowed") {
+        if (screenModeApplied_ != "borderless") SDL_Log("gd01: full screen (RecompLauncher Big Picture): Windowed is not used this run");
+        mode = "borderless";
+    }
     if (window_ && mode != screenModeApplied_) {
         bool ok = true;
         if (mode == "windowed") {
@@ -2149,6 +2197,15 @@ void App::onAction(const InputEvent& e) {
             if (e.down) ui_->buttonDown(e.action == Action::Start ? UiSystem::Start : UiSystem::Cross, e.mode == ControllerMode::Guitar);
             break;
         }
+        // The tutorial's pause menu (tut_pause): the lesson script pauses with
+        // set_time_paused, not set_paused, so the game stays Playing; the menu
+        // over it takes every button as the other menus do (#98, GD01-325:
+        // before, only Start / Back reached it and the frets, strum and
+        // arrows were dropped as the lesson's own input).
+        if (tutorialMenuUp()) {
+            uiButton(e);
+            break;
+        }
         if ((e.action == Action::Back || e.action == Action::Start) && ui_ && ui_->inGame()) {
             // game screen: kPad_Start goes to the pause screen.
             if (e.down) ui_->buttonDown(UiSystem::Start, e.mode == ControllerMode::Guitar);
@@ -2174,6 +2231,7 @@ void App::onAction(const InputEvent& e) {
             break;
         }
         pl->update(t);
+        followPlayMode(*pl, e);
         if (isFret(e.action)) {
             if (e.down) pl->fretDown(fretOf(e.action), t);
             else pl->fretUp(fretOf(e.action), t);
@@ -2399,9 +2457,10 @@ void App::cursorEvent(const SDL_Event& e) {
 
 void App::updateCursor() {
     const double now = double(SDL_GetTicksNS()) / 1e6;
-    const bool show = screen_ != Screen::Playing && (!ui_ || enhancedOn("mouse")) && now - mouseUsedMs_ < 3000;  // the ISO picker screen too
+    const bool show = (screen_ != Screen::Playing || tutorialMenuUp()) && (!ui_ || enhancedOn("mouse")) && now - mouseUsedMs_ < 3000;  // the ISO picker screen too
     if (show == cursorShown_) return;
     cursorShown_ = show;
+    if (SDL_getenv("GD01_UILOG")) SDL_Log("cursor: %s", show ? "shown" : "hidden");  // the walks' check (#98)
     if (show) SDL_ShowCursor();
     else SDL_HideCursor();
 }
@@ -2539,22 +2598,22 @@ void App::frame() {
             // arena_game.dta game_lost / game_outro: the track and the HUD go away.
             if (track_ && track_->exploding()) {
                 renderer_.clearDepth();  // track_panel explode (arena game_won)
-                track_->draw(*player_, drawT, rules_.trackSpeed[difficulty_], rules_.slopMs, *song_, flashes_.data());
-                if (multi_ && track2_ && player2_) track2_->draw(*player2_, drawT, rules_.trackSpeed[difficulty_], rules_.slopMs, *song_, flashes2_.data());
+                track_->draw(*player_, drawT, trackSpeedNow(), playRules_.slopMs, *song_, flashes_.data());
+                if (multi_ && track2_ && player2_) track2_->draw(*player2_, drawT, trackSpeedNow(), playRules_.slopMs, *song_, flashes2_.data());
             } else if ((ui_ && endMs_ >= 0) || SDL_getenv("GD01_GUITARIST_CAM") || SDL_getenv("GD01_NOTRACK")) {
                 // the game is over (or the guitarist close-up dev view)
             } else if (track_ && ui_ && ui_->inGame() && !ui_->trackShowing()) {
                 // track_panel set_showing FALSE (the attract mode)
             } else if (track_) {
                 renderer_.clearDepth();
-                track_->draw(*player_, drawT, rules_.trackSpeed[difficulty_], rules_.slopMs, *song_, flashes_.data());
+                track_->draw(*player_, drawT, trackSpeedNow(), playRules_.slopMs, *song_, flashes_.data());
                 if (multi_ && track2_ && player2_) {
                     renderer_.clearDepth();
-                    track2_->draw(*player2_, drawT, rules_.trackSpeed[difficulty_], rules_.slopMs, *song_, flashes2_.data());
+                    track2_->draw(*player2_, drawT, trackSpeedNow(), playRules_.slopMs, *song_, flashes2_.data());
                 }
                 if (!(ui_ && ui_->inGame())) highway_.drawHud(renderer_, *player_, title);  // the UI's hud panel otherwise
             } else {
-                highway_.draw(renderer_, *song_, *player_, t, rules_.trackSpeed[difficulty_], title, flashes_);
+                highway_.draw(renderer_, *song_, *player_, t, trackSpeedNow(), title, flashes_);
             }
             if (t < 0 && !(ui_ && ui_->inGame()))
                 renderer_.textCentered(kScreenW / 2, 330, 4, kAccent, std::to_string(int(-t / 1000) + 1));
@@ -3120,6 +3179,43 @@ int sustainAudioSelfTest(const std::vector<SongInfo>& songs, GameData& data, con
 // original) a chord strummed with one of its frets misses; on, any part of it
 // hits and scores as the whole chord, a fret outside it misses, and a held
 // chord's sustain lasts while any of its frets is held.
+// Require Strum (#98, GD01-326): a player made in the joypad mode (the menus'
+// last device was a guitar's d-pad, the mouse or a gamepad) and played by a
+// guitar with Require Strum on: a fret alone must not hit, a strum must;
+// played by a device with it off, the fret alone hits.
+int requireStrumSelfTest(const std::vector<SongInfo>& songs, GameData& data, const Rules& rules) {
+    if (songs.empty()) return 0;
+    Song song = buildSong(parseMidi(data.read(songs[0].midiPath)));
+    const auto& gems = song.charts[3].gems;
+    size_t i = 1;
+    while (i + 1 < gems.size() && (gems[i].fretCount() != 1 || gems[i].hopo || gems[i].ms - gems[i - 1].ms < 300 || gems[i + 1].ms - gems[i].ms < 300)) ++i;
+    if (i + 1 >= gems.size()) return std::printf("require strum self-test: no lone gem\n"), 1;
+    const Gem& g = gems[i];
+    const Action fret = Action(int(Action::Fret0) + std::countr_zero(unsigned(g.frets)));
+    auto run = [&](ControllerMode device, bool strum) {
+        Player p(song, Difficulty(3), rules, ControllerMode::Joypad, true);
+        for (float t = g.ms - 200; t < g.ms + 250; t += 1) {
+            if (t == g.ms - 20) {
+                const InputEvent e{fret, true, 0, device, 0};
+                followPlayMode(p, e);
+                p.fretDown(fretOf(fret), t);
+            }
+            if (strum && t == g.ms) {
+                const InputEvent e{Action::Strum, true, 0, device, 0};
+                followPlayMode(p, e);
+                p.strum(t);
+            }
+            p.update(t);
+        }
+        return p.gemHit(int(i));
+    };
+    const bool fretOnly = run(ControllerMode::Guitar, false), strummed = run(ControllerMode::Guitar, true), pad = run(ControllerMode::Joypad, false);
+    const int failures = fretOnly + !strummed + !pad;
+    std::printf("require strum: guitar fret alone %s, strummed %s, joypad fret alone %s: %s\n", fretOnly ? "hit" : "missed",
+                strummed ? "hit" : "missed", pad ? "hit" : "missed", failures ? "FAILED" : "ok");
+    return failures;
+}
+
 int easyChordsSelfTest(const std::vector<SongInfo>& songs, GameData& data, const Rules& rules) {
     int failures = 0, checks = 0;
     auto check = [&](bool ok, const char* what) {
@@ -3347,6 +3443,115 @@ static int helpBoxEdgeSelfTest(const GameData& data) {
     return bad ? 1 : 0;
 }
 
+// GDALL-053 / 054: Enhanced > Song Speed and Track Speed. The stretcher
+// keeps the pitch and length / tempo; a song at 150 % played on a clock at
+// 1.5 x real time ends at its length / 1.5 with every gem hit by autoplay
+// (the frames 16.7 ms of real time apart); above 100 % the hit window grows
+// (125 ms late hits at 150 %, not at 100 %); a song not at 100 % saves no
+// record; the panel takes every value of speed_options.h.
+int songSpeedSelfTest(const std::vector<SongInfo>& songs, GameData& data, const Rules& rules) {
+    namespace sp = gd::core::speed;
+    int failures = 0;
+    auto check = [&](const char* what, bool ok) {
+        std::printf("song speed: %s%s\n", what, ok ? "" : " FAILED");
+        failures += !ok;
+    };
+    // The stretcher on a 10 s, 440 Hz tone: 50 %, 150 % and 200 %.
+    for (double tempo : {0.5, 1.5, 2.0}) {
+        gd::core::audio::TimeStretch ts;
+        ts.reset(2, 44100);
+        ts.setTempo(tempo);
+        const int64_t n = 441000;
+        int64_t src = 0, endOut = -1, out = 0, crossings = 0, from = -1, to = 0;
+        double energy = 0;
+        std::vector<float> l(512), r(512);
+        float* o[2] = {l.data(), r.data()};
+        float last = 0;
+        while (out < int64_t(double(n) / tempo) + 22050) {
+            ts.process(o, 512, [&](float* const* d, int want) {
+                const int got = int(std::min<int64_t>(want, n - src));
+                for (int i = 0; i < got; ++i) d[0][i] = d[1][i] = 0.5f * float(std::sin(2 * 3.14159265358979 * 440 * double(src + i) / 44100));
+                src += got;
+                if (got == 0 && endOut < 0) endOut = out;
+                return got;
+            });
+            for (int i = 0; i < 512; ++i) {
+                const int64_t k = out + i;
+                if (k >= 44100 && k < int64_t(double(n) / tempo) - 44100) {
+                    if (from < 0) from = k;
+                    crossings += (last < 0) != (l[size_t(i)] < 0), to = k, energy += double(l[size_t(i)]) * l[size_t(i)];
+                }
+                last = l[size_t(i)];
+            }
+            out += 512;
+        }
+        const double hz = double(crossings) / 2 / (double(to - from) / 44100), rms = std::sqrt(energy / double(to - from));
+        const double len = double(endOut) / 44100, want = 10.0 / tempo;
+        char what[200];
+        std::snprintf(what, sizeof what, "%.0f %%: a 10 s tone lasts %.2f s (want %.2f), %.1f Hz (440), level %.3f (0.354)", tempo * 100,
+                      len, want, hz, rms);
+        check(what, std::abs(len - want) < 0.15 && std::abs(hz - 440) < 2 && std::abs(rms - 0.3536) < 0.01);
+    }
+    // A chart at 150 % and 200 %: every gem hit on the song clock (1.5 x real time).
+    for (const SongInfo& info : songs) {
+        Song song = buildSong(parseMidi(data.read(info.midiPath)));
+        for (double speed : {1.5, 2.0}) {
+            Rules play = rules;
+            play.slopMs = sp::slopMs(rules.slopMs, speed);
+            Player p(song, Difficulty::Expert, play, ControllerMode::Guitar, true);
+            Autoplay bot(p.chart());
+            double real = -1000, endReal = -1;
+            for (;; real += 1000.0 / 60) {
+                const float t = float(real * speed);
+                bot.feed(p, t), p.update(t);
+                if (endReal < 0 && t >= song.endMs) endReal = real;
+                if (t > song.endMs + 2000) break;
+            }
+            const int total = int(p.chart().gems.size());
+            char what[200];
+            std::snprintf(what, sizeof what, "%s at %.0f %%: %d/%d hit, ends at %.0f ms real (length %.0f / %.1f = %.0f)", info.id.c_str(),
+                          speed * 100, p.notesHit(), total, endReal, double(song.endMs), speed, double(song.endMs) / speed);
+            check(what, p.notesHit() == total && std::abs(endReal - double(song.endMs) / speed) <= 1000.0 / 60);
+        }
+        auto lateHits = [&](const Rules& rr) {
+            Player p(song, Difficulty::Easy, rr, ControllerMode::Guitar, true);
+            // Every gem strummed 25 ms after the slop, when GH1 passes a gem at 100 % (the pass deadline: gem + slop).
+            Chart late = p.chart();
+            for (Gem& g : late.gems) g.ms += rules.slopMs + 25;
+            Autoplay bot(late, -1, false);
+            for (float t = -1000; t < song.endMs + 5000; t += 4) bot.feed(p, t), p.update(t);
+            // Only the gems 600 ms or more from their neighbours (a late strum near the next gem goes to it).
+            const auto& gs = p.chart().gems;
+            int hit = 0, alone = 0;
+            for (size_t i = 0; i < gs.size(); ++i)
+                if ((i == 0 || gs[i].ms - gs[i - 1].ms >= 600) && (i + 1 == gs.size() || gs[i + 1].ms - gs[i].ms >= 600))
+                    ++alone, hit += p.gemHit(int(i));
+            return std::make_pair(hit, alone);
+        };
+        Rules wide = rules;
+        wide.slopMs = sp::slopMs(rules.slopMs, 1.5);
+        const auto [hitWide, total] = lateHits(wide);
+        const int hitNormal = lateHits(rules).first;
+        char what[200];
+        std::snprintf(what, sizeof what, "hit window %.0f ms at 150 %% (%.0f at 100 %%, %.0f at 50 %%): Easy played %.0f ms late, %d/%d lone gems hit, at 100 %% %d",
+                      double(wide.slopMs), double(rules.slopMs), double(sp::slopMs(rules.slopMs, 0.5)), double(rules.slopMs + 25), hitWide, total, hitNormal);
+        // The late presses near the next gem go to it (the nearest gem), so not all: at least 85 %, against none.
+        check(what, total > 0 && hitWide == total && hitNormal == 0 && sp::slopMs(rules.slopMs, 0.5) == rules.slopMs);
+        break;
+    }
+    check("records saved only at 100 % (50 / 150 / 200 % are practice)",
+          sp::savesRecords(sp::songSpeed("100")) && !sp::savesRecords(sp::songSpeed("50")) && !sp::savesRecords(sp::songSpeed("150")) &&
+              !sp::savesRecords(sp::songSpeed("200")) && sp::songSpeed("bogus") == 1.0);
+    check("track speed: Expert 1.4 x 2 / 1.5 = 1.87; 1 x 1 / 1 = 1",
+          std::abs(sp::scrollSpeed(1.4f, sp::trackSpeedFactor("2"), 1.5) - 1.8667f) < 1e-3f && sp::scrollSpeed(1, 1, 1) == 1.0f);
+    const auto& ch = enhancedChoices();
+    bool panel = enhancedDefaults().at("song_speed").str() == sp::kSongSpeedDefault && enhancedDefaults().at("track_speed").str() == sp::kTrackSpeedDefault;
+    for (const char* v : sp::kSongSpeeds) panel = panel && ch.at("song_speed").count(v);
+    for (const char* v : sp::kTrackSpeeds) panel = panel && ch.at("track_speed").count(v);
+    check("the Enhanced panel takes every Song / Track Speed value, defaults 100 % and 1x", panel);
+    return failures;
+}
+
 int runSelfTest(const Options& options) {
     std::string path = options.dataPath.empty() ? loadRememberedPath() : options.dataPath;
     if (inputSelfTest()) return 1;
@@ -3361,6 +3566,8 @@ int runSelfTest(const Options& options) {
                     rules.slopMs, rules.headPoints, rules.tailPoints);
         if (sustainAudioSelfTest(songs, data, rules)) return 1;
         if (easyChordsSelfTest(songs, data, rules)) return 1;
+        if (requireStrumSelfTest(songs, data, rules)) return 1;
+        if (songSpeedSelfTest(songs, data, rules)) return 1;
         int failures = 0, hopos = 0;
         for (const SongInfo& info : songs) {
             Song song = buildSong(parseMidi(data.read(info.midiPath)));

@@ -80,13 +80,6 @@
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
   .card h3 { margin: 0 0 8px; font-size: 22px; }
   .card p { margin: 0; color: var(--dim); }
-  .news { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-  .news ul { list-style: none; margin: 0; padding: 0; }
-  .news li { padding: 8px 0; border-top: 1px solid var(--line); }
-  .news li:first-child { border-top: 0; }
-  .news a { color: inherit; text-decoration: none; overflow-wrap: anywhere; }
-  .news a:hover { text-decoration: underline; }
-  .news .when { display: block; color: var(--dim); font-size: 13px; }
 
   .dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
   .dlcard { display: flex; flex-direction: column; gap: 8px; padding: 18px 18px 16px; border-radius: 12px; background: var(--panel);
@@ -99,7 +92,32 @@
   .dlcard b { font-size: 19px; }
   .dlcard .file { color: var(--dim); font-size: 15px; word-break: break-all; }
   .dlcard .soonlink { opacity: .5; }
-  .dl-note { color: var(--dim); font-size: 17px; margin-top: 16px; }
+  .dl-note { color: var(--dim); font-size: 17px; margin: 2px 0 0; }
+  .dlnews { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 18px; align-items: start; }
+  @media (max-width: 900px) { .dlnews { grid-template-columns: 1fr; } }
+  .dlcol { display: grid; gap: 14px; }
+  .dlcard .links { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+  .newscard { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; border-radius: 12px; background:
+              linear-gradient(180deg, rgba(255,138,31,.08), rgba(255,138,31,0) 140px), var(--panel);
+              border: 2px solid var(--line); border-top: 6px solid var(--orange); box-shadow: 0 0 40px rgba(255,138,31,.07); }
+  .newshead { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .pill { font-weight: 800; font-size: 14px; letter-spacing: .16em; text-transform: uppercase; color: #2a1200; background: var(--orange);
+          padding: 3px 10px; border-radius: 999px; }
+  .newsdate { color: var(--dim); font-size: 15px; }
+  .newstitle { margin: 0; font-size: 26px; line-height: 1.15; }
+  .newstitle a { color: var(--text); text-decoration: none; }
+  .newstitle a:hover { color: var(--yellow); }
+  .newsbody { max-height: 520px; overflow: auto; padding-right: 6px; color: var(--text); font-size: 17px; overflow-wrap: anywhere;
+              mask-image: linear-gradient(180deg, #000 85%, transparent); -webkit-mask-image: linear-gradient(180deg, #000 85%, transparent); }
+  .newsbody h4 { margin: 14px 0 4px; font-size: 19px; letter-spacing: .06em; text-transform: uppercase; color: var(--yellow); }
+  .newsbody p { margin: 6px 0; }
+  .newsbody ul { margin: 4px 0 8px; padding-left: 20px; }
+  .newsbody li { margin: 3px 0; }
+  .newsbody li::marker { color: var(--orange); }
+  .newsbody a { color: var(--yellow); }
+  .newsfoot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 10px; border-top: 1px solid var(--line); font-weight: 600; }
+  .newsfoot a { text-decoration: none; }
+  .newsfoot a:hover { text-decoration: underline; }
   .donate-title { margin: 40px 0 14px; font-size: 26px; font-weight: 800; letter-spacing: .02em; }
   .donate { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
   .donate .card { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
@@ -139,33 +157,37 @@
     <div class="wrap">
       <h2>Download</h2>
       <p class="lead">The Guitar Dream Universal Launcher, with every playable game inside. Always the newest release.</p>
-      <div class="dl">
-        <div class="dlcard" style="--c:var(--blue)">
-          <span class="os">Stage releases</span><span class="kind">Desktop</span>
-          <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="windows-x86_64"><b>Windows</b><span class="file">Windows 10 / 11 (64-bit)</span></a>
-          <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="macos-arm64"><b>macOS</b><span class="file">Apple silicon</span></a>
-          <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="linux-x86_64"><b>Linux</b><span class="file">Any distribution from 2022 on</span></a>
-          <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="x86_64.AppImage"><b>Linux AppImage</b><span class="file">One file, updates with AppImageUpdate</span></a>
+      <div class="dlnews">
+        <div class="dlcol">
+          <div class="dlcard" style="--c:var(--blue)">
+            <span class="os">Stage releases</span><span class="kind">Desktop</span>
+            <div class="links">
+              <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="windows-x86_64"><b>Windows</b><span class="file">Windows 10 / 11 (64-bit)</span></a>
+              <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="macos-arm64"><b>macOS</b><span class="file">Apple silicon</span></a>
+              <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="x86_64.AppImage"><b>Linux</b><span class="file">AppImage, any distribution from 2022 on</span></a>
+              <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="portable-x86_64.tar.gz|linux-x86_64.tar.gz"><b>Linux .tar.gz</b><span class="file">The same files, as a folder</span></a>
+            </div>
+          </div>
+          <div class="dlcard" style="--c:var(--green)">
+            <span class="os">On tour releases</span><span class="kind">Handhelds &amp; mobile</span>
+            <div class="links">
+              <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="steamdeck"><b>Steam Deck</b><span class="file">SteamOS, with Deck settings</span></a>
+              <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="android-arm64"><b>Android</b><span class="file">Android 7 or newer (64-bit)</span></a>
+              <span class="soonlink"><b>iOS</b><span class="file">Coming soon</span></span>
+            </div>
+          </div>
+          <p class="dl-note">No game data is included: put your own disc images in <code>original_isos/</code> next to the launcher, or load them from the launcher. <a href="https://github.com/mbracali/prj-gd-engine/releases/latest">All files and release notes</a>.</p>
         </div>
-        <div class="dlcard" style="--c:var(--yellow)">
-          <span class="os">Roadie releases</span><span class="kind">Handhelds</span>
-          <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="steamdeck"><b>Steam Deck</b><span class="file">SteamOS, with Deck settings</span></a>
-          <span class="soonlink"><b>PS Vita</b><span class="file">Coming soon</span></span>
-          <span class="soonlink"><b>3DS</b><span class="file">Coming soon</span></span>
-        </div>
-        <div class="dlcard" style="--c:var(--green)">
-          <span class="os">On tour releases</span><span class="kind">Mobile</span>
-          <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="android-arm64"><b>Android</b><span class="file">Android 7 or newer (64-bit)</span></a>
-          <span class="soonlink"><b>iOS</b><span class="file">Coming soon</span></span>
-        </div>
-        <div class="dlcard" style="--c:var(--red)">
-          <span class="os">Jam session releases</span><span class="kind">TV OS</span>
-          <span class="soonlink"><b>Android TV</b><span class="file">Coming soon</span></span>
-          <span class="soonlink"><b>LG TV</b><span class="file">Coming soon</span></span>
-          <span class="soonlink"><b>Samsung TV</b><span class="file">Coming soon</span></span>
-        </div>
+        <aside class="newscard" aria-live="polite">
+          <div class="newshead"><span class="pill">News</span><span class="newsdate" id="news-date"></span></div>
+          <h3 class="newstitle"><a id="news-title" href="https://github.com/mbracali/prj-gd-engine/discussions/categories/announcements">Loading the latest news...</a></h3>
+          <div class="newsbody" id="news-body"></div>
+          <div class="newsfoot">
+            <a id="news-read" href="https://github.com/mbracali/prj-gd-engine/discussions/categories/announcements">Read it on GitHub</a>
+            <a href="https://github.com/mbracali/prj-gd-engine/discussions/categories/announcements">Older posts &rarr;</a>
+          </div>
+        </aside>
       </div>
-      <p class="dl-note">No game data is included: put your own disc images in <code>original_isos/</code> next to the launcher, or load them from the launcher. <a href="https://github.com/mbracali/prj-gd-engine/releases/latest">All files and release notes</a>.</p>
     </div>
   </section>
 
@@ -212,17 +234,6 @@
     </div>
   </section>
 
-  <section id="updates">
-    <div class="wrap">
-      <h2>Latest updates</h2>
-      <p class="lead">Straight from the repository: the newest releases and the changes merged lately.</p>
-      <div class="news">
-        <div class="card"><h3>Releases</h3><ul id="news-releases"><li class="when">Loading...</li></ul></div>
-        <div class="card"><h3>Merged changes</h3><ul id="news-prs"><li class="when">Loading...</li></ul></div>
-      </div>
-    </div>
-  </section>
-
   <section id="launcher">
     <div class="wrap launcher">
       <div>
@@ -241,8 +252,8 @@
         <div class="row lit"><span><b>gd-game-02</b>/Guitar Hero II</span><span class="bar"><i style="width:92%"></i></span></div>
         <div class="row lit"><span><b>gd-game-03</b>/Guitar Hero 80s</span><span class="bar"><i style="width:93%"></i></span></div>
         <div class="row lit"><span><b>gd-game-04</b>/Guitar Hero III</span><span class="bar"><i style="width:87%;background:var(--yellow)"></i></span></div>
-        <div class="row"><span><b>gd-game-05</b>/Rock Band</span><span class="bar"><i style="width:40%;background:var(--yellow)"></i></span></div>
-        <div class="row" style="margin:0"><span><b>gd-game-10</b>/GH Metallica</span><span class="bar"><i style="width:48%;background:var(--yellow)"></i></span></div>
+        <div class="row"><span><b>gd-game-05</b>/Rock Band</span><span class="bar"><i style="width:78%;background:var(--yellow)"></i></span></div>
+        <div class="row" style="margin:0"><span><b>gd-game-10</b>/GH Metallica</span><span class="bar"><i style="width:69%;background:var(--yellow)"></i></span></div>
       </div>
     </div>
   </section>
@@ -275,12 +286,12 @@
     ["gd-game-02", "Guitar Hero II", "Xbox 360", "play", "92% playable"],
     ["gd-game-03", "Guitar Hero Encore: Rocks the 80s", "PlayStation 2", "play", "93% playable"],
     ["gd-game-04", "Guitar Hero III: Legends of Rock", "Xbox 360", "wip", "87% playable"],
-    ["gd-game-05", "Rock Band", "Xbox 360", "wip", "40% playable"],
+    ["gd-game-05", "Rock Band", "Xbox 360", "wip", "78% playable"],
     ["gd-game-06", "Guitar Hero: Aerosmith", "Xbox 360", "", "Planned"],
     ["gd-game-07", "Guitar Hero World Tour", "Xbox 360", "", "Planned"],
     ["gd-game-08", "Rock Band 2", "Xbox 360", "", "Planned"],
     ["gd-game-09", "The Beatles: Rock Band", "Xbox 360", "", "Planned"],
-    ["gd-game-10", "Guitar Hero: Metallica", "Xbox 360", "wip", "48% playable"],
+    ["gd-game-10", "Guitar Hero: Metallica", "Xbox 360", "wip", "69% playable"],
     ["gd-game-11", "Guitar Hero: Smash Hits", "Xbox 360", "", "Planned"],
     ["gd-game-12", "Guitar Hero 5", "Xbox 360", "", "Planned"],
     ["gd-game-13", "Lego Rock Band", "Xbox 360", "", "Planned"],
@@ -309,43 +320,69 @@
 
   // Download buttons: the newest launcher release's files (GitHub API; the
   // buttons keep pointing at the latest release page if the API is out of reach).
+  // data-asset: a part of the file's name, or several separated by "|" (the
+  // first that matches wins: the Linux .tar.gz was gdul-<v>-linux-x86_64.tar.gz
+  // up to 1.1.15, gdul-<v>-portable-x86_64.tar.gz after).
   fetch("https://api.github.com/repos/mbracali/prj-gd-engine/releases/latest")
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
     .then(rel => {
       if (!/^gdul\//.test(rel.tag_name || "")) return;
       document.getElementById("ver").textContent = `Universal Launcher ${rel.tag_name.replace(/^gdul\/v/, "")} is out. Free. Bring your own discs.`;
       for (const a of document.querySelectorAll(".dlcard a[data-asset]")) {
-        const f = (rel.assets || []).find(x => x.name.includes(a.dataset.asset) && !x.name.endsWith(".zsync") && (a.dataset.asset === "steamdeck" || !x.name.includes("steamdeck")));
+        const fit = part => (rel.assets || []).find(x => x.name.includes(part) && !x.name.endsWith(".zsync") && (part === "steamdeck" || !x.name.includes("steamdeck")));
+        const f = a.dataset.asset.split("|").map(fit).find(x => x);
         if (f) { a.href = f.browser_download_url; a.querySelector(".file").textContent = f.name; }
       }
     })
     .catch(() => {});
 
-  // Latest updates (GDSITE-002): releases and merged pull requests read from
-  // the GitHub API in the visitor's browser (no build step); text only.
-  const repo = "https://api.github.com/repos/mbracali/prj-gd-engine";
-  const day = d => new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-  function fill(id, items, fallback) {
-    const ul = document.getElementById(id);
-    ul.textContent = "";
-    if (!items.length) { const li = document.createElement("li"); li.className = "when"; li.textContent = fallback; ul.appendChild(li); return; }
-    for (const it of items) {
-      const li = document.createElement("li"), a = document.createElement("a"), w = document.createElement("span");
-      a.href = it.url; a.textContent = it.title; a.rel = "noopener";
-      w.className = "when"; w.textContent = it.when;
-      li.append(a, w); ul.appendChild(li);
+  // News (GDSITE-003): the newest post of the repository's Announcements,
+  // read from GitHub's public API in the visitor's browser; its Markdown
+  // rendered here as plain elements (headings, lists, bold, code, links).
+  (() => {
+    const older = "https://github.com/mbracali/prj-gd-engine/discussions/categories/announcements";
+    const repo = "https://github.com/mbracali/prj-gd-engine";
+    const esc = t => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const inline = t => esc(t)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" rel="noopener">$1</a>')
+      .replace(/(^|[\s(])#(\d+)\b/g, `$1<a href="${repo}/issues/$2" rel="noopener">#$2</a>`);
+    function render(md) {
+      let html = "", list = false, para = [];
+      const flush = () => { if (para.length) html += `<p>${inline(para.join(" "))}</p>`; para = []; };
+      for (const raw of md.replace(/\r/g, "").split("\n")) {
+        const line = raw.trim();
+        const item = line.match(/^[-*] (.*)/);
+        if (!item && list) { html += "</ul>"; list = false; }
+        if (!line) { flush(); continue; }
+        if (/^#{1,6} /.test(line)) { flush(); html += `<h4>${inline(line.replace(/^#+ /, ""))}</h4>`; continue; }
+        if (item) { flush(); if (!list) { html += "<ul>"; list = true; } html += `<li>${inline(item[1])}</li>`; continue; }
+        para.push(line);
+      }
+      flush();
+      if (list) html += "</ul>";
+      return html;
     }
-  }
-  const failed = id => () => fill(id, [], "Could not reach GitHub right now. See the repository for the latest news.");
-  fetch(repo + "/releases?per_page=6")
-    .then(r => r.ok ? r.json() : Promise.reject(r.status))
-    .then(rs => fill("news-releases", rs.filter(r => !r.draft).map(r => ({ url: r.html_url, title: r.name || r.tag_name, when: day(r.published_at || r.created_at) })), "No releases yet."))
-    .catch(failed("news-releases"));
-  fetch(repo + "/pulls?state=closed&sort=updated&direction=desc&per_page=30")
-    .then(r => r.ok ? r.json() : Promise.reject(r.status))
-    .then(ps => fill("news-prs", ps.filter(p => p.merged_at).sort((a, b) => b.merged_at.localeCompare(a.merged_at)).slice(0, 6)
-      .map(p => ({ url: p.html_url, title: p.title, when: "Merged " + day(p.merged_at) })), "Nothing merged lately."))
-    .catch(failed("news-prs"));
+    const title = document.getElementById("news-title"), body = document.getElementById("news-body");
+    fetch(repo.replace("https://github.com/", "https://api.github.com/repos/") + "/discussions?per_page=50")
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(list => {
+        const posts = list.filter(d => d.category && /announcement/i.test(d.category.name))
+                          .sort((a, b) => b.created_at.localeCompare(a.created_at));
+        if (!posts.length) throw new Error("none");
+        const p = posts[0];
+        title.textContent = p.title; title.href = p.html_url;
+        document.getElementById("news-read").href = p.html_url;
+        document.getElementById("news-date").textContent =
+          new Date(p.created_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+        body.innerHTML = render(p.body || "");
+      })
+      .catch(() => {
+        title.textContent = "News lives on GitHub"; title.href = older;
+        body.innerHTML = "<p>Could not reach GitHub right now. Read the announcements there.</p>";
+      });
+  })();
 
   // A note highway scrolling behind the title. Each gem is drawn once, glow
   // included, into a sprite and then only copied: a canvas blur per gem and

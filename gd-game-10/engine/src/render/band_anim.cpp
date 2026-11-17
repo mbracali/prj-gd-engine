@@ -389,6 +389,7 @@ bool Animator::init(const Setup& s, std::string& error) {
                   (model_->member.part == K("guitar") || model_->member.part == K("rhythm") || model_->member.part == K("bass"));
     ikSwitch_.clear();
     ragdollResets_.clear();
+    nodeHist_.clear();
     mocapPlaying_ = false;
     strumMod_ = fretMod_ = chordMod_ = Ramp{};
     rig_.init(*model_->skeleton);
@@ -537,6 +538,9 @@ bool Animator::init(const Setup& s, std::string& error) {
             mc.startFrame = sf ? float(sf->number()) : 0.0f;
             if (const qb::Value* ef = params->find(K("endframe"))) mc.endFrame = float(ef->number());
             if (const qb::Struct* arms = structOf(cs->find(K("arms")))) mc.arms = structOf(arms->find(model_->member.object));
+            if (const qb::Struct* sn = structOf(cs->find(K("startnodes"))))
+                if (const qb::Value* nv = sn->find(model_->member.object); nv && (nv->type == qb::Type::String || nv->type == qb::Type::WString))
+                    mc.startNode = nv->str;
             mocaps_.push_back(mc);
             add(tv->number(), Ev::Mocap, int(mocaps_.size() - 1), 0, p);
         }
@@ -1040,6 +1044,11 @@ void Animator::handle(const Event& e) {
         ++stats_.bodyAnims;
         mocapPlaying_ = true;
         if (gh4) {
+            // Band_PlayClip_Finish_CFunc: the member on the clip's start
+            // node, which the clip's root motion is relative to (97 Metallica
+            // clips put the guitarist, the bassist and the singer on
+            // drummer_start) [data; I: the teleport] (GD10-065).
+            moveToNode(t, mc.startNode);
             ragdollResets_.push_back(t);
             // The mocap clips leave the forearms unanimated (Bone_Forearm_L/R
             // have no keys and are masked off in every _S_ / _B_ / _G_ clip
@@ -1090,6 +1099,9 @@ void Animator::handle(const Event& e) {
                 mocapPlaying_ = false;
                 bodyBlend_ = 0.0f;
                 ragdollResets_.push_back(t);
+                // end_moment_anim / return_characters_to_idle_at_song_time:
+                // wait a game frame, band_movetostartnode [C scripts].
+                moveToNode(t + kFrameMs, std::string());
                 const bool guitarChain = guitarLike();
                 setIkTargets(t, guitarChain ? 0 : 1, guitarChain ? 0 : 1);
             }
@@ -1397,6 +1409,15 @@ void Animator::setIkTargets(double t, int left, int right) {
     if (left >= 0) sw.slaveL = left == 1;
     if (right >= 0) sw.slaveR = right == 1;
     ikSwitch_.push_back(sw);
+}
+
+void Animator::moveToNode(double t, const std::string& node) {
+    // GD10_BAND_STARTNODES_LEGACY=1: every member on its own start node throughout (before GD10-065).
+    static const bool legacy = std::getenv("GD10_BAND_STARTNODES_LEGACY") != nullptr;
+    if (legacy || model_->member.gh4 == false) return;
+    while (!nodeHist_.empty() && nodeHist_.back().first >= t) nodeHist_.pop_back();
+    if (nodeHist_.empty() ? node.empty() : nodeHist_.back().second == node) return;
+    nodeHist_.emplace_back(t, node);
 }
 
 void Animator::endSongEvents(double t) {

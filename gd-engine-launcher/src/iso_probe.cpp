@@ -7,6 +7,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <memory>
+
+#include "gd/core/platform/chd.h"
 
 namespace {
 
@@ -27,18 +30,29 @@ uint32_t le32(const uint8_t* p) { return uint32_t(p[0]) | uint32_t(p[1]) << 8 | 
 uint16_t le16(const uint8_t* p) { return uint16_t(p[0] | p[1] << 8); }
 uint32_t be32(const uint8_t* p) { return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | uint32_t(p[3]); }
 
+// The disc image's bytes: the file's own, or, for a CHD (GDUL-030), the image
+// it holds (gd-engine-core's reader, the one every game module reads with).
 class Reader {
 public:
-    explicit Reader(const std::string& path) : io_(SDL_IOFromFile(path.c_str(), "rb")) {}
+    explicit Reader(const std::string& path) : io_(SDL_IOFromFile(path.c_str(), "rb")) {
+        uint8_t sig[gd::core::platform::kChdSignatureBytes];
+        if (rawSize() >= 124 && rawRead(0, sig, sizeof(sig)) && gd::core::platform::isChdSignature(sig, sizeof(sig))) {
+            std::string why;
+            chd_ = gd::core::platform::ChdImage::open(
+                uint64_t(rawSize()), [this](uint64_t o, void* d, size_t n) { return rawRead(int64_t(o), d, n); }, &why);
+            if (!chd_) SDL_Log("gdul: %s: %s", path.c_str(), why.c_str()), chdError_ = why.empty() ? "CHD cannot be read" : why;
+        }
+    }
     ~Reader() {
+        chd_.reset();
         if (io_) SDL_CloseIO(io_);
     }
     bool ok() const { return io_ != nullptr; }
-    int64_t size() const { return io_ ? SDL_GetIOSize(io_) : 0; }
+    const std::string& chdError() const { return chdError_; }  // a CHD that does not open
+    int64_t size() const { return chd_ ? int64_t(chd_->size()) : rawSize(); }
     bool read(int64_t offset, void* out, size_t n) {
-        if (!io_ || offset < 0 || offset + int64_t(n) > size()) return false;
-        if (SDL_SeekIO(io_, offset, SDL_IO_SEEK_SET) < 0) return false;
-        return SDL_ReadIO(io_, out, n) == n;
+        if (chd_) return offset >= 0 && chd_->read(uint64_t(offset), out, n);
+        return rawRead(offset, out, n);
     }
     std::vector<uint8_t> read(int64_t offset, size_t n) {
         std::vector<uint8_t> v(n);
@@ -47,7 +61,16 @@ public:
     }
 
 private:
+    int64_t rawSize() const { return io_ ? SDL_GetIOSize(io_) : 0; }
+    bool rawRead(int64_t offset, void* out, size_t n) {
+        if (!io_ || offset < 0 || offset + int64_t(n) > rawSize()) return false;
+        if (SDL_SeekIO(io_, offset, SDL_IO_SEEK_SET) < 0) return false;
+        return SDL_ReadIO(io_, out, n) == n;
+    }
+
     SDL_IOStream* io_;
+    std::unique_ptr<gd::core::platform::ChdImage> chd_;
+    std::string chdError_;
 };
 
 constexpr int64_t kSector = 2048;
@@ -170,6 +193,10 @@ DiscInfo probeDisc(const std::string& path) {
     Reader r(path);
     if (!r.ok()) {
         d.error = SDL_GetError();
+        return d;
+    }
+    if (!r.chdError().empty()) {
+        d.error = r.chdError();
         return d;
     }
     if (r.size() < 64 * kSector) return d;

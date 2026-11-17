@@ -271,9 +271,7 @@ std::string Explorer::loadStatic(const Item& it) {
         if (!m->decoded || !m->draw.showing) continue;
         const gfx::GpuMesh* geomGpu = cache_->mesh(m);
         if (!geomGpu) continue;
-        const scene::Mesh* geom = m;
-        if (m->verts.empty() && !m->geomOwner.empty() && m->dir)
-            if (auto* owner = m->dir->resolve<scene::Mesh>(m->geomOwner)) geom = owner;
+        const scene::Mesh* geom = gfx::meshGeometry(m);
         if (geom->verts.empty()) continue;
         Drawn d;
         d.gpu = *geomGpu;

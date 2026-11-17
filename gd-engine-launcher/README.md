@@ -144,6 +144,17 @@ Gaming Mode (`SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD`, one press seen
 from two pads acts once) and the Deck's own controls through SDL's Steam
 Deck HIDAPI driver when Steam does not own them (`SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK`).
 
+RecompLauncher's Big Picture mode (GDUL-032): started with
+`RECOMPLAUNCHER_MODE=bigpicture` (`platform::bigPicture`), the launcher's
+window is full screen (the desktop's mode, no border) and the games get
+`GD_HOST_FULLSCREEN` in `GdHost::flags`; each module turns it into
+`GDNN_FULLSCREEN=1`, and the game's Windowed screen mode then counts as
+Full Screen (No Border) for that run (Full Screen stays Full Screen; the
+saved setting is not changed). `RECOMPLAUNCHER_MODE=desktop` or no variable:
+as before (the launcher always a window, each game its own screen mode).
+The log says which: `gdul: window fullscreen|windowed WxH` and
+`gdul: <game> ended, window fullscreen|windowed WxH`.
+
 ## Explore models
 
 The screen is the launcher's; the models are the game's. The launcher draws
@@ -247,7 +258,7 @@ typedef struct GdHost {
     int argc; const char* const* argv;   // "gdNN", [GDUL_GAME_ARGS...], the disc image
     const char *launcher_version, *game_id, *game_dir, *save_dir;
     void (*log)(void* user, const char* line); void* log_user;   // the action log
-    uint32_t flags;                  // GD_HOST_HANDHELD (gdul 0.1.6)
+    uint32_t flags;                  // GD_HOST_HANDHELD (gdul 0.1.6), GD_HOST_FULLSCREEN (GDUL-032)
     void* (*request_window)(void* user, uint32_t api); void* request_window_user;  // (gdul 1.1.13)
 } GdHost;
 ```

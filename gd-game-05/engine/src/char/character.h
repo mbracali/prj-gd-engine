@@ -201,9 +201,23 @@ public:
     Bones& faceBones() { return faceBones_; }
     const facefx::FacePose& lastFace() const { return lastFace_; }
     int facePoses() const { return facePoses_; }  // polls that posed the face
+    // Rock Band's expressions (GD05-106): a play clip's viseme_group ->
+    // change_face_group (RB 0x822E5850 -> 0x822E4C58): expression.drv plays a
+    // clip of that group of the face set; another of the group when it ends
+    // (BandCharacter poll RB 0x822E6360). False when the set has no such
+    // group or it is already the playing one.
+    bool changeFaceGroup(const std::string& group);
+    const std::string& faceGroup() const { return expGroup_; }
+    const scene::CharClipSamples* expressionClip() const { return exp_.clip; }
+    int expressionsPlayed() const { return expPlayed_; }
+    // The face servo's Blink weight this poll (RB servo +0x10c); -1 without one.
+    float blinkValue() const { return blinkValue_; }
 
     // Stats.
     int outfitObjects() const { return outfitObjects_; }
+    // The local place an outfit gave each of its parented bones (the head's
+    // face rig, GD05-116), for the bandcheck.
+    const std::map<std::string, scene::Xfm>& outfitBoneLocals() const { return outfitBoneLocal_; }
     std::vector<std::string> unresolvedBones() const;
 
 private:
@@ -241,6 +255,7 @@ private:
     const scene::Group* outfitShadow_ = nullptr;  // an outfit's, when the character has none
     int lod_ = -1;
     int outfitObjects_ = 0;
+    std::map<std::string, scene::Xfm> outfitBoneLocal_;
     int meshHidden_ = 0;
     // The servo: channel -> bone (skeleton index), and the root channels.
     std::vector<int> channelBone_;
@@ -275,6 +290,20 @@ private:
     std::vector<std::pair<int, uint32_t>> faceEntries_;  // (bone, axis)
     facefx::FacePose lastFace_;
     int facePoses_ = 0;
+    int faceBlinkFrame_ = -1;  // RB: the pose frame of the set's Blink clip
+    float blinkValue_ = -1;
+    struct ExpPlay {
+        const scene::CharClipSamples* clip = nullptr;
+        float frame = 0;
+    };
+    ExpPlay exp_, expPrev_;
+    float expFade_ = 1, expFadeBeats_ = 0;
+    std::string expGroup_;
+    int expPlayed_ = 0;
+    Bones expBones_;
+    void startExpression(const scene::CharClipSamples* clip, float fadeBeats);
+    void advanceExpression(ExpPlay& e, float dBeats, float dSeconds);
+    const Bones& expressionPose(const ExpPlay& e);
 };
 
 // The clip sets, loaded once per path and shared by the characters that

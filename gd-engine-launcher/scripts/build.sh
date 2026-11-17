@@ -11,8 +11,9 @@
 #   linux       Linux x86-64, with this machine's compiler and SDL3 (cmake,
 #               ninja, a C++20 compiler, SDL3 development files)
 #   appimage    the Linux build (this version's linux folder; built first when
-#               there is none) packed as gdul-<version>-x86_64.AppImage and its
-#               .zsync, in gdul-<version>-appimage-x86_64/ (scripts/build_appimage.sh)
+#               there is none) packed as gdul-<version>-linux-x86_64.AppImage, its
+#               .zsync and recomplauncher.json, in gdul-<version>-appimage-x86_64/
+#               (scripts/build_appimage.sh)
 #   steamdeck   Steam Deck (on Linux): gdul-<version>-steamdeck-x86_64, built in
 #               Valve's Steam Runtime 3 "sniper" SDK container (podman or docker;
 #               registry.gitlab.steamos.cloud/steamrt/sniper/sdk), with every
@@ -69,7 +70,7 @@ while [ $# -gt 0 ]; do
     --force) force=1 ;;
     --previous) [ $# -ge 2 ] || { echo "build.sh: --previous needs a folder" >&2; exit 2; }; previous="$2"; shift ;;
     --previous=*) previous="${1#--previous=}" ;;
-    -h|--help) sed -n '4,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '4,49p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build.sh: unknown build or option $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
@@ -784,6 +785,9 @@ build_os() {
   cp "$launcher/package/README.md" "$stage/README.md"
   [ "$os" = android ] || cp "$launcher/package/original_isos-README.md" "$stage/original_isos/README.md"
   [ "$os" = steamdeck ] && cp "$launcher/package/STEAM-DECK.txt" "$stage/STEAM-DECK.txt"
+  # RecompLauncher's manifest (GDUL-032, docs/tasks/RECOMPLAUNCHER_SDK.md): at
+  # the top of every desktop download, next to the program (the APK has none).
+  [ "$os" = android ] || cp "$launcher/package/recomplauncher.json" "$stage/recomplauncher.json"
   cp "$launcher/manual/"*.md "$stage/manual/"
 
   # The manifest: what each game module was built from.
@@ -844,7 +848,7 @@ PY
 # none) packed by build_appimage.sh, then verified like every download.
 build_appimage() {
   local linux="$out_root/gdul-$version-linux-x86_64" dir="$out_root/gdul-$version-appimage-x86_64"
-  local name="gdul-$version-x86_64.AppImage"
+  local name="gdul-$version-linux-x86_64.AppImage"
   echo "${B}${C}=== $name ===${N}"
   if [ ! -f "$linux/gd-engine-games/manifest.json" ]; then
     say "No gdul-$version-linux-x86_64 yet: building it first"
@@ -855,7 +859,7 @@ build_appimage() {
   "$here/verify_bundle.sh" "$dir.new/$name"
   rm -rf "$dir"
   mv "$dir.new" "$dir"
-  say "${G}Ready: gd-engine-launcher/local_builds/gdul-$version-appimage-x86_64/$name (+ .zsync)${N}"
+  say "${G}Ready: gd-engine-launcher/local_builds/gdul-$version-appimage-x86_64/$name (+ .zsync, recomplauncher.json)${N}"
 }
 
 echo "${B}Guitar Dream Universal Launcher $version: build${N}"

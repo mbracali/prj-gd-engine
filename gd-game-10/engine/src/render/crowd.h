@@ -79,6 +79,7 @@ private:
         bandanim::Mat34 root;
         venue::Vec3 pos{};
         std::vector<bandanim::Mat34> world, skin;
+        std::vector<bandanim::Mat34> logWorld;  // GD10_CROWD_LOG: the last render's pose
         int view = -1, lighterView = -1;
         std::unique_ptr<band::Model> lighterModel;  // the same ped with the right hand's lighter
         bool lighters = false;  // the state its anims follow

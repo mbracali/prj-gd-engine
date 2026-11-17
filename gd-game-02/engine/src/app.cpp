@@ -62,6 +62,7 @@
 #include "ui/ui_host.h"
 #include "ui/ui_manager.h"
 #include "video/wmv_player.h"
+#include "gd/core/audio/speed_options.h"
 
 namespace {
 
@@ -417,6 +418,13 @@ private:
     Mixer mixer_;
     std::unique_ptr<GameData> data_;
     Rules rules_;
+    // Enhanced > Song Speed / Track Speed (GDALL-053 / 054), read when a song
+    // loads: the song's speed (1 in practice, which has its own), the factor
+    // on the difficulty's track speed, and the rules the players use (the
+    // hit window x the song speed above 100 %).
+    double songSpeed_ = 1;
+    float trackFactor_ = 1;
+    Rules playRules_;
     std::vector<SongInfo> songs_;
     bool running_ = true;
     bool restart_ = false;  // Enhanced's Restart Now: runApp starts the game again
@@ -525,9 +533,11 @@ private:
     Player* playerFor(int pad);
     // track_graphics.dta's speed of the difficulty; with two players the
     // mean of theirs (0x826932D0) [C].
+    // Enhanced Track Speed and Song Speed on top (speed_options.h scrollSpeed).
     float trackSpeed() const {
-        if (!player2_) return rules_.trackSpeed[size_t(difficulty_)];
-        return (rules_.trackSpeed[size_t(difficulties_[0])] + rules_.trackSpeed[size_t(difficulties_[1])]) * 0.5f;
+        const float base = !player2_ ? rules_.trackSpeed[size_t(difficulty_)]
+                                     : (rules_.trackSpeed[size_t(difficulties_[0])] + rules_.trackSpeed[size_t(difficulties_[1])]) * 0.5f;
+        return gd::core::speed::scrollSpeed(base, trackFactor_, songSpeed_);
     }
     Autoplay* botFor(const Player* p) { return p == player_.get() ? bot_.get() : bot2_.get(); }
     bool songLost() const { return coopBand_ ? coopBand_->failed() : player_ && player_->failed(); }
@@ -991,7 +1001,13 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
                     if (input_.gh2Type(d.id).find("joypad") != std::string::npos) return ControllerMode::Joypad;
             return ControllerMode::Guitar;
         };
-        player_ = std::make_unique<Player>(*song_, part0, static_cast<Difficulty>(difficulties_[0]), rules_,
+        songSpeed_ = mode_ == DevMode::Practice ? 1.0 : gd::core::speed::songSpeed(enhancedValue("song_speed"));
+        trackFactor_ = float(gd::core::speed::trackSpeedFactor(enhancedValue("track_speed")));
+        playRules_ = rules_;
+        playRules_.slopMs = gd::core::speed::slopMs(rules_.slopMs, songSpeed_);
+        if (!gd::core::speed::isNormalSpeed(songSpeed_) || trackFactor_ != 1.0f)
+            SDL_Log("song speed %.0f %%, track speed x%.2f, hit window %.0f ms", songSpeed_ * 100, double(trackFactor_), double(playRules_.slopMs));
+        player_ = std::make_unique<Player>(*song_, part0, static_cast<Difficulty>(difficulties_[0]), playRules_,
                                            two ? modeOfPad(pads_[0]) : input_.lastMode(), noFail, faceOff ? 0 : -1, config);
         player_->setCalibrationMs(calibrationMs());
         player_->setBigNotes(song_->bigNotes[size_t(part0)]);
@@ -1004,7 +1020,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         guitarHeard_ = true;
         activeGem_ = 0, activePlayers_ = 0;
         if (two) {
-            player2_ = std::make_unique<Player>(*song_, part1, static_cast<Difficulty>(difficulties_[1]), rules_, autoplay || !ui_ ? ControllerMode::Guitar : modeOfPad(pads_[1]),
+            player2_ = std::make_unique<Player>(*song_, part1, static_cast<Difficulty>(difficulties_[1]), playRules_, autoplay || !ui_ ? ControllerMode::Guitar : modeOfPad(pads_[1]),
                                                 true, faceOff ? 1 : -1, config);
             player2_->setNumber(1);
             player2_->setCalibrationMs(calibrationMs());
@@ -1295,6 +1311,8 @@ void App::beginSong() {
                 mixerTracks(audio, player2_ ? &parts_ : practice ? &practicePart : nullptr), leadInMs_);
     mixer_.setSpeed(float(speed));
     mixer_.setClock(speed, std::max(0.0, startMs));
+    // Enhanced Song Speed (GDALL-053): the pitch kept; practice has its own speed.
+    if (!practice && !gd::core::speed::isNormalSpeed(songSpeed_)) mixer_.setTempo(songSpeed_);
     // beatmatch set_paused before the game began (the tutorials' lessons
     // start with it paused: tut_script enters after the game panel).
     if (musicPaused_ || paused_) mixer_.setPaused(true);
@@ -2930,6 +2948,13 @@ void App::applyEnhanced() {
 #ifdef __ANDROID__
     mode = "borderless";  // always full screen on phones
 #endif
+    // RecompLauncher's Big Picture mode (GD02_FULLSCREEN=1, module_entry.cpp):
+    // Windowed counts as Full Screen (No Border) for this run; the saved
+    // setting stays.
+    if (const char* fs = SDL_getenv("GD02_FULLSCREEN"); fs && std::string(fs) == "1" && mode == "windowed") {
+        if (screenModeApplied_ != "borderless") SDL_Log("gd02: full screen (RecompLauncher Big Picture): Windowed is not used this run");
+        mode = "borderless";
+    }
     if (window_ && mode != screenModeApplied_) {
         bool ok = true;
         if (mode == "windowed") {

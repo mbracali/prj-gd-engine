@@ -28,12 +28,21 @@ Value arith(const Value& a, const Value& b, char op) {
     case '-': r = x - y; break;
     case '*': r = x * y; break;
     case '/': r = y != 0 ? x / y : 0; break;
-    case '%': r = y != 0 ? std::fmod(x, y) : 0; break;
+    case '%':
+        // Harmonix's Mod: the remainder wrapped into [0, y) (fmod keeps the
+        // sign): career.dta's store steps back with {mod {+ itemIdx $dir} n},
+        // so the first item's Up must give the last (GD02-167, as gd01's GD01-319).
+        r = y != 0 ? std::fmod(x, y) : 0;
+        if (r != 0 && (r < 0) != (y < 0)) r += y;
+        break;
     }
     if (op == '/' && a.type == Value::Type::Int && b.type == Value::Type::Int && b.i != 0 && a.i % b.i == 0)
         return Value::integer(a.i / b.i);
-    if (op == '%' && a.type == Value::Type::Int && b.type == Value::Type::Int)
-        return Value::integer(b.i != 0 ? a.i % b.i : 0);
+    if (op == '%' && a.type == Value::Type::Int && b.type == Value::Type::Int) {
+        int m = b.i != 0 ? a.i % b.i : 0;
+        if (m != 0 && (m < 0) != (b.i < 0)) m += b.i;
+        return Value::integer(m);
+    }
     return real ? Value::real(r) : Value::integer(static_cast<int>(r));
 }
 

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <exception>
 
 #include "data/disc.h"
@@ -243,6 +244,11 @@ const anim::Clip* Crowd::pick(Ped& p, double t, float& blend) {
     else blend = blendFast_;
     p.first = false;
     p.lastSpeed = speed;
+    static const bool log = std::getenv("GD10_CROWD_LOG") != nullptr;
+    if (log)
+        SDL_Log("crowd: %.0f ms ped %s: %s.%s.%s -> %s (%s)", t, qbkey::names().get(p.name).c_str(), p.lighters ? "special" : "idle",
+                qbkey::names().get(skill).c_str(), qbkey::names().get(speed).c_str(), qbkey::names().get(key).c_str(),
+                p.model->clip(key) ? "found" : "MISSING");
     return p.model->clip(key);
 }
 
@@ -340,6 +346,16 @@ void Crowd::render(double ms, const venue::CamPose& cam, const venue::Venue& v, 
         bandanim::Pose pose = p.rig.bind;
         bandanim::evalBody(p.rig, p.body, ms, pose);
         bandanim::worldMatrices(p.rig, pose, p.world);
+        static const bool log = std::getenv("GD10_CROWD_LOG") != nullptr;
+        if (log) {
+            // The pose's change since the last render (GD10-064's check): the farthest bone move.
+            float moved = 0;
+            for (size_t b = 0; b < p.world.size() && b < p.logWorld.size(); ++b)
+                for (int c : {3, 7, 11}) moved = std::max(moved, std::fabs(p.world[b].m[c] - p.logWorld[b].m[c]));
+            if (!p.logWorld.empty())
+                SDL_Log("crowd: %.0f ms ped %s: farthest bone moved %.3f m", ms, qbkey::names().get(p.name).c_str(), double(moved));
+            p.logWorld = p.world;
+        }
         p.skin.resize(p.world.size());
         for (size_t b = 0; b < p.world.size(); ++b) p.skin[b] = bandanim::mmul(p.world[b], p.rig.invBind[b]);
         venue::CamPose pc;

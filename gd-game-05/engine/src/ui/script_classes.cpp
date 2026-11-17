@@ -661,6 +661,12 @@ void PanelObj::unload() {
     ui.callScript(this, "unload");
     if (path.rfind("world/", 0) == 0) ui.host().worldUnload();
     components_.clear();
+    // A player slot's components and focus are the milo's too (GD05-114:
+    // kept, they pointed into the freed view and kept the old states).
+    scoped_.clear();
+    scopeFocus.clear();
+    disabled.clear();
+    focus.clear(), lastFocus.clear();
     view.reset();
     loaded = false;
 }

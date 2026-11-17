@@ -192,6 +192,16 @@ scene::Xfm texCoordXfm(const scene::Xfm& texXfm, int texGen);
 // uv layout, for normal maps: 16 floats per vertex.
 std::vector<float> packVertices(const scene::Mesh& m);
 
+// The mesh whose vertices and faces `m` draws: its geom_owner. RB reads a
+// mesh's vertices and faces through the owner even when the mesh stores its
+// own (RB 0x82205658, 0x82206000, 0x822B06F0: owner +0x10c, then its vertices
+// +0xe0 / faces +0xf8; RndMesh::Load 0x821A02F8 sets the owner to the mesh
+// itself when none is named) [C]. The smasher plate's
+// square_smasher_plate.mesh keeps 471 vertices of its own (a taller hood)
+// but draws black_smasher.mesh's 237 (GD05-111).
+// GD05_GEOMOWNER_LEGACY=1: the owner only when the mesh has no vertices.
+const scene::Mesh* meshGeometry(const scene::Mesh* m);
+
 // Draws `mesh` (rigid) at `world` with `mat` (default: the mesh's own) and
 // every material its next_pass chain names. `tint` multiplies the colour
 // and alpha (1 1 1 1: none). `geometry` replaces the mesh's cached

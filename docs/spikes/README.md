@@ -31,6 +31,17 @@ newer one on the same topic replaces or merges.
 | [GD-GAME-14_KICKOFF.md](GD-GAME-14_KICKOFF.md) | 2026-11-10 | Kickoff: Band Hero as a delta on gd-game-12 | GD14-001 |
 | [GD-GAME-17_KICKOFF.md](GD-GAME-17_KICKOFF.md) | 2026-11-10 | Kickoff: Guitar Hero: Warriors of Rock, last of the GH5 family (Quest mode powers) | GD17-001 |
 | [GDCORE-HDR_KICKOFF.md](GDCORE-HDR_KICKOFF.md) | 2026-11-10 | Kickoff: shared HDR output for every game in gd-engine-core (H0-H7, ~10 h) | GDCORE-012 |
+| [colabs02.md](colabs02.md) | 2026-11-13 | Colabs 02: ten fan projects; nothing copyable, knowledge and option ideas; mod bug in gd02 / gd03 / gd05, RB kick bounce | GDALL-052..062, GD02-167/168, GD04-122/123, GD05-100..103, GD10-061, GDUL-029, GDCORE-013, GD08/18/19-002 |
+| [study_gh2dx.md](study_gh2dx.md) | 2026-11-13 | GH2 Deluxe: speed rules, gold stars, option ideas, black venue | GDALL-053..057, GD02-168 |
+| [study_gh_encore_xbox.md](study_gh_encore_xbox.md) | 2026-11-13 | GH80s on GH2's 360 engine: checklist for the Encore wave of song sharing | GDALL-042 |
+| [study_fastgh3.md](study_fastgh3.md) | 2026-11-13 | FastGH3 / GH3+: high-FPS checklist, retail GH3 bugs, song speed, Clone Hero reader | GD04-122/123, GDALL-053, 060 |
+| [study_ghwt_de.md](study_ghwt_de.md) | 2026-11-13 | GHWT:DE: World Tour formats for gd10, controller table, launch into a song | GD10-061, GDUL-029, GDCORE-013 |
+| [study_wor_plus.md](study_wor_plus.md) | 2026-11-13 | WoR-Plus: ideas only (no licence, ships game files) | GDALL-058 |
+| [study_rb2dx.md](study_rb2dx.md) | 2026-11-13 | RB2 Deluxe: 24 FPS shake / hair, PostProc switches, RB2 needs | GD05-102/103, GD08-002 |
+| [study_rb3dx.md](study_rb3dx.md) | 2026-11-13 | RB3 Deluxe: kick bounce, PostProc rates, translation layout | GD05-100, GD05-102, GDALL-059, GD18-002 |
+| [study_rb4dx.md](study_rb4dx.md) | 2026-11-13 | RB4 Deluxe: Forge rules in DTA, LibForge formats, HUD ideas | GD19-002, GDALL-056 |
+| [study_milo_script_library.md](study_milo_script_library.md) | 2026-11-13 | Milo script library: private corpus; gd05 lacks six builtins | GD05-101, GDALL-062 |
+| [study_arson.md](study_arson.md) | 2026-11-13 | Arson: DTA semantics; our text parser and / rules | GDALL-061, GD02-167 |
 
 Each study ends with "Backlog candidates"; the IDs are given in
 [../tasks/gd-backlog.md](../tasks/gd-backlog.md) once the items are added there.

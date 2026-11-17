@@ -122,6 +122,8 @@ private:
     bool loadingSeen_ = false;
     int songsWithoutLoading_ = 0;
     std::string failure_;
+    // The help bar's glyphs on their pills (GD10-062); fails the walk if not.
+    void checkHelpBar(FrontEnd& fe, const std::string& where);
     std::vector<std::string> log_;
     std::vector<std::string> menuShots_;  // shot:<name> ops taken (the menus walk)
     // uitest: every flow state with a Create script, started in turn.

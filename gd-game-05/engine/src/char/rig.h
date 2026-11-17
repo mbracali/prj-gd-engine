@@ -23,6 +23,32 @@
 // character's, called through the hooks at their place in that order.
 namespace chr {
 
+// The world clock the hair steps on (Hz): RB's world runs at the PostProc's
+// emulate_fps (24 under ProFilm, D55) and its hair is tuned for it (RB2 DX
+// resets the hair harder when it raises the venue rate: study_rb2dx);
+// GH2's 60 by default (GD05-102).
+void setHairStepHz(double hz);
+
+// The hair's collision, measured after each step (bandcheck "hair",
+// GD05-113), accumulated until read. Penetration in Rock Band's terms:
+// (point radius + the collide's world radius) - the point's distance to the
+// collide's centre (sphere) or clamped x segment (capsule), counted when > 0.
+struct RigHairStats {
+    int collides = 0;      // CharCollide in the character
+    int points = 0;        // simulated hair points
+    int rbPairs = 0;       // (point, collide) pairs Rock Band's hookup makes (RB 0x823392A0)
+    int usedPairs = 0;     // pairs the port's step tests (0 with GD05_HAIRCOLLIDE_LEGACY)
+    int steps = 0;         // hair steps measured
+    long pairSamples = 0;  // pair-steps measured
+    std::vector<float> pen;     // the hooked pairs' penetration > 0.0001
+    std::vector<float> penBetween;  // the same, the point on another hooked collide's hard radius (pushed from it)
+    long pointSamples = 0;      // point-steps measured
+    std::vector<float> penAll;  // info: each point against every collide, the deepest > 0
+    std::vector<float> penMid;  // info: each segment's midpoint, the same
+    double motion = 0;          // the points' moves against their strand root (units, summed)
+    double motionSeconds = 0;   // point-steps x the step's seconds
+};
+
 struct RigContext {
     double beat = 0;          // song beat (TaskMgr)
     float dBeats = 0;         // this poll
@@ -71,8 +97,16 @@ public:
     bool newSpot(const std::string& ik, const std::string& spot, double beats);
     // CharIKMidi (fret.ik): {midi_parser <spot> <start> <end>} / new_spot.
     bool ikMidi(const std::string& ik, const std::string& spot, double start, double end, double now);
+    // Rock Band's CharEyes read the face servo's Blink weight (RB 0x82329588):
+    // the character passes it each poll (< 0: no Rock Band face).
+    void setBlinkValue(float v);
+    // New gaze points picked so far, every CharEyes (diagnostics).
+    int eyeRetargets() const;
     // Hair back to rest (teleports: reset_hair).
     void resetHair();
+    // The hair's collision measured since the last call (bandcheck); the
+    // measuring starts with the first call.
+    RigHairStats takeHairStats();
     // A component switched on / off by name (e.g. the guitar IK while walking).
     void setEnabled(const std::string& name, bool on);
     // The sorted poll order, by object name (tests, logs).

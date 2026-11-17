@@ -68,6 +68,7 @@ public:
         class Campaign* campaign = nullptr;          // career (null: everything unlocked)
         std::function<void()> saveCampaign;          // autosave
         std::function<int(int score)> starsOf;       // num_stars of the current song
+        std::function<bool()> noSave;                // the song saves no record (Song Speed not 100 %)
         std::function<float()> msPerTick;          // song tempo now (arena delay_task)
         std::function<void(float)> musicSpeed;     // beatmatch set_music_speed
         std::function<void(bool)> musicPaused;     // beatmatch set_paused

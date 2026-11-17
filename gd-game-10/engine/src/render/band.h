@@ -90,7 +90,11 @@ public:
     struct Entry {
         std::unique_ptr<band::Model> model;
         bandanim::Animator anim;
-        bandanim::Mat34 root;  // model -> world: the waypoint's position and rotation, the profile's scale
+        bandanim::Mat34 root;  // model -> world: the waypoint's position and rotation, the profile's scale (at the last evaluate)
+        bandanim::Mat34 home;  // root on its own start waypoint
+        std::string rootNode;  // the node `root` is on ("": its own; Animator::startNodeAt)
+        const venue::Venue* venue = nullptr;
+        float scale = 1.0f;
         bool placed = false;   // its waypoint exists
         bool hidden = false;   // setHidden
         int view = -1;
@@ -128,6 +132,9 @@ public:
     std::string frameRateCheck(const std::vector<double>& times, int& checked) const;
     // One member's pose at `ms` (its animation and accessory bones; after its advance).
     static void evaluateEntry(Entry& e, double ms);
+    // A member's model -> world on <zone><suffix> (a TRG_Waypoint node) at
+    // `scale`; false (the origin) if the zone has no such node.
+    static bool nodeRoot(const venue::Venue* v, const std::string& suffix, float scale, bandanim::Mat34& out);
     // Draws the band's opaque meshes with a light's engine constants into
     // the bound (shadow) target; the next draw at the same `ms` reuses the
     // skinning.

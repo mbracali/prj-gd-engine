@@ -423,6 +423,8 @@ void Hud2D::draw(Canvas& c, const TextureCache& tex, double now) const {
             }
     }
 
+    // gh4's HUD up: the alerts' sprites only (z 45 and over).
+    if (alertsOnly_) items.erase(std::remove_if(items.begin(), items.end(), [](const Item& it) { return it.z < 45; }), items.end());
     std::stable_sort(items.begin(), items.end(), [](const Item& x, const Item& y) { return x.z < y.z; });
     std::vector<Vertex> v;
     for (const Item& it : items) {
@@ -451,6 +453,15 @@ void Hud2D::draw(Canvas& c, const TextureCache& tex, double now) const {
     }
 
     if (!text_) return;
+    if (alertsOnly_) {
+        if (comboText_.running(now)) {
+            char b[48];
+            std::snprintf(b, sizeof b, "%d Note Streak!", combo_);
+            drawAlert(c, comboText_, K("text_a6"), b, now, 0x12);
+        }
+        if (readyText_.running(now) && ready_) drawAlert(c, readyText_, K("text_a6"), "Star Power Ready", now, 0x12);
+        return;
+    }
     // Score text: num_a9, (222,70) in the score body, scale 1.1, right bottom, z 20,
     // font_spacing 5, shadow (3,3) black; past 5 digits the scale becomes
     // (score_frame_width / text width, 1.0) [C setup_hud, 0x82116884; the

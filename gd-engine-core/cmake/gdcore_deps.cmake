@@ -17,6 +17,8 @@
 # | VULKAN_HEADERS| 1.4.350 (v1.4.350)    | Apache-2.0 / MIT               | render: the "vulkan" backend (headers)    |
 # | VOLK       | 1.4.350 (1.4.350)      | MIT                            | render: "vulkan", the loader at run time  |
 # | VMA        | 3.3.0 (v3.3.0)         | MIT                            | render: "vulkan", memory allocation       |
+# | LIBCHDR    | 0.3.0+ commit 47d7941  | BSD-3 (+ bundled lzma: public  | platform: CHD disc images (gdcore_chd,   |
+# |            | (2026-10-11, no tag)   | domain, miniz: MIT, zstd: BSD) | cmake/gdcore_chd.cmake), the launcher too |
 #
 # The three Khronos repositories are pinned at the same Vulkan SDK tag (they
 # are released together; glslang's known_good.json names those SPIRV-Tools
@@ -91,7 +93,15 @@ set(GDCORE_DEP_VMA_URL "https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemory
 set(GDCORE_DEP_VMA_SHA256 c4f6bbe6b5a45c2eb610ca9d231158e313086d5b1a40c9922cb42b597419b14e)
 set(GDCORE_DEP_VMA_TOPDIR VulkanMemoryAllocator-3.3.0)
 
-set(GDCORE_DEPS SDL3_IMAGE KTX GLSLANG SPIRV_TOOLS SPIRV_HEADERS VULKAN_HEADERS VOLK VMA)
+# libchdr has no release tag after 0.3.0; pinned at a master commit (the
+# reader fixes for crafted CHD maps, rtissera/libchdr#198), at least two weeks
+# old when pinned (GDUL-030).
+set(GDCORE_DEP_LIBCHDR_VERSION 47d7941)
+set(GDCORE_DEP_LIBCHDR_URL "https://github.com/rtissera/libchdr/archive/47d794151b2b64f6aba60304e6480f4f5a2bc24b.tar.gz")
+set(GDCORE_DEP_LIBCHDR_SHA256 ee1131e748a2c7d7559b7054540ebe49637433901f92071560df52e369f7c7af)
+set(GDCORE_DEP_LIBCHDR_TOPDIR libchdr-47d794151b2b64f6aba60304e6480f4f5a2bc24b)
+
+set(GDCORE_DEPS SDL3_IMAGE KTX GLSLANG SPIRV_TOOLS SPIRV_HEADERS VULKAN_HEADERS VOLK VMA LIBCHDR)
 
 # gdcore_pin(<NAME> <version> <url> <sha256> <folder inside the archive>)
 function(gdcore_pin name ver url sha top)

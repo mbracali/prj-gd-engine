@@ -303,6 +303,40 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("main_solomode_screen");
         wait(1000);
         check("no_black");  // title > main > solo > song list > back: no black frame
+    } else if (scenario == "rb_loading_icons") {
+        // GD05-105: quick play's first song; through the loading screens every
+        // band icon changes frames (loading_icon_frames).
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(800);
+        press(kX);  // the first entry
+        at("qp_seldiff_solo_screen");
+        press(kX);
+        wait(1500);
+        press(kX);
+        check("loading_icon_frames");
+    } else if (scenario == "rb_songlist_tiers") {
+        // GD05-109, owner: "the songs are organized in a wrong way. In the
+        // original game each song is part of a section". The quick play list
+        // (every song) with a guitar and with a drum kit: each song under the
+        // tier RB gives its rank for that instrument (song_tiers).
+        // GD05_SONGTIERS_LEGACY=1 (the band rank in nine equal groups) fails.
+        at("splash_screen", 30000);
+        check("unlock_all_songs");
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(1000);
+        check("song_tiers:1:guitar");
+        check("song_tiers:0:drum");
     } else if (scenario == "rb_songlist_text") {
         // GD05-063, owner report: "the list of musics have wrong sizes for
         // the letters". Every text the song list draws (into its RenderDir's
@@ -1270,6 +1304,406 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1000);
         check("rb_tour_solo_events");
         check("restart_app");
+    } else if (scenario == "rb_full_solo") {
+        // GD05-119: the whole Solo Tour of a new character (guitar, or the
+        // instrument GD05_INSTRUMENT gives player 1) at the default
+        // difficulty (Medium; GD05_WALK_EASY=1 Easy). Its gigs are completed
+        // through the tour's natives (rb_full_solo_autoplay, the test aid of
+        // tests/walktest_career.cpp) but the one that wins the tour, played
+        // through the menus: endgame, the tour's win screen, the credits,
+        // the send-off; restarted, the progress is still there.
+        endMs_ = 20000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);  // GIG GUIDE
+        at("tour_solo_diff_screen");
+        if (SDL_getenv("GD05_WALK_EASY")) press(kUp), wait(300);
+        press(kX);  // the difficulty
+        check("rb_to_screen:tour_solo_event_screen", 30000);  // through the welcome hint
+        wait(1000);
+        check("rb_full_solo_autoplay");
+        press(kTri);  // back to the hub, then the gig guide again: its list rebuilt
+        at("tour_solo_hub_screen", 20000);
+        wait(800);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);
+        at("tour_solo_diff_screen");
+        press(kX);
+        check("rb_to_screen:tour_solo_event_screen", 30000);  // through the hints the gigs raised
+        wait(1000);
+        check("rb_focus_row:solo_event_provider:final", 20000);
+        press(kX);  // the winning gig
+        at("game_screen", 60000);
+        check("rb_to_screen:tour_solo_win_screen|tour_solo_easy_win_screen", 180000);
+        check("rb_full_solo_won");
+        wait(1500);
+        check("rb_to_screen:tour_solo_sendoff_screen", 60000);  // the credits: the video (none headless), the text
+        wait(1000);
+        press(kX);
+        at("tour_solo_event_screen|tour_solo_hub_screen", 30000);
+        check("restart_app");
+    } else if (scenario == "rb_full_solo_restarted") {
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(1000);
+        press(kX);  // the saved character
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_full_solo_reloaded");
+    } else if (scenario == "rb_full_band") {
+        // GD05-118: the whole Band World Tour. A guitarist made in the Solo
+        // Tour's creator, restarted; a new band (hometown boston, the data's
+        // default) with a drummer (GD05_BAND_PLAYERS 2, the lobby stand-in);
+        // its gigs completed through the natives (rb_full_band_autoplay) up to
+        // the hall of fame, played through the menus (the tour's win screen),
+        // then the endless setlist through the natives (is_hardcore_winning,
+        // tour_bwt_complete); restarted, all of it kept.
+        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,guitar", 1);
+        SDL_setenv_unsafe("GD05_BAND_PLAYERS", "2", 1);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        check("restart_app");
+    } else if (scenario == "rb_full_band_restarted") {
+        endMs_ = 12000;  // the hall of fame's eight songs
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(800);
+        press(kX);  // a new band
+        at("tour_band_create_screen", 20000);
+        wait(1200);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        for (int i = 0; i < 2; ++i) press(kDown), wait(200);
+        press(kX);  // ACCEPT
+        at("tour_band_hub_screen", 30000);
+        wait(1000);
+        check("rb_full_band_autoplay");
+        press(kX);  // GIG GUIDE
+        check("rb_to_screen:tour_band_town_screen", 40000);  // through the hints the gigs raised
+        wait(1000);
+        check("rb_focus_row:tour_town_provider:final_town", 20000);
+        press(kX);
+        at("tour_band_venue_screen", 20000);
+        wait(1000);
+        check("rb_focus_row:tour_venue_provider:final_venue", 20000);
+        press(kX);
+        at("tour_band_event_screen", 20000);
+        wait(1000);
+        check("rb_focus_row:tour_event_provider:final", 20000);
+        press(kX);  // the hall of fame
+        check("rb_to_screen:game_screen", 60000);
+        check("rb_to_screen:tour_band_win_screen", 400000);
+        wait(1500);
+        check("rb_full_band_end");
+        check("restart_app");
+    } else if (scenario == "rb_career_screens_band") {
+        // Career rundown 2: the Band World Tour's screens through the menus,
+        // each checked by rb_texts (a shot, the texts drawn, no label left
+        // empty or "Loading"). RB's band lobby: the guitarist and the
+        // drummer each make a character (as rb_band_lobby), a new band, the
+        // hub, then each hub button and back.
+        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum", 1);
+        // Posed shown but drawing nothing (no script sets them; not in the
+        // shots): the event screen's loading.lbl, the roster's rows 2-3
+        // inside their hidden player0N.grp.
+        SDL_setenv_unsafe("GD05_TEXTS_ALLOW", "band_event,band_lineup", 1);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(1500);
+        check("rb_texts:band_sel");
+        press(kX);  // a new band
+        at("matchmaking_band_screen", 30000);
+        wait(1500);
+        for (int p = 0; p < 2; ++p) {
+            pressP(kX, p), wait(1200);  // the player joins its instrument's slot
+            pressP(kX, p), wait(1500);  // (Create New)
+            if (p == 1) pressP(kDown, p), wait(400);  // female.btn
+            pressP(kX, p);
+            at("charcreator_maker_screen", 20000);
+            wait(1500);
+            pressP(kX, p);  // NAME (the offered name is taken)
+            wait(800);
+            check("focus_to create.btn", 5000);
+            pressP(kX, p);  // CREATE
+            at("charcreator_confirm_screen", 10000);
+            wait(1500);
+            pressP(kUp, p), wait(400), pressP(kX, p);  // yes
+            at("matchmaking_band_screen", 30000);
+            wait(1500);
+        }
+        check("rb_texts:band_lobby");
+        pressP(kX, 0);  // CONTINUE (the leader's continue.btn)
+        at("tour_band_create_screen", 30000);
+        wait(1500);
+        check("rb_texts:band_create");
+        check("rb_hometowns");
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        for (int i = 0; i < 2; ++i) press(kDown), wait(200);
+        press(kX);  // ACCEPT
+        at("tour_band_hub_screen", 30000);
+        wait(1000);
+        check("rb_texts:band_hub_1s");
+        wait(3000);
+        check("rb_texts:band_hub");
+        check("rb_hub_chars:2");
+        check("rb_bwt_first_gig");  // a played gig for the rows' stars and medal
+        check("rb_bwt_min_difficulty");
+        press(kX);  // GIG GUIDE
+        check("rb_to_screen:tour_band_venue_screen", 40000);  // through the hints
+        wait(1500);
+        check("rb_texts:band_venue");
+        check("rb_focus_row:tour_venue_provider:final_venue", 20000);
+        press(kX);
+        at("tour_band_event_screen", 20000);
+        wait(1500);
+        check("rb_texts:band_event");
+        check("rb_gig_rows:tour_event_provider:event,star,medal,new,songs");
+        press(kX);  // the played gig: the difficulty screen
+        at("tour_band_seldiff_screen", 20000);
+        wait(2000);
+        check("rb_texts:band_seldiff");
+        check("rb_seldiff_min:none");
+        check("rb_seldiff_min:boston/theater/song45");  // (min_difficulty kDifficultyMedium)
+        check("rb_seldiff_min:newyork/big_club/localartists");  // kDifficultyHard
+        press(kTri);
+        at("tour_band_event_screen", 20000);
+        wait(1000);
+        press(kTri);  // back: the venues
+        at("tour_band_venue_screen", 20000);
+        wait(1000);
+        press(kTri);  // the hub
+        at("tour_band_hub_screen", 20000);
+        wait(1500);
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROCK SHOP
+        at("shop_screen", 30000);
+        wait(2500);
+        check("rb_texts:band_shop");
+        press(kTri);
+        at("tour_band_hub_screen", 30000);
+        wait(1500);
+        check("focus_to bandprofile.btn", 5000);
+        press(kX);  // BAND PROFILE
+        at("tour_band_profile_screen", 30000);
+        wait(2000);
+        check("rb_texts:band_profile");
+        press(kTri);
+        at("tour_band_hub_screen", 30000);
+        wait(1500);
+        check("focus_to bandlineup.btn", 5000);
+        press(kX);  // BAND ROSTER
+        at("tour_band_lineup_screen", 30000);
+        wait(2000);
+        check("rb_texts:band_lineup");
+        press(kTri);
+        at("tour_band_hub_screen", 30000);
+        wait(1000);
+        check("rb_texts_end");
+    } else if (scenario == "rb_career_screens_solo") {
+        // Career rundown 2: the Solo Tour's screens: a new guitarist, the
+        // hub, the gig guide (a first gig through the natives for a played
+        // row; the rows' labels; the "unlock" row switches the list to the
+        // bonus gigs and Triangle back), the shop, each checked by rb_texts.
+        // tour_solo_diff.milo's loading.lbl is posed shown but draws nothing
+        // (no script sets it; not in the shot): allowed.
+        SDL_setenv_unsafe("GD05_TEXTS_ALLOW", "solo_diff", 1);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(1500);
+        check("rb_texts:solo_char");
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        check("rb_texts:solo_creator");
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        check("focus_to create.btn", 5000);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(2000);
+        check("rb_texts:solo_hub");
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);  // GIG GUIDE
+        at("tour_solo_diff_screen");
+        wait(1500);
+        check("rb_texts:solo_diff");
+        press(kX);  // the difficulty
+        check("rb_to_screen:tour_solo_event_screen", 30000);  // through the welcome hint
+        wait(1500);
+        check("rb_solo_first_gig");
+        press(kTri);  // back to the hub, then the gig guide again: its list rebuilt
+        at("tour_solo_hub_screen", 20000);
+        wait(800);
+        check("focus_up_to gigguide.btn", 5000);
+        press(kX);
+        at("tour_solo_diff_screen");
+        press(kX);
+        check("rb_to_screen:tour_solo_event_screen", 30000);
+        wait(1500);
+        check("rb_texts:solo_event");
+        check("rb_gig_rows:solo_event_provider:town,venue,event,by_line,star,new,score");
+        check("rb_solo_mode:0");
+        check("rb_focus_row:solo_event_provider:unlock", 20000);
+        press(kX);  // the unlock row: the bonus gigs
+        wait(1500);
+        check("rb_solo_mode:1");
+        check("rb_texts:solo_event_unlock");
+        check("rb_gig_rows:solo_event_provider:town,venue,event,new");
+        press(kTri);  // back to the normal gigs
+        wait(1500);
+        check("rb_solo_mode:0");
+        check("still tour_solo_event_screen");
+        press(kTri);  // the hub
+        at("tour_solo_hub_screen", 20000);
+        wait(1500);
+        check("focus_to rokkshoppe.btn", 5000);
+        press(kX);  // ROCK SHOP
+        at("shop_screen", 30000);
+        wait(2500);
+        check("rb_texts:solo_shop");
+        press(kTri);
+        at("tour_solo_hub_screen", 30000);
+        wait(1500);
+        check("focus_to playerprofile.btn", 5000);
+        press(kX);  // the character's profile
+        wait(3000);
+        check("rb_texts:solo_profile");
+        press(kTri);
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        check("rb_texts_end");
+    } else if (scenario == "rb_bwt_diy") {
+        // GD05-118: a make-your-own setlist gig (the hometown small club's
+        // diy, (songs any any)) through the menus: the band's first gig
+        // through the natives, then the venue, the gig, tour_selsong_screen
+        // twice (one song each), the difficulty, the game: the set holds the
+        // two songs chosen (RB's selsong.dta game_tour: set_any_song).
+        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,guitar", 1);
+        SDL_setenv_unsafe("GD05_BAND_PLAYERS", "2", 1);
+        endMs_ = 15000;
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(800);
+        press(kX);  // a new band
+        at("tour_band_create_screen", 20000);
+        wait(1200);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        for (int i = 0; i < 2; ++i) press(kDown), wait(200);
+        press(kX);  // ACCEPT
+        at("tour_band_hub_screen", 30000);
+        wait(1000);
+        check("rb_bwt_first_gig");
+        press(kX);  // GIG GUIDE
+        check("rb_to_screen:tour_band_venue_screen", 40000);  // the hints
+        wait(1000);
+        check("rb_focus_row:tour_venue_provider:final_venue", 20000);
+        press(kX);
+        at("tour_band_event_screen", 20000);
+        wait(1000);
+        check("rb_focus_row:tour_event_provider:final", 20000);
+        press(kX);  // Make a Setlist
+        at("tour_selsong_screen", 20000);
+        wait(2000);
+        press(kX);  // the first song
+        wait(2500);
+        at("tour_selsong_screen", 20000);
+        wait(2000);
+        press(kDown), wait(300), press(kDown), wait(300);
+        press(kX);  // another song
+        check("rb_to_screen:game_screen", 60000);  // the difficulty
+        wait(3000);
+        check("rb_bwt_diy_set");
+    } else if (scenario == "rb_full_band_restarted_restarted") {
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(1000);
+        press(kX);  // the saved band (row 0)
+        at("tour_band_hub_screen", 30000);
+        wait(1000);
+        check("rb_full_band_reloaded");
     } else if (scenario == "rb_tour_rules_restarted") {
         at("splash_screen", 30000);
         press(kX);
@@ -2071,6 +2505,56 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         for (int i = 0; i < 30; ++i) wait(500), check("band_start_shot");
         check("counter_max:missing_shaders:0");
         at("endgame_waiting_screen", 90000);
+    } else if (scenario == "rb_camera_cuts" || scenario == "rb_camera_cuts_band") {
+        // GD05-107 (owner: "some shots not looking to the band, or taking too
+        // long to change"): quick play solo (guitar) or band quick play
+        // (four players), 60 s of the song with a shot every 2.5 s
+        // (GD05_WALK_SHOTS: title_cam_NN.bmp; GD05_SHOTLOG=1 names the
+        // shots; App::rbCutAimProbe on every cut), then App::rbCamSimRun: the camera alone through each song
+        // of GD05_CAMSIM_SONGS (default the first): every cut logged
+        // (camsim ... cut), per song the longest hold, the longest time
+        // past a shot's last frame and the venue's disabled shots picked
+        // (GD05_CAMRULES_LEGACY=1: the camera of 1.1.15 to compare).
+        // GD05_VENUE picks the venue.
+        endMs_ = 600000;
+        if (scenario == "rb_camera_cuts_band") {
+            SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,guitar", 1);
+            SDL_setenv_unsafe("GD05_BAND_PLAYERS", "4", 1);
+            at("splash_screen", 30000);
+            check("unlock_all_songs");
+            press(kX);
+            at("main_screen");
+            press(kDown), wait(200);
+            press(kX);  // MULTIPLAYER
+            at("main_multimode_screen");
+            press(kX);  // BAND QUICKPLAY
+            at("main_bandcoop_screen");
+            press(kX);  // LOCAL
+            at("qp_selsong_screen", 30000);
+            wait(800);
+            press(kX);  // the first entry
+            at("qp_seldiff_screen|qp_seldiff_solo_screen", 20000);
+            wait(1500);
+            press(kX), wait(1500), press(kX), wait(1500);
+            at("game_screen", 60000);
+        } else {
+            rbQuickplay();
+        }
+        check("song_clock_running", 30000);
+        for (int i = 0; i < 24; ++i) {
+            wait(2500);
+            const std::string tag = "tshot:cam_" + std::string(i < 10 ? "0" : "") + std::to_string(i);
+            check(tag.c_str());
+        }
+        check("counter:rb_cut_aim_checks:1");
+        check("counter_max:rb_cut_aim_max_deg:1000");
+        check("counter_max:rb_cut_aim_off:1000");
+        check("counter:rb_camsim:1");
+        check("counter_max:rb_camsim_max_hold_ms:1000000");
+        check("counter_max:rb_camsim_max_past_end_ms:1000000");
+        check("counter_max:rb_camsim_directed_past_end_ms:1000000");
+        check("counter_max:rb_camsim_disabled_picks:100000");
+        check("counter_max:rb_camsim_directed_late:100000");
     } else if (scenario == "rb_highway") {
         // GD05-070 (owner: "the yellow Overdrive bar flickers", "the
         // multiplier is drawn on top of other elements", "the hit area looks
@@ -2362,6 +2846,64 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             check("kb_hits");
         }
         expect_ = {"main_screen", "main_solomode_screen", "qp_selsong_screen", "qp_seldiff_solo_screen", "game_screen", "pause_screen", "game_screen"};
+    } else if (scenario == "rb_newsong_part" || scenario == "rb_newsong_part_pad") {
+        // GD05-114, owner: "selected the option new song ... the game forced
+        // me to go into drums and did not even allow me to select guitar or
+        // bass (I'm using a keyboard ...)". Solo quick play with the keyboard
+        // (rb_newsong_part_pad: an Xbox 360 pad), a song, pause, NEW SONG,
+        // another song: qp_seldiff_solo_screen must offer the guitar slot's
+        // part select again, as on the first time (newsong_part).
+        const bool pad = scenario == "rb_newsong_part_pad";
+        // The pad works every menu itself (A, Start, the d-pad).
+        auto dev = [&](const std::string& what) { check(("dev_set " + what + " 1").c_str()), wait(90), check(("dev_set " + what + " 0").c_str()), wait(220); };
+        auto ok = [&] { if (pad) dev("b0"); else key(SDLK_RETURN); };
+        auto down = [&] { if (pad) dev("b12"); else key(SDLK_DOWN); };  // SDL_GAMEPAD_BUTTON_DPAD_DOWN
+        auto up = [&] { if (pad) dev("b11"); else key(SDLK_UP); };
+        if (pad) check("dev_attach 045e:028e", 10000);
+        at("splash_screen", 30000);
+        check("unlock_all_songs");
+        wait(500);
+        ok();
+        at("main_screen");
+        wait(1500);
+        ok();  // SOLO
+        at("main_solomode_screen");
+        ok();  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(500);
+        down(), wait(300);
+        ok();
+        at("qp_seldiff_solo_screen");
+        wait(800);
+        check("newsong_part first");
+        ok();  // guitar
+        wait(1500);
+        ok();  // the difficulty
+        at("game_screen", 60000);
+        wait(4000);
+        if (pad) dev("b6"); else key(SDLK_ESCAPE);  // pause
+        at("pause_screen", 10000);
+        wait(800);
+        for (int i = 0; i < 3; ++i) down(), wait(250);  // resume, restart, lefty, NEW SONG
+        check("print_focus");
+        ok();  // NEW SONG
+        at("confirm_quit_screen", 10000);
+        wait(800);
+        up(), wait(300);  // no.btn -> yes.btn
+        ok();  // yes
+        at("qp_selsong_screen", 40000);
+        wait(1000);
+        down(), wait(300);
+        ok();
+        at("qp_seldiff_solo_screen");
+        wait(800);
+        check("newsong_part again");
+        ok();  // guitar
+        wait(1500);
+        ok();  // the difficulty
+        at("game_screen", 60000);
+        wait(2000);
+        check("newsong_part game");
     } else if (scenario == "rb_guitar_play" || scenario == "rb_guitar_none" || scenario == "rb_pad_play" || scenario == "rb_owner_guitar") {
         // GD05-056: a song played with a device's own SDL events (a virtual
         // joystick that is the owner's Harmonix Rock Band Guitar 1bad:0002:
@@ -4382,6 +4924,63 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (keepGoing) return (void)std::printf("  FAIL (kept going) %s\n", e.c_str()), pass();
         error_ = e, failed_ = done_ = true;
     };
+    // The career rundown's checks (GD05-118 / 119: tests/walktest_career.cpp).
+    {
+        std::string err;
+        bool ok = false;
+        if (walkCareerCheck(ui, s.screen, err, ok)) return ok ? pass() : fail(err);
+    }
+    if (s.screen.rfind("rb_to_screen:", 0) == 0) {
+        // X on every screen in between (hints, results, next song) until one
+        // of the screens (a|b) is up; never on a song or a loading screen.
+        const std::string want = "|" + s.screen.substr(13) + "|";
+        if (stepStart_ < 0) stepStart_ = nowMs;
+        const std::string cur = ui.current() ? ui.current()->name() : std::string();
+        if (!ui.inTransition() && want.find("|" + cur + "|") != std::string::npos) return pass();
+        if (nowMs - stepStart_ > (s.ms > 0 ? s.ms : 30000)) return fail("never reached " + s.screen.substr(13) + " (at " + cur + ")");
+        const bool busy = cur == "game_screen" || cur.find("load") != std::string::npos || cur.find("waiting") != std::string::npos;
+        if (!busy && !ui.inTransition() && nowMs - lastNavMs_ > 1500) {
+            std::printf("  rb_to_screen: X on %s\n", cur.c_str());
+            ui.buttonDown(kX, 0), ui.buttonUp(kX, 0), lastNavMs_ = nowMs;
+        }
+        return;
+    }
+    if (s.screen.rfind("rb_focus_row:", 0) == 0) {
+        // Down the focused list until its selection is <sym> of <provider>
+        // (final / final_town / final_venue: GD05_WALK_FINAL's event or its
+        // town/venue/event parts, set by the autoplay checks).
+        const std::string rest = s.screen.substr(13);
+        const std::string prov = rest.substr(0, rest.find(':'));
+        std::string sym = rest.substr(rest.find(':') + 1);
+        if (sym.rfind("final", 0) == 0) {
+            const char* f = SDL_getenv("GD05_WALK_FINAL");
+            const std::string key = f ? f : "";
+            std::vector<std::string> parts;
+            for (size_t a = 0, b; a <= key.size(); a = b + 1) {
+                b = key.find('/', a);
+                if (b == std::string::npos) b = key.size();
+                parts.push_back(key.substr(a, b - a));
+            }
+            sym = sym == "final_town" ? parts.front() : sym == "final_venue" && parts.size() > 1 ? parts[1] : parts.back();
+        }
+        if (stepStart_ < 0) stepStart_ = nowMs;
+        auto* lp = dynamic_cast<ui::ListProvider*>(ui.interp().findObject(prov));
+        ui::PanelObj* fp = ui.focusPanel();
+        ScriptObject* lst = fp ? fp->component(fp->focus) : nullptr;
+        const int at = lst ? ui.interp().send(lst, "selected_pos", {}).integerValue() : -1;
+        const int want = lp ? lp->indexOf(sym) : -1;
+        if (want < 0) return fail(prov + " has no row " + sym);
+        if (at == want && !ui.inTransition()) {
+            std::printf("  rb_focus_row: %s at row %d\n", sym.c_str(), at);
+            return pass();
+        }
+        if (nowMs - stepStart_ > (s.ms > 0 ? s.ms : 15000)) return fail("could not reach " + sym + " in " + prov + " (at " + std::to_string(at) + ")");
+        if (!ui.inTransition() && nowMs - lastNavMs_ > 250) {
+            const int b = at > want ? kUp : kDown;
+            ui.buttonDown(b, 0), ui.buttonUp(b, 0), lastNavMs_ = nowMs;
+        }
+        return;
+    }
     if (s.screen.rfind("refcolors:", 0) == 0) {
         // rb_text_colors: refcolors:<tag> measures main_solomode_screen's
         // labels against the owner's capture of RB once it has rested 700 ms.
@@ -5600,6 +6199,64 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ui.host().setEnhancedValue("restart_now", "1");
         return pass();
     }
+    if (s.screen.rfind("newsong_part ", 0) == 0) {
+        // rb_newsong_part (GD05-114): player 0's config on qp_seldiff_solo_screen
+        // ("first" / "again"): a guitar controller, a guitar character, no
+        // track yet, so seldiff.dta's guitar slot shows its part select
+        // (guitar.btn / bass.btn); "game": the song is played on the guitar.
+        const std::string when = s.screen.substr(13);
+        Interp& in = ui.interp();
+        const Value cfg = in.send("game", "get_player_config", {Value::integer(0)});
+        if (!cfg.object) return fail("no player config");
+        const int ctrl = in.send(cfg.object, "get_controller_type", {}).integerValue();
+        const int track = in.send(cfg.object, "get_track_type", {}).integerValue();
+        const Value ch = in.send(cfg.object, "get_char", {});
+        const std::string inst = ch.object ? in.send(ch.object, "get_instrument", {}).str() : std::string("-");
+        const std::string name = ch.object ? ch.object->name() : std::string("-");
+        const ui::Session::PlayerCfg& pc = ui.session().players[0];
+        // The screen's slot of player 0 (seldiff.dta's player_panels).
+        std::string slotName = "-";
+        for (auto& sl : ui.playerSlots())
+            if (sl && sl->playerNum() == 0) slotName = sl->getProp(in, "slot").str();
+        const bool ready = in.send(cfg.object, "is_ready", {}).truthy();
+        std::printf("  newsong_part %s: controller %d track %d char %s (%s, session %s) slot %d %s ready %d\n", when.c_str(), ctrl, track,
+                    name.c_str(), inst.c_str(), pc.character.c_str(), pc.slot, slotName.c_str(), int(ready));
+        if (when == "game") return track == 2 ? pass() : fail("the song is not played on the guitar (track " + std::to_string(track) + ")");
+        if (ctrl != 1) return fail("player 0 is not on a guitar controller (" + std::to_string(ctrl) + ")");
+        if (inst != "guitar") return fail("player 0's character plays " + inst);
+        if (track != 4) return fail("player 0's part already set (track " + std::to_string(track) + ")");
+        if (ready) return fail("player 0 already ready: the screen goes on to loading");
+        if (slotName != "guitar") return fail("player 0 is not in the guitar slot (" + slotName + "): no part select");
+        // The part select's labels (owner 11-16: "the labels of the guitar
+        // and bass were MISSING" after New Song): the slot's selpart.grp,
+        // guitar.grp / bass.grp, guitar.btn / bass.btn and their icon labels
+        // guitar.lbl / bass.lbl shown, the labels and buttons with text.
+        ui::PlayerSlotObj* slot = nullptr;
+        for (auto& sl : ui.playerSlots())
+            if (sl && sl->playerNum() == 0) slot = sl.get();
+        if (!slot) return fail("no slot for player 0");
+        int hidden = 0, empty = 0;
+        std::string line;
+        for (const char* n : {"selpart.grp", "guitar.grp", "bass.grp", "guitar.btn", "bass.btn", "guitar.lbl", "bass.lbl"}) {
+            const Value cv = in.send(slot, "find", {Value::symbol(n)});
+            auto* c = dynamic_cast<ui::ComponentObj*>(cv.object);
+            if (!c) {
+                line += std::string(" ") + n + " missing";
+                ++hidden;
+                continue;
+            }
+            const bool shown = c->getProp(in, "showing").truthy();
+            const std::string n2 = n;
+            const bool hasText = n2.find(".grp") == std::string::npos;
+            const std::string text = hasText && c->panel->view ? (c->object ? c->panel->view->text(c->object) : c->panel->view->text(c->key)) : std::string();
+            line += " " + n2 + (shown ? " shown" : " HIDDEN") + (hasText ? " '" + text + "'" : std::string());
+            hidden += !shown;
+            empty += hasText && text.empty();
+        }
+        std::printf("  newsong_part %s labels:%s (hidden %d, empty %d)\n", when.c_str(), line.c_str(), hidden, empty);
+        if (hidden || empty) return fail("the part select's labels are not all shown with text (" + std::to_string(hidden) + " hidden, " + std::to_string(empty) + " empty)");
+        return pass();
+    }
     if (s.screen == "print_focus") {
         ui::PanelObj* fp = ui.focusPanel();
         std::printf("  focus: screen %s panel %s component %s (up %d)\n", ui.currentScreen().c_str(), fp ? fp->name().c_str() : "-",
@@ -5737,6 +6394,55 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::printf("  black frames: %d\n", Canvas::blackFrames);
         return Canvas::blackFrames == 0 ? pass() : fail(std::to_string(Canvas::blackFrames) + " black frames presented");
     }
+    if (s.screen == "loading_icon_frames") {
+        // GD05-105, owner: "In the loading screen ... one icon is not moving".
+        // For 3 s of the loading screens, each band icon's material texture
+        // as the panel's pose sets it every frame (the MatAnims' texture
+        // swaps the AnimFilters / enter.trg play): each icon must show more
+        // than one of its frames.
+        static double t0 = -1;
+        static std::map<std::string, std::set<std::string>> seen;
+        static std::map<std::string, int> changes;
+        static std::map<std::string, std::string> last;
+        static std::map<std::string, float> xs;
+        if (t0 < 0) t0 = nowMs, seen.clear(), changes.clear(), last.clear(), xs.clear();
+        static const std::array<std::array<const char*, 3>, 4> kIcons = {{{"load_icon_guitar", "guitar.mesh", "guitar.mat"},
+                                                                           {"load_icon_vox", "vox.mesh", "vox.mat"},
+                                                                           {"load_icon_drum", "drummer.mesh", "drummer.mat"},
+                                                                           {"load_icon_bass", "bass.mesh", "bass.mat"}}};
+        ui::PanelObj* p = ui.panel("loading_panel");
+        if (p && p->view)
+            for (const auto& [d, mesh, mat] : kIcons) {
+                const scene::Object* m = p->view->findIn(d, mat);
+                const auto* st = m ? p->view->pose().mat(static_cast<const scene::Mat*>(m)) : nullptr;
+                const std::string tex = st && st->tex ? st->tex->name : "(none)";
+                if (!last[d].empty() && last[d] != tex) ++changes[d];
+                last[d] = tex, seen[d].insert(tex);
+                if (const scene::Object* o = p->view->findIn(d, mesh)) xs[d] = p->view->pose().world(o).pos[0];
+            }
+        // GD05_WALK_SHOTS: a shot every 100 ms (the icons' pixels compared offline).
+        static int shots = 0;
+        if (nowMs - t0 < 50) shots = 0;
+        if (const char* dir = SDL_getenv("GD05_WALK_SHOTS"); dir && p && shots < 30 && nowMs - t0 >= shots * 100.0)
+            ui.host().saveScreenshot(std::string(dir) + "/loading_icons_" + std::to_string(shots++) + ".bmp");
+        if (nowMs - t0 < 3000) return;
+        t0 = -1;
+        if (seen.empty()) return fail("no loading_panel view during the loading screens");
+        int frozen = 0;
+        std::vector<std::pair<float, std::string>> order;
+        for (const auto& [d, mesh, mat] : kIcons) {
+            std::printf("  %s (x %.1f): %zu textures, %d changes in 3 s:", d, double(xs[d]), seen[d].size(), changes[d]);
+            for (const std::string& t : seen[d]) std::printf(" %s", t.c_str());
+            std::printf("\n");
+            frozen += seen[d].size() < 2;
+            order.push_back({xs[d], d});
+        }
+        std::sort(order.begin(), order.end());
+        std::printf("  left to right:");
+        for (const auto& [x, d] : order) std::printf(" %s", d.c_str());
+        std::printf("\n");
+        return frozen ? fail(std::to_string(frozen) + " band icon(s) not moving") : pass();
+    }
     if (s.screen == "loading_icons") {
         // Wave 04 (GD05-026): loading.milo's band, four inline icon
         // directories from their proxy files (load_icon_*.milo, root
@@ -5845,6 +6551,101 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::printf("  Overdrive drain: %.2f beats, meter %.3f -> %.3f: lost %.3f, want %.3f (beats / 32)\n", beats, double(odStartMeter_), double(now), lost, want);
         odDrainErrPct_ = std::max(odDrainErrPct_, want > 0 ? int(std::lround(std::fabs(lost - want) / want * 100)) : 100);
         if (beats < 2 || std::fabs(lost - want) > 0.12 * want + (odVocal_ ? 0.015 : 0.006)) return fail("the Overdrive drain is off");
+        return pass();
+    }
+    if (s.screen.rfind("song_tiers:", 0) == 0) {
+        // rb_songlist_tiers (GD05-109): "song_tiers:<controller type>:<instrument>"
+        // with player 0 on that controller, the song list ranks by the
+        // instrument and puts each song under its tier's heading, recomputed
+        // here from the data alone: SongMgr's tiers (RB 0x82434020, the
+        // ranked songs neither downloaded nor unlockable cut into the nine
+        // song_groupings tiers by count, the remainder to the last tiers),
+        // a song's tier the first whose top rank is at least its rank
+        // (0x82431958), the order by rank then symbol (0x82400348).
+        const int ctrl = std::atoi(s.screen.c_str() + 11);
+        const std::string inst = s.screen.substr(s.screen.find(':', 11) + 1);
+        Interp& in = ui.interp();
+        const Value cfg = in.send("game", "get_player_config", {Value::integer(0)});
+        // The player as main.dta's session_ready_complete_msg leaves a solo
+        // player on that controller: set_char {available_prefab ... {get_controller_sym}}.
+        const int ctrlBefore = cfg.object ? in.send(cfg.object, "get_controller_type", {}).integerValue() : 1;
+        const Value charBefore = cfg.object ? in.send(cfg.object, "get_char", {}) : Value::integer(0);
+        if (cfg.object) {
+            in.send(cfg.object, "set_controller_type", {Value::integer(ctrl)});
+            const std::string sym = in.send(cfg.object, "get_controller_sym", {}).str();
+            if (ScriptObject* pre = in.findObject("prefab_" + sym)) in.send(cfg.object, "set_char", {Value::obj(pre)});
+        }
+        in.send("song_provider", "set_song_mode", {Value::symbol("game")});
+        auto* sp = dynamic_cast<ui::ListProvider*>(in.findObject("song_provider"));
+        const std::string got = in.send("song_provider", "get_instrument", {}).str();
+        std::vector<gfx::UiView::ListRow> rows;
+        int selRow = 0;
+        if (sp) sp->rows(rows, 0, selRow);
+        if (cfg.object) in.send(cfg.object, "set_controller_type", {Value::integer(ctrlBefore)}), in.send(cfg.object, "set_char", {charBefore});
+        in.send("song_provider", "set_song_mode", {Value::symbol("game")});
+        if (!sp) return fail("no song_provider");
+        const DataNode* g = ui.bootTree() ? ui.bootTree()->find("song_groupings") : nullptr;
+        const DataNode* rk = g ? g->find("rank") : nullptr;
+        if (!rk || rk->children.size() < 2) return fail("no song_groupings rank in band.dta");
+        const int numTiers = int(rk->children.size()) - 1;
+        std::vector<int> ranks;
+        std::vector<const SongInfo*> listed;
+        for (const SongInfo& si : ui.host().songs()) {
+            if (si.tutorial || !si.rank.count(inst)) continue;
+            if (!si.unlockable) ranks.push_back(si.rank.at(inst));
+        }
+        std::sort(ranks.begin(), ranks.end());
+        std::vector<int> tops;
+        for (int i = 0, start = 0, n = int(ranks.size()); i < numTiers && n; ++i) {
+            start += n / numTiers + (i >= numTiers - n % numTiers ? 1 : 0);
+            tops.push_back(ranks[size_t(start - 1)]);
+        }
+        auto tierOf = [&](int r) {
+            for (size_t i = 0; i < tops.size(); ++i)
+                if (r <= tops[i]) return int(i);
+            return int(tops.size()) - 1;
+        };
+        auto heading = [&](int t) {
+            const DataNode* e = rk->children[size_t(t) + 1].find(inst);
+            return e && e->children.size() > 1 ? ui.localize(e->children[1].s) : std::string("?");
+        };
+        // The rows as the list draws them: headings and song names.
+        std::map<std::string, const SongInfo*> byName;
+        for (const SongInfo& si : ui.host().songs()) byName[si.name] = &si;
+        std::string curHeading, problem;
+        int songsSeen = 0, headings = 0, wrongTier = 0, wrongOrder = 0, prevRank = -1;
+        std::string prevId, line;
+        std::printf("  %s list (controller %d): list instrument '%s'; tier tops", inst.c_str(), ctrl, got.c_str());
+        for (int t : tops) std::printf(" %d", t);
+        std::printf("\n");
+        for (const gfx::UiView::ListRow& r : rows) {
+            if (r.header) {
+                if (!line.empty()) std::printf("%s\n", line.c_str());
+                curHeading = r.texts.count("heading.lbl") ? r.texts.at("heading.lbl") : "";
+                ++headings;
+                line = "    " + curHeading + ":";
+                continue;
+            }
+            const std::string name = r.texts.count("list.lbl") ? r.texts.at("list.lbl") : "";
+            auto it = byName.find(name);
+            if (it == byName.end()) continue;  // random_song
+            const SongInfo* si = it->second;
+            const int rank = si->rank.count(inst) ? si->rank.at(inst) : -1;
+            const int t = tierOf(rank);
+            line += " " + si->id + "(" + std::to_string(rank) + (si->unlockable ? "*" : "") + ")";
+            ++songsSeen;
+            if (curHeading.rfind(heading(t), 0) != 0) {
+                ++wrongTier;
+                if (problem.empty()) problem = si->id + " (rank " + std::to_string(rank) + ") under '" + curHeading + "', expected '" + heading(t) + "'";
+            }
+            if (rank < prevRank || (rank == prevRank && si->id < prevId)) ++wrongOrder;
+            prevRank = rank, prevId = si->id;
+        }
+        if (!line.empty()) std::printf("%s\n", line.c_str());
+        std::printf("  %s: %d songs under %d headings, %d under a wrong heading, %d out of order\n", inst.c_str(), songsSeen, headings, wrongTier, wrongOrder);
+        if (got != inst) return fail("the list ranks by '" + got + "', expected '" + inst + "'");
+        if (!songsSeen || int(tops.size()) != numTiers) return fail("no songs / tiers");
+        if (wrongTier || wrongOrder) return fail(problem.empty() ? "songs out of order" : problem);
         return pass();
     }
     if (s.screen == "unlock_all_songs") {  // long_cheats.dta's code: every song listed (walks that scroll a long list)
@@ -5981,6 +6782,16 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             ui::PanelObj* fp = ui.focusPanel();
             ScriptObject* lst = fp ? fp->component(fp->focus) : nullptr;
             const int at = send(lst, "selected_pos").integerValue();
+            // GD05-123: the bonus gigs sit behind the "unlock" row (RB's
+            // kTourVenueUnlock mode): to the row, X, then to the gig.
+            if (sp && !SDL_getenv("GD05_SOLOUNLOCK_LEGACY") && in.send(sp, "get", {Value::symbol("mode")}).integerValue() == 0) {
+                const int row = sp->indexOf("unlock");
+                if (row < 0) return fail("no unlock row in the gig guide");
+                if (at == row && !ui.inTransition() && nowMs - lastNavMs_ > 400) ui.buttonDown(kX, 0), ui.buttonUp(kX, 0), lastNavMs_ = nowMs;
+                else if (at != row && !ui.inTransition() && nowMs - lastNavMs_ > 250) ui.buttonDown(kDown, 0), ui.buttonUp(kDown, 0), lastNavMs_ = nowMs;
+                if (nowMs - stepStart_ > 15000) return fail("could not reach the unlock row");
+                return;
+            }
             const int want = sp && target ? sp->indexOf(target->name) : -1;
             if (want < 0) return fail("no (unlock N) event in the gig guide");
             if (at == want) return pass();
@@ -5995,15 +6806,23 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             for (int i = 0; i < sp->numData(); ++i) got.push_back(sp->symbol(i));
             int wrongSongs = 0;
             std::string list;
+            // GD05-123: normal mode lists the normal gigs then the "unlock"
+            // row; the unlock mode the bonus gigs.
+            const bool modes = !SDL_getenv("GD05_SOLOUNLOCK_LEGACY");
+            const int mode = modes ? in.send(sp, "get", {Value::symbol("mode")}).integerValue() : 0;
+            bool anyBonus = false;
             for (const Ev* e : expected) {
+                anyBonus |= e->unlock;
+                if (modes && e->unlock != (mode == 1)) continue;
                 want.push_back(e->name);
                 const int i = sp->indexOf(e->name);
                 const std::string song = i >= 0 ? in.send(sp, "event_song", {Value::integer(i)}).str() : std::string();
                 wrongSongs += song != songOf(*e);
                 list += " " + e->name + "=" + songOf(*e) + (song == songOf(*e) ? "" : "(measured " + song + ")");
             }
-            std::printf("  solo gig guide (%s, difficulty %d, max_song %d, bonus songs unlocked %d): expected %zu events:%s; measured %zu events\n",
-                        inst.c_str(), diff, maxSong, unlocked, want.size(), list.c_str(), got.size());
+            if (modes && mode == 0 && anyBonus) want.push_back("unlock");
+            std::printf("  solo gig guide (%s, difficulty %d, max_song %d, bonus songs unlocked %d, mode %d): expected %zu rows:%s; measured %zu rows\n",
+                        inst.c_str(), diff, maxSong, unlocked, mode, want.size(), list.c_str(), got.size());
             if (got != want) return fail("the gig guide lists " + std::to_string(got.size()) + " events, not the " + std::to_string(want.size()) + " open ones");
             if (wrongSongs) return fail(std::to_string(wrongSongs) + " events play another song than the data's");
             return pass();
@@ -7697,6 +8516,137 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (s.screen == "cheat_hyper_on" && !hyper) return fail("the Hyper Speed code did not turn it on");
         ++step_, stepStart_ = -1;
         return;
+    }
+    if (s.screen.rfind("rb_hub_chars:", 0) == 0) {
+        // rb_hub_chars:<n>: the band's characters in the practice space
+        // (RB's CharSelectPanel, coop_hub's teleports): a shot with the
+        // previews and one without; the pixels they change, in the screen's
+        // left half (where coop_hub frames the band) and in all. Expected
+        // from the session: <n> members, at least 2 % of the screen each.
+        static int phase = 0;
+        static double at = 0;
+        const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+        const std::string base = std::string(dir ? dir : SDL_GetBasePath()) + "/hubchars_";
+        if (phase == 0) {
+            if (!ui.host().saveScreenshot(base + "on.bmp")) return fail("no screenshot");
+            ui::RbCharPreview::hidden = true;
+            at = nowMs, phase = 1;
+            return;
+        }
+        if (nowMs - at < 300) return;
+        const bool saved = ui.host().saveScreenshot(base + "off.bmp");
+        ui::RbCharPreview::hidden = false;
+        phase = 0;
+        SDL_Surface* a = saved ? SDL_LoadBMP((base + "on.bmp").c_str()) : nullptr;
+        SDL_Surface* b = saved ? SDL_LoadBMP((base + "off.bmp").c_str()) : nullptr;
+        SDL_Surface* ca = a ? SDL_ConvertSurface(a, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        SDL_Surface* cb = b ? SDL_ConvertSurface(b, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        long changed = 0, left = 0, total = ca ? long(ca->w) * ca->h : 1;
+        for (int y = 0; ca && cb && ca->w == cb->w && ca->h == cb->h && y < ca->h; ++y)
+            for (int x = 0; x < ca->w; ++x) {
+                const uint8_t* p = static_cast<const uint8_t*>(ca->pixels) + y * ca->pitch + x * 4;
+                const uint8_t* q = static_cast<const uint8_t*>(cb->pixels) + y * cb->pitch + x * 4;
+                if (std::abs(p[0] - q[0]) + std::abs(p[1] - q[1]) + std::abs(p[2] - q[2]) > 24) ++changed, left += x < ca->w / 2;
+            }
+        for (SDL_Surface* sf : {a, b, ca, cb})
+            if (sf) SDL_DestroySurface(sf);
+        const int want = std::atoi(s.screen.substr(13).c_str());
+        const double pct = 100.0 * double(changed) / double(total), leftPct = changed ? 100.0 * double(left) / double(changed) : 0;
+        std::printf("  hub characters on %s: expected %d members (>= %d %% of the screen); measured %.1f %% of the screen changed, %.0f %% of it in the left half\n",
+                    ui.currentScreen().c_str(), want, 2 * want, pct, leftPct);
+        if (pct < 2.0 * want || leftPct < 60) return fail("the band's characters are not framed in the practice space");
+        return pass();
+    }
+    if (s.screen.rfind("rb_seldiff_min:", 0) == 0) {
+        // rb_seldiff_min:<town>/<venue>/<event>|none: on the difficulty
+        // screen, the gig set (through the band's natives) and each slot's
+        // update run again (seldiff.dta disables the difficulties below
+        // {{tour event} get min_difficulty}); then each player's disabled
+        // difficulty buttons. Expected: those below the gig's minimum.
+        const std::string arg = s.screen.substr(15);
+        ScriptObject* band = ui.interp().send("tour", "performer", {}).object;
+        int want = 0;
+        if (arg != "none" && band) {
+            const size_t a0 = arg.find('/'), b0 = arg.rfind('/');
+            ui.interp().send(band, "set_town", {Value::symbol(arg.substr(0, a0))});
+            ui.interp().send(band, "set_venue", {Value::symbol(arg.substr(a0 + 1, b0 - a0 - 1))});
+            ui.interp().send(band, "set_event", {Value::symbol(arg.substr(b0 + 1))});
+        }
+        if (ScriptObject* ev = ui.interp().send("tour", "event", {}).object) want = ui.interp().send(ev, "get", {Value::symbol("min_difficulty")}).integerValue();
+        for (auto& sl : ui.playerSlots())
+            if (sl) sl->dispatch("update");
+        static const char* const kD[] = {"easy", "medium", "hard", "expert"};
+        int slots = 0, bad = 0;
+        for (auto& sl : ui.playerSlots()) {
+            if (!sl || sl->playerNum() < 0) continue;
+            ++slots;
+            std::string dis;
+            for (int d = 0; d < 4; ++d) {
+                const bool off = sl->panel().isDisabled(gfx::UiView::scopedKey(sl->scope(), std::string(kD[d]) + ".btn"));
+                if (off) dis += std::string(" ") + kD[d];
+                bad += off != (d < want);
+            }
+            std::printf("  seldiff %s: min_difficulty %d; player %d disabled:%s\n", arg.c_str(), want, sl->playerNum(), dis.c_str());
+        }
+        if (!slots) return fail("no player slot on " + ui.currentScreen());
+        if (bad) return fail("the difficulties below the gig's minimum are not the disabled ones");
+        return pass();
+    }
+    if (s.screen.rfind("rb_texts:", 0) == 0 || s.screen == "rb_texts_end") {
+        // rb_career_screens (career rundown 2): rb_texts:<tag> once the
+        // screen rests (400 ms with the text probes on): a shot <tag>.bmp
+        // (GD05_WALK_SHOTS), every text its panels drew, and every label
+        // the panels show with no text or RB's placeholder "Loading" (the
+        // milos' own label texts, which RB's scripts replace). rb_texts_end
+        // fails when any screen had one (GD05_TEXTS_ALLOW: tags allowed).
+        static std::vector<std::string> bad;
+        if (s.screen == "rb_texts_end") {
+            for (const std::string& b : bad) std::printf("  rb_texts: %s\n", b.c_str());
+            if (!bad.empty()) return fail(std::to_string(bad.size()) + " screens showed empty or Loading labels");
+            return pass();
+        }
+        const std::string tag = s.screen.substr(9);
+        ui::ScreenObj* sc = ui.current();
+        if (stepStart_ < 0) {
+            stepStart_ = nowMs;
+            if (sc)
+                for (ui::PanelObj* p : sc->panels())
+                    if (p->view) p->view->setTextProbes(true);
+            return;
+        }
+        if ((nowMs - stepStart_ < 400 || ui.inTransition()) && nowMs - stepStart_ < 10000) return;
+        if (const char* dir = SDL_getenv("GD05_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + "/" + tag + ".bmp");
+        int loading = 0, empty = 0, drawn = 0;
+        std::string list;
+        std::printf("  rb_texts %s on %s:\n", tag.c_str(), ui.currentScreen().c_str());
+        for (ui::PanelObj* p : sc ? sc->panels() : std::vector<ui::PanelObj*>{}) {
+            if (!p->view || !p->showing) continue;
+            std::string texts;
+            for (const gfx::TextProbe& t : p->view->textProbes())
+                if (!t.text.empty()) texts += " '" + t.text + "'", ++drawn;
+            std::printf("    %s drew%s\n", p->name().c_str(), texts.c_str());
+            std::function<void(const scene::Directory&)> walk = [&](const scene::Directory& d) {
+                for (const auto& o : d.objects) {
+                    const auto* l = o->as<scene::UILabel>();
+                    // labels only (a button's own text may be empty by design)
+                    if (!l || !p->view->showing(o.get()) || o->name.size() < 4 || o->name.compare(o->name.size() - 4, 4, ".lbl") != 0) continue;
+                    const std::string t = p->view->text(o.get());
+                    const bool isLoading = t.rfind("Loading", 0) == 0;
+                    if (!t.empty() && !isLoading) continue;
+                    (isLoading ? loading : empty) += 1;
+                    list += " " + p->name() + ":" + o->name + (isLoading ? "='" + t + "'" : "=''");
+                }
+                for (const auto& [owner, sub] : d.subdirs)
+                    if (sub) walk(*sub);
+            };
+            if (p->view->milo()) walk(p->view->milo()->root());
+            p->view->setTextProbes(false);
+        }
+        std::printf("    %d texts drawn; %d labels shown empty, %d 'Loading':%s\n", drawn, empty, loading, list.c_str());
+        const char* allow = SDL_getenv("GD05_TEXTS_ALLOW");
+        if ((loading || empty) && !(allow && (std::string(",") + allow + ",").find("," + tag + ",") != std::string::npos))
+            bad.push_back(tag + ":" + list);
+        return pass();
     }
     if (s.screen.rfind("shot_", 0) == 0) {
         // A screenshot now (GD05_WALK_SHOTS): the store's second page, the venue's unlock.

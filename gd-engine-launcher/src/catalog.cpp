@@ -196,7 +196,7 @@ void Catalog::rescanDiscs() {
     for (DiscDir& d : discDirInfo_) {
         d.problem.clear(), d.isos = d.known = 0;
         for (const std::string& f : platform::listFiles(d.path, d.problem)) {
-            if (lowerExt(f) != ".iso") continue;
+            if (lowerExt(f) != ".iso" && lowerExt(f) != ".chd") continue;  // CHD images too (GDUL-030)
             ++d.isos;
             Game* g = identify(probeDisc(f));
             if (!g) continue;

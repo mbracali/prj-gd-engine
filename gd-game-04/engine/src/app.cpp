@@ -845,7 +845,16 @@ bool App::importProgress(const std::string& file) {
 void App::applyEnhanced(const std::string& key) {
     auto is = [&](const char* k) { return key.empty() || key == k; };
     if (is("screen_mode") && window_) {
-        const std::string m = enhanced_.get("screen_mode");
+        std::string m = enhanced_.get("screen_mode");
+        // RecompLauncher's Big Picture mode (GD04_FULLSCREEN=1, module_entry.cpp):
+        // Windowed counts as Full Screen (No Border) for this run; the saved
+        // setting stays.
+        if (const char* fs = SDL_getenv("GD04_FULLSCREEN"); fs && std::string(fs) == "1" && m == "windowed") {
+            static bool logged = false;
+            if (!logged) SDL_Log("gd04: full screen (RecompLauncher Big Picture): Windowed is not used this run");
+            logged = true;
+            m = "borderless";
+        }
         if (m == "windowed") {
             SDL_SetWindowFullscreen(window_, false);
         } else {
@@ -1915,7 +1924,10 @@ int App::run() {
             const char* d = SDL_GetCurrentVideoDriver();
             return d && std::strcmp(d, "offscreen") == 0;
         }();
-        const uint64_t minNs = !headless ? 0 : cap == 0 ? kMinFrameNs : uint64_t(1e9 / cap);
+        // GD04_FPS (development aid) paces a headless run too: the 60 vs 240 FPS comparison (GD04-122).
+        static const int devFps = SDL_getenv("GD04_FPS") ? std::max(0, std::atoi(SDL_getenv("GD04_FPS"))) : -1;
+        const int pace = devFps >= 0 ? devFps : cap;
+        const uint64_t minNs = !headless ? 0 : pace == 0 ? kMinFrameNs : uint64_t(1e9 / pace);
         const uint64_t spent = SDL_GetTicksNS() - frameStart;
         perf::frameDone(spent, song_ ? "song" : front_ ? front_->flowState() : "-");
         // GD04_FRAMELOG: every frame over 25 ms, with the screen (owner 1.7).

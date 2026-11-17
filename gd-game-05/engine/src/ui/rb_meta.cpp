@@ -25,9 +25,12 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <ctime>
+#include <random>
 #include <fstream>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 
@@ -85,12 +88,50 @@ std::vector<std::pair<std::string, const DataNode*>> entries(const DataNode* n) 
 }
 const char* const kDiffSyms[] = {"easy", "medium", "hard", "expert"};
 
+// config/scoring.dta (star_ratings (symbols (* ** *** **** ***** 66666
+// 77777))) [C data]: n stars' label text (RB 0x82435678: symbols[n - 1]),
+// none for 0 (as natives_game.cpp's starSymbol).
+std::string starRatingText(const DataNode* boot, int stars) {
+    if (stars <= 0) return {};
+    std::vector<std::string> symbols{"*", "**", "***", "****", "*****", "66666", "77777"};
+    if (const DataNode* sr = boot ? boot->find("star_ratings") : nullptr)
+        if (const DataNode* sy = sr->find("symbols"); sy && sy->children.size() > 1) {
+            symbols.clear();
+            for (size_t k = 1; k < sy->children.size(); ++k) {
+                const DataNode& e = sy->children[k];
+                symbols.push_back(e.type == DataNode::Type::Int ? std::to_string(e.i) : e.s);
+            }
+        }
+    return symbols[size_t(std::min<int>(stars, int(symbols.size())) - 1)];
+}
+// GD05_GIGROWS_LEGACY=1: the gig rows' event name only (D125).
+bool gigRowsLegacy() {
+    static const bool l = SDL_getenv("GD05_GIGROWS_LEGACY") != nullptr;
+    return l;
+}
+
 // ---------------------------------------------------------------- the data
 
 struct TourEvent {
     std::string town, venue, name;  // the key: town/venue/name
     const DataNode* node = nullptr;
+    // A Band World Tour event as a band plays it (RbMeta::bandInstances):
+    // the town it is played in (GD05_BWTTOWNS_LEGACY: the swapped tier town)
+    // and the data's town / venue it comes from (its locale token
+    // <town>_<venue>_<name>, ui/eng/locale_events.dta) [C data].
+    std::string place, dataTown, dataVenue;
     std::string key() const { return town + "/" + venue + "/" + name; }
+    const std::string& where() const { return place.empty() ? town : place; }
+};
+
+// A Band World Tour town ((world (<town> (order n) (region a b) ...))) and
+// the venues of its own file tour/<town>.dta ((<venue> <world> <events>...):
+// the venue's kind and the venue it is played in) [C: RB 0x823FD338 /
+// 0x823FDB20, the files loaded as 0x823FC400's content list].
+struct BandTown {
+    std::string name, region1, region2;
+    int order = 0;
+    std::vector<std::pair<std::string, std::string>> venues;  // kind, world
 };
 
 // A venue of a solo town with its events, and its kind (TourVenue: kTourVenueNormal 0,
@@ -108,7 +149,14 @@ struct TourData {
     int initialUnlocks = 1;             // tour_solo.dta num_initial_unlock_songs (RB 0x823DC120) [C]
     int maxSong[4] = {45, 45, 45, 45};  // tour_solo.dta max_song per difficulty (RB 0x823DBED0) [C]
     std::vector<TourEvent> soloEvents, bandEvents;
-    std::map<std::string, std::string> tierTown;  // band tier -> world town [I]
+    std::map<std::string, std::string> tierTown;  // band tier -> world town [I] (GD05_BWTTOWNS_LEGACY)
+    // GD05-118: RB's towns. The world's towns in the data's order, the
+    // tiers in theirs; bandEvents holds the tiers' events (town = the tier)
+    // then the towns' own (town = the town).
+    bool bwtLegacy = false;
+    std::vector<BandTown> world;
+    std::vector<std::string> tiers;
+    std::vector<std::unique_ptr<DataNode>> townFiles;  // tour/<town>.dta, preprocessed (bandEvents point into them)
     const DataNode* solo = nullptr;
     const DataNode* band = nullptr;
     std::string hometown = "boston";
@@ -119,14 +167,14 @@ void loadEvents(const DataNode* towns, std::vector<std::string>& townNames, std:
     for (const auto& [town, tn] : entries(towns)) {
         townNames.push_back(town);
         for (const auto& [venue, vn] : entries(tn))
-            for (const auto& [ev, en] : entries(vn)) out.push_back({town, venue, ev, en});
+            for (const auto& [ev, en] : entries(vn)) out.push_back({town, venue, ev, en, {}, {}, {}});
     }
 }
 
 // ------------------------------------------------------------ the profile
 
 struct CharData {
-    std::string name, gender = "male", instrument = "guitar", hometown = "boston";
+    std::string name, gender = "male", instrument = "guitar", hometown = "boston", motto;
     int attitude = 256;  // kGenreRocker (config/macros.dta kGenre*: the scripts compare the values)
     std::map<std::string, std::string> outfit;  // category -> piece
     std::set<std::string> owned;                // pieces bought or won
@@ -145,6 +193,10 @@ struct CharData {
     std::set<std::string> seenUnlocks[4];
     std::string town, venue, event, newTown;
     int score = 0;
+    // The best score of each song at each difficulty ("<difficulty>:<song>"):
+    // the solo gig list's score.lbl (RB 0x823FA578 column 6, FUN_823de4e8)
+    // [C: shown; I: the port's record].
+    std::map<std::string, int> songScores;
     // The patch creator's patches (GD05-084, D93): per set of ui.dta's
     // (patch (sets (general 10) (chest 5) (arm 5))) that many patches [I:
     // the counts read as the slots of the set], and the patch each tattoo
@@ -159,15 +211,37 @@ struct BandData {
     bool finalized = false;
     int fans = 0, money = 0, buzz = 0;
     std::map<std::string, int> stars;  // event key -> best stars (fame)
+    // The difficulty each event was completed at (RB's event record +0x18,
+    // the gig list's medal: RB 0x823EFAD0) [C: the record; I: the band's
+    // lowest difficulty of the gig, the best kept].
+    std::map<std::string, int> medals;
     std::set<std::string> items, seenHints;
     // The songs the band has played (RB's band record at +0x18c, RB
     // 0x82409D00 / 0x82409F18): quick play offers them (RB 0x823D43D0) [C].
     std::set<std::string> played;
     std::string town, venue, event, unlockedItem;
+    int created[3] = {0, 0, 0};  // the day it was formed: year, month 1-12, day (the profile's "Formed on")
+    // The last gig's unlock (TourBand +0x194: event_unlock, the gig
+    // complete screen's newoutfit.lbl): win_instruments or none.
+    std::string eventUnlock;
+    // GD05-125: active rock moments (LocalTourBand +0x198, RB 0x8240A510 /
+    // 0x8240A768): gigs until the next moment is offered (-1: not drawn
+    // yet), the moments offered since the list was last cleared, the one
+    // offered for the next gig, the one the band took (+0x74); the last
+    // gig's buzz state (+0x160) and fans lost flag (+0x164).
+    int momentCountdown = -1;
+    std::vector<std::string> usedMoments;
+    std::string nextMoment, activeMoment;
+    int buzzState = 0;
+    bool lostFans = false;
     int minDifficulty = 3;
     // The members' characters (their names, unique in the profile:
     // profile_mgr is_char_name_unique): the band's money is theirs.
     std::vector<std::string> members;
+    // GD05-118: a save made before RB's towns keys its events by the tier's
+    // town of the same order and the tier's venue (rb_profile.json
+    // "towns_v" 2 marks the new keys); RbMeta::migrateBandKeys moves them.
+    bool legacyKeys = false;
 };
 
 }  // namespace
@@ -218,6 +292,9 @@ public:
     std::function<std::string(const std::string&)> label;
     std::function<bool(const std::string&)> enabled;
     std::function<bool(Interp&, const std::string&, std::vector<Value>&, Value&)> extra;
+    // A row's other labels (the list resource's: list_event.milo /
+    // list_solo_event.milo name the gig's label event.lbl).
+    std::function<void(const std::string&, gfx::UiView::ListRow&)> texts;
     std::vector<std::string> data;
     int selected = 0;
     std::function<void()> before;
@@ -236,6 +313,7 @@ public:
             const std::string t = label ? label(data[i]) : data[i];
             r.texts["list.lbl"] = t;
             r.texts["name.lbl"] = t;
+            if (texts) texts(data[i], r);
             r.disabled = !active(int(i));
             out.push_back(std::move(r));
         }
@@ -276,12 +354,73 @@ public:
     std::vector<int> songStars;
     // The event's reward (TourPerformer reward, RB 0x823EEAE8) [C]: the
     // event's reward_per_star times each song's stars, summed.
-    int reward() const {
+    int reward() {
         const int per = event && event->ev.node ? num(event->ev.node->find("reward_per_star")) : 0;
+        // GD05-125: the band's active moment's (reward_per_star ($stars
+        // $event_reward) ...) gives each song's reward per star (RB
+        // 0x823EEAE8: the moment's script on the song's stars and the
+        // event's reward_per_star) [C].
+        const DataNode* fn = nullptr;
+        if (RbBandObj* b = bandPerf(); b && !momentsLegacy())
+            if (const DataNode* mo = momentNode(b->d.activeMoment)) fn = mo->find("reward_per_star");
         int sum = 0;
-        for (int st : songStars) sum += per * st;
+        for (int st : songStars) sum += (fn ? callMoment(*fn, st, per) : per) * st;
         return sum;
     }
+    // ---- GD05-125: active rock moments (config/tour_band.dta (moments
+    // (frequency 2 5) (vehicles (<vehicle> <moment>...) ...))).
+    static bool momentsLegacy() {
+        static const bool l = SDL_getenv("GD05_MOMENTS_LEGACY") != nullptr;
+        return l;
+    }
+    const DataNode* momentsBlock() const { return data.band ? data.band->find("moments") : nullptr; }
+    // A moment by its symbol (tour_am_charity ...): its list in any vehicle's.
+    const DataNode* momentNode(const std::string& name) const {
+        const DataNode* v = momentsBlock() ? momentsBlock()->find("vehicles") : nullptr;
+        for (size_t i = 1; v && !name.empty() && i < v->children.size(); ++i)
+            if (v->children[i].isList())
+                for (const DataNode& m : v->children[i].children)
+                    if (m.isList() && !m.children.empty() && m.children[0].isText() && m.children[0].s == name) return &m;
+        return nullptr;
+    }
+    // A moment's function ((name ($a $b) body...)): the body with $a, $b bound.
+    int callMoment(const DataNode& fn, double a, double b) {
+        if (fn.children.size() < 3 || !fn.children[1].isList()) return int(b);
+        const DataNode& params = fn.children[1];
+        std::vector<std::pair<std::string, Value>> saved;
+        const double vals[2] = {a, b};
+        for (size_t i = 0; i < params.children.size() && i < 2; ++i) {
+            std::string n = params.children[i].s;
+            if (!n.empty() && n[0] == '$') n = n.substr(1);
+            saved.emplace_back(n, in_.var(n));
+            in_.var(n) = Value::integer(int(vals[i]));
+        }
+        Value r = Value::integer(int(b));
+        try {
+            for (size_t i = 2; i < fn.children.size(); ++i) r = in_.eval(fn.children[i]);
+        } catch (const std::exception& e) {
+            SDL_Log("rb meta: moment %s: %s", fn.children[0].s.c_str(), e.what());
+        }
+        for (auto& [n, v] : saved) in_.var(n) = v;
+        return int(r.number());
+    }
+    std::mt19937& momentRng() {
+        static std::mt19937 rng(SDL_getenv("GD05_MOMENT_SEED") ? unsigned(std::atoi(SDL_getenv("GD05_MOMENT_SEED"))) : unsigned(time(nullptr)));
+        return rng;
+    }
+    // Function_8238F590(a, b): a whole number in [a, b) [I: RB's generator].
+    int randBelow(int a, int b) { return b <= a ? a : std::uniform_int_distribution<int>(a, b - 1)(momentRng()); }
+    std::pair<int, int> momentFrequency() const {
+        const DataNode* f = momentsBlock() ? momentsBlock()->find("frequency") : nullptr;
+        return {num(f, 1, 2), num(f, 2, 5)};
+    }
+    // After a gig (RB 0x8240A768) [C]: when the count of gigs to the next
+    // moment runs out it is drawn again (frequency min..max) and a moment
+    // is offered: one of the band's vehicle's list (the vehicle level's
+    // entry of (vehicles ...)) not offered since the list was last cleared
+    // (cleared once all were); otherwise none is offered. No vehicle: none
+    // [I: RB indexes the list by the level, 0 has no list].
+    void stepMoments(RbBandObj& b);
     // The money a character is paid, up to config/tour_solo.dta's max_money [C data].
     void pay(RbCharObj& c, int amount);
     // The session's local players' characters (game get_player_config <p>
@@ -319,12 +458,13 @@ public:
         if (ScriptObject* o = in_.findObject(name)) return dynamic_cast<RbEventObj*>(o);
         return own(std::make_unique<RbEventObj>(*this, e, band));
     }
-    const TourEvent* bandEvent(const RbBandObj& b, const std::string& name) {
-        for (const TourEvent& e : data.bandEvents)
-            if (e.name == name && townOf(e, b) == b.d.town) return &e;
-        for (const TourEvent& e : data.bandEvents)
-            if (e.name == name) return &e;
-        return nullptr;
+    // A band event by name: at the band's town and venue, else its town, else anywhere.
+    std::optional<TourEvent> bandEvent(const RbBandObj& b, const std::string& name) {
+        const std::vector<TourEvent> all = bandInstances(b);
+        for (int pass = 0; pass < 3; ++pass)
+            for (const TourEvent& e : all)
+                if (e.name == name && (pass == 2 || (e.where() == b.d.town && (pass == 1 || e.venue == b.d.venue)))) return e;
+        return std::nullopt;
     }
     const TourEvent* findEvent(bool band, const std::string& town, const std::string& venue, const std::string& name) {
         for (const TourEvent& e : band ? data.bandEvents : data.soloEvents)
@@ -413,6 +553,7 @@ public:
     // bonus songs unlocked, a named song only when downloaded (none).
     std::vector<size_t> soloOpenEvents(const CharData& c, int diff, const SoloVenue& v) const {
         std::vector<size_t> out;
+        if (v.type == 2 && !SDL_getenv("GD05_DOWNLOADGIG_LEGACY")) return out;  // no downloaded songs (GD05-119)
         for (size_t i : v.events) {
             bool unlock = false, symbol = false;
             const int n = firstSongNumber(data.soloEvents[i], unlock, symbol);
@@ -495,19 +636,99 @@ public:
         if (e.town == b.d.hometown) return first;
         return e.town;
     }
+    // ---- GD05-118: the Band World Tour's towns as RB's (DECISIONS D123).
+    const BandTown* worldTown(const std::string& name) const {
+        for (const BandTown& t : data.world)
+            if (t.name == name) return &t;
+        return nullptr;
+    }
+    // The tier a town plays for a band from `home` (RB 0x823FCED8) [C]: none
+    // for a town without a (region a b); the hometown the first tier; else
+    // the index counts, over the regioned towns in the data's order: the
+    // towns of the town's half (same region and part) before it, the
+    // hometown when it lies after it in that half, every town of the other
+    // half of the hometown's region when the town is in the hometown's
+    // region but not its half, and every town of another region when the
+    // town is not in the hometown's region.
+    std::string tierFor(const std::string& home, const std::string& town) const {
+        const BandTown* t = worldTown(town);
+        const BandTown* h = worldTown(home);
+        if (!t || data.tiers.empty()) return {};
+        if (t->region2.empty()) return {};
+        size_t k = 0;
+        if (home != town && h) {
+            bool reached = false;
+            for (const BandTown& w : data.world) {
+                if (&w == t) reached = true;
+                if (w.region2.empty()) break;
+                if (w.region1 == t->region1) {
+                    if (h->region1 == t->region1 && w.region2 != t->region2) {
+                        if (h->region2 != t->region2) ++k;
+                    } else if (!reached || &w == h) {
+                        ++k;
+                    }
+                } else if (h->region1 != t->region1) {
+                    ++k;
+                }
+            }
+        }
+        return k < data.tiers.size() ? data.tiers[k] : std::string();
+    }
+    // What a town needs to be travelled to from `home` (RB 0x823FD058) [C]:
+    // 0 the hometown, 1 its region's half, 2 the other half of its region, 3
+    // another region or a town without one; the band's vehicle level is the
+    // last of (moments (vehicles <van> <bus> <jet>)) it owns, 1-based (RB
+    // 0x823EE2B8) [C]; a town is open at its need or less (RB 0x823F2E20) [C].
+    int travelNeed(const std::string& home, const std::string& town) const {
+        const BandTown* h = worldTown(home);
+        const BandTown* t = worldTown(town);
+        if (!h || !t || t->region2.empty() || t->region1 != h->region1) return 3;
+        if (t->region2 == h->region2) return t == h ? 0 : 1;
+        return 2;
+    }
+    int vehicleLevel(const RbBandObj& b) const;
+    std::vector<std::string> openTowns(const RbBandObj& b) const;
+    // The events a band plays in each town and venue (RB 0x823F3AD0) [C]:
+    // a town's venues are its own file's; at each, the town's tier's events
+    // of that venue (a tier's (last ...) venue is the town's last venue),
+    // then the town's own. GD05_BWTTOWNS_LEGACY: the tiers as towns by order.
+    std::vector<TourEvent> bandInstances(const RbBandObj& b) const;
     int bandFame(const RbBandObj& b, const std::string& town) {
         int f = 0;
-        for (const TourEvent& e : data.bandEvents)
-            if (auto it = b.d.stars.find(e.key()); it != b.d.stars.end() && (town.empty() || townOf(e, b) == town)) f += it->second;
+        for (const TourEvent& e : bandInstances(b))
+            if (auto it = b.d.stars.find(e.key()); it != b.d.stars.end() && (town.empty() || e.where() == town)) f += it->second;
         return f;
     }
+    // A band event's status (RB 0x823EC890) [C]: locked while its buzz is
+    // over the band's, its (item ...) is not owned, or the fame (stars) of
+    // its town / the world is under its (fame (town n) (world m)); else
+    // played or new. GD05_BWTTOWNS_LEGACY: no item check.
     int bandStatus(const RbBandObj& b, const TourEvent& e) {
         if (b.d.stars.count(e.key())) return 1 | (1 << (2 + b.d.minDifficulty));
         const DataNode* fame = e.node ? e.node->find("fame") : nullptr;
         const int townReq = num(fame ? fame->find("town") : nullptr), worldReq = num(fame ? fame->find("world") : nullptr);
         const int buzzReq = num(e.node ? e.node->find("buzz") : nullptr);
-        if (bandFame(b, townOf(e, b)) < townReq || bandFame(b, "") < worldReq || b.d.buzz < buzzReq) return 0;
+        const std::string item = text(e.node ? e.node->find("item") : nullptr);
+        if (!data.bwtLegacy && !item.empty() && !b.d.items.count(item)) return 0;
+        if (bandFame(b, e.where()) < townReq || bandFame(b, "") < worldReq || b.d.buzz < buzzReq) return 0;
         return 2;
+    }
+    // The name shown for a band event: its locale token
+    // (<town>_<venue>_<name>, ui/eng/locale_events.dta), else its song
+    // when (display_song TRUE), else its name [I: RB's event_display_name
+    // not read].
+    std::string bandEventLabel(const TourEvent& e) {
+        if (!data.bwtLegacy && !e.dataTown.empty()) {
+            const std::string tok = e.dataTown + "_" + e.dataVenue + "_" + e.name;
+            const std::string l = ui_.localize(tok);
+            if (!l.empty() && l != tok) return l;
+            if (flag(e.node ? e.node->find("display_song") : nullptr, false)) {
+                const DataNode* songs = e.node->find("songs");
+                const std::string id = songs && songs->children.size() > 1 ? resolveSong(songs->children[1], "band") : std::string();
+                if (!id.empty()) return songName(id);
+            }
+        }
+        return localizeOr(e.name);
     }
 
     // ---- the Band World Tour's buzz and fans (config/tour_band.dta (buzz ...)).
@@ -697,7 +918,7 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
         if (k == "eye_color_palette") return r = Value::obj(m.palette("eyes.pal")), true;
         return false;
     }
-    if (msg == "deform" || msg == "update" || msg == "print_guid" || msg == "set_dirty") return true;
+    if (msg == "deform" || msg == "update" || msg == "update_appearance" || msg == "print_guid" || msg == "set_dirty") return true;
     if (msg == "has_outfit") {
         // Owned, or worn: the piece itself, or an instrument model whose
         // finish (<model>_<finish>, char/instruments.dta) is worn [I].
@@ -756,8 +977,16 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
         return r = Value::integer(e ? m.soloStatus(*this, e->ev) : 0), true;
     }
     if (msg == "first_unplayed_event") {
-        for (const TourEvent& e : m.data.soloEvents)
-            if (m.soloStatus(*this, e) == 2) return r = Value::obj(m.eventObj(e, false)), true;
+        // Of the mode's venues (kTourVenueNormal / Unlock / Download: the
+        // gig guide's mode, ui/tour_solo.dta select_first_unplayed) [C
+        // data] (GD05_SOLOUNLOCK_LEGACY: any).
+        const int mode = iArg(args, 0);
+        static const bool legacy = SDL_getenv("GD05_SOLOUNLOCK_LEGACY") != nullptr;
+        for (const SoloVenue& v : m.data.soloVenues) {
+            if (!legacy && v.type != mode) continue;
+            for (size_t i : v.events)
+                if (m.soloStatus(*this, m.data.soloEvents[i]) == 2) return r = Value::obj(m.eventObj(m.data.soloEvents[i], false)), true;
+        }
         return true;
     }
     if (msg == "set_random_songs") {
@@ -774,13 +1003,45 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
         m.lastStars = iArg(args, 0), m.lastScore = iArg(args, 1);
         m.songStars.push_back(m.lastStars);
         d.score += m.lastScore;
+        if (m.songIndex < m.setlist.size()) {
+            int& best = d.songScores[std::to_string(std::clamp(d.difficulty, 0, 3)) + ":" + m.setlist[m.songIndex]];
+            best = std::max(best, m.lastScore);
+        }
         ++m.songIndex;
         return true;
     }
     if (msg == "last_song") return r = Value::integer(m.songIndex + 1 >= m.setlist.size() ? 1 : 0), true;  // the song now playing is the set list's last (endgame.dta asks before complete_song) [C data]
     if (msg == "first_song") return r = Value::integer(m.songIndex == 0 ? 1 : 0), true;
     if (msg == "num_completed") return r = Value::integer(int(m.songIndex)), true;
-    if (msg == "is_winning") return r = Value::integer(m.winning ? 1 : 0), true;
+    if (msg == "is_winning") {
+        // TourCharLocal is_winning (vfunc +0x5c, RB 0x823E47E0 -> 0x823CFA58,
+        // read in assembly) [C]: the last town, in the data's order, whose
+        // first venue is a normal one with open events at the difficulty
+        // (Easy: tier3_2, songs 26-30; else moscow, 41-45) is the
+        // character's town, and the event playing is the only one of that
+        // town's open events not yet completed: this gig ends the tour.
+        // GD05_TOURWIN_LEGACY: the flag endgame.dta sets from it (never set).
+        if (SDL_getenv("GD05_TOURWIN_LEGACY")) return r = Value::integer(m.winning ? 1 : 0), true;
+        const int dd = std::clamp(d.difficulty, 0, 3);
+        std::string last;
+        for (auto t = m.data.soloTowns.rbegin(); t != m.data.soloTowns.rend() && last.empty(); ++t)
+            for (const SoloVenue& v : m.data.soloVenues)
+                if (v.town == *t) {
+                    if (v.type == 0 && !m.soloOpenEvents(d, dd, v).empty()) last = *t;
+                    break;  // the town's first venue
+                }
+        if (last.empty() || last != d.town || !m.event) return r = Value::integer(0), true;
+        std::string unplayed;
+        for (const SoloVenue& v : m.data.soloVenues) {
+            if (v.town != last) continue;
+            for (size_t i : m.soloOpenEvents(d, dd, v)) {
+                if (m.soloCompleted(d, dd, m.data.soloEvents[i])) continue;
+                if (!unplayed.empty()) return r = Value::integer(0), true;
+                unplayed = m.data.soloEvents[i].key();
+            }
+        }
+        return r = Value::integer(unplayed == m.event->ev.key() ? 1 : 0), true;
+    }
     if (msg == "reward") return r = Value::integer(m.reward()), true;
     if (msg == "complete_event") {
         // TourCharLocal complete_event (RB 0x823E1178) [C]: the first time
@@ -874,11 +1135,100 @@ void RbMeta::pay(RbCharObj& c, int amount) {
 }
 
 void RbMeta::setBuzz(RbBandObj& b, int buzz) {
-    const DataNode* caps = buzzBlock() ? buzzBlock()->find("buzz_caps") : nullptr;
-    const int k = b.d.items.count("tour_vehicle_jet") ? 4 : b.d.items.count("tour_vehicle_bus") ? 3 : b.d.items.count("tour_vehicle_van") ? 2 : 1;
-    const int cap = num(caps, size_t(k), 999999999);
-    b.d.buzz = std::clamp(buzz, 0, cap);
+    // GD05_BUZZCAP_LEGACY=1: capped by the vehicle [I]. Else the cap is
+    // applied to a gig's gain (buzzGain, RB 0x8240A088) and here only kept
+    // at 0 or more [I: RB 0x823EE188 not read].
+    if (SDL_getenv("GD05_BUZZCAP_LEGACY")) {
+        const DataNode* caps = buzzBlock() ? buzzBlock()->find("buzz_caps") : nullptr;
+        const int k = b.d.items.count("tour_vehicle_jet") ? 4 : b.d.items.count("tour_vehicle_bus") ? 3 : b.d.items.count("tour_vehicle_van") ? 2 : 1;
+        const int cap = num(caps, size_t(k), 999999999);
+        b.d.buzz = std::clamp(buzz, 0, cap);
+    } else {
+        b.d.buzz = std::max(0, buzz);
+    }
     b.d.fans = buzzToFans(b.d.buzz);
+}
+
+// The band's difficulty: the lowest of its players' (RB 0x823EDED8 over
+// the members) [C; I: the session's joined players].
+int bandMinDifficulty(UiManager& ui) {
+    int d = 3;
+    const Session& s = ui.session();
+    for (int p = 0; p < 4; ++p)
+        if (s.joined(p)) d = std::min(d, std::clamp(s.players[size_t(p)].difficulty, 0, 3));
+    return d;
+}
+
+void RbMeta::stepMoments(RbBandObj& b) {
+    b.d.nextMoment.clear();
+    const auto [lo, hi] = momentFrequency();
+    if (b.d.momentCountdown < 0) b.d.momentCountdown = randBelow(lo, hi + 1);
+    if (b.d.momentCountdown == 0 || --b.d.momentCountdown != 0) return;
+    b.d.momentCountdown = randBelow(lo, hi + 1);
+    const int level = vehicleLevel(b);
+    const DataNode* v = momentsBlock() ? momentsBlock()->find("vehicles") : nullptr;
+    if (!v || level < 1 || size_t(level) >= v->children.size() || !v->children[size_t(level)].isList()) return;
+    const DataNode& list = v->children[size_t(level)];
+    const int n = int(list.children.size()) - 1;
+    if (n < 1) return;
+    if (int(b.d.usedMoments.size()) >= n) b.d.usedMoments.clear();
+    std::string pick;
+    for (int guard = 0; guard < 1000; ++guard) {
+        const DataNode& m = list.children[size_t(randBelow(1, n + 1))];
+        pick = m.isList() && !m.children.empty() ? m.children[0].s : std::string();
+        if (std::find(b.d.usedMoments.begin(), b.d.usedMoments.end(), pick) == b.d.usedMoments.end()) break;
+    }
+    b.d.usedMoments.push_back(pick);
+    b.d.nextMoment = pick;
+}
+
+int RbMeta::vehicleLevel(const RbBandObj& b) const {
+    const DataNode* moments = data.band ? data.band->find("moments") : nullptr;
+    const DataNode* vehicles = moments ? moments->find("vehicles") : nullptr;
+    int level = 0;
+    for (size_t i = 1; vehicles && i < vehicles->children.size(); ++i) {
+        const DataNode& v = vehicles->children[i];
+        const std::string name = v.isList() ? text(&v, 0) : v.isText() ? v.s : std::string();
+        if (b.d.items.count(name)) level = int(i);
+    }
+    return level;
+}
+
+std::vector<std::string> RbMeta::openTowns(const RbBandObj& b) const {
+    std::vector<std::string> v;
+    if (data.bwtLegacy) return data.bandTowns;
+    const int level = vehicleLevel(b);
+    for (const BandTown& t : data.world)
+        if (travelNeed(b.d.hometown, t.name) <= level) v.push_back(t.name);
+    return v;
+}
+
+std::vector<TourEvent> RbMeta::bandInstances(const RbBandObj& b) const {
+    std::vector<TourEvent> out;
+    if (data.bwtLegacy) {
+        for (TourEvent e : data.bandEvents) {
+            e.place = townOf(e, b);
+            out.push_back(std::move(e));
+        }
+        return out;
+    }
+    for (const BandTown& t : data.world) {
+        const std::string tier = tierFor(b.d.hometown, t.name);
+        for (size_t v = 0; v < t.venues.size(); ++v) {
+            const std::string& kind = t.venues[v].first;
+            const bool last = v + 1 == t.venues.size();
+            for (const TourEvent& e : data.bandEvents) {
+                const bool fromTier = !tier.empty() && e.town == tier && (e.venue == kind || (last && e.venue == "last"));
+                const bool own = e.town == t.name && e.venue == kind;
+                if (!fromTier && !own) continue;
+                TourEvent x = e;
+                x.dataTown = e.town, x.dataVenue = e.venue;
+                x.town = x.place = t.name, x.venue = kind;
+                out.push_back(std::move(x));
+            }
+        }
+    }
+    return out;
 }
 
 std::vector<RbCharObj*> RbMeta::localMembers(RbBandObj* band) {
@@ -907,7 +1257,14 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "set_motto") return d.motto = sArg(args, 0), true;
     if (msg == "hometown") return r = Value::symbol(d.hometown), true;
     if (msg == "set_hometown") return d.hometown = sArg(args, 0), true;
-    if (msg == "init") return d.finalized = true, d.town = d.hometown, m.localMembers(this), m.save(), true;
+    if (msg == "init") {
+        if (!d.created[0]) {
+            const time_t now = time(nullptr);
+            const tm* lt = localtime(&now);
+            if (lt) d.created[0] = lt->tm_year + 1900, d.created[1] = lt->tm_mon + 1, d.created[2] = lt->tm_mday;
+        }
+        return d.finalized = true, d.town = d.hometown, m.localMembers(this), m.save(), true;
+    }
     if (msg == "is_finalized") return r = Value::integer(d.finalized ? 1 : 0), true;
     if (msg == "is_local") return r = Value::integer(1), true;
     if (msg == "update_members" || msg == "update_data" || msg == "set_dirty" || msg == "print_guid") return true;
@@ -939,10 +1296,18 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "adjust_buzz") return m.setBuzz(*this, d.buzz + iArg(args, 0)), true;
     if (msg == "town_fame") return r = Value::integer(m.bandFame(*this, args.empty() ? d.town : sArg(args, 0))), true;
     if (msg == "total_town_fame" || msg == "total_venue_fame") {
+        // The stars a town's (venue's) events can give: [I] (RB 0x823F01A8
+        // sums its events, not read): max_stars_per_song x the songs of each
+        // (GD05_BWTTOWNS_LEGACY: 5 an event).
         int n = 0;
         const std::string t = args.empty() ? d.town : sArg(args, 0);
-        for (const TourEvent& e : m.data.bandEvents) n += m.townOf(e, *this) == t && (msg != "total_venue_fame" || e.venue == d.venue);
-        return r = Value::integer(n * 5), true;
+        const int per = num(m.data.band ? m.data.band->find("max_stars_per_song") : nullptr, 1, 5);
+        for (const TourEvent& e : m.bandInstances(*this)) {
+            if (e.where() != t || (msg == "total_venue_fame" && e.venue != d.venue)) continue;
+            const DataNode* songs = e.node ? e.node->find("songs") : nullptr;
+            n += m.data.bwtLegacy ? 5 : per * std::max(1, songs ? int(songs->children.size()) - 1 : 1);
+        }
+        return r = Value::integer(n), true;
     }
     if (msg == "venue_fame") {
         int f = 0;
@@ -953,22 +1318,27 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "venue") return r = Value::symbol(d.venue), true;
     if (msg == "set_town") return d.town = sArg(args, 0), true;
     if (msg == "set_venue") return d.venue = sArg(args, 0), true;
-    // Leaving home needs the van; another venue at home, a first gig [I].
-    if (msg == "can_leave_hometown") return r = Value::integer(d.items.count("tour_vehicle_van") ? 1 : 0), true;
+    // Leaving home: another town open (RB 0x823CE850 asks the open towns,
+    // vfunc +0x48) [C; I: more than the hometown] (GD05_BWTTOWNS_LEGACY:
+    // the van); another venue at home, a first gig [I].
+    if (msg == "can_leave_hometown") {
+        if (m.data.bwtLegacy) return r = Value::integer(d.items.count("tour_vehicle_van") ? 1 : 0), true;
+        return r = Value::integer(m.openTowns(*this).size() > 1 ? 1 : 0), true;
+    }
     if (msg == "can_leave_home_venue") return r = Value::integer(d.stars.empty() ? 0 : 1), true;
     if (msg == "venue_status") {
-        for (const TourEvent& e : m.data.bandEvents)
-            if (m.townOf(e, *this) == d.town && e.venue == sArg(args, 0) && m.bandStatus(*this, e) != 0) return r = Value::integer(2), true;
+        for (const TourEvent& e : m.bandInstances(*this))
+            if (e.where() == d.town && e.venue == sArg(args, 0) && m.bandStatus(*this, e) != 0) return r = Value::integer(2), true;
         return true;
     }
     if (msg == "num_new_town_events" || msg == "num_new_venue_events") {
         int n = 0;
-        for (const TourEvent& e : m.data.bandEvents)
-            if (m.townOf(e, *this) == d.town && (msg == "num_new_town_events" || e.venue == d.venue) && m.bandStatus(*this, e) == 2) ++n;
+        for (const TourEvent& e : m.bandInstances(*this))
+            if (e.where() == d.town && (msg == "num_new_town_events" || e.venue == d.venue) && m.bandStatus(*this, e) == 2) ++n;
         return r = Value::integer(n), true;
     }
     if (msg == "set_event") {
-        if (const TourEvent* e = m.bandEvent(*this, sArg(args, 0))) {
+        if (const std::optional<TourEvent> e = m.bandEvent(*this, sArg(args, 0))) {
             d.event = e->name;
             m.event = m.eventObj(*e, true);
             m.setlist = m.eventSongs(*e, true, "band");
@@ -986,7 +1356,7 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "event_status") {
         const RbEventObj* e = args.empty() ? m.event : dynamic_cast<RbEventObj*>(args[0].object);
         if (!e && !args.empty())
-            if (const TourEvent* te = m.bandEvent(*this, sArg(args, 0))) return r = Value::integer(m.bandStatus(*this, *te)), true;
+            if (const std::optional<TourEvent> te = m.bandEvent(*this, sArg(args, 0))) return r = Value::integer(m.bandStatus(*this, *te)), true;
         return r = Value::integer(e ? m.bandStatus(*this, e->ev) : 0), true;
     }
     if (msg == "next_any_index") {
@@ -1011,7 +1381,19 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "last_song") return r = Value::integer(m.songIndex + 1 >= m.setlist.size() ? 1 : 0), true;  // the song now playing is the set list's last (endgame.dta asks before complete_song) [C data]
     if (msg == "first_song") return r = Value::integer(m.songIndex == 0 ? 1 : 0), true;
     if (msg == "num_completed") return r = Value::integer(int(m.songIndex)), true;
-    if (msg == "is_winning" || msg == "is_hardcore_winning") return r = Value::integer(m.winning ? 1 : 0), true;
+    if (msg == "is_winning" || msg == "is_hardcore_winning") {
+        // TourBand is_winning (vfunc +0x5c, RB 0x823EDB00) [C]: the event
+        // awards win_item (tour_halloffame_complete) not yet owned, or is
+        // hardcore winning: it awards hardcore_item (tour_bwt_complete, RB
+        // 0x823EC428). GD05_TOURWIN_LEGACY: the flag endgame.dta sets from it.
+        if (SDL_getenv("GD05_TOURWIN_LEGACY")) return r = Value::integer(m.winning ? 1 : 0), true;
+        const std::string award = m.event && m.event->ev.node ? text(m.event->ev.node->find("award_item")) : std::string();
+        const std::string win = text(m.data.band ? m.data.band->find("win_item") : nullptr);
+        const std::string hard = text(m.data.band ? m.data.band->find("hardcore_item") : nullptr);
+        const bool hardcore = !award.empty() && award == hard;
+        const bool winning = (!award.empty() && award == win && !d.items.count(win)) || hardcore;
+        return r = Value::integer((msg == "is_winning" ? winning : hardcore) ? 1 : 0), true;
+    }
     if (msg == "reward") return r = Value::integer(m.reward()), true;
     if (msg == "complete_event") {
         if (!m.event) return true;
@@ -1027,13 +1409,80 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
         // (2 at least) - 2, each clamped to the table; fans follow the buzz
         // (RB 0x823EE350).
         const int before = d.stars.count(m.event->ev.key()) ? d.stars[m.event->ev.key()] / songs : -1;
-        const int change = m.buzzChange(m.event->ev.venue, before, stars), fans0 = d.fans;
-        m.setBuzz(*this, d.buzz + change);
+        int change = m.buzzChange(m.event->ev.venue, before, stars);
+        const int fans0 = d.fans;
+        if (!RbMeta::momentsLegacy()) {
+            // GD05-125 (RB 0x8240A088) [C]: the active moment's (buzz_change
+            // ($avg_stars $buzz_change) ...) changes the gain; a gain is
+            // capped at buzz_caps of the band's difficulty (a gain past it
+            // only up to it, none when already over); a loss from a band
+            // with buzz sets have_lost_fans; buzz_state is kTourBuzzCap (1)
+            // when a gain reached the cap, kTourBuzzMaxCap (2) at Expert's.
+            d.lostFans = false;
+            if (const DataNode* mo = m.momentNode(d.activeMoment))
+                if (const DataNode* fn = mo->find("buzz_change")) change = m.callMoment(*fn, stars, change);
+            const DataNode* caps = m.buzzBlock() ? m.buzzBlock()->find("buzz_caps") : nullptr;
+            const int diff = bandMinDifficulty(m.ui());
+            const int cap = num(caps, size_t(diff + 1), 999999999), maxCap = num(caps, 4, 999999999);
+            const int gain = change;
+            if (change >= 1 && cap < d.buzz + change) change = std::max(0, std::min(change, cap - d.buzz));
+            if (d.buzz != 0 && change < 0) d.lostFans = true;
+            m.setBuzz(*this, d.buzz + change);
+            d.buzzState = gain < 1 || d.buzz < cap ? 0 : (d.buzz == maxCap ? 2 : 1);
+            if (SDL_getenv("GD05_MOMENTLOG"))
+                SDL_Log("rb meta: gig %s: moment '%s', buzz %+d (gain %d, cap %d at difficulty %d) -> %d, state %d, lost fans %d",
+                        m.event->ev.key().c_str(), d.activeMoment.c_str(), change, gain, cap, diff, d.buzz, d.buzzState, int(d.lostFans));
+        } else {
+            m.setBuzz(*this, d.buzz + change);
+        }
         lastFansChange = d.fans - fans0;
         lastBuzzChange = change;
         d.stars[m.event->ev.key()] = std::max(d.stars[m.event->ev.key()], m.lastStars);
+        // The medal: the lowest difficulty the band's players played the gig
+        // at, the best kept [I: RB's record +0x18 writer not read].
+        {
+            int medal = 3;
+            const Session& s = m.ui().session();
+            for (int p = 0; p < 4; ++p)
+                if (s.joined(p)) medal = std::min(medal, std::clamp(s.players[size_t(p)].difficulty, 0, 3));
+            auto it = d.medals.find(m.event->ev.key());
+            d.medals[m.event->ev.key()] = it == d.medals.end() ? medal : std::max(it->second, medal);
+        }
         const std::string award = text(m.event->ev.node->find("award_item"));
+        // GD05-122: TourBand complete_event (RB 0x823EF0F0) [C]: the gig
+        // that awards win_item gives each local member's character its
+        // instrument's (win_instruments (<instrument> <item>)) item, the
+        // category the instrument's (mic for vocals), when not owned, and
+        // the gig's unlock is then win_instruments (the gig complete
+        // screen's "You have been awarded clear instruments!") [C; I: a
+        // member playing bass takes the bass entry]. GD05_WININSTR_LEGACY=1:
+        // nothing awarded.
+        d.eventUnlock.clear();
+        static const bool winLegacy = SDL_getenv("GD05_WININSTR_LEGACY") != nullptr;
+        const std::string winItem = text(m.data.band ? m.data.band->find("win_item") : nullptr);
+        if (!winLegacy && !award.empty() && award == winItem)
+            if (const DataNode* wi = m.data.band ? m.data.band->find("win_instruments") : nullptr) {
+                const Session& s = m.ui().session();
+                for (RbCharObj* c : m.localMembers()) {
+                    std::string inst = c->d.instrument;
+                    for (int p = 0; p < 4; ++p)
+                        if (s.joined(p) && s.players[size_t(p)].character == c->name() && s.players[size_t(p)].trackType == 1) inst = "bass";
+                    const std::string item = text(wi->find(inst));
+                    if (item.empty() || c->d.owned.count(item)) continue;
+                    c->d.owned.insert(item);
+                    d.eventUnlock = "win_instruments";
+                    SDL_Log("rb meta: %s (%s) awarded %s %s", c->d.name.c_str(), inst.c_str(), inst == "vocals" ? "mic" : inst.c_str(), item.c_str());
+                }
+            }
         if (!award.empty() && !d.items.count(award)) d.items.insert(award), d.unlockedItem = award;
+        if (!RbMeta::momentsLegacy()) {
+            // The moment was spent on this gig [I: where RB clears +0x74],
+            // then the next one is drawn (RB 0x8240A768 after each gig).
+            d.activeMoment.clear();
+            m.stepMoments(*this);
+            if (SDL_getenv("GD05_MOMENTLOG"))
+                SDL_Log("rb meta: moments: %d gigs to the next, offered '%s' (vehicle level %d)", d.momentCountdown, d.nextMoment.c_str(), m.vehicleLevel(*this));
+        }
         m.save();
         return true;
     }
@@ -1041,6 +1490,7 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     // (buzz (venues (<venue> (lose_penalty n))))) [C data; I: when RB applies it].
     if (msg == "lose_song") {
         const int before = d.fans;
+        if (!RbMeta::momentsLegacy() && d.buzz != 0 && m.losePenalty(d.venue.empty() && m.event ? m.event->ev.venue : d.venue) < 0) d.lostFans = true;
         m.setBuzz(*this, d.buzz + m.losePenalty(d.venue.empty() && m.event ? m.event->ev.venue : d.venue));
         lastFansChange = d.fans - before;
         return m.save(), true;
@@ -1053,20 +1503,35 @@ bool RbBandObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "can_win_item") {
         // An open gig awards it (award_item) [I].
         if (d.items.count(sArg(args, 0))) return true;
-        for (const TourEvent& e : m.data.bandEvents)
+        for (const TourEvent& e : m.bandInstances(*this))
             if (text(e.node->find("award_item")) == sArg(args, 0) && m.bandStatus(*this, e) == 2) return r = Value::integer(1), true;
         return true;
     }
-    if (msg == "have_lost_fans") return true;
+    if (msg == "have_lost_fans") return r = Value::integer(!RbMeta::momentsLegacy() && d.lostFans ? 1 : 0), true;
     if (msg == "unlocked_item") return r = Value::symbol(d.unlockedItem), true;
     if (msg == "clear_unlocked_item") return d.unlockedItem.clear(), true;
     if (msg == "add_seen_hint") return d.seenHints.insert(sArg(args, 0)), true;
-    if (msg == "has_next_moment") return true;
-    if (msg == "buzz_state") return true;
-    if (msg == "event_unlock" || msg == "unlocked_venue_token" || msg == "unlocked_venue_town") return r = Value::symbol(""), true;
+    // GD05-125: the moment offered for the next gig (next_moment, RB's
+    // LocalTourBand vfunc +0x8c; has_next_moment its != 0, RB 0x823F1550),
+    // taken with set_active_moment <moment> | 0 (tour_active_moment_panel,
+    // RB 0x824099B8); buzz_state (+0x160). GD05_MOMENTS_LEGACY=1: none.
+    if (msg == "has_next_moment") return r = Value::integer(!RbMeta::momentsLegacy() && !d.nextMoment.empty() ? 1 : 0), true;
+    if (msg == "next_moment") {
+        if (RbMeta::momentsLegacy() || d.nextMoment.empty()) return true;
+        return r = Value::list({Value::symbol(d.nextMoment)}), true;
+    }
+    if (msg == "set_active_moment") {
+        const Value v = args.empty() ? Value::integer(0) : args[0];
+        d.activeMoment = v.type == Value::Type::Array && v.array && !v.array->empty() ? (*v.array)[0].str() : std::string();
+        if (SDL_getenv("GD05_MOMENTLOG")) SDL_Log("rb meta: active moment '%s'", d.activeMoment.c_str());
+        return true;
+    }
+    if (msg == "buzz_state") return r = Value::integer(RbMeta::momentsLegacy() ? 0 : d.buzzState), true;
+    if (msg == "event_unlock") return r = Value::symbol(d.eventUnlock), true;
+    if (msg == "unlocked_venue_token" || msg == "unlocked_venue_town") return r = Value::symbol(""), true;
     if (msg == "is_town_complete") {
-        for (const TourEvent& e : m.data.bandEvents)
-            if (m.townOf(e, *this) == d.town && !d.stars.count(e.key())) return true;
+        for (const TourEvent& e : m.bandInstances(*this))
+            if (e.where() == d.town && !d.stars.count(e.key())) return true;
         return r = Value::integer(1), true;
     }
     if (msg == "num_unlocked_events" || msg == "num_unlocked_venues" || msg == "num_unlocked_towns") return true;
@@ -1082,8 +1547,10 @@ bool RbEventObj::handleNative(Interp& in, const std::string& msg, std::vector<Va
         if (k == "event_name") return r = Value::symbol(ev.name), true;
         if (k == "venue") return r = Value::symbol(ev.venue), true;
         if (k == "town") return r = Value::symbol(ev.town), true;
+        if (k == "data_town") return r = Value::symbol(ev.dataTown.empty() ? ev.town : ev.dataTown), true;  // the walks' (GD05-118)
         if (k == "award_item") return r = Value::symbol(text(ev.node->find("award_item"))), true;
         if (k == "min_difficulty") return r = Value::integer(num(ev.node->find("min_difficulty"))), true;
+        if (k == "reward_per_star") return r = Value::integer(num(ev.node->find("reward_per_star"))), true;
         if (k == "warning_screen") return r = Value::symbol(""), true;
         if (k == "sellout") return true;
         if (k == "world_fame_required" || k == "town_fame_required") {
@@ -1119,6 +1586,7 @@ void RbMeta::save() {
         Json j = Json::object();
         j.set("name", Json::string(c->d.name)), j.set("gender", Json::string(c->d.gender)), j.set("instrument", Json::string(c->d.instrument));
         j.set("hometown", Json::string(c->d.hometown)), j.set("money", Json::number(c->d.money)), j.set("score", Json::number(c->d.score));
+        if (!c->d.motto.empty()) j.set("motto", Json::string(c->d.motto));
         j.set("difficulty", Json::number(c->d.difficulty)), j.set("skin", Json::number(c->d.skin));
         j.set("eye", Json::number(c->d.eye)), j.set("eyebrow", Json::number(c->d.eyebrow));
         j.set("weight", Json::number(c->d.weight)), j.set("height", Json::number(c->d.height));
@@ -1152,6 +1620,9 @@ void RbMeta::save() {
         Json st = Json::object();
         for (const auto& [k, v] : c->d.stars) st.set(k, Json::number(v));
         j.set("stars", st);
+        Json sc = Json::object();
+        for (const auto& [k, v] : c->d.songScores) sc.set(k, Json::number(v));
+        j.set("song_scores", sc);
         Json ow = Json::array();
         for (const std::string& s : c->d.owned) ow.a.push_back(Json::string(s));
         j.set("owned", ow);
@@ -1179,6 +1650,21 @@ void RbMeta::save() {
         Json st = Json::object();
         for (const auto& [k, v] : b->d.stars) st.set(k, Json::number(v));
         j.set("stars", st);
+        Json md = Json::object();
+        for (const auto& [k, v] : b->d.medals) md.set(k, Json::number(v));
+        j.set("medals", md);
+        j.set("moment_countdown", Json::number(b->d.momentCountdown));
+        j.set("next_moment", Json::string(b->d.nextMoment)), j.set("active_moment", Json::string(b->d.activeMoment));
+        {
+            Json um = Json::array();
+            for (const std::string& x : b->d.usedMoments) um.a.push_back(Json::string(x));
+            j.set("used_moments", um);
+        }
+        if (b->d.created[0]) {
+            Json cr = Json::array();
+            for (int x : b->d.created) cr.a.push_back(Json::number(x));
+            j.set("created", cr);
+        }
         Json it = Json::array();
         for (const std::string& s : b->d.items) it.a.push_back(Json::string(s));
         j.set("items", it);
@@ -1191,6 +1677,7 @@ void RbMeta::save() {
         Json sh = Json::array();
         for (const std::string& s : b->d.seenHints) sh.a.push_back(Json::string(s));
         j.set("seen_hints", sh);
+        if (!data.bwtLegacy && !b->d.legacyKeys) j.set("towns_v", Json::number(2));
         bs.a.push_back(j);
     }
     root.set("bands", bs);
@@ -1218,6 +1705,7 @@ void RbMeta::load() {
         RbCharObj* c = newChar();
         c->d.name = j["name"].str(), c->d.gender = j["gender"].str(), c->d.instrument = j["instrument"].str();
         c->d.hometown = j["hometown"].str(), c->d.money = int(j["money"].num(100)), c->d.score = int(j["score"].num());
+        c->d.motto = j["motto"].str();
         c->d.difficulty = int(j["difficulty"].num(1)), c->d.skin = int(j["skin"].num());
         c->d.eye = int(j["eye"].num()), c->d.eyebrow = int(j["eyebrow"].num());
         c->d.weight = float(j["weight"].num(0.5)), c->d.height = float(j["height"].num(0.5));
@@ -1239,6 +1727,7 @@ void RbMeta::load() {
             }
         for (const auto& [loc, v] : j["tattoos"].o) c->d.tattoos[loc] = int(v.num(-1));
         for (const auto& [k, v] : j["stars"].o) c->d.stars[k] = int(v.num());
+        for (const auto& [k, v] : j["song_scores"].o) c->d.songScores[k] = int(v.num());
         for (const Json& s : j["owned"].a) c->d.owned.insert(s.str());
         for (const Json& s : j["seen_hints"].a) c->d.seenHints.insert(s.str());
         for (size_t d = 0; d < 4 && d < j["unlocks"].a.size(); ++d) c->d.unlocks[d] = int(j["unlocks"].a[d].num(-1));
@@ -1252,10 +1741,16 @@ void RbMeta::load() {
         b->d.money = int(j["money"].num()), b->d.buzz = int(j["buzz"].num()), b->d.town = j["town"].str(), b->d.finalized = true;
         b->d.motto = j["motto"].str(), b->d.venue = j["venue"].str(), b->d.minDifficulty = int(j["min_difficulty"].num(3));
         for (const auto& [k, v] : j["stars"].o) b->d.stars[k] = int(v.num());
+        for (const auto& [k, v] : j["medals"].o) b->d.medals[k] = int(v.num());
+        for (size_t i = 0; i < 3 && i < j["created"].a.size(); ++i) b->d.created[i] = int(j["created"].a[i].num());
+        b->d.momentCountdown = int(j["moment_countdown"].num(-1));
+        b->d.nextMoment = j["next_moment"].str(), b->d.activeMoment = j["active_moment"].str();
+        for (const Json& x : j["used_moments"].a) b->d.usedMoments.push_back(x.str());
         for (const Json& s : j["items"].a) b->d.items.insert(s.str());
         for (const Json& s : j["members"].a) b->d.members.push_back(s.str());
         for (const Json& s : j["played"].a) b->d.played.insert(s.str());
         for (const Json& s : j["seen_hints"].a) b->d.seenHints.insert(s.str());
+        b->d.legacyKeys = j["towns_v"].num() < 2;
         bands.push_back(b);
     }
 }
@@ -1308,6 +1803,12 @@ public:
         if (msg == "venue" || msg == "venue_variant") {
             std::string v = m_.soloChar() ? m_.soloChar()->d.venue : m_.bandPerf() ? m_.bandPerf()->d.venue : std::string();
             if (msg == "venue_variant") {
+                // A band town's venue is its file's (RB 0x823F4C00: the town
+                // record's venue +8, e.g. seattle's big_club big_club_07) [C].
+                if (RbBandObj* b = m_.bandPerf(); b && !m_.data.bwtLegacy)
+                    if (const BandTown* t = m_.worldTown(b->d.town))
+                        for (const auto& [kind, world] : t->venues)
+                            if (kind == v && !world.empty()) return r = Value::symbol(world), true;
                 // The venue's kind -> one of its venues (config/macros.dta VENUES) [I: the original's pick].
                 const std::string kind = v.empty() ? "small_club" : v;
                 static const std::map<std::string, int> counts = {{"small_club", 12}, {"big_club", 12}, {"theater", 9}, {"arena", 8}};
@@ -1491,6 +1992,17 @@ public:
         if (shot != shot_) shot_ = shot, at_ = double(SDL_GetTicks());
     }
     const std::string& shot() const { return shot_; }
+    // The selected BandCamShot's teleport of `object` (its band targets'
+    // (target, teleport, xfm): RB's BandCamShot rev 14, RB 0x822D9640)
+    // [C data]: practice_space.milo's coop_hub moves coop0..3.pxy to
+    // where the hub's camera frames the band; false when it does not.
+    bool teleport(const gfx::UiView& view, const std::string& object, scene::Xfm& out) const {
+        const auto* b = shot_.empty() ? nullptr : dynamic_cast<const scene::BandCamShot*>(view.find(shot_ + ".shot"));
+        if (b)
+            for (const auto& t : b->bandTargets)
+                if (t.teleport && t.target == object) return out = t.to, true;
+        return false;
+    }
     // Sets (or clears) the view's camera; `slot` / `ch`: the character's slot and the preview.
     void apply(gfx::UiView& view, const std::string& slot, chr::Character* ch) const {
         if (legacy()) return view.clearCameraOverride();
@@ -1506,6 +2018,10 @@ public:
                 last = shot_;
                 SDL_Log("select_cam %s: camera at %.1f %.1f %.1f, forward %.2f %.2f %.2f, fov %.3f", shot_.c_str(), cam.world.m[12], cam.world.m[13],
                         cam.world.m[14], cam.world.m[4], cam.world.m[5], cam.world.m[6], cam.yFov);
+                if (const auto* b = dynamic_cast<const scene::BandCamShot*>(cs))
+                    for (const auto& t : b->bandTargets)
+                        SDL_Log("select_cam %s: target %s teleport %d to %.1f %.1f %.1f anim '%s'", shot_.c_str(), t.target.c_str(), int(t.teleport),
+                                t.to.pos[0], t.to.pos[1], t.to.pos[2], t.anim.c_str());
             }
         }
     }
@@ -1598,7 +2114,44 @@ public:
                 if (!pc || !view->worldXfm(std::string(kind) + std::to_string(i) + ".pxy", sat)) continue;
                 if (slots_[i]->set(ui, previewLook(*pc))) slotChars.push_back({slots_[i].get(), sat});
             }
+        } else if (showing && view && !shown && !legacy && !hubLegacy()) {
+            // A screen without player slots (the band hub, its profile and
+            // roster screens): RB's CharSelectPanel poll (RB 0x828433C0) [C]
+            // shows, for each of the mode's max_players slots (proxies
+            // "<coop|hth|solo><i>.pxy" by max_players 4 / 2 / else, RB
+            // 0x82842860 / 0x82843910), the character of the player in it
+            // (gamecfg get_player_num_from_slot_num) unless the screen's
+            // show_char <player> answers FALSE (unhandled: shown).
+            const int n = std::clamp(gameCfgValue(ui, "max_players").integerValue(), 1, 4);
+            const char* kind = n == 4 ? "coop" : n == 2 ? "hth" : "solo";
+            while (slots_.size() < size_t(n)) slots_.push_back(std::make_unique<RbCharPreview>());
+            ScreenObj* sc = ui.current();
+            for (int i = 0; i < n; ++i) {
+                const int pn = ui.interp().send("gamecfg", "get_player_num_from_slot_num", {Value::integer(i)}, false).integerValue();
+                if (pn < 0 || pn > 3 || !ui.session().joined(pn)) continue;
+                if (sc && sc->handler("show_char") && !ui.interp().send(sc, "show_char", {Value::integer(pn)}, false).truthy()) continue;
+                const Value cfg = ui.interp().send("game", "get_player_config", {Value::integer(pn)});
+                auto* pc = cfg.object ? dynamic_cast<RbCharObj*>(ui.interp().send(cfg.object, "get_char", {}).object) : nullptr;
+                scene::Xfm sat;
+                const std::string pxy = std::string(kind) + std::to_string(i) + ".pxy";
+                if (!pc || !view->worldXfm(pxy, sat)) continue;
+                cam_.teleport(*view, pxy, sat);
+                if (SDL_getenv("GD05_SHOTLOG"))
+                    SDL_Log("practice space %s: %s%d.pxy player %d at %.1f %.1f %.1f", ui.currentScreen().c_str(), kind, i, pn, sat.pos[0], sat.pos[1], sat.pos[2]);
+                if (slots_[size_t(i)]->set(ui, previewLook(*pc))) slotChars.push_back({slots_[size_t(i)].get(), sat});
+            }
         }
+        // The CharLoadingPanel's loading<i>.lbl (tour_band_hub.milo): RB's
+        // poll shows one only while the slot's character is still loading
+        // (RB 0x828433C0: the player's character not there yet) [C]; the
+        // port's characters load at once, so they stay hidden (the milo
+        // shows them: four "Loading" over the practice space).
+        // GD05_HUBCHARS_LEGACY=1: the milo's labels and no characters.
+        if (showing && !hubLegacy())
+            if (ScreenObj* sc = ui.current())
+                for (PanelObj* p : sc->panels())
+                    if (p->view && p->className() == "CharLoadingPanel")
+                        for (int i = 0; i < 4; ++i) p->view->setShowing("loading" + std::to_string(i) + ".lbl", false);
         if (view) cam_.apply(*view, "creator.pxy", shown ? preview_.character() : nullptr);
         QuietPanelObj::draw();
         if (shown) preview_.draw(ui, *view, at);
@@ -1606,6 +2159,10 @@ public:
     }
 
 private:
+    static bool hubLegacy() {
+        static const bool l = SDL_getenv("GD05_HUBCHARS_LEGACY") != nullptr;
+        return l;
+    }
     RbCharPreview preview_;
     std::vector<std::unique_ptr<RbCharPreview>> slots_;
     PanelShotCamera cam_;
@@ -2480,7 +3037,217 @@ public:
     }
 };
 
+// GD05-124: CharProfilePanel (tour_char_profile_panel, ui/tour_solo.dta /
+// tour_band_sel.dta; its handler RB 0x82841A00 answers get_band_count,
+// get_char_band_provider, get_money, get_gamertag, get_instrument_icon ...)
+// [C: the messages; I: the answers from the port's profile]. The port had
+// none of them: the character profile screen showed "kDataUnhandled" as the
+// name and no cash, quote or instrument. set_char picks the character;
+// get_char_band_provider lists the profile's bands it is a member of;
+// get_top_five_provider its five best-scored songs [I]; get_gamertag the
+// player's intro name (no Xbox Live gamertag in the port) [I].
+// GD05_CHARPROFILE_LEGACY=1: the earlier panel (none answered).
+class CharProfilePanelObj : public PanelObj {
+public:
+    using PanelObj::PanelObj;
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        static const bool legacy = SDL_getenv("GD05_CHARPROFILE_LEGACY") != nullptr;
+        if (legacy || !gMeta) return PanelObj::handleNative(in, msg, args, r);
+        gMeta->ensure();
+        r = Value::integer(0);
+        RbCharObj* c = dynamic_cast<RbCharObj*>(char_);
+        if (msg == "set_char") return char_ = args.empty() ? nullptr : in.evalValue(args[0]).object, true;
+        if (msg == "is_local") return r = Value::integer(1), true;
+        if (msg == "get_char_name") return r = Value::string(c ? c->d.name : std::string()), true;
+        if (msg == "get_money") return r = Value::integer(c ? c->d.money : 0), true;
+        if (msg == "get_motto") return r = Value::string(c && !c->d.motto.empty() ? c->d.motto : gMeta->localizeOr("band_profile_default_motto")), true;
+        if (msg == "set_motto") return c ? (c->d.motto = args.empty() ? std::string() : in.evalValue(args[0]).str(), gMeta->save(), true) : true;
+        if (msg == "get_instrument_icon") return char_ ? (r = in.send(char_, "instrument_icon", {}), true) : true;
+        if (msg == "get_gamertag") {
+            const int pn = getProp(in, "profile_player_num").integerValue();
+            const Value cfg = in.send("gamecfg", "get_player_config", {Value::integer(std::clamp(pn, 0, 3))});
+            return r = cfg.object ? in.send(cfg.object, "intro_name", {}) : Value::string(""), true;
+        }
+        if (msg == "get_band_count") return r = Value::integer(int(bandsOf(c).size())), true;
+        if (msg == "get_char_band_provider") {
+            if (!bands_) {
+                bands_ = gMeta->own(std::make_unique<RbList>("char_profile_band_provider"));
+                bands_->build = [this] { return bandsOf(dynamic_cast<RbCharObj*>(char_)); };
+                bands_->label = [](const std::string& b) {
+                    for (RbBandObj* x : gMeta->bands)
+                        if (x->name() == b) return x->d.name;
+                    return b;
+                };
+            }
+            bands_->refresh();
+            return r = Value::obj(bands_), true;
+        }
+        if (msg == "get_top_five_provider") {
+            if (!top_) {
+                top_ = gMeta->own(std::make_unique<RbList>("char_profile_top_five_provider"));
+                top_->build = [this] {
+                    std::vector<std::pair<int, std::string>> v;
+                    if (auto* ch = dynamic_cast<RbCharObj*>(char_))
+                        for (const auto& [k, sc] : ch->d.songScores) v.emplace_back(-sc, k.substr(k.find(':') + 1));
+                    std::sort(v.begin(), v.end());
+                    std::vector<std::string> out;
+                    for (const auto& [sc, id] : v)
+                        if (out.size() < 5 && std::find(out.begin(), out.end(), id) == out.end()) out.push_back(id);
+                    return out;
+                };
+                top_->label = [](const std::string& id) { return gMeta->songName(id); };
+            }
+            top_->refresh();
+            return r = Value::obj(top_), true;
+        }
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+
+private:
+    static std::vector<std::string> bandsOf(const RbCharObj* c) {
+        std::vector<std::string> v;
+        if (c)
+            for (RbBandObj* b : gMeta->bands)
+                if (std::find(b->d.members.begin(), b->d.members.end(), c->d.name) != b->d.members.end()) v.push_back(b->name());
+        return v;
+    }
+    ScriptObject* char_ = nullptr;
+    RbList* bands_ = nullptr;
+    RbList* top_ = nullptr;
+};
+
+// A number with thousands separators (RB 0x82280D60's score text) [I: the separator].
+std::string fmtThousands(int n) {
+    std::string d = std::to_string(std::abs(n)), out;
+    for (size_t i = 0; i < d.size(); ++i) {
+        if (i && (d.size() - i) % 3 == 0) out += ',';
+        out += d[i];
+    }
+    return (n < 0 ? "-" : "") + out;
+}
+
+// GD05-124: BandProfilePanel (tour_band_profile_panel, ui/tour_band.dta;
+// its handler RB 0x828388C0) [C: the messages, the strings' tokens; I: the
+// answers from the port's band]: the name, "Formed on <day> <month> <year>"
+// (band_profile_formed_date_fmt, RB 0x82838658), "in <hometown>"
+// (band_profile_hometown_fmt, RB 0x828386D0), the fans (tour_band_fans),
+// the world fame (RB 0x828382C0: the score text), the quote, the members.
+// GD05_BANDPROFILE_LEGACY=1: none answered ("kDataUnhandled" everywhere).
+class BandProfilePanelObj : public PanelObj {
+public:
+    using PanelObj::PanelObj;
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        static const bool legacy = SDL_getenv("GD05_BANDPROFILE_LEGACY") != nullptr;
+        if (legacy || !gMeta) return PanelObj::handleNative(in, msg, args, r);
+        gMeta->ensure();
+        r = Value::integer(0);
+        RbBandObj* b = dynamic_cast<RbBandObj*>(band_);
+        RbMeta& m = *gMeta;
+        if (msg == "set_band") return band_ = args.empty() ? nullptr : in.evalValue(args[0]).object, true;
+        if (!b) return PanelObj::handleNative(in, msg, args, r);
+        if (msg == "get_band_name") return r = Value::string(b->d.name), true;
+        if (msg == "set_band_name") return b->d.name = args.empty() ? b->d.name : in.evalValue(args[0]).str(), m.save(), true;
+        if (msg == "get_motto") return r = Value::string(b->d.motto.empty() ? m.localizeOr("band_profile_default_motto") : b->d.motto), true;
+        if (msg == "set_motto") return b->d.motto = args.empty() ? std::string() : in.evalValue(args[0]).str(), m.save(), true;
+        if (msg == "get_create_date_string") {
+            static const char* const kMonths[] = {"january", "february", "march", "april", "may", "june",
+                                                  "july", "august", "september", "october", "november", "december"};
+            if (!b->d.created[0]) return r = Value::string(""), true;
+            char buf[160];
+            std::snprintf(buf, sizeof buf, m.localizeOr("band_profile_formed_date_fmt").c_str(), b->d.created[2],
+                          m.localizeOr(std::string("month_") + kMonths[std::clamp(b->d.created[1], 1, 12) - 1]).c_str(), b->d.created[0]);
+            return r = Value::string(buf), true;
+        }
+        if (msg == "get_hometown_string") {
+            char buf[160];
+            std::snprintf(buf, sizeof buf, m.localizeOr("band_profile_hometown_fmt").c_str(), m.localizeOr(b->d.hometown).c_str());
+            return r = Value::string(buf), true;
+        }
+        if (msg == "get_fans_string") {
+            char buf[160];
+            std::snprintf(buf, sizeof buf, m.localizeOr("tour_band_fans").c_str(), fmtThousands(b->d.fans).c_str());
+            return r = Value::string(buf), true;
+        }
+        if (msg == "get_fame_string") return r = Value::string(fmtThousands(m.bandFame(*b, ""))), true;
+        if (msg == "get_logo_patch") return true;
+        if (msg == "get_member_provider" || msg == "get_top_five_provider") {
+            RbList*& l = msg == "get_member_provider" ? members_ : top_;
+            if (!l) {
+                l = m.own(std::make_unique<RbList>(msg == "get_member_provider" ? "band_profile_member_provider" : "band_profile_top_five_provider"));
+                if (msg == "get_member_provider") l->build = [this] {
+                    auto* bb = dynamic_cast<RbBandObj*>(band_);
+                    return bb ? bb->d.members : std::vector<std::string>{};
+                };
+                else {
+                    // The band's songs played (its record of played songs) [I: RB's top five by score].
+                    l->build = [this] {
+                        std::vector<std::string> v;
+                        if (auto* bb = dynamic_cast<RbBandObj*>(band_))
+                            for (const std::string& s : bb->d.played)
+                                if (v.size() < 5) v.push_back(s);
+                        return v;
+                    };
+                    l->label = [](const std::string& id) { return gMeta->songName(id); };
+                }
+            }
+            l->refresh();
+            return r = Value::obj(l), true;
+        }
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+
+private:
+    ScriptObject* band_ = nullptr;
+    RbList* members_ = nullptr;
+    RbList* top_ = nullptr;
+};
+
+// GD05-124: BandLineupPanel (tour_band_lineup_panel, ui/tour_band_sel.dta)
+// [C: the messages and get_row's (leader instrument_icon name status sub)
+// as the script reads it, kMetaLineup* (macros.dta); I: the rows from the
+// port's band]: a row per member of the band (the profile's character
+// names), the leader the session leader's character, Playing when the
+// member's character is in the session, else Absent; Empty after the
+// members. GD05_BANDPROFILE_LEGACY=1: none answered (no rows).
+class BandLineupPanelObj : public PanelObj {
+public:
+    using PanelObj::PanelObj;
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        static const bool legacy = SDL_getenv("GD05_BANDPROFILE_LEGACY") != nullptr;
+        if (legacy || !gMeta) return PanelObj::handleNative(in, msg, args, r);
+        gMeta->ensure();
+        r = Value::integer(0);
+        if (msg == "build_resolution_list") return true;
+        if (msg == "get_row") {
+            const int i = args.empty() ? 0 : in.evalValue(args[0]).integerValue();
+            RbBandObj* b = gMeta->bandPerf();
+            std::vector<Value> row{Value::integer(0), Value::string(""), Value::string(""), Value::integer(0), Value::string("")};
+            if (b && i >= 0 && i < int(b->d.members.size())) {
+                const std::string& name = b->d.members[size_t(i)];
+                RbCharObj* c = gMeta->charNamed(name);
+                const Session& s = ui.session();
+                bool playing = false, leader = false;
+                const int lead = gameCfgValue(ui, "leader_num").integerValue();
+                for (int p = 0; p < 4; ++p) {
+                    if (!s.joined(p) || !c || s.players[size_t(p)].character != c->name()) continue;
+                    playing = true;
+                    leader |= p == lead;
+                }
+                row[0] = Value::integer(leader ? 1 : 0);
+                row[1] = c ? in.send(c, "instrument_icon", {}) : Value::string("");
+                row[2] = Value::string(name);
+                row[3] = Value::integer(playing ? 1 : 2);  // kMetaLineupPlaying / kMetaLineupOffline
+            }
+            return r = Value::list(row), true;
+        }
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+};
+
 std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& cls, const std::string& name) {
+    if (cls == "CharProfilePanel") return std::make_unique<CharProfilePanelObj>(ui, name, cls);
+    if (cls == "BandProfilePanel") return std::make_unique<BandProfilePanelObj>(ui, name, cls);
+    if (cls == "BandLineupPanel") return std::make_unique<BandLineupPanelObj>(ui, name, cls);
     if (cls == "GuitarTutorialPanel" || cls == "DrumTutorialPanel" || cls == "VocalsTutorialPanel") return std::make_unique<RbTutorialPanelObj>(ui, name, cls);
     if (cls == "OutfitConfigPanel") return std::make_unique<OutfitConfigPanelObj>(ui, name, cls);
     if (cls == "OutfitGroupPanel") return std::make_unique<OutfitGroupPanelObj>(ui, name, cls);
@@ -2580,6 +3347,12 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
                 const DataNode* s0 = songs && songs->children.size() > 1 ? &songs->children[1] : nullptr;
                 if (s0 && s0->isList() && text(s0, 0) == "unlock") v.type = 1;
                 if (s0 && s0->isText() && s0->s == "download") v.type = 2;
+                // GD05-119: a venue's (download ...) entry is the template of
+                // one event per downloaded song (RB 0x823FDB20: the event named
+                // download makes the venue kTourVenueDownload and adds an event
+                // for each song SongMgr has downloaded) [C]: none here, so
+                // Tokyo's arena has no gig (GD05_DOWNLOADGIG_LEGACY=1: listed).
+                if (e.name == "download" && !SDL_getenv("GD05_DOWNLOADGIG_LEGACY")) v.type = 2;
             }
             if (const DataNode* n = m.data.solo ? m.data.solo->find("num_initial_unlock_songs") : nullptr) m.data.initialUnlocks = num(n);
             for (const auto& [k, n] : entries(m.data.solo ? m.data.solo->find("max_song") : nullptr)) {
@@ -2594,19 +3367,98 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
                         m.data.maxSong[c.children[0].i] = num(&c);
                 }
             loadEvents(m.data.band ? m.data.band->find("tiers") : nullptr, m.data.bandTowns, m.data.bandEvents);
-            // A tier is the world town of the same order [I].
-            std::vector<std::pair<int, std::string>> world;
-            for (const auto& [t, n] : entries(m.data.band ? m.data.band->find("world") : nullptr)) world.emplace_back(num(n->find("order"), 1, 99), t);
-            std::stable_sort(world.begin(), world.end());
-            for (size_t i = 0; i < m.data.bandTowns.size(); ++i) {
-                const std::string town = i < world.size() ? world[i].second : m.data.bandTowns[i];
-                m.data.tierTown[m.data.bandTowns[i]] = town;
+            m.data.bwtLegacy = SDL_getenv("GD05_BWTTOWNS_LEGACY") != nullptr;
+            if (!m.data.bwtLegacy) {
+                // GD05-118 (D123): RB's towns (RB 0x823FE1D8): the tiers keep
+                // their own events; each (world ...) town in the data's order
+                // with its region, and its own file tour/<town>.dta (RB's
+                // content list of the tour folder, loaded by 0x823FC400)
+                // [C; I: the files found by the towns' names]. The files use
+                // tour_band.dta's macros (BWT_BUZZ_*), so a loader reads that
+                // first.
+                m.data.tiers = m.data.bandTowns;
+                ScriptLoader loader(ui.data());
+                for (const char* f : {"config/macros.dta", "config/tour_band.dta"}) {
+                    try {
+                        loader.load(f);
+                    } catch (const std::exception& e) {
+                        SDL_Log("rb meta: %s: %s", f, e.what());
+                    }
+                }
+                m.data.bandTowns.clear();
+                for (const auto& [t, n] : entries(m.data.band ? m.data.band->find("world") : nullptr)) {
+                    BandTown bt;
+                    bt.name = t, bt.order = num(n->find("order"));
+                    if (const DataNode* r = n->find("region")) bt.region1 = text(r, 1), bt.region2 = text(r, 2);
+                    std::unique_ptr<DataNode> file;
+                    try {
+                        file = std::make_unique<DataNode>(loader.load("tour/" + t + ".dta"));
+                    } catch (const std::exception& e) {
+                        SDL_Log("rb meta: tour/%s.dta: %s", t.c_str(), e.what());
+                    }
+                    if (file) {
+                        for (const DataNode& vn : file->children) {
+                            if (!vn.isList() || vn.children.empty() || !vn.children[0].isText()) continue;
+                            const std::string kind = vn.children[0].s;
+                            bt.venues.emplace_back(kind, vn.children.size() > 1 && vn.children[1].isText() ? vn.children[1].s : std::string());
+                            for (size_t i = 1; i < vn.children.size(); ++i) {
+                                const DataNode& en = vn.children[i];
+                                if (en.isList() && !en.children.empty() && en.children[0].isText())
+                                    m.data.bandEvents.push_back({t, kind, en.children[0].s, &en, {}, {}, {}});
+                            }
+                        }
+                        m.data.townFiles.push_back(std::move(file));
+                    }
+                    m.data.bandTowns.push_back(t);
+                    m.data.world.push_back(std::move(bt));
+                }
             }
-            for (TourEvent& e : m.data.bandEvents) e.town = m.data.tierTown[e.town];
-            for (std::string& t : m.data.bandTowns) t = m.data.tierTown[t];
+            // A tier is the world town of the same order [I] (GD05_BWTTOWNS_LEGACY).
+            if (m.data.bwtLegacy) {
+                std::vector<std::pair<int, std::string>> world;
+                for (const auto& [t, n] : entries(m.data.band ? m.data.band->find("world") : nullptr)) world.emplace_back(num(n->find("order"), 1, 99), t);
+                std::stable_sort(world.begin(), world.end());
+                for (size_t i = 0; i < m.data.bandTowns.size(); ++i) {
+                    const std::string town = i < world.size() ? world[i].second : m.data.bandTowns[i];
+                    m.data.tierTown[m.data.bandTowns[i]] = town;
+                }
+                for (TourEvent& e : m.data.bandEvents) e.town = m.data.tierTown[e.town];
+                for (std::string& t : m.data.bandTowns) t = m.data.tierTown[t];
+            }
         }
         SDL_Log("rb meta: solo tour %d towns %d events, band tour %d towns %d events", int(m.data.soloTowns.size()), int(m.data.soloEvents.size()),
                 int(m.data.bandTowns.size()), int(m.data.bandEvents.size()));
+        // GD05-118: a band saved with the earlier keys (a tier played in the
+        // world town of the same order, its venue the tier's): each event
+        // moves to the town that plays its tier for the band's hometown,
+        // (last ...) to that town's last venue.
+        if (!m.data.bwtLegacy && !m.data.world.empty()) {
+            std::vector<std::pair<int, std::string>> byOrder;
+            for (const BandTown& t : m.data.world) byOrder.emplace_back(t.order, t.name);
+            std::stable_sort(byOrder.begin(), byOrder.end());
+            for (RbBandObj* b : m.bands) {
+                if (!b->d.legacyKeys) continue;
+                std::map<std::string, int> moved;
+                for (const auto& [k, v] : b->d.stars) {
+                    const size_t a = k.find('/'), c = k.rfind('/');
+                    std::string town = k.substr(0, a), venue = k.substr(a + 1, c - a - 1);
+                    const std::string name = k.substr(c + 1);
+                    for (size_t i = 0; i < m.data.tiers.size() && i < byOrder.size(); ++i) {
+                        if (byOrder[i].second != town) continue;
+                        for (const BandTown& t : m.data.world)
+                            if (m.tierFor(b->d.hometown, t.name) == m.data.tiers[i]) {
+                                town = t.name;
+                                if (venue == "last" && !t.venues.empty()) venue = t.venues.back().first;
+                            }
+                        break;
+                    }
+                    moved[town + "/" + venue + "/" + name] = v;
+                }
+                SDL_Log("rb meta: band %s: %d event records moved to RB's towns", b->d.name.c_str(), int(moved.size()));
+                b->d.stars = std::move(moved);
+                b->d.legacyKeys = false;
+            }
+        }
     };
     m.load();
     auto* tour = m.own(std::make_unique<RbTourObj>(m));
@@ -2619,38 +3471,134 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
     // Solo events: every event of every town in order (the list moves the town as it scrolls).
     m.soloEvents = list("solo_event_provider");
     // The open towns' open events (RB 0x823E5BB8 / 0x823E46B0) [C].
+    // GD05-123: SoloEventProvider's modes (RB 0x823FA248 / 0x823FA578)
+    // [C]: kTourVenueNormal (0) lists the open towns' normal venues' open
+    // events, then one mode row per open venue of another kind ("unlock":
+    // Rio's bonus gigs, "download"); kTourVenueUnlock (1) / Download (2)
+    // list that kind's events (ui/tour_solo.dta: SELECT_MSG on the row sets
+    // the mode, Triangle sets it back). GD05_SOLOUNLOCK_LEGACY=1: every
+    // venue's events in one list, no mode.
+    static int soloMode = 0;
+    static const bool soloModeLegacy = SDL_getenv("GD05_SOLOUNLOCK_LEGACY") != nullptr;
     m.soloEvents->build = [&m] {
         std::vector<std::string> v;
         RbCharObj* c = m.soloChar();
         if (!c) return v;
         const int dd = std::clamp(c->d.difficulty, 0, 3);
+        std::vector<std::string> modes;
+        for (const std::string& t : m.soloOpenTowns(c->d, dd))
+            for (const SoloVenue& sv : m.data.soloVenues) {
+                if (sv.town != t) continue;
+                const std::vector<size_t> open = m.soloOpenEvents(c->d, dd, sv);
+                if (!soloModeLegacy && sv.type != soloMode) {
+                    if (soloMode == 0 && !open.empty()) modes.push_back(sv.type == 1 ? "unlock" : "download");
+                    continue;
+                }
+                for (size_t i : open) v.push_back(m.data.soloEvents[i].name);  // unique across the towns [C data]
+            }
+        for (const std::string& md : modes)
+            if (std::find(v.begin(), v.end(), md) == v.end()) v.push_back(md);
+        if (SDL_getenv("GD05_UILOG")) SDL_Log("tour: solo events %d (difficulty %d, mode %d)", int(v.size()), dd, soloMode);
+        return v;
+    };
+    // A mode row's venue: the open venue of its kind.
+    auto modeVenue = [&m](const std::string& sym) -> const SoloVenue* {
+        const int type = sym == "unlock" ? 1 : sym == "download" ? 2 : -1;
+        RbCharObj* c = m.soloChar();
+        if (type < 0 || !c) return nullptr;
+        const int dd = std::clamp(c->d.difficulty, 0, 3);
         for (const std::string& t : m.soloOpenTowns(c->d, dd))
             for (const SoloVenue& sv : m.data.soloVenues)
-                if (sv.town == t)
-                    for (size_t i : m.soloOpenEvents(c->d, dd, sv)) v.push_back(m.data.soloEvents[i].name);  // unique across the towns [C data]
-        if (SDL_getenv("GD05_UILOG")) SDL_Log("tour: solo events %d (difficulty %d)", int(v.size()), dd);
-        return v;
+                if (sv.town == t && sv.type == type) return &sv;
+        return nullptr;
     };
     auto evOf = [&m](const std::string& sym) -> const TourEvent* { return m.findEvent(false, "", "", sym); };
     m.soloEvents->label = [&m, evOf](const std::string& sym) {
         const TourEvent* e = evOf(sym);
+        if (sym == "unlock" || sym == "download") return m.localizeOr(sym == "unlock" ? "tour_unlock_songs" : "tour_download_songs");
         if (!e) return sym;
         RbCharObj* c = m.soloChar();
         const std::vector<std::string> songs = m.eventSongs(*e, false, c ? c->d.instrument : "guitar");
         return m.localizeOr(e->town) + ": " + (songs.empty() ? m.localizeOr(e->name) : m.songName(songs[0]));
     };
+    // GD05-120: the gig's row label is the list resource's event.lbl
+    // (ui/resource/list_solo_event.milo: event, by_line, town, venue,
+    // score, star, new) [C data]: the song and its artist [I: RB's Text not
+    // read]. GD05_EVENTLBL_LEGACY=1: none (blank rows).
+    m.soloEvents->texts = [&m, evOf, modeVenue](const std::string& sym, gfx::UiView::ListRow& r) {
+        if (SDL_getenv("GD05_EVENTLBL_LEGACY")) return;
+        const TourEvent* e = evOf(sym);
+        RbCharObj* c = m.soloChar();
+        // SoloEventProvider::Text (RB 0x823FA578) [C], by the list type's
+        // elements (ui_objects.dta solo_event: town venue event by_line star
+        // new score): town.lbl on a town's first row, venue.lbl
+        // (<town>_<venue>) on a venue's first row, star.lbl the gig's star
+        // rating, new.lbl "NEW" for a new gig, score.lbl the song's best
+        // score; a mode row: its town, venue, tour_unlock_songs, new when
+        // its venue has a new gig. GD05_GIGROWS_LEGACY=1: event / by_line only.
+        const bool rows = !gigRowsLegacy();
+        if (rows && c) {
+            const int idx = m.soloEvents->indexOf(sym);
+            std::string town, venue;
+            const SoloVenue* mv = modeVenue(sym);
+            if (e) town = e->town, venue = e->venue;
+            else if (mv) town = mv->town, venue = mv->venue;
+            std::string pt, pv;
+            if (idx > 0) {
+                const std::string prev = m.soloEvents->symbol(idx - 1);
+                if (const TourEvent* pe = evOf(prev)) pt = pe->town, pv = pe->venue;
+            }
+            // RB's Localize gives a missing token back as is (RB 0x82265878)
+            // [C]: the solo tiers (tier1_1 ...) and their venues have no
+            // locale token, so the port leaves those labels empty rather
+            // than show "tier1_1" [I: what RB's list draws for them].
+            auto loc = [&m](const std::string& tok) {
+                const std::string l = m.ui().localize(tok);
+                return l == tok ? std::string() : l;
+            };
+            if (idx == 0 || town != pt) r.texts["town.lbl"] = loc(town);
+            if (idx == 0 || town != pt || venue != pv) r.texts["venue.lbl"] = loc(town + "_" + venue);
+            const int dd = std::clamp(c->d.difficulty, 0, 3);
+            if (mv) {
+                for (size_t i : m.soloOpenEvents(c->d, dd, *mv))
+                    if (m.soloStatus(*c, m.data.soloEvents[i]) == 2) r.texts["new.lbl"] = m.localizeOr("tour_new");
+                r.texts["event.lbl"] = m.soloEvents->label(sym);
+                return;
+            }
+            if (e) {
+                if (auto st = c->d.stars.find(std::to_string(dd) + ":" + e->key()); st != c->d.stars.end())
+                    r.texts["star.lbl"] = starRatingText(m.ui().bootTree(), st->second);
+                if (m.soloStatus(*c, *e) == 2) r.texts["new.lbl"] = m.localizeOr("tour_new");
+            }
+        }
+        const std::vector<std::string> songs = e ? m.eventSongs(*e, false, c ? c->d.instrument : "guitar") : std::vector<std::string>{};
+        if (songs.empty()) return void(r.texts["event.lbl"] = m.localizeOr(sym));
+        r.texts["event.lbl"] = m.songName(songs[0]);
+        for (const SongInfo& si : m.ui().host().songs())
+            if (si.id == songs[0]) r.texts["by_line.lbl"] = si.artist;
+        if (rows && c)
+            if (auto sc = c->d.songScores.find(std::to_string(std::clamp(c->d.difficulty, 0, 3)) + ":" + songs[0]); sc != c->d.songScores.end() && sc->second > 0)
+                r.texts["score.lbl"] = std::to_string(sc->second);
+    };
     m.soloEvents->enabled = [&m, evOf](const std::string& sym) {
+        if (sym == "unlock" || sym == "download") return true;
         const TourEvent* e = evOf(sym);
         RbCharObj* c = m.soloChar();
         return e && c && m.soloStatus(*c, *e) != 0;
     };
-    m.soloEvents->extra = [&m, evOf](Interp&, const std::string& msg, std::vector<Value>& a, Value& r) {
+    m.soloEvents->extra = [&m, evOf, modeVenue](Interp&, const std::string& msg, std::vector<Value>& a, Value& r) {
         RbList& l = *m.soloEvents;
+        if (msg == "set" && sArg(a, 0) == "mode") {
+            if (!soloModeLegacy) soloMode = std::clamp(iArg(a, 1), 0, 2), l.refresh();
+            return true;
+        }
+        if (msg == "get" && sArg(a, 0) == "mode") return r = Value::integer(soloModeLegacy ? 0 : soloMode), true;
+        if (msg == "set" || msg == "get") return r = Value::integer(0), true;
         if (l.data.empty()) l.refresh();
         const TourEvent* e = evOf(l.symbol(iArg(a, 0)));
-        if (msg == "set" || msg == "get") return r = Value::integer(0), true;  // mode
-        if (msg == "town") return r = Value::symbol(e ? e->town : ""), true;
-        if (msg == "venue") return r = Value::symbol(e ? e->venue : ""), true;
+        const SoloVenue* mv = modeVenue(l.symbol(iArg(a, 0)));
+        if (msg == "town") return r = Value::symbol(e ? e->town : mv ? mv->town : ""), true;
+        if (msg == "venue") return r = Value::symbol(e ? e->venue : mv ? mv->venue : ""), true;
         if (msg == "event") return r = Value::symbol(e ? e->name : ""), true;
         if (msg == "event_song") {
             RbCharObj* c = m.soloChar();
@@ -2673,31 +3621,102 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
     m.bandEvents->build = [&m] {
         std::vector<std::string> v;
         if (RbBandObj* b = m.bandPerf())
-            for (const TourEvent& e : m.data.bandEvents)
-                if (m.townOf(e, *b) == b->d.town && (b->d.venue.empty() || e.venue == b->d.venue)) v.push_back(e.name);
+            for (const TourEvent& e : m.bandInstances(*b))
+                if (e.where() == b->d.town && (b->d.venue.empty() || e.venue == b->d.venue)) v.push_back(e.name);
         return v;
     };
-    m.bandEvents->label = [&m](const std::string& s) { return m.localizeOr(s); };
+    m.bandEvents->label = [&m](const std::string& s) {
+        if (RbBandObj* b = m.bandPerf())
+            if (const std::optional<TourEvent> e = m.bandEvent(*b, s)) return m.bandEventLabel(*e);
+        return m.localizeOr(s);
+    };
+    // GD05-120: the gig's name in the list resource's event.lbl
+    // (ui/resource/list_event.milo: event, songs, fame, star, medal, item,
+    // new) [C data; I: the other labels left empty, RB's Text not read].
+    m.bandEvents->texts = [&m](const std::string& s, gfx::UiView::ListRow& r) {
+        if (!SDL_getenv("GD05_EVENTLBL_LEGACY")) r.texts["event.lbl"] = m.bandEvents->label(s);
+        if (gigRowsLegacy()) return;
+        // EventProvider::Text (RB 0x823F6848) [C], by the list type's
+        // elements (ui_objects.dta event: event star fame new songs medal
+        // item): star.lbl the star rating of a played one-song gig ("*" for
+        // a set), fame.lbl a played set's "stars/max" (max_stars_per_song a
+        // song), new.lbl "NEW" for a new gig that awards nothing, songs.lbl
+        // the song (one) or tour_song_set "%i Song Set", medal.lbl
+        // medal_strings by the difficulty it was played at, item.lbl a new
+        // gig's award_item icon (tour_band.dta items).
+        RbBandObj* b = m.bandPerf();
+        const std::optional<TourEvent> e = b ? m.bandEvent(*b, s) : std::nullopt;
+        if (!e || !e->node) return;
+        const DataNode* songs = e->node->find("songs");
+        const int n = songs ? int(songs->children.size()) - 1 : 1;
+        const int status = m.bandStatus(*b, *e);
+        auto played = b->d.stars.find(e->key());
+        const DataNode* band = m.data.band;
+        if (played != b->d.stars.end()) {
+            const int per = num(band ? band->find("max_stars_per_song") : nullptr, 1, 5);
+            if (n > 1) {
+                r.texts["star.lbl"] = "*";
+                r.texts["fame.lbl"] = std::to_string(played->second) + "/" + std::to_string(n * per);
+            } else {
+                r.texts["star.lbl"] = starRatingText(m.ui().bootTree(), played->second);
+            }
+            if (auto md = b->d.medals.find(e->key()); md != b->d.medals.end()) {
+                const DataNode* ms = band ? band->find("medal_strings") : nullptr;
+                if (ms && md->second + 1 < int(ms->children.size())) r.texts["medal.lbl"] = ms->children[size_t(md->second + 1)].s;
+            }
+        }
+        const std::string award = text(e->node->find("award_item"));
+        if (status == 2) {
+            if (award.empty()) r.texts["new.lbl"] = m.localizeOr("tour_new");
+            else if (const DataNode* items = band ? band->find("items") : nullptr)
+                if (const DataNode* it = items->find(award)) r.texts["item.lbl"] = text(it->find("icon"));
+        }
+        if (n < 2) {
+            const std::vector<std::string> set = m.eventSongs(*e, true, "band");
+            if (!set.empty() && set[0] != "any") r.texts["songs.lbl"] = m.songName(set[0]);
+        } else {
+            char buf[96];
+            std::snprintf(buf, sizeof buf, m.localizeOr("tour_song_set").c_str(), n);
+            r.texts["songs.lbl"] = buf;
+        }
+    };
     m.venues = list("tour_venue_provider");
     m.venues->build = [&m] {
         std::vector<std::string> v;
         if (RbBandObj* b = m.bandPerf())
-            for (const TourEvent& e : m.data.bandEvents)
-                if (m.townOf(e, *b) == b->d.town && std::find(v.begin(), v.end(), e.venue) == v.end()) v.push_back(e.venue);
+            for (const TourEvent& e : m.bandInstances(*b))
+                if (e.where() == b->d.town && std::find(v.begin(), v.end(), e.venue) == v.end()) v.push_back(e.venue);
         return v;
     };
     m.venues->label = [&m](const std::string& s) { return m.localizeOr(s); };
     m.towns = list("tour_town_provider");
-    m.towns->build = [&m] { return m.data.bandTowns; };
+    // The towns the band can travel to (RB's open towns, vfunc +0x48: RB
+    // 0x823F2E20) [C; I: the list shows only those].
+    m.towns->build = [&m] {
+        RbBandObj* b = m.bandPerf();
+        return b ? m.openTowns(*b) : m.data.bandTowns;
+    };
     m.towns->label = [&m](const std::string& s) { return m.localizeOr(s); };
     m.towns->extra = [&m](Interp&, const std::string& msg, std::vector<Value>&, Value& r) {
-        if (msg == "num_towns") return r = Value::integer(int(m.data.bandTowns.size())), true;
+        if (msg == "num_towns") return r = Value::integer(m.towns->numData()), true;
         return false;
     };
     m.hometowns = list("tour_hometown_provider");
     m.hometowns->build = [&m] {
         std::vector<std::string> v;
-        for (const auto& [t, n] : entries(m.data.band ? m.data.band->find("world") : nullptr)) v.push_back(t);
+        // HometownProvider (vtable RB 0x8206fb30), filled by RB 0x823FC338
+        // [C]: the towns whose record has both parts of a (region a b), then
+        // sorted by their localized names (RB 0x823FBB90, compare RB
+        // 0x823F4768: strcmp of the two localize results) [C].
+        // GD05_HOMETOWN_LEGACY=1: the data's order (GD05_BWTTOWNS_LEGACY:
+        // every town).
+        for (const auto& [t, n] : entries(m.data.band ? m.data.band->find("world") : nullptr)) {
+            const DataNode* reg = n->find("region");
+            if (m.data.bwtLegacy || (reg && reg->children.size() > 2)) v.push_back(t);
+        }
+        static const bool legacy = SDL_getenv("GD05_HOMETOWN_LEGACY") != nullptr;
+        if (!legacy && !m.data.bwtLegacy)
+            std::stable_sort(v.begin(), v.end(), [&m](const std::string& a, const std::string& b) { return m.localizeOr(a) < m.localizeOr(b); });
         if (v.empty()) v.push_back(m.data.hometown);
         return v;
     };

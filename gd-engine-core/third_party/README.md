@@ -11,6 +11,14 @@ CMake at pinned versions (`../cmake/gdcore_deps.cmake`).
 
 The AUDIO area vendors `miniaudio/` here the same way.
 
+`libchdr/` holds only a licence: libchdr itself (CHD disc images, GDUL-030) is
+fetched at a pinned commit (`../cmake/gdcore_deps.cmake`, built by
+`../cmake/gdcore_chd.cmake`). Its archive carries libchdr's BSD-3 `LICENSE.txt`
+(packaged as `licenses/libchdr-LICENSE.txt`) and its bundled decoders: LZMA SDK
+and dr_flac (public domain), miniz (Unlicense), zstd 1.5.7 (BSD, whose licence
+text is not in libchdr's copy: `libchdr/zstd-LICENSE.txt`, Zstandard's own,
+packaged as `licenses/libchdr-zstd-LICENSE.txt`).
+
 Rules (docs/guidelines/engine-backend-guidelines.md, rule 6):
 
 - Unmodified copies only; a fix goes upstream or into our wrapper code.

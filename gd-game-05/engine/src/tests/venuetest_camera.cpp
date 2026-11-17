@@ -95,9 +95,7 @@ struct Floor {
 Floor floorOf(const World& w) {
     Floor f;
     for (const scene::Mesh* m : w.venue().all<scene::Mesh>()) {
-        const scene::Mesh* g = m;
-        if (m->verts.empty() && !m->geomOwner.empty() && m->dir)
-            if (auto* o = m->dir->resolve<scene::Mesh>(m->geomOwner)) g = o;
+        const scene::Mesh* g = gfx::meshGeometry(m);
         if (!g->bones.empty() || g->faces.empty()) continue;
         const scene::Xfm x = w.pose().world(m);
         auto at = [&](uint16_t i) {

@@ -426,7 +426,10 @@ void ClipDriver::runEvents(Node& n, float from, float to) {
     const auto& ev = n.clip->events;
     int first = -1;
     for (;;) {
-        if (n.nextEvent <= from || to <= n.nextEvent) break;
+        // [from, to): an event on the clip's first frame fires on the first
+        // advance (RB's arm events sit at frame 0: set_leftarm_false ...);
+        // with (from, to) it never fired and held back every later event [I].
+        if (n.nextEvent < from || to <= n.nextEvent) break;
         if (first < 0) first = n.eventIndex;
         if (runScript) fire(n.clip, ev[size_t(n.eventIndex)].script);
         // FUN_821A4B40: the next event, wrapping.

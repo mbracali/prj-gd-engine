@@ -39,6 +39,18 @@ alike. Read every file in [docs/guidelines/](.) before you start.
 - **Tests.** Test what you did: people use the app a lot. Regular tests run
   mainly on Linux; every bug fix that can be reproduced headless gets a check
   in the game's self-tests.
+  - **Quick tier, during work:** `tools/quicktest.sh` (GDALL-049) builds only
+    the games your changes touch (against `origin/develop`; `--base <ref>` or
+    game ids such as `gd02 gd04` to choose) and runs each one's `--selftest`
+    plus at most 3 short walks picked from the source folders changed,
+    printing one PASS / FAIL table (logs in `~/.cache/gd-quicktest/`). Builds
+    run one game at a time with `-j4` after a free-memory check; tests run one
+    game at a time unless `--jobs <n>`. Target: under 5 minutes a game.
+    `--list` shows what it would run, `--walks "a b"` picks the walks.
+  - **Full gates, only before a release:** every walk, venuetest, chartest and
+    the other long suites of the game (e.g. `gd-game-03/tools/run_tests.sh`,
+    `gd-game-01/tools/walks.sh` with no walk named). Never run them as a gate
+    during normal work (owner 11-13: no 30-40 minute gates).
 
 ## When you finish
 
