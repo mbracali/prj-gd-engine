@@ -231,8 +231,84 @@ multiplier badges `pa_2x..11x`, `OD_drums/bass/guitar/vocals`. The
 executable has none of these names (objects are looked up by hash [I]).
 `src/data/psp_gfx.*`, `gd24 --highwaytest [--sheet f.bmp]`.
 
-Not known yet: how the scene places them (node transforms, the per-mesh
-scale, the camera), the lane positions and the track's length / speed.
+### Mesh objects, materials, placement
+
+Object pointers in COMMON point 0x80 past the object as the file has it
+(with the chunk bases above) [C: every mesh -> material -> texture -> block
+link lands on an object header that way] (`src/data/highway_assets.*`).
+
+**Mesh object** [C data, 50 in COMMON]: +0x00 u32 0x4D, +0x10 0x77359400,
++0x30 f32[3] box min, +0x40 f32[3] box max, +0x50 centre, +0x60 radius,
++0x68 name pointer, +0x6C type (2 skinned, 3 prop), +0x7C u32 n, +0x80 n x
+{material pointer, mesh block pointer}. The block's normalized positions
+times the box's largest |coordinate| give model units [C: 8-bit 127 and
+16-bit 32767 land on the box's extremes for every mesh checked, e.g.
+track_plane_A 6.5635, gem_4a 0.3474, plate_4a 0.3729].
+
+**Material**, 0x53 [C data]: +0x0C flags (byte 1: 1 alpha-blended, 3
+additive [I: the 3s are the glows, rails, track surface strips, beat bars,
+failed X, all with opaque grey textures]; byte 2: 1 on the track's
+Overdrive layer `od` [I: shown in Overdrive]), +0x1C texture pointer, name
+at +0x80. Texture names sit at +0x3D (+0x3C is a small number).
+
+**Mesh blocks**, more: the words after the counts vary ({0, 1, -1} on
+props, {1, 1, -1, 0x20} on the track plane's pieces, bone data on skinned
+meshes); skinned meshes have one display list per bone group ({VTYPE,
+PRIM..., RET} repeated; plate_4a: two lists, 5 strips) [C data]. Before the
+VTYPE the list may set the material ambient alpha (0x58) and colour (0x55,
+BGR), which the GE uses for vertices without a colour [C data: beat bars
+0xC4C4C4, the track icon alpha 0xC0, others 0xFFFFFF]. Vertex colours come
+as 565 / 5551 / 4444 / 8888 (the track edge mesh: 5551, alpha 0 at the far
+end, so the rails fade out).
+
+**Model space** [C data]: x across, y along the highway (+y away from the
+player), z up. `track_plane_A` (3.21 x 12.92, y -6.56..6.36) has five
+sub-meshes: `TrackPlaneEdge` (177 vertices, the rails, the strike bar and
+its lane marks, textured from an atlas: red / yellow / green / blue row at
+v 0.11..0.19), additive strips `rails`, `od` (Overdrive) and `base` on the
+far third, and `track_instrument_icon` (y -3.9..-1.4; placeholder texture
+`file4`; the materials `track_instrument_icon0..3` carry `icon_drum`,
+`icon_bass`, `icon_guitar`, `icon_mic`). **The lanes and the strike line**:
+the four lane-mark quads of the strike bar are centred at x -1.100,
+-0.362, 0.379, 1.127, y -4.488 [C data]; the lane plates (0.746 wide) and
+the gems (0.69) fit that 0.74 spacing; the beat bars are 2.90 wide.
+
+Not found yet [I]: the camera (no highway camera object in COMMON; the
+`entity_camera` / `anim cam` objects look like venue cameras), the spacing
+of the four tracks, the scroll speed actually used by the code (below).
+
+## The configuration in BEATMATCH.STR (DTA)
+
+Every BEATMATCH image carries the game's whole Harmonix DTA tree as data
+arrays [C data, all 41 songs] (`src/data/dta.*`): an array {u32 nodes
+pointer, u32 (file symbol [I]), u16 count, u16 ...}, nodes {u32 value, u32
+type: 0 int, 1 float, 5 symbol, 0x10 / 0x11 / 0x13 array, 0x12 string}.
+Top level: system, prototype, songs, objects, synth, beatmatcher, audio,
+game, mc, mem, joypad, ui, rnd, world, ... Much of it is inherited from the
+console games (iop modules, PS2 joypad slots); the executable has none of
+the `y_per_second` / `song_scroll_speed` / `slop` strings, so whether its
+code reads them is not known [I].
+
+- `(songs (<folder lower case> (name ...) (artist ...) (song (tracks (drum 0)
+  (bass 1) (guitar 2) (vocals 3)) ...) (song_scroll_speed 2300) (preview
+  <start ms> <end ms>) (rank ...) (initial_track 2) ...))`, 55 entries
+  (41 songs + tutorials).
+- `(game (track (y_per_second (0 7.5) (1 8.5) (2 9.5) (3 11.5))))`: highway
+  units per second, Easy..Expert (gd24 uses it: 11.5 shows 0.94 s of Expert
+  between the strike line and the far end).
+- `(beatmatcher (watcher (type joypad) (slop 100) (intent_window 250)))`:
+  the hit window gd24 uses.
+- `(prototype ... (config_standard_4_config1 (joypad ... (drum_slots 15 0 12
+  1 7 1 13 2 4 2 5 3) (remap_left 2) (remap_right 3)) (num_slots 4)))`:
+  {button, lane} pairs in Harmonix's PS2 kPad order [I: legacy; not used
+  for the PSP defaults].
+
+**The preview's place in the song**: `(preview start end)`; for 18 of 41
+songs the AT3 starts exactly at `start` (onset lag 0 +-30 ms; mostly the
+songs whose AT3 length = end - start); for the others the AT3 length
+differs from end - start by up to 11 s and the onsets sit 40..200 ms off.
+`gd24 --synctest` measures it (`src/game/preview_sync.*`) and the song
+screen applies the measured lag (within +-200 ms) [I].
 
 ## Controls (what the data say)
 

@@ -1,7 +1,8 @@
 # gd-game-24: working context (paths, tools, Ghidra)
 
-Rock Band Unplugged (PSP, USA, ULUS-10418) -> `gd24` (GD24-002 in progress:
-window + status screen, previews, controls + GAMEPADS, chart reader; see
+Rock Band Unplugged (PSP, USA, ULUS-10418) -> `gd24` (GD24-002 first boot:
+window + status screen, previews, controls + GAMEPADS, chart reader, songs
+on the original highway; see
 `PROGRESS.md`). Read this first, then `PROGRESS.md`,
 `DECISIONS.md`, `OPEN_QUESTIONS.md`, `../docs/FORMATS.md` and the backlog's
 gd-game-24 section.
@@ -38,6 +39,7 @@ no other game's config changed.
 ```sh
 gd-game-24/engine/build/dev/gd24 "$ISO"     # status screen: songs, Confirm plays a preview,
                                            # Select GAMEPADS, Start ENHANCED
+gd-game-24/engine/build/dev/gd24 "$ISO" --song ABC --difficulty 3 --track 2   # straight into a song
 gd-game-24/tools/try_in_launcher.sh "gd-engine-launcher/build/gd24/Guitar Dream Universal Launcher" "$ISO"
 # the module in a development launcher while ready_to_play is false (nothing tracked changes)
 ```
@@ -45,7 +47,10 @@ gd-game-24/tools/try_in_launcher.sh "gd-engine-launcher/build/gd24/Guitar Dream 
 Development aids: `GD24_KEYS="<ms>:<key>,..."`, `GD24_SCREENSHOT=<f.bmp>`
 + `GD24_SCREENSHOT_AT=<ms>,...`, `GD24_QUIT_AFTER=<ms>`, `GD24_SAVE_DIR=<dir>`
 (tests: keeps the real saves untouched), `GD24_VIRTUAL_PAD=1430:4748:guitar`,
-`GD24_INPUTLOG=1`, `GD24_AUDIO_BACKEND=<id>`.
+`GD24_INPUTLOG=1`, `GD24_AUDIO_BACKEND=<id>`, `GD24_AUTOPLAY=1` (the active
+track's gems pressed on time), `GD24_CAMERA="ex,ey,ez,tx,ty,tz,fov"`.
+Silent, windowless runs for screenshots: `SDL_VIDEO_DRIVER=offscreen
+GD24_AUDIO_BACKEND=openal ALSOFT_DRIVERS=null` (the GL device still works).
 
 gd-engine-core comes in through `add_subdirectory` (the disc reader: .iso
 and .chd); its OpenAL sub-build runs its own jobs, so the first build uses
@@ -61,6 +66,7 @@ gd-game-24/engine/build/dev/gd24 --audiotest "$ISO"   # 41 previews: 0 errors, f
 gd-game-24/engine/build/dev/gd24 --charttest "$ISO"   # 41 songs x 4 tracks x 4 difficulties (0.2 s)
 gd-game-24/engine/build/dev/gd24 --charttest "$ISO" abc --notes   # one song's gems
 GD24_SAVE_DIR=/tmp/x gd-game-24/engine/build/dev/gd24 --inputtest  # virtual pads, 33 checks
+gd-game-24/engine/build/dev/gd24 --synctest "$ISO"    # the previews' place in the charts (3 s)
 ```
 
 ## Decrypting EBOOT.BIN (done once, local only)

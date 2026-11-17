@@ -135,3 +135,38 @@ Next (the rest of the first boot), in order:
    song: its offset into the song is not known yet, [I]), input judged
    against the gems (hit / miss), track switching.
 Estimate: 6-10 h of agent time, most of it step 1.
+
+## GD24-002 first boot, the highway and the chart (11-17, about 3.5 h)
+
+Done, committed (c31989e, fb25e1a and the docs):
+
+1. **Placement** (FORMATS.md "Mesh objects, materials, placement"): mesh
+   objects -> materials -> textures in COMMON.STR, the scale (the box's
+   largest |coordinate|), blend modes, skinned display lists, GE vertex /
+   material colours; the lanes and the strike line from the track plane's
+   own lane marks (x -1.100 -0.362 0.379 1.127, y -4.488) [C]. The speed
+   from the disc's DTA (`y_per_second` 7.5..11.5 per difficulty) and the
+   hit window (`slop` 100 ms) [C data, whether the code reads them: I].
+   Not found: the camera and the tracks' spacing [I, chosen to frame the
+   track; GD24_CAMERA overrides].
+2. **Renderer**: `src/render/highway_renderer` on gd-engine-core's device
+   (1920x1088 colour + depth target, alpha / additive pipelines, the 2D
+   canvas on top, screenshots read back).
+3. **Playing**: Confirm on the status screen (Triangle: difficulty, Square:
+   preview) or `--song <FOLDER> [--difficulty 0..3] [--track 0..3]`; four
+   tracks side by side with their icons, the active one lit, beat lines
+   from the gems' ticks (a bar line every 4 beats [I]), plates, gems,
+   crash pieces on hits; lanes judged (hit / miss / wrong press, chords),
+   Left / Right switch tracks (camera eases over). The preview plays from
+   the song's `(preview start ...)` plus a measured onset lag
+   (`--synctest`: 18/41 exactly at start, the rest within +-200 ms).
+   Checks: `--highwaytest` 0 failures (models + lane marks);
+   GD24_AUTOPLAY=1: 14/14 hits, 0 misses, 0 wrong on ABC Expert guitar in
+   6 s; four lane keys pressed off the notes on WOULD Easy: 4 wrong, 13
+   misses; screenshots looked at (ABC Expert guitar / bass, track switch).
+
+Next: the camera and the tracks' spacing from the code (the highway
+draw code is not found yet), Overdrive / phrases / scoring (GD24-003), the
+PSP controls' real defaults (the DTA's slots are the PS2 legacy), Easy vs
+Medium lists (same counts on several songs: which vector is which [I]),
+the venue behind the see-through tracks (GD24-005).
