@@ -6,6 +6,18 @@ matches the tag's version. Nothing is released yet.
 
 ## [Unreleased]
 
+## [1.1.16] - 2026-11-16
+
+### Added
+- Song Speed (50-200 %, the pitch kept) and Track Speed (0.5-3.5x) in Enhanced > Cheats & Enhancers.
+- CHD disc images (.chd) next to .iso (#112).
+- Starts in full screen when RecompLauncher opens it in Big Picture mode.
+
+### Fixed
+- The More Stats screen and the panels after a song are no longer darker than the original (#115).
+- Songs played with Enhanced Autoplay no longer save records, stars, gold stars, cash or high scores (#104).
+- The store: pressing Up on the first item goes to the last one.
+
 ## [1.1.15] - 2026-11-13
 
 ### Fixed

@@ -39,7 +39,7 @@ This is a list of all the planned and already decompiled games. Every game is pl
 | gd-game-07 | Guitar Hero World Tour            | Xbox 360      | --            |
 | gd-game-08 | Rock Band 2                       | Xbox 360      | --            |
 | gd-game-09 | The Beatles: Rock Band            | Xbox 360      | --            |
-| gd-game-10 | Guitar Hero: Metallica            | Xbox 360      | 48% Playable  |
+| gd-game-10 | Guitar Hero: Metallica            | Xbox 360      | 69% Playable  |
 | gd-game-11 | Guitar Hero: Smash Hits           | Xbox 360      | --            |
 | gd-game-12 | Guitar Hero 5                     | Xbox 360      | --            |
 | gd-game-13 | Lego Rock Band                    | Xbox 360      | --            |

@@ -6,6 +6,17 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.14] - 2026-11-16
+
+### Added
+- Song Speed (50-200 %, the pitch kept) and Track Speed (0.5-3.5x) in Enhanced > Cheats & Enhancers.
+- CHD disc images (.chd) next to .iso (#112).
+- Starts in full screen when RecompLauncher opens it in Big Picture mode.
+
+### Fixed
+- The tutorials' pause menu works with the guitar, gamepad and keyboard, and shows the cursor on the mouse (#98).
+- Require Strum no longer stops working after using a guitar's d-pad in the menus (#98).
+
 ## [1.1.13] - 2026-11-13
 
 ### Fixed
