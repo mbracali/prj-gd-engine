@@ -82,7 +82,8 @@ The chunks are **memory images with absolute pointers** (0x088xxxxx ..
 Harmonix `Symbol` strings, `{pointer, count, capacity}` vectors [C data].
 Each chunk is loaded to a fixed address (estimated by pointer density:
 venue / `COMMON` chunk 0 at about 0x08F36000, chunk 1 at about 0x091C3000;
-song chunks at about 0x096E9800) [I: exact bases from the loader, next].
+song images at 0x096E9A80 [C: every BEATMATCH image's 27 kPad_* symbol strings
+are pointed to from that base, all 41 songs]) [I for the venue / COMMON bases].
 There is no relocation table: a port reads the objects through their class
 layouts (vtable address = class), so every class a feature needs must be
 described from the EBOOT. This is the main cost of the port.
@@ -105,11 +106,14 @@ Riot"), "Stars / Money / Fans" text, logo name, members [C data].
 Same container, `N` = 128; entries 125, 126, 127 and 128 hold four images
 of the same size, one per **difficulty** (a word at +0x2F4 in each is 0..3;
 the first word is the entry number 0x7D..0x80; only ~2,000 of ~200,000
-words differ between them) [C data, ABC and 3SAND7S]. Pointers are the same
-in all four, so they load at one address.
+words differ between them) [C data, all 41 songs]. Each image is RAM
+loaded at **0x096E9A80** [C: all 27 `kPad_*` symbol strings pointed to from
+that base, every song]. Every image holds the gems of all four tracks and
+all four difficulties (the Easy image gives the same gems as the Expert one
+[C: `gd24 --charttest`]); what differs are other per-difficulty objects.
 
-Inside: the parsed song (no MIDI file is stored: no `MThd`) [C data]. Arrays
-of 20-byte gems were found by their ascending float times [C data, ABC]:
+The parsed song (no MIDI file is stored: no `MThd`) [C data]. The gem
+record, 20 bytes:
 
 | Offset | Type | Meaning |
 |---|---|---|
@@ -117,15 +121,28 @@ of 20-byte gems were found by their ascending float times [C data, ABC]:
 | 0x04 | u32 | tick (480 per beat: 2952.4 ms = tick 2160 at ABC's tempo) |
 | 0x08 | u16, u16 | duration (ms?, ticks?) [I] |
 | 0x0C | u8 | MIDI pitch-like id (0x3A, 0x3C...) [I] |
-| 0x0E | u8 | lane bitmask 1/2/4/8: **four lanes** [C data] |
+| 0x0E | u8 | lane bit mask 1 / 2 / 4 / 8: **four lanes**; chords OR them (5, 10, ...) [C data] |
 | 0x0F | u8 | flags (0x0A / 0x0B) [I] |
-| 0x10 | u32 | 0 |
+| 0x10 | u32 | flags (0, 0x02000000 seen) [I] |
 
-This matches Rock Band's GameGem record. The tempo map, the phrase / section
-lists (PhraseDB, `VERSECHORUSSOLO`), the four instrument tracks (`PART GUITAR /
-BASS / DRUMS / VOCALS`) and the star-power phrases are found through the
-SongData object graph: to map next (GD24-002) from GameGemDB.cpp /
-SongData.cpp users (strings at 0x08B40964, 0x08B40B88).
+The tracks [C data, all 41 songs]: one object per instrument holds a
+pointer to its name `PART DRUMS` / `PART BASS` / `PART GUITAR` /
+`PART VOCALS`, the short name (`drum`, `bass`, `guitar`, `vocals`) and its
+index 0..3; a list of the four name pointers sits before the first one.
+After each track object come four difficulty objects, each with a gem
+vector `{u32 pointer, u32 count, u32 capacity = count}` that follows a small
+number which is the same for all of a song's vectors (0xAA in ABC, 0x5A in
+WOULD); other 20-byte vectors near them (one to a few records, e.g. phrase
+spans [I]) follow 0x7F800001 or another vector's capacity. The four
+vectors of a track are Easy, Medium, Hard, Expert in address order [I: the
+counts grow; 156 of 164 Easy charts use the two middle lanes only]. One
+tick has one time in every list (the tempo map is shared) [C].
+`src/data/beatmatch.*`, `gd24 --charttest [<song>] [--notes]`.
+
+Still to map: the tempo map and time signatures as objects, the sections /
+phrases (PhraseDB, `VERSECHORUSSOLO`), Overdrive phrases, the meaning of the
+duration fields. The tutorials' BEATMATCH (T01..T15, one shared file size)
+have one list per track.
 
 ## ATM: song audio (5 stems, encrypted): out of scope
 
@@ -141,7 +158,12 @@ player's disc instead (below).
 
 `<SONG>_PREVIEW.AT3`: a plain RIFF WAVE, WAVEFORMATEXTENSIBLE ATRAC3plus
 (GUID BFAA23E9-58CB-7144-A119-FFFA01E4CE62), stereo 44.1 kHz, 2048-byte
-frames (352 kbit/s), ~30 s; **FFmpeg decodes it as is** [C].
+frames (352 kbit/s), ~30 s; **FFmpeg decodes it as is** [C]. Chunks
+[C data, all 41]: `fmt `, `fact` {u32 samples, u32 encoder delay} (ABC
+1,292,946 and 3,070), `smpl` with one loop {delay, delay + samples - 1},
+`data`. FFmpeg's atrac3p gives frames x 2048 samples = delay + samples +
+368 for every song [C]; gd24 cuts the delay and keeps the fact length
+(`src/audio/at3_preview.*`, `gd24 --audiotest`: 41/41, 0 decode errors).
 
 ## PSP.BNK: sound banks
 
@@ -167,6 +189,26 @@ characters [C data: every table has exactly count + 1 lines]. Strings are referr
 2,549 strings), `_MUSIC` (title / artist / album per song), `_JUKEBOX`,
 `_GAMEPLAY_TIPS`, `_BANDNAME_A/B`, `_MEMBERNAME_MALE/FEMALE`; languages EN,
 FR, GE, IT, SP.
+
+## Controls (what the data say)
+
+[C] STR_EN.TXT lists the original's Options > Controls actions: TRACK SWITCH
+RIGHT / LEFT, RED / YELLOW / GREEN / BLUE NOTE, OVERDRIVE ("--- unassigned
+---" also appears: assignable [I]). The help bars use tokens `$button1` (select /
+confirm / continue), `$button2` (back / cancel), `$button3`, `$button4`,
+`$left_trigger`, `$right_trigger`, `$stick`; the code's token table at
+0x08b4ef38 lists {name, getter 0x08932c24, index}: left 0, right 1, up 2,
+down 3, button1..4 4..7, start 8, menu 9, left_trigger 10, right_trigger
+11, left_trigger2 / right_trigger2, stick, stick2, updown, leftright,
+voice_on / voice_off. The glyphs come from string ids filled at run time
+(BSS 0x08b5b4d0), so the defaults are not in a data table. The tips
+(STR_EN_GAMEPLAY_TIPS.TXT, "(default controls)") name Overdrive on two
+buttons, one per thumb (glyphs А and Е of the ButtonsSM font), track
+switching on two (И, Й) and pause on one (К). [I] the default lanes L, Up,
+Triangle, R, Overdrive Cross / Down, track switching Left / Right
+(`gameplayOf` in `src/input/input.h`) until the glyph font or the code's
+controls table is decoded. No PSP-mask table exists in .rodata [C: scanned
+for four distinct button masks at strides 2..24].
 
 ## CANARY.EDAT
 

@@ -1,7 +1,8 @@
 # gd-game-24: working context (paths, tools, Ghidra)
 
-Rock Band Unplugged (PSP, USA, ULUS-10418) -> `gd24` (not started: plan in
-`PROGRESS.md`, waiting for the owner). Read this first, then `PROGRESS.md`,
+Rock Band Unplugged (PSP, USA, ULUS-10418) -> `gd24` (GD24-002 in progress:
+window + status screen, previews, controls + GAMEPADS, chart reader; see
+`PROGRESS.md`). Read this first, then `PROGRESS.md`,
 `DECISIONS.md`, `OPEN_QUESTIONS.md`, `../docs/FORMATS.md` and the backlog's
 gd-game-24 section.
 
@@ -22,9 +23,29 @@ decompiler output into tracked files (`docs/legal.md`).
 ## Build (Linux dev build, -j2; check `free -g` first)
 
 ```sh
-cmake -S gd-game-24/engine -B gd-game-24/engine/build/dev -G Ninja -DCMAKE_BUILD_TYPE=Release -DGD24_MODULE=ON
+FFMPEG_JOBS=2 gd-game-24/engine/build_ffmpeg.sh   # once: FFmpeg 7.1.5 LGPL + atrac3p (build_common.sh)
+cmake -S gd-game-24/engine -B gd-game-24/engine/build/dev -G Ninja -DCMAKE_BUILD_TYPE=Release -DGD24_MODULE=ON \
+  -DGD24_FFMPEG_DIR=$PWD/gd-game-24/engine/build/ffmpeg/linux/ffmpeg-prefix
 ninja -C gd-game-24/engine/build/dev -j2 gd24 gd24_module   # gd24 + gd-game-24.so
 ```
+
+gd24 has its own FFmpeg config (`engine/build_common.sh`, gd10's pattern:
+same version, tarball, SHA-256 and LGPL checks; only `--enable-decoder=atrac3p`);
+no other game's config changed.
+
+## Run
+
+```sh
+gd-game-24/engine/build/dev/gd24 "$ISO"     # status screen: songs, Confirm plays a preview,
+                                           # Select GAMEPADS, Start ENHANCED
+gd-game-24/tools/try_in_launcher.sh "gd-engine-launcher/build/gd24/Guitar Dream Universal Launcher" "$ISO"
+# the module in a development launcher while ready_to_play is false (nothing tracked changes)
+```
+
+Development aids: `GD24_KEYS="<ms>:<key>,..."`, `GD24_SCREENSHOT=<f.bmp>`
++ `GD24_SCREENSHOT_AT=<ms>,...`, `GD24_QUIT_AFTER=<ms>`, `GD24_SAVE_DIR=<dir>`
+(tests: keeps the real saves untouched), `GD24_VIRTUAL_PAD=1430:4748:guitar`,
+`GD24_INPUTLOG=1`, `GD24_AUDIO_BACKEND=<id>`.
 
 gd-engine-core comes in through `add_subdirectory` (the disc reader: .iso
 and .chd); its OpenAL sub-build runs its own jobs, so the first build uses
@@ -36,6 +57,10 @@ more than two cores for about a minute.
 ISO="$PWD/original_isos/PSP - Rock Band Unplugged (USA).iso"
 gd-game-24/engine/build/dev/gd24 --formattest "$ISO"   # "formattest: all 184 files parse"
 gd-game-24/engine/build/dev/gd24 --formattest <a .chd of the disc>   # same output
+gd-game-24/engine/build/dev/gd24 --audiotest "$ISO"   # 41 previews: 0 errors, fact lengths, RMS (2.5 s)
+gd-game-24/engine/build/dev/gd24 --charttest "$ISO"   # 41 songs x 4 tracks x 4 difficulties (0.2 s)
+gd-game-24/engine/build/dev/gd24 --charttest "$ISO" abc --notes   # one song's gems
+GD24_SAVE_DIR=/tmp/x gd-game-24/engine/build/dev/gd24 --inputtest  # virtual pads, 33 checks
 ```
 
 ## Decrypting EBOOT.BIN (done once, local only)
@@ -96,6 +121,11 @@ trusting its decompiled C.
   BSS), entry 0x08804114, gp 0x08B62060, module `"rockband"` [C].
 - Harmonix sources `../src/rock/beatmatch/*`, `../src/rock/utl/*`,
   `../src/rock/m2game/*` named in asserts (strings 0x08B4xxxx) [C].
+- Controls: the token table at 0x08b4ef38 (left right up down button1..4
+  start menu triggers; getter FUN_08932c24, string ids in BSS 0x08b5b4d0);
+  sceCtrlPeekBufferPositive is called at 0x088e38fc, sceCtrlReadLatch at
+  0x088e35d8 (code Ghidra did not make functions of; DumpAsm prints only
+  defined code there).
 - Key functions so far: FAT open by sector FUN_08a23f5c; song paths
   FUN_089f191c / FUN_089f1b30 / FUN_089f2648; ATRAC player FUN_089b65b4
   (sets up), FUN_089b5948 (decode loop). The `.ATM` song audio is

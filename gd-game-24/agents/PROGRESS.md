@@ -71,3 +71,42 @@ and a small GE-format mesh / texture renderer: +6-10 h. M0-M2 now about
 Song audio: the `.ATM` files are encrypted. Owner 11-17: no protection is
 ever broken, so the full 5-track audio is out of scope and the key work was
 dropped (D6); songs play their unencrypted preview AT3 from the disc.
+
+## GD24-002 lane B, 11-17 (about 3.5 h of agent time)
+
+Done, each committed:
+
+1. **The window**: `gd24 <disc>` and `gd-game-24.so` open an SDL window
+   (gd-engine-core's OpenGL 3 device presenting a 960x544 CPU canvas drawn
+   with SDL's software renderer and 8x8 font). Our own status screen: the
+   title from PARAM.SFO ("Rock Band Unplugged™", ULUS-10418 v1.00), the 41
+   songs + 14 tutorial tracks named from STR_<L>_MUSIC.TXT (title / artist
+   / album triples in folder order); ENHANCED basics (screen mode, with
+   GD24_FULLSCREEN as Big Picture; volume; song-name language) saved in
+   enhanced.txt; mouse. Runs in the dev launcher through
+   `tools/try_in_launcher.sh` (the launcher refuses ready_to_play: false
+   games; the script passes a git-ignored games.yaml marking it ready).
+   Screenshots looked at: the canvas and the real window (spectacle),
+   standalone and inside the launcher.
+2. **Previews**: `<SONG>_PREVIEW.AT3` through FFmpeg's atrac3p (gd24's own
+   FFmpeg config, gd10's pattern + atrac3p only), delay cut, fact length,
+   looped on a gd-engine-core audio output (miniaudio). `--audiotest`:
+   41/41, 0 decode errors, every length = the fact chunk (decoder gives
+   +368 samples past it for every song), RMS -13.9..-17.7 dB, 1,216 s in
+   2.5 s; played through the real device.
+3. **Controls**: `src/input` on gd10's model (PSP buttons from keyboard and
+   gamepads, 2 bindings per control, merged actions, gd10's guitar
+   detection, controllers.json); guitars play lanes 1-4 in a song and
+   confirm / go back in menus; the GAMEPADS screen (universal layout).
+   `--inputtest` with SDL virtual pads: 33/33. The PSP lane mapping is
+   [I] (FORMATS.md "Controls"): the defaults are not in a data table and
+   the tip glyphs are not decoded yet.
+4. **Chart reader** (once): `src/data/beatmatch` + `--charttest`: base
+   0x096E9A80 (FORMATS' 0x096E9800 estimate corrected), the four PART
+   tracks and their four difficulty vectors: 41/41 songs, 334,338 gems, one
+   time per tick in every list.
+
+Not done: the original highway (GD24-002's main part: the highway heap
+image, GE meshes / textures), playing a chart (autoplay, hit detection),
+tempo map / phrases / Overdrive objects, the controls' real defaults, the
+tutorials' charts, packaging (`build.sh` module recipe; not ready_to_play).
