@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "data/highway_assets.h"
 #include "data/psp_gfx.h"
 #include "data/str_file.h"
 #include "data/umd.h"
@@ -84,6 +85,31 @@ int highwayTest(const gd24::Umd& umd, const std::string& sheet) {
         const bool ok = n > 50 && (r > mx * 0.6) == bool(g.r) && (gg > mx * 0.6) == bool(g.g) && (b > mx * 0.6) == bool(g.b);
         std::printf("highwaytest: %s texture %-10s %dx%d %d bpp: %d saturated pixels, mean (%.0f %.0f %.0f): %s\n", ok ? "ok  " : "FAIL",
                     g.name, t->width, t->height, t->bpp, n, r, gg, b, g.colour);
+        failures += !ok;
+    }
+    // The models as the song screen uses them (mesh -> material -> texture
+    // links, the scale from the box) and the strike line's lane marks.
+    gd24::HighwayAssets hw;
+    if (!hw.load(umd, &error)) {
+        std::printf("highwaytest: FAIL models: %s\n", error.c_str()), ++failures;
+    } else {
+        for (const char* want : {"track_plane_A", "gem_4a", "gem_4b", "gem_4c", "gem_4d", "plate_4a", "beat_bar_a", "beat_bar2_a", "gem_4a_crash"}) {
+            const gd24::HwModel* m = hw.model(want);
+            if (!m) {
+                std::printf("highwaytest: FAIL model %s not found\n", want), ++failures;
+                continue;
+            }
+            std::printf("highwaytest: ok   model %-13s scale %.4f box (%.2f %.2f %.2f)..(%.2f %.2f %.2f):", want, double(m->scale), double(m->min[0]),
+                        double(m->min[1]), double(m->min[2]), double(m->max[0]), double(m->max[1]), double(m->max[2]));
+            for (const gd24::HwSubMesh& sub : m->subs)
+                std::printf(" %s/%s%s %zu v", sub.material.c_str(), sub.texture.empty() ? "-" : sub.texture.c_str(), sub.additive() ? " add" : "",
+                            sub.mesh.vertices.size());
+            std::printf("\n");
+        }
+        float lane[4], strike = 0;
+        const bool ok = hw.laneMarks(lane, strike);
+        std::printf("highwaytest: %s lane marks x %.3f %.3f %.3f %.3f, strike line y %.3f\n", ok ? "ok  " : "FAIL", double(lane[0]), double(lane[1]),
+                    double(lane[2]), double(lane[3]), double(strike));
         failures += !ok;
     }
     if (!sheet.empty()) {

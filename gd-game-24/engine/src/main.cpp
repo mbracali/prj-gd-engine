@@ -5,12 +5,17 @@
 // ../docs/FORMATS.md. Not playable yet (GD24-002, the first boot).
 //
 //   gd24 <disc>                  the game: for now our own status screen (the
-//                                disc's title and songs), ENHANCED and GAMEPADS
+//                                disc's title and songs), ENHANCED and GAMEPADS;
+//                                Confirm plays a song on the original highway
+//   gd24 <disc> --song <FOLDER> [--difficulty 0..3] [--track 0..3]
+//                                straight into a song (Easy..Expert; drums, bass, guitar, vocals)
 //   gd24 --formattest <disc>     every file the port reads, parsed; one line per failure
 //   gd24 --charttest <disc> [<song> | all] [--notes]
 //                                BEATMATCH.STR: difficulty images, gem lists, tempo-map check
 //   gd24 --highwaytest <disc> [--sheet <f.bmp>]
 //                                COMMON.STR's textures and meshes: the highway's pieces
+//   gd24 --synctest <disc> [<song>]
+//                                the preview's place in the chart: DTA (preview ...) vs onsets
 //   gd24 --inputtest             the input layer with virtual controllers (no disc)
 //   gd24 --audiotest <disc> [<song> | all] [--play]
 //                                decodes the song previews (ATRAC3plus) and checks them
@@ -18,6 +23,7 @@
 #include <SDL3/SDL_main.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -29,6 +35,7 @@
 #include "tests/audiotest.h"
 #include "tests/charttest.h"
 #include "tests/highwaytest.h"
+#include "tests/synctest.h"
 #include "tests/inputtest.h"
 
 namespace {
@@ -115,19 +122,24 @@ int formatTest(const gd24::Umd& umd) {
 }  // namespace
 
 int gd24Main(int argc, char** argv) {
-    bool formattest = false, audiotest = false, charttest = false, highwaytest = false, play = false, notes = false;
+    bool formattest = false, audiotest = false, charttest = false, highwaytest = false, synctest = false, play = false, notes = false;
     std::string sheet;
-    std::string disc, song;
+    std::string disc, song, playSong;
+    int difficulty = -1, track = -1;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--formattest") formattest = true;
         else if (a == "--audiotest") audiotest = true;
         else if (a == "--charttest") charttest = true;
         else if (a == "--highwaytest") highwaytest = true;
+        else if (a == "--synctest") synctest = true;
         else if (a == "--sheet" && i + 1 < argc) sheet = argv[++i];
         else if (a == "--play") play = true;
         else if (a == "--notes") notes = true;
-        else if ((audiotest || charttest) && !disc.empty() && !a.empty() && a[0] != '-') song = a;
+        else if (a == "--song" && i + 1 < argc) playSong = argv[++i];
+        else if (a == "--difficulty" && i + 1 < argc) difficulty = std::atoi(argv[++i]);
+        else if (a == "--track" && i + 1 < argc) track = std::atoi(argv[++i]);
+        else if ((audiotest || charttest || synctest) && !disc.empty() && !a.empty() && a[0] != '-') song = a;
         else if (a == "--inputtest") return inputTest();
         else if (a == "--version") return std::printf("gd24 %s\n", GD24_VERSION), 0;
         else if (!a.empty() && a[0] != '-') disc = a;
@@ -147,9 +159,11 @@ int gd24Main(int argc, char** argv) {
     if (audiotest) return audioTest(*umd, song, play);
     if (charttest) return chartTest(*umd, song, notes);
     if (highwaytest) return highwayTest(*umd, sheet);
+    if (synctest) return gd24::syncTest(*umd, song);
     umd.reset();
     Options opt;
     opt.disc = disc;
+    opt.song = playSong, opt.difficulty = difficulty, opt.track = track;
     App app;
     return app.run(opt);
 }

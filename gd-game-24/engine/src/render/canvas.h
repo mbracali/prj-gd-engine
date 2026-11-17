@@ -11,6 +11,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -30,6 +31,7 @@ public:
     void shutdown();
 
     void clear(Rgba c);
+    void clearTransparent();  // an overlay on a 3D picture (present3d)
     void fill(float x, float y, float w, float h, Rgba c);
     void frame(float x, float y, float w, float h, Rgba c);
     // Text with the 8 x 8 font at `scale` (1: 8 px glyphs); non-ASCII letters
@@ -38,6 +40,11 @@ public:
     static float textWidth(const std::string& s, float scale = 2);
     // The picture to the window.
     void present();
+    // A 3D picture with the canvas on top: `scene` draws into its own target
+    // (the canvas texture given to draw over it) and returns what to show.
+    using Scene = std::function<gd::core::render::Texture(gd::core::render::Device&, gd::core::render::Texture canvas)>;
+    void present3d(const Scene& scene);
+    gd::core::render::Device* device() { return dev_.get(); }
     // The current picture as a BMP (development aid: GD24_SCREENSHOT).
     bool save(const std::string& path) const;
     // Window pixels to canvas units.
@@ -49,4 +56,6 @@ private:
     SDL_Renderer* soft_ = nullptr;
     std::unique_ptr<gd::core::render::Device> dev_;
     gd::core::render::Texture tex_{};
+    gd::core::render::Texture shown3d_{};  // the last 3D picture (save() reads it back)
+    bool last3d_ = false;
 };

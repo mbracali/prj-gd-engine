@@ -20,23 +20,31 @@ target_sources(gd24 PRIVATE
   src/audio/at3_preview.cpp
   src/audio/audio_out.cpp
   src/data/beatmatch.cpp
+  src/data/dta.cpp
+  src/data/highway_assets.cpp
   src/data/json.cpp
   src/data/param_sfo.cpp
   src/data/psp_gfx.cpp
+  src/data/song_config.cpp
   src/data/song_list.cpp
   src/data/str_file.cpp
   src/data/text_table.cpp
   src/data/umd.cpp
   src/devaids/dev_aids.cpp
+  src/game/preview_sync.cpp
+  src/game/song_play.cpp
   src/input/input.cpp
   src/platform/paths.cpp
   src/platform/settings.cpp
   src/render/canvas.cpp
+  src/render/highway_renderer.cpp
   src/tests/audiotest.cpp
   src/tests/charttest.cpp
   src/tests/highwaytest.cpp
   src/tests/inputtest.cpp
+  src/tests/synctest.cpp
   src/ui/gamepads_screen.cpp
+  src/ui/song_screen.cpp
 )
 target_include_directories(gd24 PRIVATE src)
 target_compile_definitions(gd24 PRIVATE GD24_VERSION="${PROJECT_VERSION}")

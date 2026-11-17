@@ -116,21 +116,35 @@ int App::run(const Options& opt) {
     if (const char* v = SDL_getenv("GD24_VIRTUAL_PAD")) SDL_Log("input: virtual pad %s: id %u", v, unsigned(Input::attachVirtualPad(v)));
     DevAids aids;
     startNs_ = SDL_GetTicksNS();
+    if (opt.difficulty >= 0) difficulty_ = std::clamp(opt.difficulty, 0, 3);
+    if (!opt.song.empty()) {
+        for (size_t i = 0; i < songs_.size(); ++i)
+            if (SDL_strcasecmp(songs_[i].folder.c_str(), opt.song.c_str()) == 0) sel_ = int(i), startSong(int(i));
+        if (screen_ != Screen::Song) SDL_Log("gd24: --song %s: not on the disc", opt.song.c_str());
+    }
     while (!quit_) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) handleEvent(e);
         const uint64_t ms = (SDL_GetTicksNS() - startNs_) / 1000000;
         for (const SDL_Event& k : aids.keysDue(ms)) handleEvent(k);
-        pollPreview();
-        draw();
+        if (screen_ == Screen::Song) {
+            song_.update(audio_);
+            song_.drawOverlay(canvas_);
+            canvas_.present3d([this](gr::Device& dev, gr::Texture overlay) { return song_.draw3d(dev, overlay); });
+        } else {
+            pollPreview();
+            draw();
+            canvas_.present();
+        }
         aids.afterDraw(ms, canvas_);
-        canvas_.present();
         if (aids.quitDue(ms)) quit_ = true;
     }
+    if (screen_ == Screen::Song) song_.stop(audio_);
     if (decoding_.valid()) decoding_.wait();
     if (screen_ == Screen::Gamepads) gamepads_.exit();
     input_.close();
     audio_.close();
+    song_.release();
     canvas_.shutdown();
     SDL_DestroyWindow(window_);
     window_ = nullptr;
@@ -160,6 +174,20 @@ void App::handleEvent(const SDL_Event& e) {
     // Keys and controllers: the input layer's PSP buttons (input/input.h).
     events_.clear();
     input_.handle(e, events_);
+    if (screen_ == Screen::Song) {
+        for (const InputEvent& ev : events_) {
+            if (SDL_getenv("GD24_INPUTLOG")) SDL_Log("input: %s %s", actionName(ev.action), ev.down ? "down" : "up");
+            if (!song_.action(gameplayOf(ev.action), ev.down, audio_)) {
+                screen_ = Screen::Status, input_.setInGame(false), status_.clear();
+                char line[160];
+                std::snprintf(line, sizeof line, "Last song: %d hits, %d misses, %d wrong presses, best streak %d", song_.play().hits(),
+                              song_.play().misses(), song_.play().wrongPresses(), song_.play().bestStreak());
+                status_ = line;
+                break;
+            }
+        }
+        return;
+    }
     for (const InputEvent& ev : events_) {
         if (!ev.down) continue;
         if (SDL_getenv("GD24_INPUTLOG")) SDL_Log("input: %s", actionName(ev.action));
@@ -172,6 +200,12 @@ void App::handleEvent(const SDL_Event& e) {
         case Action::Circle: menu(Menu::Back); break;
         case Action::Start: menu(Menu::Start); break;
         case Action::Select: menu(Menu::Select); break;
+        case Action::Square:
+            if (screen_ == Screen::Status && !songs_.empty()) playPreview(sel_);
+            break;
+        case Action::Triangle:
+            if (screen_ == Screen::Status) difficulty_ = (difficulty_ + 1) % 4;
+            break;
         default: break;
         }
     }
@@ -199,7 +233,7 @@ void App::menu(Menu m) {
         else if (m == Menu::Right && n) sel_ = std::min(n - 1, sel_ + kRows);
         else if (m == Menu::Start) screen_ = Screen::Enhanced, esel_ = 0;
         else if (m == Menu::Select) openGamepads();
-        else if (m == Menu::Confirm && n) playPreview(sel_);
+        else if (m == Menu::Confirm && n) startSong(sel_);
         else if (m == Menu::Back) audio_.stop(), playingSong_ = -1, status_.clear();
         if (sel_ < scroll_) scroll_ = sel_;
         if (sel_ >= scroll_ + kRows) scroll_ = sel_ - kRows + 1;
@@ -257,6 +291,21 @@ void App::playPreview(int song) {
                 clip->errors, double(SDL_GetTicksNS() - t0) / 1e6);
         return clip;
     });
+}
+
+// A song on the original highway (ui/song_screen.h) with its preview.
+void App::startSong(int song) {
+    if (decoding_.valid()) decoding_.wait();
+    audio_.stop();
+    playingSong_ = decodingSong_ = -1;
+    std::string error;
+    if (!song_.start(*umd_, songs_[size_t(song)], difficulty_, opt_.track, error)) {
+        status_ = songs_[size_t(song)].title + ": " + error;
+        SDL_Log("song: %s", status_.c_str());
+        return;
+    }
+    screen_ = Screen::Song;
+    input_.setInGame(true);
 }
 
 void App::pollPreview() {
@@ -332,7 +381,7 @@ std::string App::songCounts() const {
 void App::drawStatus() {
     canvas_.text(32, 20, title_, kAccent, 3);
     canvas_.text(32, 52, discId_ + "  v" + discVersion_ + "   " + songCounts(), kDim, 2);
-    canvas_.text(32, 76, std::string(app::kProgram) + " " + app::kVersion + ": not playable yet (first boot in progress)", kMuted, 2);
+    canvas_.text(32, 76, std::string(app::kProgram) + " " + app::kVersion + ": first boot, preview audio", kMuted, 2);
     canvas_.fill(kListX - 8, kListY - 6, Canvas::kW - 2 * kListX + 16, kRows * kRowH + 12, kPanel);
     for (int i = 0; i < kRows && scroll_ + i < int(songs_.size()); ++i) {
         const int idx = scroll_ + i;
@@ -363,7 +412,9 @@ void App::drawStatus() {
         std::snprintf(t, sizeof t, "%5.1f s", audio_.positionSec());
         canvas_.text(Canvas::kW - 32 - Canvas::textWidth(t, 2), kListY + kRows * kRowH + 34, t, kDim, 2);
     }
-    drawHelp({{"Confirm", "preview"}, {"Back", "stop"}, {"Select", "GAMEPADS"}, {"Start", "ENHANCED"}});
+    const std::string diff = std::string("Difficulty: ") + SongScreen::difficultyName(difficulty_);
+    canvas_.text(Canvas::kW - 32 - Canvas::textWidth(diff, 2), kListY + kRows * kRowH + 12, diff, kAccent, 2);
+    drawHelp({{"Confirm", "play"}, {"Square", "preview"}, {"Triangle", "difficulty"}, {"Select", "GAMEPADS"}, {"Start", "ENHANCED"}});
 }
 
 void App::drawEnhanced() {

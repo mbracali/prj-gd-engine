@@ -41,12 +41,13 @@ struct PspTexture {
 struct PspVertex {
     float u = 0, v = 0;
     float x = 0, y = 0, z = 0;  // normalized for 8 / 16-bit formats
-    uint32_t color = 0xFFFFFFFF;
+    uint32_t color = 0xFFFFFFFF;  // ABGR8888 (R in the low byte), from the GE's 565 / 5551 / 4444 / 8888
 };
 
 struct PspMesh {
     std::string name;  // the nearest name before the block [I]
     uint32_t address = 0, vtype = 0;
+    uint32_t material = 0xFFFFFFFF;  // ABGR: the list's ambient colour / alpha (vertices without a colour)
     struct Prim {
         int type = 0, count = 0;  // GE: 3 triangles, 4 strip, 5 fan
     };
@@ -54,6 +55,11 @@ struct PspMesh {
     std::vector<PspVertex> vertices;
 };
 
+// One texture object / mesh block at `address` (false: not one); `strict`
+// also wants the header words of the common form (a search over raw memory).
+bool decodeTexture(const HeapChunk& c, uint32_t address, PspTexture& tex);
+bool decodeMesh(const HeapChunk& c, uint32_t address, PspMesh& m, bool strict = false);
+// Every one in the chunk, found by their headers alone.
 std::vector<PspTexture> findTextures(const HeapChunk& c);
 std::vector<PspMesh> findMeshes(const HeapChunk& c);
 

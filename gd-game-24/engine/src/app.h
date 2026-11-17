@@ -19,6 +19,7 @@
 #include "platform/settings.h"
 #include "render/canvas.h"
 #include "ui/gamepads_screen.h"
+#include "ui/song_screen.h"
 
 namespace gd24 {
 class Umd;
@@ -26,6 +27,9 @@ class Umd;
 
 struct Options {
     std::string disc;
+    std::string song;     // --song <FOLDER>: straight into that song
+    int difficulty = -1;  // --difficulty 0..3 (Easy..Expert)
+    int track = -1;       // --track 0..3 (drums, bass, guitar, vocals; default the song's initial_track)
 };
 
 class App {
@@ -39,7 +43,7 @@ public:
     enum class Menu { Up, Down, Left, Right, Confirm, Back, Start, Select };
 
 private:
-    enum class Screen { Status, Enhanced, Gamepads };
+    enum class Screen { Status, Enhanced, Gamepads, Song };
 
     bool openWindow(std::string& error);
     void applyScreenMode();
@@ -53,6 +57,7 @@ private:
     void drawHelp(const std::vector<std::pair<std::string, std::string>>& items);
     void reloadSongs();
     void playPreview(int song);
+    void startSong(int song);
     void pollPreview();
     void applyVolume();
     std::string songCounts() const;
@@ -64,6 +69,8 @@ private:
     Settings settings_;
     Input input_;
     GamepadsScreen gamepads_{input_};
+    SongScreen song_;
+    int difficulty_ = 3;  // Expert
     std::vector<InputEvent> events_;
     SDL_Window* window_ = nullptr;
     Canvas canvas_;

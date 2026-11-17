@@ -81,6 +81,11 @@ void Canvas::clear(Rgba c) {
     SDL_RenderClear(soft_);
 }
 
+void Canvas::clearTransparent() {
+    SDL_SetRenderDrawColor(soft_, 0, 0, 0, 0);
+    SDL_RenderClear(soft_);
+}
+
 void Canvas::fill(float x, float y, float w, float h, Rgba c) {
     SDL_SetRenderDrawColor(soft_, c.r, c.g, c.b, c.a);
     const SDL_FRect r{x, y, w, h};
@@ -112,10 +117,38 @@ void Canvas::present() {
     dev_->updateTexture(gr::TextureRegion{tex_}, kW, kH, surface_->pixels, size_t(surface_->pitch));
     dev_->present(tex_, gr::Rect{0, 0, kW, kH}, gr::Filter::Linear);
     dev_->endFrame();
+    last3d_ = false;
+}
+
+void Canvas::present3d(const Scene& scene) {
+    SDL_FlushRenderer(soft_);
+    dev_->beginFrame();
+    dev_->updateTexture(gr::TextureRegion{tex_}, kW, kH, surface_->pixels, size_t(surface_->pitch));
+    shown3d_ = scene(*dev_, tex_);
+    const gr::TextureDesc d = dev_->textureDesc(shown3d_);
+    dev_->present(shown3d_, gr::Rect{0, 0, d.width, d.height}, gr::Filter::Linear);
+    dev_->endFrame();
+    last3d_ = true;
 }
 
 bool Canvas::save(const std::string& path) const {
     SDL_FlushRenderer(soft_);
+    if (last3d_ && shown3d_) {
+        // The 3D picture as shown (rows come back top-down).
+        const gr::TextureDesc d = dev_->textureDesc(shown3d_);
+        const gr::Readback rb = dev_->readTexture(shown3d_, gr::Rect{0, 0, d.width, d.height});
+        SDL_Surface* s = rb ? SDL_CreateSurface(d.width, d.height, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        bool ok = s && dev_->readbackData(rb, s->pixels, size_t(d.width) * size_t(d.height) * 4);
+        if (s) {
+            for (int y = 0; ok && y < d.height; ++y) {  // opaque for the BMP
+                uint8_t* row = static_cast<uint8_t*>(s->pixels) + size_t(y) * size_t(s->pitch);
+                for (int x = 0; x < d.width; ++x) row[x * 4 + 3] = 255;
+            }
+            ok = ok && SDL_SaveBMP(s, path.c_str());
+            SDL_DestroySurface(s);
+        }
+        return ok;
+    }
     return SDL_SaveBMP(surface_, path.c_str());
 }
 
