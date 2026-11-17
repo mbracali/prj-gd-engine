@@ -148,6 +148,31 @@ void HudWidgets::addNatives(qs::Vm& vm, ui::UiSystem& ui) {
         widgets_.push_back(std::move(w));
         return true;
     });
+    // GetHUDMessageParent player = <n>: player n's message container ->
+    // message_parent (its HUD parent's `message` child: hud_1g's g1 600x50
+    // at (50, -140), hud_2g's g1 / g2); false without one
+    // (hud_create_message then returns) [C scripts hud_messages.qb; I: the
+    // container the C returns].
+    // GD10_HUD_MESSAGES_LEGACY=1: unhandled as before (GD10-068).
+    if (!SDL_getenv("GD10_HUD_MESSAGES_LEGACY"))
+        vm.addNative("GetHUDMessageParent", [this](Vm& v, qs::ScriptRun& run, qb::Struct& p) {
+            const qb::Value* pl = Vm::param(p, K("player"));
+            const int n = pl ? int(pl->number()) : 1;
+            const qb::Value* ps = v.global(qbkey::key("player" + std::to_string(n) + "_status"));
+            const qb::Value* hp = ps && ps->st ? ps->st->find(K("hud_parent")) : nullptr;
+            ui::Element* root = ui_ ? ui_->find(K("hud_root")) : nullptr;
+            ui::Element* parent = root && hp && hp->key ? ui_->descAlias(*root, hp->key) : nullptr;
+            if (!parent) return false;
+            for (const auto& c : parent->children)
+                if (c->localId == K("message")) {
+                    if (!run.frames.empty()) {
+                        if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
+                        Vm::set(*run.frames.back().locals, K("message_parent"), Vm::makeKey(c->id));
+                    }
+                    return true;
+                }
+            return false;
+        });
 }
 
 double HudWidgets::input(const Widget& w, const std::array<Values, 4>& players, double nowMs, const Band& band) const {

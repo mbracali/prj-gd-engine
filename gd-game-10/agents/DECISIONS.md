@@ -686,3 +686,27 @@ that two-player mode (gh4's MULTIPLAYER lobby stops in the character hub);
 GD10_HUDLOG=1 logs each widget.
 Why: GD10-067.
 Undo: GD10_HUD2P_LEGACY=1 (ui/song_hooks.cpp beginHud).
+
+## D118. gh4's in-song messages: the C's triggers spawn the scripts [C 0x82118088, 0x82119280, 0x8211B468; I the rest] (2026-11-17, lane A)
+
+What: with gh4's HUD up, SongHooks::frameMessages spawns, per player,
+hot_start_achieved {player} when the streak reaches hot_start_min_streak
+(25) and no note was missed yet (0x82118088 calls it when the player's
+hot-start flag is set and the old streak was under the minimum; the flag
+read as "no miss yet" [I]); hud_show_note_streak_combo {player combo} when
+the streak passes 50 (combo 50) or a hundred past it (0x82119280: old < 50
+<= new, or new % 100 < old % 100; 0x8211B468 the same as == 50 / a
+hundred); show_star_power_ready {player_status} when Star Power reaches 50
+out of Star Power [I: GH3's rule]. The scripts (hud_create_message,
+hud_wait_and_create_message, hud_message_flame_style*) make the text in the
+player's `message` container: GetHUDMessageParent [I: its HUD parent's
+`message` child]. Hud2D / Hud2P draw no alerts then.
+DestroyScreenElement preserve_parent destroys the children only (the
+script runs on that container) [I]. A desc sprite's `material` takes the
+material's first texture; one not loaded is not drawn (was a white box);
+the HUD fire's materials (fire_2D_Notestreak_Small, fire_2D_Starpower) are
+in no pak the port loads (not found in any disc pak by key), so the flames
+are missing.
+Why: GD10-068.
+Undo: GD10_HUD_MESSAGES_LEGACY=1 (song_hooks.cpp, hud_widgets.cpp);
+GD10_PRESERVE_PARENT_LEGACY=1, GD10_UI_MATERIAL_LEGACY=1 (ui_system.cpp).

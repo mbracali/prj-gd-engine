@@ -34,6 +34,8 @@ public:
     void setDevilFinish(bool on) { devilFinish_ = on; }
     // gh4's own HUD is up (GD10-067): only the alerts and prompts are drawn here.
     void setAlertsOnly(bool on) { alertsOnly_ = on; }
+    // gh4's own messages up (GD10-068): GH3's alerts not drawn either.
+    void setNoAlerts(bool on) { noAlerts_ = on; }
     // The song (current_song): the boss's death icon and death meter end time.
     void setSong(uint32_t songKey) { song_ = songKey; }
     void update(const Match& m, double nowMs);
@@ -120,6 +122,7 @@ public:
 private:
     bool started_ = false;
     bool alertsOnly_ = false;
+    bool noAlerts_ = false;
     double startMs_ = 0;
     uint32_t song_ = 0;
     // Battle pieces drawn over the HUD (battlemode_container) [C scripts

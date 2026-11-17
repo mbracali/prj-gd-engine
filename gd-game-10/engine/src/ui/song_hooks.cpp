@@ -1079,6 +1079,13 @@ void SongHooks::beginHud(SongScreen& s) {
     }
     if (players_ == 1) s.hud().setAlertsOnly(gh4Hud_);
     else s.setHud2pAlertsOnly(gh4Hud_);
+    // gh4's messages (GD10-068) replace GH3's alerts ("<n> Note Streak!",
+    // "Star Power Ready") under its HUD. GD10_HUD_MESSAGES_LEGACY=1: GH3's alerts as before.
+    static const bool msgLegacy = SDL_getenv("GD10_HUD_MESSAGES_LEGACY") != nullptr;
+    gh4Messages_ = gh4Hud_ && !msgLegacy;
+    msgRun_ = {0, 0}, msgSp_ = {0, 0}, msgMissed_ = {false, false};
+    if (players_ == 1) s.hud().setNoAlerts(gh4Messages_);
+    else s.setHud2pNoAlerts(gh4Messages_);
     const qb::Value* lay = vm.global(K("g_hud_2d_struct_used"));
     const qb::Value* dn = lay && lay->st ? lay->st->find(K("desc_interface")) : nullptr;
     SDL_Log("hud: gh4 HUD %s (layout %s, %d players), %zu widgets", gh4Hud_ ? "up" : "NOT built", dn ? dn->str.c_str() : "none", players_, hud_.widgets());
@@ -1134,6 +1141,7 @@ void SongHooks::frameHud(SongScreen& s, double now) {
         band.faceoffRatio = sum > 0 ? float((v[0].score - v[1].score) / sum) : 0.0f;
     }
     hud_.update(v, hudPlayers_, now, band);
+    if (gh4Messages_) frameMessages(s, v, now);
     // The C's player1_streak_started / _ended with the streak over / under
     // 10 (0x82118710), starpower_bulbs_unhide / _hide across 50 (the
     // drain's hide: star_power_activate_and_drain) [C; I: raised on a change].
@@ -1199,6 +1207,55 @@ void SongHooks::frameHud(SongScreen& s, double now) {
             Vm::set(p, K("time"), Vm::makeFloat(0.25f));
             vm.run(K("SetScreenElementProps"), p);
         }
+    }
+}
+
+void SongHooks::frameMessages(SongScreen& s, const std::array<HudWidgets::Values, 4>& v, double now) {
+    // gh4's in-song messages (GD10-068), as the C spawns their scripts; the
+    // scripts make the text (hud_create_message under the player's
+    // `message` container, GetHUDMessageParent) and its style (the fire
+    // flames, hud_message_flame_style*) and sounds:
+    // - hot_start_achieved player = <n>: the streak reaching
+    //   hot_start_min_streak (25) with no note missed yet [C 0x82118088; I:
+    //   the C's per-player flag = no miss so far];
+    // - hud_show_note_streak_combo player combo: the streak passing 50
+    //   (combo 50), then each hundred past it (combo = the hundred) [C
+    //   0x82119280, 0x8211B468];
+    // - show_star_power_ready player_status = player<n>_status: the Star
+    //   Power reaching 50 out of Star Power [I: GH3's rule, as Hud2D's].
+    Vm& vm = fe_.vm();
+    (void)s;
+    const int minStreak = int(Vm::number(vm.global(K("hot_start_min_streak")), 25));
+    for (int p = 0; p < hudPlayers_; ++p) {
+        const HudWidgets::Values& a = v[size_t(p)];
+        const int run = a.streak, prev = msgRun_[size_t(p)];
+        if (a.missedNote) msgMissed_[size_t(p)] = true;
+        qb::Struct q;
+        Vm::set(q, K("player"), Vm::makeInt(p + 1));
+        if (!msgMissed_[size_t(p)] && prev < minStreak && run >= minStreak) {
+            vm.spawn(K("hot_start_achieved"), q);
+            ++messages_;
+            SDL_Log("hud message: hot start, player %d (streak %d) at %.0f ms", p + 1, run, now);
+        }
+        int combo = 0;
+        if (prev < 50 && run > 49) combo = 50;
+        else if (prev > 50 && run % 100 < prev % 100 && run > prev) combo = run - run % 100;
+        if (combo) {
+            qb::Struct c = q;
+            Vm::set(c, K("combo"), Vm::makeInt(combo));
+            vm.spawn(K("hud_show_note_streak_combo"), c);
+            ++messages_;
+            SDL_Log("hud message: %d note streak, player %d at %.0f ms", combo, p + 1, now);
+        }
+        msgRun_[size_t(p)] = run;
+        if (!a.spActive && a.starPower >= 50 && msgSp_[size_t(p)] < 50) {
+            qb::Struct r;
+            Vm::set(r, K("player_status"), Vm::makeKey(qbkey::key("player" + std::to_string(p + 1) + "_status")));
+            vm.spawn(K("show_star_power_ready"), r);
+            ++messages_;
+            SDL_Log("hud message: Star Power ready, player %d at %.0f ms", p + 1, now);
+        }
+        msgSp_[size_t(p)] = a.starPower;
     }
 }
 

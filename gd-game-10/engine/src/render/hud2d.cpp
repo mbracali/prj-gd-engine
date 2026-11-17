@@ -425,6 +425,7 @@ void Hud2D::draw(Canvas& c, const TextureCache& tex, double now) const {
 
     // gh4's HUD up: the alerts' sprites only (z 45 and over).
     if (alertsOnly_) items.erase(std::remove_if(items.begin(), items.end(), [](const Item& it) { return it.z < 45; }), items.end());
+    if (alertsOnly_ && noAlerts_) items.clear();  // gh4 draws its HUD and messages (GD10-068)
     std::stable_sort(items.begin(), items.end(), [](const Item& x, const Item& y) { return x.z < y.z; });
     std::vector<Vertex> v;
     for (const Item& it : items) {
@@ -454,6 +455,7 @@ void Hud2D::draw(Canvas& c, const TextureCache& tex, double now) const {
 
     if (!text_) return;
     if (alertsOnly_) {
+        if (noAlerts_) return;
         if (comboText_.running(now)) {
             char b[48];
             std::snprintf(b, sizeof b, "%d Note Streak!", combo_);

@@ -7,6 +7,7 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ### Fixed
 - Face-off and Pro Face-off use Guitar Hero: Metallica's own two-player HUD (the face-off meter with both scores, multipliers, streaks and Star Power).
+- In-song messages in Guitar Hero: Metallica's own style: Hot Start!, note streaks and Star Power Ready.
 
 ## [0.0.2] - 2026-11-16
 

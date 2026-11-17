@@ -231,6 +231,11 @@ Element* UiSystem::resolve(const qb::Value* v) const {
     return nullptr;
 }
 
+static bool materialLegacy() {
+    static const bool on = SDL_getenv("GD10_UI_MATERIAL_LEGACY") != nullptr;
+    return on;
+}
+
 void UiSystem::setTexture(Element& e, uint32_t key) {
     e.texture = key;
     const uint32_t ctx = assetContexts_.empty() ? 0 : assetContexts_.back();
@@ -339,6 +344,17 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         else if (n == K("rot_angle")) e.rot = v.number();
         else if (n == K("relative_rot_angle")) e.rot += v.number();
         else if (n == K("texture")) newTexture = v.key;
+        else if (n == K("material") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr) && !materialLegacy()) {
+            // A sprite's material (the HUD messages' fire, hud_message_fire's
+            // fire_2D_Notestreak_Small / fire_2D_Starpower): its first
+            // texture, still (GD10-068) [C data; I: the material's own
+            // animation not drawn]. GD10_UI_MATERIAL_LEGACY=1: ignored as before.
+            // One not loaded (the fire's are on no pak the port loads) is not
+            // drawn: it was a plain white rectangle [I].
+            if (const uint32_t t = tex_.materialTexture(v.key)) newTexture = t, e.missingMaterial = 0;
+            else if (v.key) e.missingMaterial = v.key;
+            if (e.missingMaterial && SDL_getenv("GD10_HUDLOG")) SDL_Log("ui: material %s has no texture", qbkey::name(v.key).c_str());
+        }
         else if (n == K("blend") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr))
             e.blend = v.key == K("add") ? 1 : (v.key == K("subtract") || v.key == K("sub")) ? 2 : 0;
         else if (n == K("font")) e.font = v.key;
@@ -1399,7 +1415,7 @@ void UiSystem::draw(Canvas& c) {
             const Vertex q[6] = {a, b, cc, a, cc, d};
             c.draw(q, 6, int(id.id), e.blend == 1 ? Blend::Add : e.blend == 2 ? Blend::Sub : Blend::Alpha);
             ++stats_.spritesDrawn;
-        } else if (e.type == kSprite && !e.texture && e.w > 0 && e.h > 0) {
+        } else if (e.type == kSprite && !e.texture && e.w > 0 && e.h > 0 && !e.missingMaterial) {
             // A sprite without a texture is a plain rectangle in its colour
             // (the detailed stats' paper and row highlights) [I].
             const float w = e.w * it.wsx, h = e.h * it.wsy;
@@ -2190,7 +2206,13 @@ void UiSystem::addNatives() {
     vm_.addNative("DestroyScreenElement", [this](Vm&, ScriptRun&, qb::Struct& p) {
         Element* e = resolve(Vm::param(p, K("id")));
         if (!e) return false;
-        if (e == root_.get() || Vm::flag(p, K("dont_recurse"))) {
+        // preserve_parent: its children only, the element and the scripts
+        // running on it stay (hud_wait_and_create_message empties the
+        // player's message container, then makes the new message in it:
+        // destroying the container killed the script, GD10-068) [C scripts; I].
+        // GD10_PRESERVE_PARENT_LEGACY=1: the element destroyed as before.
+        static const bool ppLegacy = SDL_getenv("GD10_PRESERVE_PARENT_LEGACY") != nullptr;
+        if (e == root_.get() || Vm::flag(p, K("dont_recurse")) || (!ppLegacy && Vm::flag(p, K("preserve_parent")))) {
             while (!e->children.empty()) destroy(e->children.back().get());
         } else {
             destroy(e);

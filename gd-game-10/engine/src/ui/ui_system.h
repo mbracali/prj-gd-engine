@@ -52,6 +52,7 @@ struct Element {
     bool zGiven = false;  // without its own z_priority an element draws at its parent's [I]
     std::array<uint8_t, 4> rgba{255, 255, 255, 255};
     uint32_t texture = 0, font = 0;
+    uint32_t missingMaterial = 0;  // a material with no texture loaded: not drawn (GD10-068)
     uint32_t texContext = 0;  // the asset context the texture was set under (PushAssetContext), 0: global
     std::string text;
     bool hidden = false, flipH = false, flipV = false, notFocusable = false, blockEvents = false;

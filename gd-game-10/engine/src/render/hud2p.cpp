@@ -534,6 +534,7 @@ void Hud2P::draw(Canvas& c, const TextureCache& tex, const Match& m, double now)
     }
     // The alerts' glow burst (z 50) and lightning (800x100 at the text - (0,20), z 45) [C scripts].
     for (const Alerts& al : alerts_) {
+        if (noAlerts_) break;
         if (al.glow.running(now)) {
             const HudAnim::Props g = al.glow.at(now);
             float w = 64, h = 64;
@@ -574,7 +575,7 @@ void Hud2P::draw(Canvas& c, const TextureCache& tex, const Match& m, double now)
             }
         }
     }
-    for (int p = 0; p < 2; ++p) {
+    for (int p = 0; p < 2 && !noAlerts_; ++p) {
         const Alerts& al = alerts_[size_t(p)];
         char b[48];
         std::snprintf(b, sizeof b, "%d Note Streak!", al.comboN);
