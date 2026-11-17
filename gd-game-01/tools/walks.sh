@@ -264,31 +264,32 @@ walk_easy_chords() {
 }
 
 # Enhanced > Graphics Backend / Audio Backend (GDCORE-006): a value the build
-# does not offer is dropped at start (local); the two rows are the first of
-# PERFORMANCE & GRAPHICS; Right steps Graphics to SDL3, then Vulkan (each
-# change asks Restart Now / Later: Esc is Later), the Audio dropdown picks
-# OpenAL (Later again); MODES > Steam Deck keeps both; the next start reads
-# them (the "backends:" log line). Then Restart Now restarts at once.
+# does not offer is dropped at start (the default: Vulkan on Linux, GDALL-050;
+# the walks run on Linux); the two rows are the first of PERFORMANCE &
+# GRAPHICS (local, SDL3, Vulkan, OpenGL3); Right steps Graphics to OpenGL3,
+# then local (each change asks Restart Now / Later: Esc is Later), the Audio
+# dropdown picks OpenAL (Later again); MODES > Steam Deck keeps both; the next
+# start reads them (the "backends:" log line). Then Restart Now restarts at once.
 walk_enhanced_backends() {
   local s keys="" keep="$seed" i
   s="$work/enhanced_backends_seed" && rm -rf "$s" && cp -r "$seed" "$s"
   printf '{"graphics_backend":"metal","audio_backend":"nope"}\n' > "$s/gd-engine/gd01/enhanced.json"
   seed="$s"
   for i in $(seq 0 13); do keys+="$((2500 + i * 100)):keyDown,"; done  # down to Graphics Backend
-  keys+="4500:keyRight,4800:keyEscape,5100:keyRight,5400:keyEscape,"  # SDL3, Later; Vulkan, Later
+  keys+="4500:keyRight,4800:keyEscape,5100:keyRight,5400:keyEscape,"  # OpenGL3, Later; local, Later
   keys+="5700:keyDown,6000:keyReturn,6200:keyDown,6400:keyDown,6700:keyReturn,7000:keyEscape,"  # dropdown: OpenAL, Later
   for i in $(seq 0 13); do keys+="$((7300 + i * 100)):keyUp,"; done  # up to MODES > Steam Deck
   run enhanced_backends 11000 "${keys}9800:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings
-  result enhanced_backends "$(( $(has enhanced_backends "backends: graphics local, audio local") && \
+  result enhanced_backends "$(( $(has enhanced_backends "backends: graphics vulkan, audio local") && \
     ! $(has enhanced_backends "restart:") && \
-    $(json "$(save enhanced_backends)/enhanced.json" "d['graphics_backend'] == 'vulkan' and d['audio_backend'] == 'openal' and d['max_fps'] == '60'") ))" \
-    "unknown backends dropped; Graphics Vulkan, Audio OpenAL saved; Steam Deck mode keeps them"
+    $(json "$(save enhanced_backends)/enhanced.json" "d['graphics_backend'] == 'local' and d['audio_backend'] == 'openal' and d['max_fps'] == '60'") ))" \
+    "unknown backends dropped (Vulkan, local); Graphics local, Audio OpenAL saved; Steam Deck mode keeps them"
   cp "$(save enhanced_backends)/enhanced.json" "$s/gd-engine/gd01/enhanced.json"
   run enhanced_backends_start 4000 "" GD01_SKIP_BOOT=1
   seed="$keep"
-  result enhanced_backends_start "$(has enhanced_backends_start "backends: graphics vulkan, audio openal")" "the next start reads the saved backends"
-  # Restart Now: Graphics to SDL3, Restart Now; the game starts again in the
-  # same process on Enhanced Settings (offscreen: SDL3 falls back to local).
+  result enhanced_backends_start "$(has enhanced_backends_start "backends: graphics local, audio openal")" "the next start reads the saved backends"
+  # Restart Now: Graphics from Vulkan (the default) to OpenGL3, Restart Now; the
+  # game starts again in the same process on Enhanced Settings.
   s="$work/enhanced_restart_seed" && rm -rf "$s" && cp -r "$keep" "$s"
   printf '{}\n' > "$s/gd-engine/gd01/enhanced.json"
   seed="$s"
@@ -296,7 +297,7 @@ walk_enhanced_backends() {
   for i in $(seq 0 13); do keys+="$((2500 + i * 100)):keyDown,"; done
   run enhanced_restart 12000 "${keys}4500:keyRight,5000:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings
   seed="$keep"
-  result enhanced_restart "$(( $(has enhanced_restart "restart: Enhanced Settings asked") && $(has enhanced_restart "backends: graphics sdl3, audio local") && \
+  result enhanced_restart "$(( $(has enhanced_restart "restart: Enhanced Settings asked") && $(has enhanced_restart "backends: graphics opengl3, audio local") && \
     $(grep -c "goto_screen enhanced_settings" "$work/enhanced_restart.log") >= 2 ))" "Restart Now starts the game again on the new backend, back on Enhanced Settings"
 }
 
@@ -321,7 +322,9 @@ walk_calibration_reset() {
 walk_enhanced_hdr() {
   local s keys keep="$seed" i
   s="$work/enhanced_hdr_seed" && rm -rf "$s" && cp -r "$seed" "$s"
-  printf '{"bloom":"original"}\n' > "$s/gd-engine/gd01/enhanced.json"
+  # local (OpenGL), settings_version 2 so GDALL-050 keeps it: the fallback wording checked
+  # is OpenGL's (on Vulkan True HDR would take effect at the next start instead).
+  printf '{"bloom":"original","graphics_backend":"local","settings_version":2}\n' > "$s/gd-engine/gd01/enhanced.json"
   seed="$s"
   keys=""
   for i in $(seq 0 22); do keys+="$((2500 + i * 100)):keyDown,"; done  # down to the HDR row
@@ -336,7 +339,7 @@ walk_enhanced_hdr() {
     hashes+=("$(md5sum < "$work/enhanced_frame/shot.bmp" | cut -c1-32)")
   done
   # #80: True HDR in Steam Deck Gaming Mode (gamescope) on OpenGL says why and what to change.
-  printf '%s\n' '{"bloom":"original","hdr":"true"}' > "$s/gd-engine/gd01/enhanced.json"
+  printf '%s\n' '{"bloom":"original","hdr":"true","graphics_backend":"local","settings_version":2}' > "$s/gd-engine/gd01/enhanced.json"
   run enhanced_hdr_gamescope 3000 "" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings GAMESCOPE_WAYLAND_DISPLAY=gamescope-0
   result enhanced_hdr_gamescope "$(has enhanced_hdr_gamescope "hdr: mode true - True HDR unavailable: in Steam Deck Gaming Mode (gamescope) OpenGL has no HDR; set Graphics Backend to Vulkan")" \
     "True HDR under gamescope on OpenGL: fallback reason names the Vulkan backend"
