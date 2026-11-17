@@ -710,3 +710,48 @@ are missing.
 Why: GD10-068.
 Undo: GD10_HUD_MESSAGES_LEGACY=1 (song_hooks.cpp, hud_widgets.cpp);
 GD10_PRESERVE_PARENT_LEGACY=1, GD10_UI_MATERIAL_LEGACY=1 (ui_system.cpp).
+
+## D119. After a Band_PlayClip clip: own start node, then the anim set's idle as it is [C 0x82192E08, 0x82196A90, 0x82192AA8, 0x82122BA8, 0x8211DCD8] (2026-11-17, lane A)
+
+What (decoded, the port already does it; no behaviour change):
+- Band_PlayClip_CFunc (0x8219EF48) calls 0x82196A90 per member with the
+  clip's `anims` struct: anims.<member> = $none: the member is left alone
+  (a clip it is already playing goes on); no entry: BandManager_ChangeIk
+  enabled (0x8211D780) + the band manager's idle (0x8211D6B8); otherwise
+  Band_PlaySimpleAnim name / anim / start / disable_arms / tempomatching.
+  Members playing a special anim (member +0x39) are skipped only when the
+  clip passes override_special = false (default true).
+- Band_PlayClip_Finish_CFunc (0x82192E08, a game frame later): for each
+  member with an anims entry other than $none, startnodes.<member>
+  (0x82192D80 -> 0x82192500: <zone>_TRG_Waypoint_<node>, position and
+  rotation, Info.target_node) or, without one, its own start node. This
+  makes D113's [I] a [C].
+- band_movetostartnode / Band_MoveToStartNode_CFunc (0x82192AA8 ->
+  0x82192948 -> 0x82192678): <zone>_TRG_Waypoint_<guitarist | bassist |
+  vocalist | drummer>_start (the _player1 / _player2 nodes in face-off,
+  battle and boss modes), position and rotation; nothing else.
+- BandManager_PlayIdle (0x8211DCD8: `name` = 0xa1dc81f9, `start` /
+  `restart`) -> 0x8211D6B8 -> the member's vtable +0x14 -> the idle pick
+  0x82122BA8: anim_set.<stance>.<type> at random (not the last one), and
+  when the member was in a clip / special anim (+0x39, set by 0x82121A08 /
+  0x8212C5F8) it clears it and spawns band_movetostartnode (not in the
+  front-end stances); the loop plays from 0x82121868 into hero_body_branch
+  (bodytimer) like any body anim. No node, root offset or blend-back rule
+  for mocap loops anywhere on this path; end_moment_anim only unpauses the
+  bodytimer (the idle paused at the clip's start goes on).
+Result: the port's GD10-069 cases are what the original's code does with
+this data. Master of Puppets: car_male_anim_struct_MasterOfPuppets_alt
+(use_alt_anim_structs = 1) gives Kirk / Rob / James L_GUIT_B2_MOP /
+L_GUIT_B_MOP / L_SING_S_MOP, whose idles are the song's own clips
+(MasterofPuppets02_S_01 etc., startnodes drummer_start in the clip
+structs); after the last clips (515.5 s) they play from the own start
+nodes: James z 5.57 vs the front waypoint 3.88 (1.7 m past it), Kirk
+x 5.5. Battery: Battery_S_02_B (60.7 s) and S_Slowplay02_IK_Slave
+(60.4 s) have anims.drummer = $none, so Lars's Battery_D_01 (53.5 s) runs
+on while Kirk's Battery_G_02 plays on drummer_start (0.16 m apart).
+Found on the way, not changed: a clip whose anims has no entry for a
+member sends that member to idle; the port skips it (the six Metallica
+songs' 97 clips name every member; 715 of the 730 global clips, e.g.
+Group_StarPower_01_Clip without the drummer, do not).
+Why: GD10-069 (owner chose "decode the original first").
+Undo: nothing changed.
