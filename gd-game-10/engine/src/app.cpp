@@ -1655,6 +1655,7 @@ void App::frame() {
             if (song_->venue()) {
                 static std::set<std::string> zonesHeard;
                 const std::string& z = song_->venue()->venue().zone;
+                hitch::Scope zs("zone sounds");
                 if (zonesHeard.insert(z).second) front_->sfx.addPak(*disc_, "DATA/COMPRESSED/ZONES/" + z + ".pak.xen");
             }
             // The transition's own sound entry (Common_<t>_Transition's

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/song_screen.h"
+#include "render/hitch.h"
 
 #include "audio/sound_buss.h"
 
@@ -136,6 +137,7 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     difficulty_ = std::clamp(setup.difficulty[0], 0, 3);
     twoPlayers_ = setup.mode != GameMode::Solo;
     try {
+        hitch::Scope hs("chart");  // GD10-070: the song start's parts in a hitch's log
         chart_ = loadChart(disc, song.name);
         // endtime: no gems after it (practice's section) [C script start_gem_scroller's endtime].
         if (setup.endMs > 0)
@@ -178,7 +180,10 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     ms.inputOffsetMs = float(song.inputOffset - setup.lagMs);
     drawOffsetMs_ = setup.drawOffsetMs();
     match_ = std::make_unique<Match>();
-    if (!match_->start(chart_, tuning_, &g, ms, setup.bossProps, error)) return false;
+    {
+        hitch::Scope hs("match");
+        if (!match_->start(chart_, tuning_, &g, ms, setup.bossProps, error)) return false;
+    }
     player_ = &match_->player(0);
     if (match_->lastNoteEndMs() <= 0) {
         error = song.name + " has no " + difficultyName(difficulty_) + " chart for this mode";
@@ -240,6 +245,7 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
         intro_.setup(song.title, by, song.artist, startMs_, first, introFast_ ? -6700.0 : -6500.0);
     }
     if (!highwayOk_) SDL_Log("highway: the 2D highway's tables are missing; the debug highway is drawn");
+    hitch::Scope streamScope("stream");
     auto stream = SongStream::open(disc, song.name, error);
     if (!stream) return false;
     if (startMs_ > 0 && !stream->seek(startMs_)) {
@@ -291,6 +297,7 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
         const std::string zone = VenueStage::chooseZone(g);
         if (preload_) {
             // The preload (VenuePreload) when it is this song's, zone and intro.
+            hitch::Scope hs("venue wait");
             if (preload_->work.valid()) preload_->work.wait();
             if (preload_->stage && preload_->song == song.name && preload_->zone == zone && preload_->leadInMs == leadInMs_ &&
                 preload_->cameras == introCameras_ && preload_->endMs == setup.endMs && preload_->startMs == startMs_)
