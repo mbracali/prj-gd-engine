@@ -1,5 +1,10 @@
 # Guitar Dream Universal Launcher: changes
 
+## Unreleased
+
+Highlights
+- Update from inside the launcher (#114): it checks GitHub for a new version at start (or from the version badge), shows what is new and, only when you say Update now, downloads, checks and installs it, keeping your discs, saves and settings. Android opens the new APK in the browser; the AppImage keeps its own updates.
+
 ## 1.1.16
 
 Highlights
