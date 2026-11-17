@@ -17,3 +17,18 @@ class Umd;
 // one song: each list's range; --notes prints every gem. Exit code 1 on a
 // failed check.
 int chartTest(const gd24::Umd& umd, const std::string& which, bool notes);
+
+// gd24 --rulestest <disc> [<song> | all] [--difficulty 0..3]: the gameplay
+// rules (game/song_play.h) played headless over each song's whole chart:
+//  1. perfect autoplay: the song passes, no phrase is missed, and every
+//     score event agrees with the rule replayed from the event log alone
+//     (multiplier = captures + 1 up to 5, reset by a phrase miss after the
+//     capture timer, doubled in Overdrive with 5 -> 11; points = gem / capture
+//     value x multiplier; the score = their sum);
+//  2. an idle player: the song fails at the time predicted from the chart
+//     alone (each gem nobody plays, each missed phrase start: the health
+//     amounts; the crowd = mean health - failed tracks x penalty);
+//  3. one gem left out after five captures: the multiplier goes back to 1,
+//     the phrase is not captured.
+// Exit code 1 on a failed check.
+int rulesTest(const gd24::Umd& umd, const std::string& which, int difficulty);

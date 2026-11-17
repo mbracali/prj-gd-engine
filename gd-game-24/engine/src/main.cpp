@@ -14,6 +14,7 @@
 //                                BEATMATCH.STR: difficulty images, gem lists, tempo-map check
 //   gd24 --highwaytest <disc> [--sheet <f.bmp>]
 //                                COMMON.STR's textures and meshes: the highway's pieces
+//   gd24 --rulestest <disc> [<song> | all] [--difficulty 0..3]   the gameplay rules, headless
 //   gd24 --synctest <disc> [<song>]
 //                                the preview's place in the chart: DTA (preview ...) vs onsets
 //   gd24 --inputtest             the input layer with virtual controllers (no disc)
@@ -122,6 +123,7 @@ int formatTest(const gd24::Umd& umd) {
 }  // namespace
 
 int gd24Main(int argc, char** argv) {
+    bool rulestest = false;
     bool formattest = false, audiotest = false, charttest = false, highwaytest = false, synctest = false, play = false, notes = false;
     std::string sheet;
     std::string disc, song, playSong;
@@ -133,13 +135,14 @@ int gd24Main(int argc, char** argv) {
         else if (a == "--charttest") charttest = true;
         else if (a == "--highwaytest") highwaytest = true;
         else if (a == "--synctest") synctest = true;
+        else if (a == "--rulestest") rulestest = true;
         else if (a == "--sheet" && i + 1 < argc) sheet = argv[++i];
         else if (a == "--play") play = true;
         else if (a == "--notes") notes = true;
         else if (a == "--song" && i + 1 < argc) playSong = argv[++i];
         else if (a == "--difficulty" && i + 1 < argc) difficulty = std::atoi(argv[++i]);
         else if (a == "--track" && i + 1 < argc) track = std::atoi(argv[++i]);
-        else if ((audiotest || charttest || synctest) && !disc.empty() && !a.empty() && a[0] != '-') song = a;
+        else if ((audiotest || charttest || synctest || rulestest) && !disc.empty() && !a.empty() && a[0] != '-') song = a;
         else if (a == "--inputtest") return inputTest();
         else if (a == "--version") return std::printf("gd24 %s\n", GD24_VERSION), 0;
         else if (!a.empty() && a[0] != '-') disc = a;
@@ -160,6 +163,7 @@ int gd24Main(int argc, char** argv) {
     if (charttest) return chartTest(*umd, song, notes);
     if (highwaytest) return highwayTest(*umd, sheet);
     if (synctest) return gd24::syncTest(*umd, song);
+    if (rulestest) return rulesTest(*umd, song, difficulty);
     umd.reset();
     Options opt;
     opt.disc = disc;

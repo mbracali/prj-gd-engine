@@ -182,4 +182,32 @@ std::vector<Beatmatch::Track> Beatmatch::readTracks(const BeatmatchImage& im, st
     return tracks;
 }
 
+std::vector<TimeSig> Beatmatch::readTimeSigs(const BeatmatchImage& im) const {
+    const uint8_t* d = image(im);
+    const uint32_t n = im.size & ~3u;
+    std::vector<TimeSig> best;
+    for (uint32_t o = 0; o + 12 <= n; o += 4) {
+        const uint32_t ptr = le32(d + o), count = le32(d + o + 4);
+        if (count == 0 || count > 400 || le32(d + o + 8) != count || ptr < kBase || (ptr & 3)) continue;
+        const uint64_t rel = uint64_t(ptr) - kBase;
+        if (rel + uint64_t(count) * 16 > n || count <= best.size()) continue;
+        std::vector<TimeSig> v;
+        bool ok = true;
+        for (uint32_t k = 0; k < count && ok; ++k) {
+            const uint8_t* r = d + rel + 16 * k;
+            TimeSig t{int(le32(r)), int(le32(r + 4)), int(le32(r + 8)), le32(r + 12)};
+            ok = t.num >= 1 && t.num <= 16 && (t.den == 2 || t.den == 4 || t.den == 8 || t.den == 16);
+            if (ok && k == 0) ok = t.bar == 0 && t.tick == 0;
+            if (ok && k > 0) {
+                const TimeSig& p = v.back();
+                ok = t.bar > p.bar && int64_t(t.tick) - int64_t(p.tick) == int64_t(t.bar - p.bar) * p.num * 1920 / p.den;
+            }
+            v.push_back(t);
+        }
+        if (ok) best = std::move(v);
+    }
+    if (best.empty()) best.push_back(TimeSig{});
+    return best;
+}
+
 }  // namespace gd24

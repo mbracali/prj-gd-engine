@@ -47,6 +47,16 @@ struct GemList {
     bool offGrid() const;   // ticks off the 1/32-beat grid (vocal-like) [I]
 };
 
+// A time signature change [C data, all 55 BEATMATCH files]: 16-byte records
+// {u32 bar, u32 numerator, u32 denominator, u32 tick}, the first one at bar
+// 0 / tick 0; a vector {pointer, count, capacity = count} points to them
+// (seven copies per image, all equal). The ticks agree with the bars:
+// tick[i+1] - tick[i] = (bar[i+1] - bar[i]) * num[i] * 1920 / den[i].
+struct TimeSig {
+    int bar = 0, num = 4, den = 4;
+    uint32_t tick = 0;
+};
+
 struct BeatmatchImage {
     uint32_t entry = 0, offset = 0, size = 0;
     uint32_t difficulty = 0;  // the word at +0x2F4
@@ -72,6 +82,9 @@ struct Beatmatch {
     };
     // The instrument tracks and their four difficulties' gems.
     std::vector<Track> readTracks(const BeatmatchImage& im, std::string* error) const;
+    // The song's time signatures (the longest list that passes the bar /
+    // tick check above); {0, 4, 4, 0} when none is found.
+    std::vector<TimeSig> readTimeSigs(const BeatmatchImage& im) const;
 };
 
 }  // namespace gd24

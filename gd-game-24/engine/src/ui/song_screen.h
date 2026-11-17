@@ -66,6 +66,7 @@ public:
     const gd24::SongPlay& play() const { return play_; }
     const gd24::SongConfig& config() const { return cfg_; }
     bool ready() const { return audioStarted_; }
+    bool finished() const { return finished_; }
 
 private:
     float yPerSecond() const;
@@ -86,6 +87,11 @@ private:
     uint64_t lastNs_ = 0;
     bool lanesDown_[4] = {};
     bool autoplay_ = false;
+    bool finished_ = false;  // the results are shown (the preview ended, or the song failed)
+    double endMs_ = 0;       // where the song ends: the preview's end (or the chart's)
+    int lastIndicator_ = -2;
+    void finish();
+    void drawResults(Canvas& c);
     int iconTex_[4] = {-1, -1, -1, -1};
     float laneX_[4] = {-1.11f, -0.37f, 0.37f, 1.11f}, strikeY_ = -4.49f;  // from the track plane (laneMarks)
     double laneFlash_[4] = {-1e9, -1e9, -1e9, -1e9};
