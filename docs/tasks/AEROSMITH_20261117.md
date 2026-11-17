@@ -11,8 +11,8 @@ side touches only its own game; shared files (backlog, launcher) only for its ow
 - Memory: the other agent may build too: build at -j2, `free -g` first, one game binary at a time, Ghidra at most
   6 GB and never during a build. Quick checks only; no long gates.
 - Decrypted executables and extracted data stay in gd-game-06's git-ignored `ghidra/` / `extracted*/`.
-- Song audio: GH3-engine songs are encrypted FSB banks; Claude does not write or wire the decryption of song audio
-  (owner informed 11-17); the engine keeps one entry point for it.
+- Song audio: GH3-engine songs are FSB banks in the same container as GH3's; gd06 ports gd04's audio handling as-is
+  (the same way gd-game-10 carries it), reading the player's own disc at runtime. No assets are committed.
 - Never PR / merge / bump versions unasked.
 
 ## Plan

@@ -1,14 +1,13 @@
 # gd-game-06: open questions for the owner
 
-1. **Song audio (owner item).** Aerosmith's song banks
-   (`DATA/MUSIC/<song>.fsb.xen` + `.dat.xen`) are the same encrypted FSB3
-   container as GH3's. The port does not decrypt song audio and does not
-   reuse gd04's decryption (AEROSMITH_20261117.md rules). gd06 will keep one
-   entry point for it and play songs without their audio until then. How do
-   you want to supply it?
+1. **Song audio.** Aerosmith's song banks (`DATA/MUSIC/<song>.fsb.xen` +
+   `.dat.xen`) use GH3's container, so gd06 ports gd04's audio handling as-is
+   (as gd-game-10 does), reading the player's own disc at runtime. M3 confirms
+   the key path on Aerosmith's banks. No decision needed unless you want it done
+   differently.
 2. **Shared library or copy?** The recommendation is a copy of gd04's engine
-   without its song decryption (DECISIONS D2). Approve, or prefer a shared
-   GH3-engine library (touches gd-game-04)?
+   (DECISIONS D2). Approve, or prefer a shared GH3-engine library (touches
+   gd-game-04)?
 3. **Milestones and order.** M1..M6 as in PROGRESS.md "Plan"; which ones to
    run, and in one run or one at a time?
 4. **Online / Xbox Live.** Out of scope as in GH3 (net_guitar_battle,

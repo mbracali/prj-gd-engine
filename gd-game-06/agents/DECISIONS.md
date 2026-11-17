@@ -16,28 +16,24 @@ the engine and tools is M1's decision (D2). Undo: none needed.
 What: M1 copies gd-game-04's tracked `engine/`, `tools/`, `build_commands/`,
 `local_build.sh` into gd-game-06, renamed gd04 -> gd06 / GD04 -> GD06 /
 user-facing names -> Guitar Hero: Aerosmith, version 0.0.0 (as gd-game-10's
-D1), **without** gd04's song-audio decryption (below), then changes only what
-Aerosmith needs (the diff list).
+D1), including gd04's audio handling (Aerosmith's song banks use GH3's
+container), then changes only what Aerosmith needs (the diff list).
 
 Why:
 - The XEX is GH3's with small changes (97% of functions pair by size and
   callees, every C function name kept, FORMATS.md) and every data format but
   the `.ska` keys parses with GH3's decoders, so a copy works almost at once.
 - A shared "GH3 engine" library for gd04 and gd06 would mean refactoring the
-  released gd04 (its tests, its packages) and touching gd-game-04, and the
-  library would carry gd04's song decryption into gd06, which this port must
-  not reuse. The repository's pattern is one engine per game folder
-  (gd-game-10 started the same way) with the common backends in
-  gd-engine-core.
+  released gd04 (its tests, its packages) and touching gd-game-04. The
+  repository's pattern is one engine per game folder (gd-game-10 started the
+  same way) with the common backends in gd-engine-core.
 - Cost: fixes in gd04's copy do not reach gd06 by themselves; the copy's
   comments keep GH3's [C] addresses, which are [I] for gd06 until re-found.
 
-Removed from the copy: `fsbDecrypt` and every call to it (data/fsb.*,
-audio/song_stream.cpp, audio/sfx.cpp, tests/sfxtest.cpp). gd06 keeps a
-single entry point where song-bank bytes would be turned into playable data,
-which returns "not available"; songs then play without their audio (the
-chart, highway and clock still run) until the owner decides (OPEN_QUESTIONS 1).
-streamall and in-pak sounds are not encrypted and play as in gd04.
+Audio: gd06 keeps gd04's song-bank reader (data/fsb.*, audio/song_stream.cpp,
+audio/sfx.cpp) as-is, since Aerosmith's banks use GH3's container; the per-bank
+key is derived the same way (M3 confirms it on Aerosmith's banks). streamall and
+in-pak sounds play as in gd04.
 
 Diff list (what gd06 changes in the copy, by milestone):
 - M1: names / title (Guitar Hero: Aerosmith, title ID 41560819 in
@@ -48,7 +44,8 @@ Diff list (what gd06 changes in the copy, by milestone):
   `ui_exploding_text`, the 9 new C functions, movie subtitles (AO movies),
   the Xbox sign-in natives.
 - M3: Quickplay's mode select (`menu_quickplay_select_mode.qb`), co-op
-  quickplay, the difficulty analyser screen, song audio's entry point.
+  quickplay, the difficulty analyser screen, confirm the song-bank key on
+  Aerosmith's banks.
 - M4: six new venues, the Aerosmith band (per-venue singer / drummer rigs,
   tempo anim events, per-member animation data), Aerosmith entrance /
   DMC intro transitions, new particles (pyro, fireworks, Tesla lightning,

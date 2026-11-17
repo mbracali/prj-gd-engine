@@ -80,9 +80,9 @@ took and our parser does not model yet [I]. To be read in M1 (GD06-002).
 ## Audio
 
 - Song banks `DATA/MUSIC/<song>.fsb.xen`: the same container as GH3 (FSB3,
-  encrypted; the first bytes match GH3's encrypted banks [I]) with a `.dat.xen`
-  index next to each. Song-audio decryption is an owner item and is not part
-  of this port's code (OPEN_QUESTIONS).
+  the first bytes match GH3's banks [I]) with a `.dat.xen` index next to each.
+  gd06 reads them with gd04's audio handling (per-bank key as GH3; M3 confirms
+  it on Aerosmith's banks).
 - `DATA/STREAMS/streamall.fsb.xen`: plain FSB3 (`FSB3` magic) [C], the menu
   and effect sounds; GH3's `fsb.py list` layout.
 - In-pak `.wav` (XMA) sound effects: GH3's layout [C].
