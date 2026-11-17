@@ -35,3 +35,12 @@ Why: the STR files are raw RAM with absolute pointers (FORMATS.md). The
 alternative, running the PSP code (an emulator / recompiler), is against the
 project's clean-room approach.
 Undo: the owner prefers another route (OPEN_QUESTIONS Q1).
+
+## D5. Owner's answers 11-17: the first boot uses the original highway
+
+What: GD24-002 = one song's chart and its 5 stems on the **original**
+highway decoded from the disc and the EBOOT (no debug highway); PSP disc
+recognition (.iso and .chd) in the launcher with the first boot, the game
+not ready_to_play; controls = the PSP mapping from the code + GAMEPADS
+screen + guitar controllers (frets = lanes); DLC out of scope.
+Why: owner (OPEN_QUESTIONS 1-5). Undo: the owner decides otherwise.

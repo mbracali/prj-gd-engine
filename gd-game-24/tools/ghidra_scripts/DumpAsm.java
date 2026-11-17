@@ -28,6 +28,10 @@ public class DumpAsm extends GhidraScript {
 			Function f = getFunctionContaining(a);
 			println("==== " + a + (f != null ? " in " + f.getName() + " @ " + f.getEntryPoint() : "") + " ====");
 			Instruction ins = listing.getInstructionAt(a);
+			if (ins == null && listing.getDefinedDataContaining(a) == null) {
+				disassemble(a); // undiscovered code: disassemble it (read-only runs keep nothing)
+				ins = listing.getInstructionAt(a);
+			}
 			if (ins == null) {
 				ins = listing.getInstructionAfter(a);
 			}

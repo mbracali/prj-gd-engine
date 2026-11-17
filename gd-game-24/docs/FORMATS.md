@@ -138,11 +138,38 @@ SongData.cpp users (strings at 0x08B40964, 0x08B40B88).
   are **encrypted**: half start with a set first bit (a plain ATRAC3plus
   frame always starts with 0), and FFmpeg's atrac3plus decoder rejects
   them. The zero padding frames are left in clear.
-- The decryption is in the EBOOT: the ATRAC stream reader FUN_089b4fdc
-  calls FUN_088f4c90 (walks the 5 streams), which calls two 3 KB routines,
-  FUN_0888ec50 and FUN_0888fa1c, full of XORs with 24-bit masks (0xFFFFFF,
-  0x800000, 0x400000, 0x1000000): a custom stream cipher [C call graph; the
-  algorithm is the first M1 job].
+- The cipher is **HC-128** (the eSTREAM stream cipher, 128-bit key and
+  IV), in its "optimized" reference form [C: the table layout P / Q, the
+  X / Y windows, the 1,024-step counter, the init expansion with
+  f1 / f2 and the 64 setup updates match the published algorithm; our
+  own Python HC-128 reproduces the spec's test vectors]:
+  - FUN_089b4fdc (ATRAC stream reader) -> FUN_088f4c90: splits the file
+    data into the 5 per-stream buffers by frame (position / frame size mod
+    5), then, once per file, sets up one HC-128 state per stream (states of
+    0x10CC bytes at 0x08B7DDC8 + 0x10CC x stream), and XORs each stream's
+    bytes with its keystream, 64 bytes per block (FUN_0888ec50 = 16 output
+    words; FUN_0888fa1c = the setup update).
+  - IV of stream s: 16 bytes made from the header's 16 bytes at 0x28: byte
+    j takes `b = hdr[0x28 + 2s + j mod 3]` (for 5 streams: step (12/5)+1
+    = 3, minus s) and `iv[j] = b XOR (iv[j-1] + NOT b + j + s)` (bytes,
+    iv[-1] = 0) [C FUN_088f4c90].
+  - Key: four words at 0x08B83250..5C, written by four script natives
+    (FUN_0888ea68 / ea94 / eac0 / eaec, registered with hashes 0xF92220FB,
+    0x8E25106D, 0x172C41D7, 0x602B7141, category 0xDB, registry indices
+    513..516) as `argument XOR hdr[0x10]`, `XOR hdr[0x08]`, `XOR hdr[0x34]`,
+    `XOR hdr[0x00]` [C]. Before the setup FUN_088f4c90 calls a callback
+    (pointer at 0x08B83260, set to 0x089E01C0 at 0x08A5ECDC) that posts
+    message 0x1C37E923 to the script system and runs script tasks
+    (FUN_089DFBE4) until the first key word is set [C]. So the four
+    arguments come from a **script** (data in `GLOBAL_BINARY.STR`: the
+    message's handler record is at file offset 0x6CE50) [C], not from code.
+    Not found yet: the four script constants. A quick test with four
+    32-bit constants found near the handler (24 orders, both byte orders,
+    with / without the header words) does not decrypt [C: no valid frames].
+  - After decryption, the first two words of each stream's first block are
+    XORed once more with the sum of the 5 stream sizes [C].
+  - The keystream runs on whole 64-byte blocks; a partial block at the
+    end of a read is kept for the next read (field +0x88) [I: detail].
 - The 5 stems are guitar, bass, drums, vocals and the backing track, each
   muted when its track is missed, as in Frequency / Amplitude [I: order to
   confirm].

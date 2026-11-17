@@ -55,3 +55,23 @@ Total about 50-80 h of agent time; the first boot (M0-M2) about 9-14 h.
   decompiled C needs a check against the assembly in tricky places.
 - PSP rendering data (GE display lists, swizzled 4/8-bit textures, VFPU
   math) for M5.
+
+## GD24-002 start (2026-11-17): owner's answers in, ATM cipher first
+
+Owner approved the plan (OPEN_QUESTIONS 1-5, DECISIONS D5): the first boot
+shows the **original** highway (no debug highway), the launcher recognises
+PSP discs (.iso, .chd) with it, PSP mapping + GAMEPADS + guitars.
+
+Re-estimate of the first boot with the original highway: the highway is an
+object graph in a heap image (meshes, materials, swizzled PSP textures,
+the gem models), so M2 also needs the heap-image reader for those classes
+and a small GE-format mesh / texture renderer: +6-10 h. M0-M2 now about
+15-25 h of agent time, plus the ATM key (below).
+
+ATM cipher: identified as **HC-128** (FORMATS.md "ATM"); IV derivation
+from the header confirmed in the code. Blocker: the 128-bit key comes from
+four values a **script** passes to four natives when the player asks for
+the key (message 0x1C37E923 in GLOBAL_BINARY's script data); the script VM
+is not mapped yet. Options for the owner: reverse the script VM until the
+four values are found (3-6 h, uncertain), or start the first boot meanwhile
+with the songs' 30 s preview AT3 (plain ATRAC3plus) as the audio.
