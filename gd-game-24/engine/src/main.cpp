@@ -9,6 +9,8 @@
 //   gd24 --formattest <disc>     every file the port reads, parsed; one line per failure
 //   gd24 --charttest <disc> [<song> | all] [--notes]
 //                                BEATMATCH.STR: difficulty images, gem lists, tempo-map check
+//   gd24 --highwaytest <disc> [--sheet <f.bmp>]
+//                                COMMON.STR's textures and meshes: the highway's pieces
 //   gd24 --inputtest             the input layer with virtual controllers (no disc)
 //   gd24 --audiotest <disc> [<song> | all] [--play]
 //                                decodes the song previews (ATRAC3plus) and checks them
@@ -26,6 +28,7 @@
 #include "data/umd.h"
 #include "tests/audiotest.h"
 #include "tests/charttest.h"
+#include "tests/highwaytest.h"
 #include "tests/inputtest.h"
 
 namespace {
@@ -112,13 +115,16 @@ int formatTest(const gd24::Umd& umd) {
 }  // namespace
 
 int gd24Main(int argc, char** argv) {
-    bool formattest = false, audiotest = false, charttest = false, play = false, notes = false;
+    bool formattest = false, audiotest = false, charttest = false, highwaytest = false, play = false, notes = false;
+    std::string sheet;
     std::string disc, song;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--formattest") formattest = true;
         else if (a == "--audiotest") audiotest = true;
         else if (a == "--charttest") charttest = true;
+        else if (a == "--highwaytest") highwaytest = true;
+        else if (a == "--sheet" && i + 1 < argc) sheet = argv[++i];
         else if (a == "--play") play = true;
         else if (a == "--notes") notes = true;
         else if ((audiotest || charttest) && !disc.empty() && !a.empty() && a[0] != '-') song = a;
@@ -140,6 +146,7 @@ int gd24Main(int argc, char** argv) {
     if (formattest) return formatTest(*umd);
     if (audiotest) return audioTest(*umd, song, play);
     if (charttest) return chartTest(*umd, song, notes);
+    if (highwaytest) return highwayTest(*umd, sheet);
     umd.reset();
     Options opt;
     opt.disc = disc;

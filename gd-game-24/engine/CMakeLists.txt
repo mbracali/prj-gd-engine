@@ -22,6 +22,7 @@ target_sources(gd24 PRIVATE
   src/data/beatmatch.cpp
   src/data/json.cpp
   src/data/param_sfo.cpp
+  src/data/psp_gfx.cpp
   src/data/song_list.cpp
   src/data/str_file.cpp
   src/data/text_table.cpp
@@ -33,6 +34,7 @@ target_sources(gd24 PRIVATE
   src/render/canvas.cpp
   src/tests/audiotest.cpp
   src/tests/charttest.cpp
+  src/tests/highwaytest.cpp
   src/tests/inputtest.cpp
   src/ui/gamepads_screen.cpp
 )
