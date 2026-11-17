@@ -1121,7 +1121,7 @@ universal launcher, not released on its own.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD06-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-06/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
+| GD06-001 | Original | 🟡 | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-06/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) 11-17: started (AEROSMITH_20261117.md, branch feature/20261117-aerosmithing). | New 10-28 |
 
 
 ## gd-game-07: Guitar Hero World Tour (Xbox 360)
