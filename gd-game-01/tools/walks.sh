@@ -13,7 +13,8 @@
 #   tools/walks.sh <gd01 binary> <Guitar Hero (PS2) .iso> [walk ...]
 #
 # Walks (all by default): selftest logo_skip band quickplay mouse enhanced
-# gamepads gamepads_pad store tutorial_pause. song_end and career_win are run by name (each plays a whole song). "band" runs first when another walk needs its save.
+# gamepads gamepads_pad store tutorial_pause. song_end and career_win are run by name (each plays a whole song),
+# tutorial_cartoons and tutorial_pulloff too (about 40 s each). "band" runs first when another walk needs its save.
 # The universal menus (universal_mechanisms.md) are covered by: logo_skip and
 # band (1.1.1 skips, 1.1.2 band naming, band_typing), mouse (1.1.3, credits skip,
 # song row hover, one Back in Enhanced),
@@ -415,6 +416,44 @@ walk_tutorial_pause() {
   result tutorial_pause_keys "$(( $(grep -c "goto_screen tut_loading" "$work/tutorial_pause_keys.log") >= 2 ))" "keyboard: Down, Enter on the tutorial's pause restarts the lesson"
   run tutorial_pause_cursor 13000 "$tut,10000:start,11000:hover100_100" GD01_SKIP_BOOT=1
   result tutorial_pause_cursor "$(has tutorial_pause_cursor "cursor: shown")" "the mouse shows the cursor on the tutorial's pause"
+}
+
+# Lesson 1's cartoons (#98, GD01-322): the fretting hand (t1_demo_3.mnm, with
+# intro_2 at ~24 s) and the strumming hand (t1_demo_1.mnm, intro_3 at ~30 s)
+# drawn over the guitar diagram: each region differs from the frame before
+# them (22 s) by a mean of 20+ (measured 76 and 57).
+walk_tutorial_cartoons() {
+  needs_band
+  local tut="4000:keyDown,4300:keyDown,4600:keyReturn,7000:keyReturn"
+  run tutorial_cartoons 34000 "$tut" GD01_SKIP_BOOT=1 GD01_SCREENSHOT_WALL=22000,28000,34000
+  local d="$work/tutorial_cartoons" r
+  r="$(python3 -P -c "
+import sys
+from PIL import Image
+import numpy as np
+d = sys.argv[1]
+im = lambda t: np.asarray(Image.open(f'{d}/shot_{t}.bmp').convert('RGB').resize((1920, 1080))).astype(float)
+b = im(22000)
+def diff(t, x0, y0, x1, y1): return abs(im(t)[y0:y1, x0:x1] - b[y0:y1, x0:x1]).mean()
+f, s = diff(28000, 500, 500, 740, 680), diff(34000, 1200, 380, 1600, 640)
+print(f'fretting hand {f:.1f}, strumming hand {s:.1f}', 1 if f > 20 and s > 20 else 0)
+" "$d" 2>&1 | tail -1)"
+  result tutorial_cartoons "${r##* }" "lesson 1's fretting and strumming hand cartoons drawn (${r% *})"
+}
+
+# Lesson 3's pull-off trainer (#98, GD01-322; TutorialHopoTrain, FUN_001576c0):
+# GD01_TUT_STATE=pulloff starts there; three runs of hold G+R+Y, strum, lift Y,
+# then R (then G) each count (hopo_hit's VO hit_vo) and the trainer ends.
+walk_tutorial_pulloff() {
+  needs_band
+  local keys="4000:keyDown,4300:keyDown,4600:keyReturn,7000:keyReturn" k b
+  for k in 0 1 2; do
+    b=$((36000 + k * 3000))
+    keys+=",$b:+green,$((b + 50)):+red,$((b + 100)):+yellow,$((b + 300)):+strum,$((b + 400)):-strum,$((b + 600)):-yellow,$((b + 900)):-red,$((b + 1200)):-green"
+  done
+  run tutorial_pulloff 47000 "$keys" GD01_SKIP_BOOT=1 GD01_TUTLOG=1 GD01_TUT_STATE=pulloff
+  result tutorial_pulloff "$(( $(grep -c "play_vo hit_vo" "$work/tutorial_pulloff.log") == 3 && $(has tutorial_pulloff "end_hopo_train") ))" \
+    "three pull-off runs (G+R+Y, strum, lift Y, R, G) count and end the trainer"
 }
 
 # Unlock Shop: Career > UNLOCK SHOP > Guitars > the Gibson ES-335 ($600),

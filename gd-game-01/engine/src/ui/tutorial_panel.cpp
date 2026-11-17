@@ -333,6 +333,10 @@ public:
         return false;
     }
     void enter() override {  // TutorialPanel_v3
+        // Development aid (walks): GD01_TUT_STATE=<state> (e.g. pulloff) starts the
+        // tutorial picked at that lesson, as the original's next_tutorial_lesson cheat would reach it.
+        if (const char* st = SDL_getenv("GD01_TUT_STATE"); st && *st)
+            host_.sendTo("tutorials", "set", {Value::symbol("start_state"), Value::symbol(st)});
         tuning_ = hopo_ = false;
         tune_.enter();
         train_.enter();
