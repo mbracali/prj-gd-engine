@@ -136,4 +136,5 @@ trusting its decompiled C.
 - Key functions so far: FAT open by sector FUN_08a23f5c; song paths
   FUN_089f191c / FUN_089f1b30 / FUN_089f2648; ATRAC player FUN_089b65b4
   (sets up), FUN_089b5948 (decode loop). The `.ATM` song audio is
-  encrypted and out of scope (DECISIONS D6): do not work on it.
+  encrypted; the owner now requested decoding. The standalone decoder is
+  `engine/src/audio/atm_audio.*`; playback integration remains open.

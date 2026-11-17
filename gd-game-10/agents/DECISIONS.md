@@ -755,3 +755,43 @@ songs' 97 clips name every member; 715 of the 730 global clips, e.g.
 Group_StarPower_01_Clip without the drummer, do not).
 Why: GD10-069 (owner chose "decode the original first").
 Undo: nothing changed.
+
+## D120. A clip without the member: its running clip ends, an idle with blend 0 [C 0x82196A90, 0x82122FB0, 0x82404908] (2026-11-17, lane A)
+
+What: Band_PlayClip_CFunc's per-member call (0x82196A90) for a member
+with no entry in the clip's `anims` (not `$none`): BandManager_ChangeIk
+(0x8211D780) and the band manager's idle (0x8211D6B8, blend
+DAT_82023648 = 0.0, restart false), which calls the member's vtable +0x14.
+For the guitarist / bassist / singer classes (vtables 0x82002714,
+0x82002750, 0x8200278C) that is 0x82122FB0: only for a member whose clip
+flag (+0x39) is set, it kills handle_moment_anim_blending, runs
+end_moment_anim (moment_blend off at once, IK chain, ragdoll reset, a
+frame later band_movetostartnode) and picks an idle (0x82122EA0 ->
+0x82122BA8, blend 0). For the drummer class (vtable 0x820028A8) +0x14 is
+0x82404908 (`li r3,0; blr`): nothing. The port ends the running clip
+(Animator::endMoment, as at a clip's end) and plays the stance's idle
+with blend 0. [I] the port's clip flag lasts while the clip plays; the
+original's lasts to the next idle pick, where a late call only restarts
+the idle on the same node.
+Why: GD10-069 follow-up (owner 11-17). Group_StarPower_01/02_Clip (no
+drummer) leave Lars alone as before; 28 songs use clips without some
+non-drummer member (e.g. Sad But True's SadButTrue_05 ends Kirk's
+GS_Pan01 at 249.6 s instead of ~254.5 s).
+Undo: GD10_CLIP_IDLE_LEGACY=1 (render/band_anim.cpp init, Ev::ClipIdle).
+
+## D121. The song's first frame drawn once under the loading screen [I] (2026-11-17, lane A)
+
+What: when a song starts (App, after SongScreen::start and the hooks'
+begin, still under the loading screen and before SongScreen::frame starts
+the mixer), one frame of the song at its first frame's time (start minus
+the lead-in) is drawn and presented: the venue (drawn, not advanced), the
+highway, the HUD (SongScreen::prewarm) and gh4's HUD widgets
+(SongHooks::draw). Every pipeline those draws need is made there, so the
+first song frame no longer compiles them with the music running. Hitch
+scopes: "pipeline prewarm", "prewarm song", "prewarm hud", "prewarm
+present". [I] the original's own warm-up was not decoded; this is the
+nearest our backends allow (pipelines are made at a draw with its state).
+Why: GD10-070: cold pipeline cache, the first song frame took 1228 ms with
+the music running; now 27 ms, the 1198 ms in the loading screen's last
+frame. Warm cache: that loading frame 37..44 ms (was ~20).
+Undo: GD10_PIPELINE_PREWARM_LEGACY=1 (app.cpp; ui/song_screen.cpp prewarm).

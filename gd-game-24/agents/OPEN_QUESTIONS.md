@@ -18,8 +18,9 @@ For the owner unless marked "agent". Answered ones keep the answer.
 5. **DLC.** Answered 11-17: out of scope.
 6. (agent) Exact chunk load addresses of each STR kind, from the stream
    loader instead of the pointer-density estimate.
-7. **Song audio.** Answered 11-17: the `.ATM` 5-track audio is encrypted;
-   no protection is broken, so it is out of scope. Songs play their
-   unencrypted `<SONG>_PREVIEW.AT3` from the player's disc for now.
+7. **Song audio.** Answered 11-17: implement decryption of the player's own
+   `.ATM` audio. The standalone five-stream decoder now exists at
+   `engine/src/audio/atm_audio.*`; it compiles and still needs wiring into
+   the game's audio playback. Previews remain active until then.
 8. (agent) The highway: which heap image holds it (COMMON / GLOBAL_BINARY
    [I]), its classes, textures and how the gems are drawn.

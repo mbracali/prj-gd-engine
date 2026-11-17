@@ -61,8 +61,8 @@ int formatTest(const gd24::Umd& umd) {
                 umd.files().size());
     if (umd.discId() != kDiscId) fail("UMD_DATA.BIN", "disc ID " + umd.discId() + ", expected " + kDiscId);
 
-    // The songs: BEATMATCH.STR (charts) and the preview audio (the .ATM is
-    // encrypted and out of scope, DECISIONS D6).
+    // The songs: BEATMATCH.STR (charts) and preview audio. decodeAtm is
+    // implemented, but is not yet wired into gameplay playback.
     int songs = 0, tutorials = 0;
     for (const gd24::Umd::Entry* e : umd.list("PSP_GAME/USRDIR/MUSIC/")) {
         if (!endsWith(e->path, "/BEATMATCH.STR")) continue;

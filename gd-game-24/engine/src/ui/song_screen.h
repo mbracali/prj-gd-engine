@@ -3,8 +3,8 @@
 // A song on the original highway (GD24-002, the first boot): the four
 // instrument tracks side by side, built from COMMON.STR's models
 // (data/highway_assets), the chart of one difficulty scrolling in time with
-// the song's preview (the encrypted .ATM audio is out of scope, DECISIONS
-// D6), beat lines from the chart's ticks, the player's lanes judged
+// the song's preview (the .ATM decoder exists but is not yet wired in), beat
+// lines from the chart's ticks, the player's lanes judged
 // (game/song_play), track switching.
 //
 // Placement (docs/FORMATS.md "The highway's placement"):

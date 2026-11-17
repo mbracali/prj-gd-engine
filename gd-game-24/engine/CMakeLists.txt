@@ -18,6 +18,7 @@ target_sources(gd24 PRIVATE
   src/main.cpp
   src/app.cpp
   src/audio/at3_preview.cpp
+  src/audio/atm_audio.cpp
   src/audio/audio_out.cpp
   src/data/beatmatch.cpp
   src/data/dta.cpp

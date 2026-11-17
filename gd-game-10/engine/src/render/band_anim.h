@@ -201,7 +201,8 @@ private:
         Strum, Fret, Chord, Perf, DrumArm, Cymbal,                                       // from the song
         Mocap,                                                                         // gh4 Band_PlayClip
         BodyDone, TransitionDone, StrumDone, FaceDone, ChordRelease, ArmDone, Twist,  // scheduled
-        ClipEvent                                                                     // ped_animevents
+        ClipEvent,                                                                    // ped_animevents
+        ClipIdle                                                                      // gh4 Band_PlayClip without this member
     };
     struct Event {
         double t = 0;
@@ -231,6 +232,7 @@ private:
     void scheduleClipEvents(uint32_t clipKey, double t);
     std::vector<ClipEvent> clipEvents_;
     void bodyFinished(double t);
+    void endMoment(double t);
     void afterStance(double t, bool stanceChanged);
     void setArms(int disable, double t, float blend);
     void playAnimEvent(const qb::Struct& p, double t);

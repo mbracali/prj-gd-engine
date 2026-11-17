@@ -45,13 +45,13 @@ not ready_to_play; controls = the PSP mapping from the code + GAMEPADS
 screen + guitar controllers (frets = lanes); DLC out of scope.
 Why: owner (OPEN_QUESTIONS 1-5). Undo: the owner decides otherwise.
 
-## D6. No protection is broken: the .ATM audio is out of scope (2026-11-17)
+## D6. Superseded: implement the player's .ATM song audio (2026-11-17)
 
-What: the `.ATM` song audio is encrypted; the engine never decrypts it and
-no key is searched for. Songs play their unencrypted `<SONG>_PREVIEW.AT3`
-from the player's disc. Everything is read at run time from the player's
-own disc, like the other games.
-Why: owner. Undo: none planned.
+What: the owner now requests a clean-room implementation that accepts a
+song's `.ATM` file from the player's disc and returns its five decrypted
+ATRAC3plus streams. The old restriction against searching for the key is
+superseded. Keep previews as fallback until the implementation is complete.
+Why: owner 11-17. Undo: owner changes direction.
 
 ## D7. Gameplay rules: the code's structure, the numbers inferred (GD24-003, 2026-11-17)
 

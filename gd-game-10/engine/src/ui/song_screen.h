@@ -218,6 +218,7 @@ private:
     // The SongWon / SongLost transition's length (Default_SongWon_Transition
     // time 8000 [C data]); the outro started (the venue told).
     double transitionMs_ = 8000;
+    bool prewarming_ = false;  // prewarm: the venue drawn, not advanced
     bool holdClock_ = false;  // the mixer paused until the venue is up (frame)
     double drawOffsetMs_ = 0;  // the highway's draw time - now (video - audio calibration)
     double leadInMs_ = 3000;  // the intro transition's time before the music
@@ -230,6 +231,11 @@ public:
     // After the song: the venue alone at `ms` (song time) while GH3's
     // transition runs; false once there is nothing to draw.
     bool drawOutro(Canvas& c, double ms);
+    // GD10-070: one draw of the song's first frame (venue, highway, HUD)
+    // before its clock starts, so its pipelines are made under the loading
+    // screen, not on the first song frame. GD10_PIPELINE_PREWARM_LEGACY=1: off.
+    void prewarm(Canvas& c, const TextureCache* textures);
+    double firstFrameMs() const { return startMs_ - leadInMs_; }
     // GuitarEvent_SongWon_Spawned plays PreEncore / PreBoss when the tier's
     // unlock set current_transition (Progression_TierEncoreUnlock /
     // TierBossUnlock): the same win stances, their own cameras [C data

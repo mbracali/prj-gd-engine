@@ -528,6 +528,18 @@ bool Animator::init(const Setup& s, std::string& error) {
                 for (const qb::File& f : *s.songFiles)
                     if ((cs = structOf(f.find(clipKey)))) break;
             const qb::Struct* anims = cs ? structOf(cs->find(K("anims"))) : nullptr;
+            // A clip whose anims has no entry for this member sends it to idle
+            // (0x82196A90: BandManager_ChangeIk + the band manager's idle,
+            // 0x8211D6B8 -> the member's vtable +0x14): the guitarist's,
+            // bassist's and singer's 0x82122FB0 ends a running clip there
+            // (end_moment_anim) and picks an idle with blend 0; the drummer's
+            // (0x82404908) does nothing; $none leaves the member alone [C]
+            // (GD10-069 / D120). GD10_CLIP_IDLE_LEGACY=1: no entry = $none.
+            static const bool clipIdleLegacy = std::getenv("GD10_CLIP_IDLE_LEGACY") != nullptr;
+            if (anims && !anims->find(model_->member.object) && role_ != band::Role::Drummer && !clipIdleLegacy) {
+                add(tv->number(), Ev::ClipIdle, 0, 0, p);
+                continue;
+            }
             const uint32_t key = anims ? keyOf(anims->find(model_->member.object)) : 0;
             if (!key || key == K("none")) continue;
             Mocap mc;
@@ -1092,21 +1104,25 @@ void Animator::handle(const Event& e) {
     }
     case Ev::BodyDone:
         if (e.gen == bodyGen_) {
-            if (mocapPlaying_ && model_->member.gh4) {
-                // end_moment_anim: the moment_blend switch off and the body
-                // timer unpaused at once (blendduration 0); band_setikchain
-                // guitar for a guitar / bass / rhythm part, else slave [C script].
-                mocapPlaying_ = false;
-                bodyBlend_ = 0.0f;
-                ragdollResets_.push_back(t);
-                // end_moment_anim / return_characters_to_idle_at_song_time:
-                // wait a game frame, band_movetostartnode [C scripts].
-                moveToNode(t + kFrameMs, std::string());
-                const bool guitarChain = guitarLike();
-                setIkTargets(t, guitarChain ? 0 : 1, guitarChain ? 0 : 1);
-            }
+            if (mocapPlaying_ && model_->member.gh4) endMoment(t);
             mocapPlaying_ = false;
             bodyFinished(t);
+        }
+        break;
+    case Ev::ClipIdle:
+        // 0x82122FB0 (PlayIdle, restart false): only for a member in a clip
+        // (+0x39); kills handle_moment_anim_blending, runs end_moment_anim,
+        // then the idle pick (0x82122EA0 with blend 0) [C]. The port keeps
+        // the clip flag only while the clip plays (the original's lasts to
+        // the next idle pick, where a late call only restarts the idle) [I].
+        if (mocapPlaying_ && model_->member.gh4) {
+            endMoment(t);
+            mocapPlaying_ = false;
+            specialOnce_ = false;
+            scriptedClip_ = 0;
+            nextAnim_ = 0;
+            currentAnim_ = K("idle"), cycle_ = true, repeat_ = 1;
+            bodyIteration(t);
         }
         break;
     case Ev::ClipEvent:
@@ -1397,6 +1413,17 @@ float Animator::ikMiss(double ms, const std::vector<Mat34>& world) const {
         worst = std::max(worst, vlen(vsub(posOf(world[size_t(c.b2)]), posOf(world[size_t(tgt)]))));
     }
     return worst;
+}
+
+// end_moment_anim: the moment_blend switch off and the body timer unpaused
+// at once (blendduration 0); band_setikchain guitar for a guitar / bass /
+// rhythm part, else slave; a game frame later band_movetostartnode [C scripts].
+void Animator::endMoment(double t) {
+    bodyBlend_ = 0.0f;
+    ragdollResets_.push_back(t);
+    moveToNode(t + kFrameMs, std::string());
+    const bool guitarChain = guitarLike();
+    setIkTargets(t, guitarChain ? 0 : 1, guitarChain ? 0 : 1);
 }
 
 void Animator::setIkTargets(double t, int left, int right) {

@@ -264,8 +264,8 @@ void App::menu(Menu m) {
 
 void App::applyVolume() { audio_.setVolume(float(std::atoi(settings_.get("volume").c_str())) / 100.0f); }
 
-// The song's <SONG>_PREVIEW.AT3 (the full .ATM audio is encrypted and out
-// of scope, DECISIONS D6), decoded on a worker thread, then looped.
+// The song's <SONG>_PREVIEW.AT3 is decoded on a worker thread and looped.
+// The .ATM decoder exists, but playback is not wired to its five tracks yet.
 void App::playPreview(int song) {
     const gd24::SongEntry& s = songs_[size_t(song)];
     if (!s.hasPreview) {

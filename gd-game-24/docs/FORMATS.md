@@ -144,17 +144,38 @@ phrases (PhraseDB, `VERSECHORUSSOLO`), Overdrive phrases, the meaning of the
 duration fields. The tutorials' BEATMATCH (T01..T15, one shared file size)
 have one list per track.
 
-## ATM: song audio (5 stems, encrypted): out of scope
+## ATM: song audio (5 stems, encrypted)
 
 [C data, all 55 folders]: a 0x38-byte header (stream count 5, frame size
 0x190, the 5 stream sizes), then 400-byte frames interleaved round-robin
 over the 5 streams (guitar, bass, drums, vocals, backing [I]); a stream
 that ends early is padded with zero frames. The frames are **encrypted**.
 
-Owner's decision (2026-11-17): the project never breaks a protection. The
-full 5-track audio is **out of scope**; the engine does not read or decrypt
-the `.ATM` files. Songs play their unencrypted `<SONG>_PREVIEW.AT3` from the
-player's disc instead (below).
+Owner's current decision (2026-11-17): implement the audio path for the
+player's own disc, returning five decrypted ATRAC3plus streams from the
+`.ATM` bytes. Until that function is complete, the engine keeps using the
+unencrypted `<SONG>_PREVIEW.AT3` (below). The earlier out-of-scope decision
+is superseded (agents/DECISIONS.md, D6).
+
+The song audio uses HC-128. Header words `key1` at 0x10, `key2` at 0x08,
+`key3` at 0x34 and `key4` at 0x00 are unmasked by XOR with constants
+`0x5156B456`, `0x28CBD70B`, `0x4B5AEFFC`, `0x6165E84B` respectively to make
+the 128-bit key. The 128-bit per-track IV is derived from header bytes
+0x28..0x33, the track index and the previous IV byte [C: cross-checked
+against the executable and ATMTool's independently published decoder].
+Each output track is first HC-128 decrypted, then its first two little-endian
+u32 words are XORed with the sum of all five declared track lengths. Track
+payloads are round-robin interleaved in `chunk_size` blocks; the final
+partial round uses `max_track_length % chunk_size` bytes per track. The
+header's final words are key material / IV input, not reserved fields.
+
+ATMTool is an independent public implementation of this format
+([source repository](https://github.com/maodus/ATMTool)); gd24's implementation
+is newly written and does not include its source. The executable's generic
+Harmonix `BinStream` Park–Miller cipher [C, FUN_08ae74e0] is a separate path
+and is not the `.ATM` audio cipher. gd24 implements the file decoder in
+`src/audio/atm_audio.*`; preview playback remains the active fallback until
+song playback is wired to these streams.
 
 `<SONG>_PREVIEW.AT3`: a plain RIFF WAVE, WAVEFORMATEXTENSIBLE ATRAC3plus
 (GUID BFAA23E9-58CB-7144-A119-FFFA01E4CE62), stereo 44.1 kHz, 2048-byte

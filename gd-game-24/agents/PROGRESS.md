@@ -49,8 +49,8 @@ Total about 50-80 h of agent time; the first boot (M0-M2) about 9-14 h.
 
 - Heap images: every needed class layout must be read from the EBOOT
   (vtable map); cost grows with each feature (UI and venues the most).
-- The song audio: the `.ATM` stems are encrypted and out of scope (D6);
-  the previews play.
+- The song audio: `.ATM` decoding was initially out of scope (D6); owner
+  superseded that decision 11-17 and requested the decoder.
 - The function export splits some functions (FindPspFunctions); the
   decompiled C needs a check against the assembly in tricky places.
 - PSP rendering data (GE display lists, swizzled 4/8-bit textures, VFPU
@@ -68,9 +68,12 @@ the gem models), so M2 also needs the heap-image reader for those classes
 and a small GE-format mesh / texture renderer: +6-10 h. M0-M2 now about
 15-25 h of agent time.
 
-Song audio: the `.ATM` files are encrypted. Owner 11-17: no protection is
-ever broken, so the full 5-track audio is out of scope and the key work was
-dropped (D6); songs play their unencrypted preview AT3 from the disc.
+Song audio: owner 11-17 superseded D6 and asked for the five-stream `.ATM`
+decoder. Existing public ATMTool documentation/source describes the key
+masking, HC-128, per-track IV and stream order; gd24 has a new standalone
+implementation in `engine/src/audio/atm_audio.*`. Not yet wired to gameplay;
+preview playback remains active. `cmake --build ... --target gd24` compiles
+the new source; no functional audio test has been run.
 
 ## GD24-002 lane B, 11-17 (about 3.5 h of agent time)
 
