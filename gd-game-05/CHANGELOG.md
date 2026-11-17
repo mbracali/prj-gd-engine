@@ -6,6 +6,9 @@ inside the Guitar Dream Universal Launcher's release
 
 ## [Unreleased]
 
+### Fixed
+- Solo sections turn the highway blue, as in Rock Band.
+
 ## [0.0.8] - 2026-11-16
 
 ### Added

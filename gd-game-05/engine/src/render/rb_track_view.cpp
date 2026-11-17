@@ -123,6 +123,7 @@ void RbTrackView::load(const GameData& data, scene::MiloLibrary& library, const 
     barW_ = get<scene::TrackWidget>("bar_measure.wid");
     beatW_ = get<scene::TrackWidget>("bar_beat.wid");
     halfBeatW_ = get<scene::TrackWidget>("bar_half_beat.wid");
+    soloMaskW_ = get<scene::TrackWidget>("guitar_solo_mask.wid");
 
     // The smasher plate (the now bar's frets / pads): the inline directory
     // smasher_plate_guitar / _drum, its draw_order.grp [C data].
@@ -1179,6 +1180,7 @@ void RbTrackView::drawBeatLines(gfx::MaterialRenderer& mr, gfx::SceneCache& cach
     const long half = division / 2;
     const double fromMs = nowMs + (bottomY_ - 1) / (yPerSecond_ * speed_) * 1000.0f;
     const double toMs = nowMs + topY_ / (yPerSecond_ * speed_) * 1000.0f;
+    drawSoloMasks(mr, cache, nowMs);
     long tick = std::max(0L, long(song.tempo.msToTick(std::max(0.0, fromMs))) / half * half);
     for (int guard = 0; guard < 4096; ++guard, tick += half) {
         const double ms = song.tempo.tickToMs(double(tick));
@@ -1191,6 +1193,47 @@ void RbTrackView::drawBeatLines(gfx::MaterialRenderer& mr, gfx::SceneCache& cach
             w = std::abs(m - std::round(m)) < 1e-6 ? barW_ : beatW_;
         }
         drawWidget(mr, cache, w, 0, y);
+    }
+}
+
+// A solo section's blue track (GD05-129): beat_markers.grp's
+// guitar_solo_mask.wid (guitar_solo_mask.mesh, surface_w_norm.mat), one
+// instance a solo, at the solo's start, its y scaled to the solo's length
+// (the instance matrix's row 1 y) [C RB 0x828122D0: the bar builder adds it
+// at the measure a solo starts in, the span from RB 0x8242A888 (the track's
+// solo list)]. guitar_solo_cap.wid (the brackets) is never instanced by the
+// executable (no reference) [C]. GD05_SOLOMASK_LEGACY=1: no mask.
+void RbTrackView::drawSoloMasks(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, float nowMs) {
+    static const bool legacy = SDL_getenv("GD05_SOLOMASK_LEGACY") != nullptr;
+    if (legacy || !soloMaskW_ || !soloMaskW_->dir || !curPlayer_ || !curPlayer_->chart) return;
+    static const bool log = SDL_getenv("GD05_SOLOMASK_LOG") != nullptr;
+    for (const Span& s : curPlayer_->chart->solos) {
+        const float y0 = yOf(s.startMs - nowMs), len = yOf(s.endMs - s.startMs);
+        if (y0 > topY_ || y0 + len < bottomY_ - 1 || len <= 0) continue;
+        scene::Xfm inst;
+        inst.rot = {1, 0, 0, 0, len, 0, 0, 0, 1};
+        inst.pos = {0, y0, 0};
+        for (const std::string& n : soloMaskW_->meshes) {
+            const scene::Mesh* m = soloMaskW_->dir->resolve<scene::Mesh>(n);
+            if (!m) continue;
+            scene::Xfm x0;
+            if (soloMaskW_->allowRotation) x0.rot = pose_.local(m).rot;
+            x0 = scene::compose(x0, inst);
+            if (log) {
+                static int logged = 0;
+                if (logged++ < 3) {
+                    const scene::Mesh* g = gfx::meshGeometry(m);
+                    float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+                    if (g)
+                        for (const auto& v : g->verts)
+                            for (int k = 0; k < 3; ++k) lo[k] = std::min(lo[k], v.pos[k]), hi[k] = std::max(hi[k], v.pos[k]);
+                    SDL_Log("RB track: solo mask %s at y %.1f len %.1f (solo %.0f..%.0f ms), mesh %s mat %s showing %d, verts %zu box %.2f %.2f %.2f .. %.2f %.2f %.2f",
+                            part_.c_str(), double(y0), double(len), double(s.startMs), double(s.endMs), n.c_str(), m->mat.c_str(), int(pose_.showing(m)),
+                            g ? g->verts.size() : size_t(0), double(lo[0]), double(lo[1]), double(lo[2]), double(hi[0]), double(hi[1]), double(hi[2]));
+                }
+            }
+            gfx::drawMesh(mr, cache, *m, gfx::toMat4(x0), &pose_);
+        }
     }
 }
 

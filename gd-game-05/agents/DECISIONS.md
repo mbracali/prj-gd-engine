@@ -2557,3 +2557,18 @@ pattern). Each says what, why and how to undo it.
   the three screens 18 -> 0; shots band_profile.bmp, band_lineup.bmp,
   solo_profile.bmp show the data.
 - **Undo:** GD05_CHARPROFILE_LEGACY=1, GD05_BANDPROFILE_LEGACY=1.
+
+## D137
+- **What (2026-11-17, GD05-129):** a solo section's blue track. The track's
+  beat_markers.grp holds guitar_solo_mask.wid (guitar_solo_mask.mesh, a
+  strip 19.7 wide and 1 unit long, surface_w_norm.mat); RB's bar builder
+  (RB 0x828122D0) adds one instance a solo at the solo's start (the span
+  from the track's solo list, RB 0x8242A888), the instance matrix's y
+  scaled to the solo's length in track units [C]. The port never drew it.
+  Now drawn before the bar lines for the player's chart solos (any part).
+  guitar_solo_cap.wid (brackets) has no reference in the executable [C],
+  not drawn.
+- **Measured:** mainoffender guitar, solo 9831..23715 ms: track centre
+  column at 12.0 s mean blue 14 -> 51; at 9.3 s the mask's edge sits at
+  the solo start up the track.
+- **Undo:** GD05_SOLOMASK_LEGACY=1.
