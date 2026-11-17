@@ -16,9 +16,16 @@ find_package(SDL3 REQUIRED CONFIG)
 add_executable(gd24 WIN32 MACOSX_BUNDLE)
 target_sources(gd24 PRIVATE
   src/main.cpp
+  src/app.cpp
+  src/data/param_sfo.cpp
+  src/data/song_list.cpp
   src/data/str_file.cpp
   src/data/text_table.cpp
   src/data/umd.cpp
+  src/devaids/dev_aids.cpp
+  src/platform/paths.cpp
+  src/platform/settings.cpp
+  src/render/canvas.cpp
 )
 target_include_directories(gd24 PRIVATE src)
 target_compile_definitions(gd24 PRIVATE GD24_VERSION="${PROJECT_VERSION}")

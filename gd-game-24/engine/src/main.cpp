@@ -4,7 +4,8 @@
 // player's own UMD image (.iso or .chd) at run time; see ../README.md and
 // ../docs/FORMATS.md. Not playable yet (GD24-002, the first boot).
 //
-//   gd24 <disc>                  the game (the first boot is GD24-002)
+//   gd24 <disc>                  the game: for now our own status screen (the
+//                                disc's title and songs), ENHANCED and GAMEPADS
 //   gd24 --formattest <disc>     every file the port reads, parsed; one line per failure
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -14,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "app.h"
 #include "data/str_file.h"
 #include "data/text_table.h"
 #include "data/umd.h"
@@ -122,10 +124,11 @@ int gd24Main(int argc, char** argv) {
     }
     SDL_Log("gd24 %s: disc %s (%zu files)", GD24_VERSION, umd->discId().c_str(), umd->files().size());
     if (formattest) return formatTest(*umd);
-    if (umd->discId() != kDiscId)
-        SDL_Log("gd24: this is not a Rock Band Unplugged (USA) disc (disc ID %s)", umd->discId().c_str());
-    SDL_Log("gd24: not playable yet: the first boot is GD24-002");
-    return 0;
+    umd.reset();
+    Options opt;
+    opt.disc = disc;
+    App app;
+    return app.run(opt);
 }
 
 #ifndef GD24_MODULE
