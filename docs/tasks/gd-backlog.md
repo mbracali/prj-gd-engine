@@ -1279,7 +1279,13 @@ universal launcher, not released on its own.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD24-001 | Original | 🟡 | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-24/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) 11-17: in progress, dev wave (DEV_WAVE_20261117.md). | New 11-04 |
+| GD24-001 | Original | ✅ | Discovery: the UMD and its formats, the executable in Ghidra, what other games give it; plan with the owner | 11-17 (dev wave): EBOOT decrypted locally (pspdecrypt), Ghidra + Allegrex export (28,942 functions, imports named), formats in `gd-game-24/docs/FORMATS.md`: data are heap images (raw RAM, absolute pointers), songs = encrypted 5-stem ATRAC3plus `.ATM` + BEATMATCH heap images with 4-lane gem lists; plan, estimates (M0-M2 9-14 h, all 50-80 h) and questions in `gd-game-24/agents/` (PROGRESS, OPEN_QUESTIONS). Waiting for the owner's approval. | New 11-04 |
+| GD24-002 | Original | ❌ | First boot: one song's chart (four tracks, one difficulty, from BEATMATCH.STR) with its 5-stem audio on a 4-lane highway, autoplay + input (M0 set-up, M1 data layer, M2) | Needs the owner's OK on the plan (`gd-game-24/agents/OPEN_QUESTIONS.md` Q1-Q2); first jobs: STR chunk bases from the loader, the ATM cipher (FUN_0888ec50 / FUN_0888fa1c) | GD24-001 |
+| GD24-003 | Original | ❌ | M3 gameplay rules: track switching, phrase capture / deploy, overdrive, multiplier, scoring, fail, stem muting, results | From BeatMatcher / PhraseDB / TrackWatcher in the EBOOT; gd-game-05 as reference | GD24-001 |
+| GD24-004 | Original | ❌ | M4 menus: the UI heap images (UI_0..2.STR), fonts, quickplay flow, settings, GAMEPADS / Enhanced menus | | GD24-001 |
+| GD24-005 | Original | ❌ | M5 venues and band: venue heap images (GE meshes, swizzled paletted textures, cameras), the 3D highway, characters + ANIMS clips | | GD24-001 |
+| GD24-006 | Original | ❌ | M6 career and the rest: world tour / map, band creation (ROCKERMAKER), presets, saves, jukebox, tutorials (BNK voice-overs), movies (PMF) | | GD24-001 |
+| GD24-007 | Platform | ❌ | Launcher: recognise PSP UMD images (`iso_signatures` for ULUS-10418), the gd24 module and packages | `gd-game-24/agents/OPEN_QUESTIONS.md` Q4 | GD24-001 |
 
 ## gd-game-25: DJ Hero (Xbox 360)
 
