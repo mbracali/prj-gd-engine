@@ -183,6 +183,8 @@ private:
     std::array<SlotSet, 5> sets_{};
     std::array<std::string, 5> slotColors_{"green", "red", "yellow", "blue", "orange"};
     const scene::TrackWidget *barW_ = nullptr, *beatW_ = nullptr, *halfBeatW_ = nullptr;
+    const scene::TrackWidget* soloMaskW_ = nullptr;  // guitar_solo_mask.wid (GD05-129)
+    void drawSoloMasks(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, float nowMs);
     std::string drawGroup_, animGroup_;
     // The sustain tails (track/gem_tail.milo's tail02.mesh and tail_<colour>.mat).
     scene::Milo* tails_ = nullptr;

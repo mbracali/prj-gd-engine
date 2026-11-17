@@ -660,3 +660,138 @@ Why: GD10-063: the port drew GH3's HUD sprites by GH3's names; most are not
 on gh4's disc (13,357 missing texture draws in a quickplay song).
 Undo: GD10_HUD_LEGACY=1 (no setup_band_hud, GH3's Hud2D, the old
 ResolveScreenElementID).
+
+## D117. gh4's two-player HUD: hud_2g for face-off [C scripts; I the band values, faceoff_ratio] (2026-11-17, lane A)
+
+What: face-off and pro face-off run setup_band_hud as one player does, with
+player1_status.hud_parent = alias_g1 and player2_status's alias_g2
+(get_highway_pos_and_scale, two non-vocal players) [C script].
+update_hud_layout picks hud_2g; setup_band_hud kills its band_meter, boss
+meter and the side meters and attaches HUD_band_battle as the face-off
+meter (HUD_attach_widget_band_faceoff_meter: score_1/2, nixies, tubes,
+streaks, the needle) [C scripts]. Each player's streak raises
+player<n>_streak_started / _ended (band<n>_ in a band-scoring mode). The
+port's Hud2P draws only its alerts and the co-op raise-axe prompt then.
+Battle (p2_battle -> battle_hud_2d_elements, no desc_interface) and co-op
+keep Hud2P [C update_hud_layout].
+[I]: faceoff_ratio = (score1 - score2) / (score1 + score2) (its needle's
+value_range [1 -1] -> [-51.5 51.5], amber lit 0 .. 0.1: player 1 ahead >
+0); band1_* with two players: summed score, average health (co-op's fail
+rule, 0x8210FD18), the lower streak / multiplier / Star Power. The C keeps
+these as registered HUD values (0x82160000's constructor names them) whose
+setters are not decoded. A falling value_range is read mirrored (the only
+one is the face-off needle's).
+Dev aid: GD10_DEV_GAME_MODE=<p2 mode> starts the quickplay walk's song in
+that two-player mode (gh4's MULTIPLAYER lobby stops in the character hub);
+GD10_HUDLOG=1 logs each widget.
+Why: GD10-067.
+Undo: GD10_HUD2P_LEGACY=1 (ui/song_hooks.cpp beginHud).
+
+## D118. gh4's in-song messages: the C's triggers spawn the scripts [C 0x82118088, 0x82119280, 0x8211B468; I the rest] (2026-11-17, lane A)
+
+What: with gh4's HUD up, SongHooks::frameMessages spawns, per player,
+hot_start_achieved {player} when the streak reaches hot_start_min_streak
+(25) and no note was missed yet (0x82118088 calls it when the player's
+hot-start flag is set and the old streak was under the minimum; the flag
+read as "no miss yet" [I]); hud_show_note_streak_combo {player combo} when
+the streak passes 50 (combo 50) or a hundred past it (0x82119280: old < 50
+<= new, or new % 100 < old % 100; 0x8211B468 the same as == 50 / a
+hundred); show_star_power_ready {player_status} when Star Power reaches 50
+out of Star Power [I: GH3's rule]. The scripts (hud_create_message,
+hud_wait_and_create_message, hud_message_flame_style*) make the text in the
+player's `message` container: GetHUDMessageParent [I: its HUD parent's
+`message` child]. Hud2D / Hud2P draw no alerts then.
+DestroyScreenElement preserve_parent destroys the children only (the
+script runs on that container) [I]. A desc sprite's `material` takes the
+material's first texture; one not loaded is not drawn (was a white box);
+the HUD fire's materials (fire_2D_Notestreak_Small, fire_2D_Starpower) are
+in no pak the port loads (not found in any disc pak by key), so the flames
+are missing.
+Why: GD10-068.
+Undo: GD10_HUD_MESSAGES_LEGACY=1 (song_hooks.cpp, hud_widgets.cpp);
+GD10_PRESERVE_PARENT_LEGACY=1, GD10_UI_MATERIAL_LEGACY=1 (ui_system.cpp).
+
+## D119. After a Band_PlayClip clip: own start node, then the anim set's idle as it is [C 0x82192E08, 0x82196A90, 0x82192AA8, 0x82122BA8, 0x8211DCD8] (2026-11-17, lane A)
+
+What (decoded, the port already does it; no behaviour change):
+- Band_PlayClip_CFunc (0x8219EF48) calls 0x82196A90 per member with the
+  clip's `anims` struct: anims.<member> = $none: the member is left alone
+  (a clip it is already playing goes on); no entry: BandManager_ChangeIk
+  enabled (0x8211D780) + the band manager's idle (0x8211D6B8); otherwise
+  Band_PlaySimpleAnim name / anim / start / disable_arms / tempomatching.
+  Members playing a special anim (member +0x39) are skipped only when the
+  clip passes override_special = false (default true).
+- Band_PlayClip_Finish_CFunc (0x82192E08, a game frame later): for each
+  member with an anims entry other than $none, startnodes.<member>
+  (0x82192D80 -> 0x82192500: <zone>_TRG_Waypoint_<node>, position and
+  rotation, Info.target_node) or, without one, its own start node. This
+  makes D113's [I] a [C].
+- band_movetostartnode / Band_MoveToStartNode_CFunc (0x82192AA8 ->
+  0x82192948 -> 0x82192678): <zone>_TRG_Waypoint_<guitarist | bassist |
+  vocalist | drummer>_start (the _player1 / _player2 nodes in face-off,
+  battle and boss modes), position and rotation; nothing else.
+- BandManager_PlayIdle (0x8211DCD8: `name` = 0xa1dc81f9, `start` /
+  `restart`) -> 0x8211D6B8 -> the member's vtable +0x14 -> the idle pick
+  0x82122BA8: anim_set.<stance>.<type> at random (not the last one), and
+  when the member was in a clip / special anim (+0x39, set by 0x82121A08 /
+  0x8212C5F8) it clears it and spawns band_movetostartnode (not in the
+  front-end stances); the loop plays from 0x82121868 into hero_body_branch
+  (bodytimer) like any body anim. No node, root offset or blend-back rule
+  for mocap loops anywhere on this path; end_moment_anim only unpauses the
+  bodytimer (the idle paused at the clip's start goes on).
+Result: the port's GD10-069 cases are what the original's code does with
+this data. Master of Puppets: car_male_anim_struct_MasterOfPuppets_alt
+(use_alt_anim_structs = 1) gives Kirk / Rob / James L_GUIT_B2_MOP /
+L_GUIT_B_MOP / L_SING_S_MOP, whose idles are the song's own clips
+(MasterofPuppets02_S_01 etc., startnodes drummer_start in the clip
+structs); after the last clips (515.5 s) they play from the own start
+nodes: James z 5.57 vs the front waypoint 3.88 (1.7 m past it), Kirk
+x 5.5. Battery: Battery_S_02_B (60.7 s) and S_Slowplay02_IK_Slave
+(60.4 s) have anims.drummer = $none, so Lars's Battery_D_01 (53.5 s) runs
+on while Kirk's Battery_G_02 plays on drummer_start (0.16 m apart).
+Found on the way, not changed: a clip whose anims has no entry for a
+member sends that member to idle; the port skips it (the six Metallica
+songs' 97 clips name every member; 715 of the 730 global clips, e.g.
+Group_StarPower_01_Clip without the drummer, do not).
+Why: GD10-069 (owner chose "decode the original first").
+Undo: nothing changed.
+
+## D120. A clip without the member: its running clip ends, an idle with blend 0 [C 0x82196A90, 0x82122FB0, 0x82404908] (2026-11-17, lane A)
+
+What: Band_PlayClip_CFunc's per-member call (0x82196A90) for a member
+with no entry in the clip's `anims` (not `$none`): BandManager_ChangeIk
+(0x8211D780) and the band manager's idle (0x8211D6B8, blend
+DAT_82023648 = 0.0, restart false), which calls the member's vtable +0x14.
+For the guitarist / bassist / singer classes (vtables 0x82002714,
+0x82002750, 0x8200278C) that is 0x82122FB0: only for a member whose clip
+flag (+0x39) is set, it kills handle_moment_anim_blending, runs
+end_moment_anim (moment_blend off at once, IK chain, ragdoll reset, a
+frame later band_movetostartnode) and picks an idle (0x82122EA0 ->
+0x82122BA8, blend 0). For the drummer class (vtable 0x820028A8) +0x14 is
+0x82404908 (`li r3,0; blr`): nothing. The port ends the running clip
+(Animator::endMoment, as at a clip's end) and plays the stance's idle
+with blend 0. [I] the port's clip flag lasts while the clip plays; the
+original's lasts to the next idle pick, where a late call only restarts
+the idle on the same node.
+Why: GD10-069 follow-up (owner 11-17). Group_StarPower_01/02_Clip (no
+drummer) leave Lars alone as before; 28 songs use clips without some
+non-drummer member (e.g. Sad But True's SadButTrue_05 ends Kirk's
+GS_Pan01 at 249.6 s instead of ~254.5 s).
+Undo: GD10_CLIP_IDLE_LEGACY=1 (render/band_anim.cpp init, Ev::ClipIdle).
+
+## D121. The song's first frame drawn once under the loading screen [I] (2026-11-17, lane A)
+
+What: when a song starts (App, after SongScreen::start and the hooks'
+begin, still under the loading screen and before SongScreen::frame starts
+the mixer), one frame of the song at its first frame's time (start minus
+the lead-in) is drawn and presented: the venue (drawn, not advanced), the
+highway, the HUD (SongScreen::prewarm) and gh4's HUD widgets
+(SongHooks::draw). Every pipeline those draws need is made there, so the
+first song frame no longer compiles them with the music running. Hitch
+scopes: "pipeline prewarm", "prewarm song", "prewarm hud", "prewarm
+present". [I] the original's own warm-up was not decoded; this is the
+nearest our backends allow (pipelines are made at a draw with its state).
+Why: GD10-070: cold pipeline cache, the first song frame took 1228 ms with
+the music running; now 27 ms, the 1198 ms in the loading screen's last
+frame. Warm cache: that loading frame 37..44 ms (was ~20).
+Undo: GD10_PIPELINE_PREWARM_LEGACY=1 (app.cpp; ui/song_screen.cpp prewarm).

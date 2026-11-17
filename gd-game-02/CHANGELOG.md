@@ -6,6 +6,9 @@ matches the tag's version. Nothing is released yet.
 
 ## [Unreleased]
 
+### Fixed
+- Enhanced > HDR (Emulated / True HDR) and Cinematic Color no longer make the stages darker than the original during songs (#115).
+
 ## [1.1.16] - 2026-11-16
 
 ### Added

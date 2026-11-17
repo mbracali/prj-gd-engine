@@ -27,7 +27,7 @@ namespace {
 constexpr const char* kTitle = "Guitar Dream Universal Launcher";
 constexpr const char* kWebsite = "https://guitardreamengine.com";
 // Hits that are not a row's buttons or a dialog's.
-constexpr int kHitWebsite = -10, kHitDiscs = -11;
+constexpr int kHitWebsite = -10, kHitDiscs = -11, kHitUpdates = -12;
 const std::string kDot = " \xC2\xB7 ";  // " · "
 
 using namespace palette;
@@ -172,7 +172,7 @@ bool Launcher::init() {
     // commands at those times (ms since start): up down left right green red
     // yellow blue, drop=<file> (as if dropped on the window), play=<game id>,
     // shot=<file.bmp> (saves the frame), drag=1|0 (the drop overlay),
-    // toast=<text>, quit.
+    // toast=<text>, updates (the Updates menu), updatecheck (Check for updates), quit.
     if (const char* sc = SDL_getenv("GDUL_SCRIPT")) {
         std::string all = sc;
         for (size_t start = 0; start < all.size();) {
@@ -191,10 +191,12 @@ bool Launcher::init() {
             script_.push_back(s);
         }
     }
+    updateInit();
     return true;
 }
 
 void Launcher::shutdown() {
+    updater_.shutdown();
     exploreClose();
     sounds_.close();
     closeGamepads();
@@ -556,6 +558,8 @@ void Launcher::frame() {
         runCommandLine();
         if (!running_) return;
     }
+    updateFrame();
+    if (!running_) return;
     if (cliExplore_ && !explore_) {  // --explore --exit-after: the explorer closed
         running_ = false;
         return;
@@ -590,6 +594,8 @@ void Launcher::runScript() {
     else if (st.cmd == "toast") toast(st.arg);
     else if (st.cmd == "folders") showDiscFolders("Where we look for discs");
     else if (st.cmd == "quit") running_ = false;
+    else if (st.cmd == "updates") updateMenu();
+    else if (st.cmd == "updatecheck") updater_.startCheck(true);
     else if (st.cmd == "drop") {
         static std::string dropped;  // SDL_EVENT_DROP_FILE's data must outlive the event queue
         dropped = st.arg;
@@ -659,6 +665,7 @@ void Launcher::handle(const SDL_Event& e) {
         case SDLK_L: if (!e.key.repeat) press(Fret::Yellow); break;
         case SDLK_E: if (!e.key.repeat) press(Fret::Blue); break;
         case SDLK_P: if (!e.key.repeat && !dialog_.open) activate(focusRow_, kPlay); break;
+        case SDLK_U: if (!e.key.repeat && !dialog_.open) updateMenu(); break;
         default: break;
         }
         break;
@@ -723,9 +730,10 @@ void Launcher::handle(const SDL_Event& e) {
         for (auto it = hits_.rbegin(); it != hits_.rend(); ++it) {
             if (!it->r.contains(mx, my)) continue;
             mouseUsed_ = true;
-            if (it->row == kHitWebsite || it->row == kHitDiscs) {
+            if (it->row == kHitWebsite || it->row == kHitDiscs || it->row == kHitUpdates) {
                 if (click && !dialog_.open) {
                     if (it->row == kHitWebsite) openWebsite();
+                    else if (it->row == kHitUpdates) updateMenu();
                     else showDiscFolders("Where we look for discs");
                 }
             } else if (it->row < 0) {
@@ -1168,6 +1176,7 @@ void Launcher::drawHeader() {
     const float vw = measure(FontId::SemiBold, 14, ver) + 16;
     gfx_.rect(R(153 + subW + 12, 89, vw, 22), withAlpha(kOxblood, 0.85f), 11 * s_);
     text(FontId::SemiBold, 14, 153 + subW + 20, 91, ver, kCream);
+    hits_.push_back({R(153 + subW + 12, 89, vw, 22), kHitUpdates, -1});  // the Updates menu (GDUL-031)
 
     float mx = -1, my = -1;
     SDL_GetMouseState(&mx, &my);

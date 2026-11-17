@@ -1655,6 +1655,7 @@ void App::frame() {
             if (song_->venue()) {
                 static std::set<std::string> zonesHeard;
                 const std::string& z = song_->venue()->venue().zone;
+                hitch::Scope zs("zone sounds");
                 if (zonesHeard.insert(z).second) front_->sfx.addPak(*disc_, "DATA/COMPRESSED/ZONES/" + z + ".pak.xen");
             }
             // The transition's own sound entry (Common_<t>_Transition's
@@ -1716,6 +1717,27 @@ void App::frame() {
                     return ui->textWidth(font, t, scale * ui->fontLineHeight(font), spacing);
                 });
             if (walk_) ++walk_->songsStarted;
+            // GD10-070: the song's first frame drawn once now, its clock still
+            // held (SongScreen::frame starts the mixer), so the venue's,
+            // highway's and HUD's pipelines are made here under the loading
+            // screen and not on the first song frame (a second on a cold
+            // pipeline cache, with the music running) [I: the original warms
+            // its shaders while loading]. GD10_PIPELINE_PREWARM_LEGACY=1: off.
+            static const bool prewarmLegacy = SDL_getenv("GD10_PIPELINE_PREWARM_LEGACY") != nullptr;
+            if (!prewarmLegacy) {
+                hitch::Scope ps("pipeline prewarm");
+                canvas_.begin(SDL_Color{0, 0, 0, 255});
+                {
+                    hitch::Scope ss("prewarm song");
+                    song_->prewarm(canvas_, textures_.get());
+                }
+                if (hooks_) {
+                    hitch::Scope hs2("prewarm hud");
+                    hooks_->draw(canvas_, song_->firstFrameMs());
+                }
+                hitch::Scope es("prewarm present");
+                canvas_.end();
+            }
         }
         return;
     }

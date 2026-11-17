@@ -3216,6 +3216,66 @@ int requireStrumSelfTest(const std::vector<SongInfo>& songs, GameData& data, con
     return failures;
 }
 
+// #98 (GD01-322): lesson 3's second part, 8 pull-offs on tutorial206 (Easy):
+// a guitar player holds each strummed note with the lower frets of the
+// pull-offs after it, strums, and lifts one fret per pull-off; every HOPO gem
+// must be hit without a strum (the Hopo event that counts in hopo_callback).
+int pullOffSelfTest(const std::vector<SongInfo>& songs, GameData& data, const Rules& rules) {
+    const SongInfo* info = nullptr;
+    for (const SongInfo& s : songs)
+        if (s.id == "tutorial206") info = &s;
+    if (!info) return std::printf("pull-off self-test: no tutorial206\n"), 1;
+    Song song = buildSong(parseMidi(data.read(info->midiPath)));
+    const auto& gems = song.charts[0].gems;
+    struct Ev { float t; int kind, fret; };  // kind 0 up, 1 down, 2 strum
+    std::vector<Ev> evs;
+    int pullOffs = 0;
+    for (size_t i = 0; i < gems.size(); ++i) {
+        const Gem& g = gems[i];
+        if (g.fretCount() != 1) continue;
+        const int f = std::countr_zero(unsigned(g.frets));
+        const bool pull = g.hopo && i > 0 && gems[i - 1].fretCount() == 1 && gems[i - 1].frets > g.frets;
+        if (pull) {
+            ++pullOffs;
+            evs.push_back({g.ms, 0, std::countr_zero(unsigned(gems[i - 1].frets))});
+        } else if (g.hopo && i > 0) {
+            evs.push_back({g.ms, 1, f});  // a hammer-on
+        } else {
+            uint32_t hold = g.frets;
+            for (size_t j = i + 1; j < gems.size() && gems[j].hopo && gems[j].fretCount() == 1 && gems[j].frets < gems[j - 1].frets; ++j)
+                hold |= gems[j].frets;
+            for (int k = 0; k < 5; ++k) evs.push_back({g.ms - 40, (hold >> k & 1u) ? 1 : 0, k});
+            evs.push_back({g.ms, 2, f});
+        }
+    }
+    // Require Strum off (joypad mode, what 1.1.15's d-pad bug switched to, GD01-326): a lift never pulls off.
+    auto play = [&](ControllerMode mode, int& hopos, int& hit) {
+        Player p(song, Difficulty::Easy, rules, mode, true);
+        p.setTutorialMode(true);
+        hopos = 0, hit = 0;
+        size_t e = 0;
+        uint32_t held = 0;
+        for (float t = gems.empty() ? 0 : gems.front().ms - 200; !gems.empty() && t < gems.back().ms + 500; t += 1) {
+            for (; e < evs.size() && evs[e].t <= t; ++e) {
+                const Ev& v = evs[e];
+                if (v.kind == 2) p.strum(t);
+                else if (v.kind == 1 && !(held >> v.fret & 1u)) p.fretDown(v.fret, t), held |= 1u << v.fret;
+                else if (v.kind == 0 && (held >> v.fret & 1u)) p.fretUp(v.fret, t), held &= ~(1u << v.fret);
+            }
+            p.update(t);
+            for (const PlayerEvent& ev : p.takeEvents()) hopos += ev.kind == PlayerEvent::Kind::Hopo;
+        }
+        for (size_t i = 0; i < gems.size(); ++i) hit += p.gemHit(int(i));
+    };
+    int hopos, hit, padHopos, padHit;
+    play(ControllerMode::Guitar, hopos, hit);
+    play(ControllerMode::Joypad, padHopos, padHit);
+    const bool ok = pullOffs >= 8 && hopos >= pullOffs && hit == int(gems.size());
+    std::printf("pull-off self-test: tutorial206 Easy %d gems, %d pull-offs; Require Strum on: %d hit without a strum, %d hit; "
+                "off: %d, %d: %s\n", int(gems.size()), pullOffs, hopos, hit, padHopos, padHit, ok ? "ok" : "FAILED");
+    return ok ? 0 : 1;
+}
+
 int easyChordsSelfTest(const std::vector<SongInfo>& songs, GameData& data, const Rules& rules) {
     int failures = 0, checks = 0;
     auto check = [&](bool ok, const char* what) {
@@ -3567,6 +3627,7 @@ int runSelfTest(const Options& options) {
         if (sustainAudioSelfTest(songs, data, rules)) return 1;
         if (easyChordsSelfTest(songs, data, rules)) return 1;
         if (requireStrumSelfTest(songs, data, rules)) return 1;
+        if (pullOffSelfTest(songs, data, rules)) return 1;
         if (songSpeedSelfTest(songs, data, rules)) return 1;
         int failures = 0, hopos = 0;
         for (const SongInfo& info : songs) {

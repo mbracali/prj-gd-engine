@@ -10,3 +10,8 @@ based_on: PlayStation Portable
 guitar_dream_version: "0.0.0"
 ready_to_play: false
 completeness: 0
+# How the launcher recognises this game's disc image (by content, not name),
+# as .iso or .chd (chdman createdvd / createcd).
+iso_signatures:
+  - format: iso9660          # PlayStation Portable UMD
+    psp_disc_id: "ULUS-10418"  # UMD_DATA.BIN's disc ID (Rock Band Unplugged, USA)

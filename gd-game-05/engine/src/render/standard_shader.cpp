@@ -371,6 +371,11 @@ void main() {
 
 #if GD_SPECULAR_MAP
     vec4 specFactor = texture(sSpecular, uv);
+    // RB's lit + specular-map pixel shaders (ark/xbox_shaders #33: specular
+    // map x gSpecular c2) tint the map by the material's specular colour
+    // [C data] (GD05-131; the material upload sends white under
+    // GD05_SPECMAP_LEGACY=1).
+    specFactor.rgb *= uSpecular.rgb;
     specFactor.a = max(specFactor.a * uSpecular.a, 0.1);
 #else
     vec4 specFactor = uSpecular;

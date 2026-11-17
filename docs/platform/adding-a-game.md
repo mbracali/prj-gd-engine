@@ -62,11 +62,14 @@ iso_signatures:
     ps2_boot: "SLUS_214.47"   # SYSTEM.CNF's BOOT2 program
     volume_id: "..."          # optional: the volume name
     files: [SYSTEM.CNF]       # optional: names in the root folder
+  - format: iso9660           # PlayStation Portable UMD
+    psp_disc_id: "ULUS-10418" # UMD_DATA.BIN's disc ID
 ```
 
 Add one per region or revision the game supports. To read a disc's values,
 drop it on the launcher: `gdul.log` shows what it found ("Xbox 360 disc, title
-ID 415607E7", "PlayStation 2 disc, SLUS_212.24").
+ID 415607E7", "PlayStation 2 disc, SLUS_212.24", "PlayStation Portable disc,
+ULUS-10418").
 
 ## The launcher module
 

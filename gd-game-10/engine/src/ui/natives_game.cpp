@@ -321,6 +321,22 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
                     }
                     ++fe.preloadRequest.serial;  // the boss is player 2's character: the venue's band loads again
                 }
+        // GD10_DEV_GAME_MODE=<p2_faceoff | p2_pro_faceoff | p2_battle |
+        // p2_quickplay> (development aid, not the original): a one-player
+        // song starts as that two-player mode (player 2 a guitarist on the
+        // second controller), so the two-player HUDs can be checked from the
+        // quickplay walk (gh4's multiplayer lobby, GD10-067's notes).
+        if (const char* dm = SDL_getenv("GD10_DEV_GAME_MODE"); dm && *dm && !r.boss) {
+            v.setGlobal(K("game_mode"), Vm::makeKey(K(dm)));
+            v.setGlobal(K("current_num_players"), Vm::makeInt(2));
+            if (const qb::Value* p2 = v.global(K("player2_status")); p2 && p2->st) {
+                qb::Value nv = *p2;
+                nv.st = std::make_shared<qb::Struct>(*p2->st);
+                Vm::set(*nv.st, K("part"), Vm::makeKey(K("guitar")));
+                Vm::set(*nv.st, K("controller"), Vm::makeInt(1));
+                v.setGlobal(K("player2_status"), nv);
+            }
+        }
         const qb::Value* mode = v.global(K("game_mode"));
         r.gameMode = mode ? mode->key : 0;
         r.players = int(Vm::number(v.global(K("current_num_players")), 1)) >= 2 ? 2 : 1;

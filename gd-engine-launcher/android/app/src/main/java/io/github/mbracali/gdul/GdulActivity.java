@@ -99,4 +99,35 @@ public class GdulActivity extends SDLActivity {
         }
         return "";
     }
+
+    // Called from the launcher's update check (updater.cpp, JNI, on its own
+    // thread): GET a public GitHub URL (no token; the User-Agent is
+    // "gdul/<version>", nothing personal). The body, or "\u0001" + why.
+    public static String httpGet(String url, String userAgent) {
+        java.net.HttpURLConnection c = null;
+        try {
+            c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+            c.setConnectTimeout(10000);
+            c.setReadTimeout(20000);
+            c.setInstanceFollowRedirects(true);
+            c.setRequestProperty("User-Agent", userAgent);
+            c.setRequestProperty("Accept", "application/vnd.github+json");
+            int code = c.getResponseCode();
+            java.io.InputStream in = code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream();
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            if (in != null) {
+                byte[] buf = new byte[16384];
+                for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
+                in.close();
+            }
+            String body = out.toString("UTF-8");
+            if (code < 200 || code >= 300) return "\u0001HTTP " + code;
+            return body;
+        } catch (Exception e) {
+            Log.w("gdul", "httpGet " + url + ": " + e);
+            return "\u0001" + e.toString();
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
 }

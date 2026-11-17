@@ -76,7 +76,8 @@ private:
 constexpr int64_t kSector = 2048;
 
 // ISO 9660: the primary volume descriptor at sector 16, the root folder's
-// records, SYSTEM.CNF's BOOT2 line (PlayStation 2).
+// records, SYSTEM.CNF's BOOT2 line (PlayStation 2), UMD_DATA.BIN's disc ID
+// (PlayStation Portable: "ULUS-10418|...", the text before the first '|').
 bool probeIso9660(Reader& r, DiscInfo& d) {
     std::vector<uint8_t> pvd = r.read(16 * kSector, size_t(kSector));
     if (pvd.empty() || pvd[0] != 1 || std::memcmp(&pvd[1], "CD001", 5) != 0) return false;
@@ -85,7 +86,7 @@ bool probeIso9660(Reader& r, DiscInfo& d) {
     const uint8_t* root = &pvd[156];
     const uint32_t lba = le32(root + 2), size = std::min<uint32_t>(le32(root + 10), 1u << 20);
     std::vector<uint8_t> dir = r.read(int64_t(lba) * kSector, size);
-    uint32_t cnfLba = 0, cnfSize = 0;
+    uint32_t cnfLba = 0, cnfSize = 0, umdLba = 0, umdSize = 0;
     for (size_t i = 0; i < dir.size();) {
         const uint8_t len = dir[i];
         if (len == 0) {  // records do not cross sectors: on to the next one
@@ -99,6 +100,7 @@ bool probeIso9660(Reader& r, DiscInfo& d) {
             if (size_t semi = name.find(';'); semi != std::string::npos) name.erase(semi);
             d.files.push_back(lower(name));
             if (lower(name) == "system.cnf") cnfLba = le32(&dir[i + 2]), cnfSize = le32(&dir[i + 10]);
+            if (lower(name) == "umd_data.bin") umdLba = le32(&dir[i + 2]), umdSize = le32(&dir[i + 10]);
         }
         i += len;
     }
@@ -112,6 +114,11 @@ bool probeIso9660(Reader& r, DiscInfo& d) {
             if (size_t semi = exe.find(';'); semi != std::string::npos) exe.erase(semi);
             d.ps2Boot = upper(trim(exe));
         }
+    }
+    if (umdLba && umdSize && umdSize < 4096) {
+        std::vector<uint8_t> umd = r.read(int64_t(umdLba) * kSector, umdSize);
+        std::string text(umd.begin(), umd.end());
+        d.pspDiscId = upper(trim(text.substr(0, text.find('|'))));
     }
     return true;
 }
@@ -172,6 +179,7 @@ std::string DiscInfo::describe() const {
     if (format == "xdvdfs") return xexTitleId.empty() ? "Xbox disc" : "Xbox 360 disc, title ID " + xexTitleId;
     if (format == "iso9660") {
         if (!ps2Boot.empty()) return "PlayStation 2 disc, " + ps2Boot;
+        if (!pspDiscId.empty()) return "PlayStation Portable disc, " + pspDiscId;
         return volumeId.empty() ? "ISO 9660 disc" : "ISO 9660 disc \"" + volumeId + "\"";
     }
     return error.empty() ? "not a disc image" : error;
@@ -182,10 +190,11 @@ bool IsoSignature::matches(const DiscInfo& d) const {
     if (!ps2Boot.empty() && upper(ps2Boot) != d.ps2Boot) return false;
     if (!volumeId.empty() && volumeId != d.volumeId) return false;
     if (!xexTitleId.empty() && upper(xexTitleId) != d.xexTitleId) return false;
+    if (!pspDiscId.empty() && upper(pspDiscId) != d.pspDiscId) return false;
     for (const std::string& f : files)
         if (std::find(d.files.begin(), d.files.end(), lower(f)) == d.files.end()) return false;
     // A signature must check something beyond the file system.
-    return !ps2Boot.empty() || !volumeId.empty() || !xexTitleId.empty() || !files.empty();
+    return !ps2Boot.empty() || !volumeId.empty() || !xexTitleId.empty() || !pspDiscId.empty() || !files.empty();
 }
 
 DiscInfo probeDisc(const std::string& path) {

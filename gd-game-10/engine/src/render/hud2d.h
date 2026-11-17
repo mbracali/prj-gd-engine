@@ -70,6 +70,8 @@ public:
     // ("<n> Note Streak!", "Star Power Ready", their glow burst and
     // lightning) draw here, not GH3's rock meter, score body and counter.
     void setAlertsOnly(bool on) { alertsOnly_ = on; }
+    // gh4's own messages up (GD10-068): GH3's alerts not drawn either.
+    void setNoAlerts(bool on) { noAlerts_ = on; }
 
     // The song's start (current_starttime, ms): the intro's times count from it.
     void setStart(double startMs) { startMs_ = startMs; }
@@ -147,6 +149,7 @@ private:
     std::array<Track, 3> bigTube_;  // tubes 4..6: initial (0,0) -> final (0,-170)
     bool started_ = false;
     bool alertsOnly_ = false;
+    bool noAlerts_ = false;
 };
 
 // The HUD alerts' scripts, shared by both HUDs [C scripts hud_show_note_streak_combo,

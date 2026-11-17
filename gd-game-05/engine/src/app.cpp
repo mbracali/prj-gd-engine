@@ -853,6 +853,17 @@ private:
     };
     std::vector<RbDirectedCut> rbDirectedCuts_;
     size_t rbDirectedNext_ = 0;
+    // GD05-134 / item 7: worldbase.dta player_failed / player_saved: a
+    // BFTB_<I>_FAIL shot as a member fails out, BFTB_<I>_REVIVE (the
+    // saviour's instrument) 0.35 s after a save; directed cuts wait while
+    // any member is out ($camera.num_players_failed).
+    struct RbCamCue {
+        float ms;
+        std::string cat;
+        bool revive;
+    };
+    std::vector<RbCamCue> rbCamCues_;
+    int rbFailedNow_ = 0;
     bool rbDirectedBuilt_ = false;
     float rbShotsT_ = 0;
     const scene::CamShot* rbShot(const std::string& category, const std::function<bool(const scene::CamShot&)>& ok = {});
@@ -2234,9 +2245,11 @@ void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events
         }
     };
     bool deployed = false;
+    int deployer = -1;  // the first member who deployed this update (the saviour)
     for (const PlayerEvent& e : events0) {
         phraseCaptured(*player_, e);
         deployed |= e.kind == PlayerEvent::Kind::StarPowerStart;
+        if (deployed && deployer < 0) deployer = 0;
     }
     for (RbSeat& st : seats_) {
         if (over) break;
@@ -2255,6 +2268,7 @@ void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events
             const bool wasOd = st.vocal->overdriveActive();
             st.vocal->update(t);
             deployed |= !wasOd && st.vocal->overdriveActive();
+            if (deployed && deployer < 0) deployer = int(&st - seats_.data()) + 1;
             for (const VocalPlayer::Event& e : st.vocal->takeEvents()) {
                 if (e.kind != VocalPlayer::Event::Kind::PhraseRated) continue;
                 st.lastRating = VocalPlayer::ratingName(e.rating), st.lastRatingMs = t;
@@ -2268,12 +2282,15 @@ void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events
             p.setExternal(st.vocal->score(), st.vocal->streak(), mult, st.vocal->overdriveActive(), st.vocal->overdrive(), st.rating, st.phrasesHit);
         } else {
             if (st.bot && !st.out) st.bot->feed(p, t);
+            // Test aid (GD05_AUTODEPLOY=1): the band's autoplaying members deploy as soon as ready.
+            if (static const bool autoDeploy = SDL_getenv("GD05_AUTODEPLOY") != nullptr; st.bot && !st.out && autoDeploy && p.starPowerReady()) p.starPowerButton(t);
             p.update(t);
             const std::vector<PlayerEvent> ev = p.takeEvents();
             if (st.bonus) st.bonus->update(p, ev, t);
             for (const PlayerEvent& e : ev) {
                 phraseCaptured(p, e);
                 deployed |= e.kind == PlayerEvent::Kind::StarPowerStart;
+                if (deployed && deployer < 0) deployer = int(&st - seats_.data()) + 1;
                 if (e.kind == PlayerEvent::Kind::Hit && ui_) ui_->gameEvent("hit", {Value::integer(int(&st - seats_.data()) + 1)});
             }
             st.rating = p.rockMeter();
@@ -2307,6 +2324,11 @@ void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events
     // brink kept as muted judging-on.]
     const float t0 = t;
     auto isOut = [&](int idx) { return idx == 0 ? player0Out_ : seats_[size_t(idx - 1)].out; };
+    // A member's track letter for worldbase.dta's BFTB_<B|D|G|V>_FAIL / _REVIVE.
+    auto bftbLetter = [&](int idx) -> std::string {
+        const std::string part = idx == 0 ? (vocal_ ? std::string("vocals") : parts_[0]) : seats_[size_t(idx - 1)].part;
+        return part == "bass" ? "B" : part == "drum" || part == "drums" ? "D" : part == "vocals" ? "V" : "G";
+    };
     auto setOut = [&](int idx, bool v) { (idx == 0 ? player0Out_ : seats_[size_t(idx - 1)].out) = v; };
     auto rating = [&](int idx) {
         if (idx == 0) return vocal_ ? vocalRating_ : player_->rockMeter();
@@ -2329,6 +2351,7 @@ void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events
             ++fails_[size_t(k)], outMs_[size_t(k)] = t0;
             for (int q = 0; q < players; ++q) spend(q, q == k ? 1.0f : 0.0f);  // its energy gone, every deploy stopped
             bandNotices_.push_back({"PLAYER " + std::to_string(k + 1) + " FAILED!", t0});
+            if (!envOn("GD05_FAILSHOTS_LEGACY")) rbCamCues_.push_back({t0, "BFTB_" + bftbLetter(k) + "_FAIL", false});
         }
     if (deployed) {
         bool saved = false;
@@ -2345,6 +2368,9 @@ void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events
                 while (g < int(gems.size()) && gems[size_t(g)].ms < back) ++g;
                 who->skipUntil(g);
                 bandNotices_.push_back({"PLAYER " + std::to_string(k + 1) + " SAVED!", t0});
+                // player.dta save_player: the world's player_saved with the
+                // causer's track; player_saved_activate 0.35 s later [C data].
+                if (!envOn("GD05_FAILSHOTS_LEGACY")) rbCamCues_.push_back({t0 + 350.0f, "BFTB_" + bftbLetter(deployer < 0 ? 0 : deployer) + "_REVIVE", true});
             }
         if (saved)
             for (int q = 0; q < players; ++q) {
@@ -3948,6 +3974,8 @@ void App::rbResetSongShots() {
     rbDirectedCuts_.clear();
     rbDirectedNext_ = 0;
     rbDirectedBuilt_ = false;
+    rbCamCues_.clear();
+    rbFailedNow_ = 0;
 }
 
 // A shot the VENUE track's rules start (force_shot): its targets through
@@ -4143,6 +4171,22 @@ void App::rbShots(float t) {
     // texts are kept without their brackets (chart.cpp eventText); it also
     // started the shot at the event and read zero_time from the header's
     // properties (none: 0). GD05_DIRECTED_LEGACY=1: as before (no cuts).
+    // worldbase.dta player_failed / player_saved_activate [C data]: the
+    // shot picked at once, picks held for (min_time + zero_time) / 30 s.
+    while (!rbCamCues_.empty() && rbCamCues_.front().ms <= t) {
+        const RbCamCue cue = rbCamCues_.front();
+        rbCamCues_.erase(rbCamCues_.begin());
+        rbFailedNow_ = std::max(0, rbFailedNow_ + (cue.revive ? -1 : 1));
+        if (rbLoseShot_) continue;
+        const scene::CamShot* s = rbShot(cue.cat);
+        if (SDL_getenv("GD05_SHOTLOG")) SDL_Log("band %s shot %s at %.0f ms (members out %d)", cue.revive ? "revive" : "fail", s ? s->name.c_str() : "(none)", double(t), rbFailedNow_);
+        if (!s) continue;
+        next = s;
+        rbDirected_ = true;
+        const auto* b = dynamic_cast<const scene::BandCamShot*>(s);
+        const float mt = (std::atof(s->flag("min_time").c_str()) + (b ? b->zeroTime : 0.0f)) / 30.0f;
+        rbNextCamMs_ = t + mt * 1000.0f;
+    }
     const std::string key = "[do_directed_cut ";
     auto directedCat = [&](const std::string& e, size_t from) {
         std::string cat = e.substr(from);
@@ -4164,6 +4208,7 @@ void App::rbShots(float t) {
         while (rbDirectedBuilt_ && rbDirectedNext_ < rbDirectedCuts_.size() && rbDirectedCuts_[rbDirectedNext_].startMs <= t) {
             const RbDirectedCut& c = rbDirectedCuts_[rbDirectedNext_++];
             if (rbLoseShot_) continue;
+            if (rbFailedNow_ > 0 && !envOn("GD05_FAILSHOTS_LEGACY")) continue;  // start_directed_cut: num_players_failed 0 only
             next = c.shot;
             rbDirected_ = true;
             rbNextCamMs_ = c.eventMs + std::atof(c.shot->flag("min_time").c_str()) / 30.0f * 1000.0f;

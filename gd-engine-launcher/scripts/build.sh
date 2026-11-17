@@ -34,9 +34,10 @@
 #               emulator; not released)
 #   all         every one this system can build
 #   --force     rebuild every game module (normally a module is reused when its
-#               game-info.yaml guitar_dream_version and the launcher's module
-#               SDK (sdk/, modules/gdNN/) are the same as in the previous build's
-#               gd-engine-games/manifest.json)
+#               build key, gd-engine-games/gd-game-NN/buildkey.txt in the
+#               previous build, is the same: the game's sources, gd-engine-core,
+#               the module SDK, the recipes and the toolchain; see
+#               module_build_key)
 #   --previous <folder>  where the previous build is (also GDUL_PREVIOUS_BUILD):
 #               a build folder, or unpacked release downloads (an .apk is
 #               unpacked too); default: the newest build in local_builds/
@@ -70,7 +71,7 @@ while [ $# -gt 0 ]; do
     --force) force=1 ;;
     --previous) [ $# -ge 2 ] || { echo "build.sh: --previous needs a folder" >&2; exit 2; }; previous="$2"; shift ;;
     --previous=*) previous="${1#--previous=}" ;;
-    -h|--help) sed -n '4,49p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '4,50p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build.sh: unknown build or option $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
@@ -147,6 +148,131 @@ module_inputs_hash() {
   { find "$launcher/sdk" "$launcher/modules/gd$1" "$launcher/scripts" "$repo/gd-game-$1/engine/build_common.sh" "${core[@]}" \
       -type f -not -path "$repo/gd-engine-core/build/*" 2>/dev/null || true; } |
     LC_ALL=C sort | while IFS= read -r f; do cat "$f"; done | sha256
+}
+
+# ---- module reuse: the build key (GDREL-010) ----
+# A module is taken from the previous build (--previous) only when its build
+# key, written next to it as buildkey.txt, is the one this build computes:
+# a SHA-256 over everything that goes into the module on that system:
+#   - the game's folder (git's tracked and untracked-not-ignored files, by
+#     content), except what never goes into a module: game-info.yaml (copied
+#     fresh into every build: a version bump alone reuses the module),
+#     CHANGELOG.md, agents/ and docs/;
+#   - gd-engine-core (except docs/), the launcher's module SDK (sdk/:
+#     gd_host.h, the shim), modules/gdNN/ when the game has one, and the
+#     recipes (this script, build_linux_portable.sh, build_steamdeck.sh);
+#   - the system, the processor and the toolchain (toolchain_id).
+# Anything that cannot be computed gives no key: the module is built (and
+# carries no buildkey.txt). The inputs of each key are in
+# logs/<os>-<game>.buildkey.txt, to see why a module was built.
+toolchain_id() {  # <os>: compilers, CMake, SDL3's headers, flags; fails when one cannot be read
+  local os="$1" cc cxx sdlh="" d pfx
+  case "$os" in
+    windows)
+      if [ "$host" != windows ]; then cc=x86_64-w64-mingw32-gcc cxx=x86_64-w64-mingw32-g++; else cc="${CC:-gcc}" cxx="${CXX:-g++}"; fi
+      for d in /usr/x86_64-w64-mingw32/sys-root/mingw/include /mingw64/include /ucrt64/include; do
+        [ -f "$d/SDL3/SDL_version.h" ] && sdlh="$d/SDL3/SDL_version.h" && break
+      done ;;
+    macos)
+      cc="${CC:-cc}" cxx="${CXX:-c++}"
+      d="$(brew --prefix sdl3 2>/dev/null)" || return 1
+      sdlh="$d/include/SDL3/SDL_version.h" ;;
+    android)
+      [ -n "${ANDROID_NDK:-}" ] && [ -n "${SDL3_SRC:-}" ] || return 1
+      cc="$ANDROID_NDK/toolchains/llvm/prebuilt/$NDK_HOST/bin/clang" cxx="$ANDROID_NDK/toolchains/llvm/prebuilt/$NDK_HOST/bin/clang++"
+      sdlh="$SDL3_SRC/include/SDL3/SDL_version.h" ;;
+    *)
+      cc="${CC:-cc}" cxx="${CXX:-c++}"
+      pfx="${CMAKE_PREFIX_PATH:-}"
+      for d in "${pfx%%:*}/include" /usr/include /usr/local/include; do
+        [ -f "$d/SDL3/SDL_version.h" ] && sdlh="$d/SDL3/SDL_version.h" && break
+      done ;;
+  esac
+  [ -n "$sdlh" ] && [ -f "$sdlh" ] || return 1
+  local ccv cxxv cmv
+  ccv="$("$cc" --version 2>/dev/null | head -1)" || return 1
+  cxxv="$("$cxx" --version 2>/dev/null | head -1)" || return 1
+  cmv="$(cmake --version 2>/dev/null | head -1)" || return 1
+  [ -n "$ccv" ] && [ -n "$cxxv" ] && [ -n "$cmv" ] || return 1
+  echo "cc: $ccv"
+  echo "c++: $cxxv"
+  echo "cmake: $cmv"
+  echo "sdl3 headers: $(sha256 < "$sdlh")"
+  echo "flags: CFLAGS=${CFLAGS:-} CXXFLAGS=${CXXFLAGS:-} LDFLAGS=${LDFLAGS:-} MINGW_TOOLCHAIN=${MINGW_TOOLCHAIN:-}"
+  case "$os" in
+    android)
+      echo "ndk: $(sha256 < "$ANDROID_NDK/source.properties") abi $android_abi" ;;
+    windows)  # Fedora's MinGW packages (the C runtime, winpthreads, SDL3), when rpm can say
+      if command -v rpm >/dev/null; then
+        echo "mingw: $(rpm -q mingw64-gcc-c++ mingw64-crt mingw64-winpthreads mingw64-SDL3 2>/dev/null | tr '\n' ' ')"
+      fi ;;
+    macos)
+      echo "macOS SDK: $(xcrun --show-sdk-version 2>/dev/null || echo unknown)" ;;
+  esac
+}
+module_build_key() {  # <NN> <os>: the key on stdout; nothing (and status 1) when it cannot be computed
+  local nn="$1" os="$2" tc paths list f blobs
+  command -v git >/dev/null || return 1
+  git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  tc="$(toolchain_id "$os")" || return 1
+  [ -n "$tc" ] || return 1
+  paths=("gd-game-$nn" gd-engine-core gd-engine-launcher/sdk gd-engine-launcher/scripts/build.sh
+         gd-engine-launcher/scripts/build_linux_portable.sh gd-engine-launcher/scripts/build_steamdeck.sh)
+  [ -d "$launcher/modules/gd$nn" ] && paths+=("gd-engine-launcher/modules/gd$nn")
+  list="$( { git -C "$repo" ls-files -- "${paths[@]}" && git -C "$repo" ls-files --others --exclude-standard -- "${paths[@]}"; } |
+    grep -vE "^gd-game-$nn/(game-info\.yaml|CHANGELOG\.md|agents/|docs/)|^gd-engine-core/docs/" | LC_ALL=C sort -u)" || return 1
+  [ -n "$list" ] || return 1
+  {
+    echo "gdul module build key 1"
+    echo "game: gd-game-$nn"
+    echo "system: $os $(arch_of "$os")"
+    echo "$tc"
+    if [ "$nn" = 01 ] && { [ "$os" = linux ] || [ "$os" = steamdeck ]; }; then  # NVIDIA DLSS, fetched (not in git)
+      echo "dlss: $(cat "$repo"/gd-game-01/engine/third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* 2>/dev/null | sha256)"
+    fi
+    # Each file's content as git's blob hash (one git for all; a file
+    # listed but deleted counts as "missing").
+    while IFS= read -r f; do
+      if [ -f "$repo/$f" ]; then echo "$f"; else echo "missing $f" >&3; fi
+    done <<<"$list" 3>"$logs/.$os-gd-game-$nn.missing" > "$logs/.$os-gd-game-$nn.files"
+    blobs="$(cd "$repo" && git hash-object --no-filters --stdin-paths < "$logs/.$os-gd-game-$nn.files")" || return 1
+    [ "$(($(wc -l < "$logs/.$os-gd-game-$nn.files")))" = "$(($(printf '%s\n' "$blobs" | wc -l)))" ] || return 1
+    paste -d' ' <(printf '%s\n' "$blobs") "$logs/.$os-gd-game-$nn.files"
+    cat "$logs/.$os-gd-game-$nn.missing"
+  } > "$logs/$os-gd-game-$nn.buildkey.txt" || return 1
+  rm -f "$logs/.$os-gd-game-$nn.files" "$logs/.$os-gd-game-$nn.missing"
+  sha256 < "$logs/$os-gd-game-$nn.buildkey.txt"
+}
+# module_reuse_why <previous manifest> <game id> <module file> <build key>:
+# nothing when the previous build's module can be reused, else why it is built.
+module_reuse_why() {
+  local prev="$1" id="$2" mod="$3" key="$4" dir root prev_key="" prev_mod
+  if [ "$force" = 1 ]; then echo "--force"; return 0; fi
+  if [ -z "$key" ]; then echo "no build key could be computed"; return 0; fi
+  if [ -z "$prev" ] || [ ! -f "$prev" ]; then echo "no previous build"; return 0; fi
+  dir="$(dirname "$prev")/$id" root="$(dirname "$(dirname "$prev")")"
+  [ -f "$dir/buildkey.txt" ] && prev_key="$(head -1 "$dir/buildkey.txt")"
+  prev_mod="$(manifest_get "$prev" "$id" module)" || prev_mod=""
+  if [ -z "$prev_key" ]; then echo "the previous build has no build key for it"
+  elif [ "$prev_key" != "$key" ]; then echo "its sources, the core, the SDK, the recipes or the toolchain changed (build key)"
+  elif [ "$prev_mod" != "$mod" ]; then echo "the previous manifest does not list $mod"
+  elif ! reusable_module "$dir" "$mod" "$root"; then echo "the previous build's module folder is incomplete"
+  fi
+}
+# reusable_module <previous module folder> <module file> <previous bundle root>:
+# every file the previous module folder says it has is there (the module,
+# Android's native libraries, gd-engine-core's libraries, the files at the root).
+reusable_module() {
+  local dir="$1" mod="$2" root="$3" f list
+  [ -s "$dir/$mod" ] || return 1
+  for list in native-libs.txt core-libs.txt; do
+    [ -f "$dir/$list" ] || continue
+    while IFS= read -r f; do [ -z "$f" ] || [ -s "$dir/$f" ] || return 1; done < "$dir/$list"
+  done
+  if [ -f "$dir/root-files.txt" ]; then
+    while IFS= read -r f; do [ -z "$f" ] || [ -s "$root/$f" ] || return 1; done < "$dir/root-files.txt"
+  fi
+  return 0
 }
 
 # ship_core_runtime <os> <module build dir> <module folder out>: the shared
@@ -610,7 +736,9 @@ unpack_apks() {
       [ -f "$d/native-libs.txt" ] || continue
       for abi in arm64-v8a x86_64; do
         [ -d "$u/lib/$abi" ] || continue
-        while IFS= read -r f; do cp "$u/lib/$abi/$f" "$d"; done < "$d/native-libs.txt"
+        # (A library missing from the APK is left missing: reusable_module
+        # then builds that module instead of taking it.)
+        while IFS= read -r f; do if [ -f "$u/lib/$abi/$f" ]; then cp "$u/lib/$abi/$f" "$d"; fi; done < "$d/native-libs.txt"
       done
     done
   done
@@ -681,7 +809,8 @@ build_os() {
   echo "${B}${C}=== $name ===${N}"
   if [ "$os" = android ]; then android_env || return 1; fi
   local prev
-  prev="$(previous_manifest "$os" "$arch" "$out")"
+  # (An unreadable previous build is no previous build: every module is built.)
+  prev="$(previous_manifest "$os" "$arch" "$out")" || prev=""
   [ -n "$prev" ] && say "Previous build: ${prev#"$launcher/"}"
   local stage="$out_root/.$name.new"
   rm -rf "$stage" && mkdir -p "$stage/licenses" "$stage/manual" "$stage/gd-engine-games"
@@ -702,8 +831,8 @@ build_os() {
   fi
 
   # Games: every game-info.yaml (the launcher lists them all), and a module
-  # for each playable one, reused from the previous build when its version
-  # is the same.
+  # for each playable one, reused from the previous build when its build
+  # key is the same (module_build_key).
   cp "$launcher/games.yaml" "$launcher/launcher-info.yaml" "$stage/gd-engine-games/"
   local entries=() gi id ver ready nn mod systems ihash
   for gi in "${game_infos[@]}"; do
@@ -726,30 +855,38 @@ build_os() {
       *) say "${R}$id: ready_to_play but no $os module (module_systems_$nn): every build must carry it${N}"; return 1 ;;
     esac
     ihash="$(module_inputs_hash "$nn")"
-    local dest="$stage/gd-engine-games/$id" prev_dir="" prev_ver="" prev_hash="" built_at reused=""
+    # The build key (GDREL-010, module_build_key): the module is reused only
+    # when the previous build's buildkey.txt for it is this very key and every
+    # file it lists is there; anything else (no key, an older download without
+    # one, a missing file) builds it.
+    local key="" dest="$stage/gd-engine-games/$id" prev_dir="" prev_ver="" prev_root="" built_at reused="" why=""
+    key="$(module_build_key "$nn" "$os")" || key=""
     if [ -n "$prev" ]; then
       prev_dir="$(dirname "$prev")/$id"
+      prev_root="$(dirname "$(dirname "$prev")")"
       prev_ver="$(manifest_get "$prev" "$id" guitar_dream_version)"
-      prev_hash="$(manifest_get "$prev" "$id" inputs_hash)"
     fi
-    if [ "$force" = 0 ] && [ -n "$prev_ver" ] && [ "$prev_ver" = "$ver" ] && [ "$prev_hash" = "$ihash" ] && [ -f "$prev_dir/$mod" ]; then
-      say "${G}$id $ver: same version and module SDK as the previous build, module reused${N}"
+    why="$(module_reuse_why "$prev" "$id" "$mod" "$key")" || why="the reuse check failed"
+    if [ -z "$why" ]; then
+      say "${G}$id $ver: unchanged since the previous build ($prev_ver; build key ${key:0:12}), module reused${N}"
       cp -R "$prev_dir/." "$dest/"
       cp "$repo/$gi" "$dest/game-info.yaml"
       if [ -f "$dest/root-files.txt" ]; then  # its files at the launcher's root, from that build's root
         mkdir -p "$dest/root"
-        while IFS= read -r f; do cp "$(dirname "$(dirname "$prev")")/$f" "$dest/root/"; done < "$dest/root-files.txt"
+        while IFS= read -r f; do cp "$prev_root/$f" "$dest/root/"; done < "$dest/root-files.txt"
       fi
       built_at="$(manifest_get "$prev" "$id" built_at)"
       reused="true"
     else
       [ -n "$prev_ver" ] && [ "$prev_ver" != "$ver" ] && say "$id: version $prev_ver -> $ver"
-      [ -n "$prev_ver" ] && [ "$prev_ver" = "$ver" ] && [ "$prev_hash" != "$ihash" ] && say "$id: the launcher's module SDK changed"
+      say "$id: building ($why)"
       step "$os-$id" "$id $ver: building the module" "build_module_$nn" "$os" "$work/$id" "$dest" || return 1
       built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       reused="false"
       say "${G}$id $ver: module built ($(warnings_in "$logs/$os-$id.log") compiler warnings)${N}"
     fi
+    rm -f "$dest/buildkey.txt"
+    if [ -n "$key" ]; then printf '%s\n' "$key" > "$dest/buildkey.txt"; fi
     entries+=("$id|$ver|$mod|$built_at|$reused|$ihash")
   done
 
