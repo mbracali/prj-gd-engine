@@ -5,5 +5,5 @@
 #include <string>
 
 // The save folder (SDL_GetPrefPath(gd-engine, gd24)), with a trailing
-// separator; "" when SDL cannot give one.
+// separator; "" when SDL cannot give one. GD24_SAVE_DIR overrides it (tests).
 std::string prefDir();

@@ -8,6 +8,13 @@
 
 std::string prefDir() {
     static const std::string dir = [] {
+        // Development aid: GD24_SAVE_DIR=<folder/> keeps tests away from the real saves.
+        if (const char* d = SDL_getenv("GD24_SAVE_DIR")) {
+            std::string p = d;
+            if (!p.empty() && p.back() != '/' && p.back() != '\\') p += '/';
+            SDL_CreateDirectory(p.c_str());
+            return p;
+        }
         char* pref = SDL_GetPrefPath(app::kPrefOrg, app::kPrefApp);
         std::string p = pref ? pref : "";
         SDL_free(pref);

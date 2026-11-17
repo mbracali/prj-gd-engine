@@ -7,6 +7,7 @@
 //   gd24 <disc>                  the game: for now our own status screen (the
 //                                disc's title and songs), ENHANCED and GAMEPADS
 //   gd24 --formattest <disc>     every file the port reads, parsed; one line per failure
+//   gd24 --inputtest             the input layer with virtual controllers (no disc)
 //   gd24 --audiotest <disc> [<song> | all] [--play]
 //                                decodes the song previews (ATRAC3plus) and checks them
 #include <SDL3/SDL.h>
@@ -22,6 +23,7 @@
 #include "data/text_table.h"
 #include "data/umd.h"
 #include "tests/audiotest.h"
+#include "tests/inputtest.h"
 
 namespace {
 
@@ -115,6 +117,7 @@ int gd24Main(int argc, char** argv) {
         else if (a == "--audiotest") audiotest = true;
         else if (a == "--play") play = true;
         else if (audiotest && !disc.empty() && !a.empty() && a[0] != '-') song = a;
+        else if (a == "--inputtest") return inputTest();
         else if (a == "--version") return std::printf("gd24 %s\n", GD24_VERSION), 0;
         else if (!a.empty() && a[0] != '-') disc = a;
     }

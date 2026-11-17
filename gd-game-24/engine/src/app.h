@@ -15,8 +15,10 @@
 
 #include "audio/audio_out.h"
 #include "data/song_list.h"
+#include "input/input.h"
 #include "platform/settings.h"
 #include "render/canvas.h"
+#include "ui/gamepads_screen.h"
 
 namespace gd24 {
 class Umd;
@@ -37,12 +39,13 @@ public:
     enum class Menu { Up, Down, Left, Right, Confirm, Back, Start, Select };
 
 private:
-    enum class Screen { Status, Enhanced };
+    enum class Screen { Status, Enhanced, Gamepads };
 
     bool openWindow(std::string& error);
     void applyScreenMode();
     void handleEvent(const SDL_Event& e);
     void menu(Menu m);
+    void openGamepads();
     void click(float x, float y);
     void draw();
     void drawStatus();
@@ -59,6 +62,9 @@ private:
     std::string title_, discId_, discVersion_;
     std::vector<gd24::SongEntry> songs_;
     Settings settings_;
+    Input input_;
+    GamepadsScreen gamepads_{input_};
+    std::vector<InputEvent> events_;
     SDL_Window* window_ = nullptr;
     Canvas canvas_;
     Screen screen_ = Screen::Status;

@@ -101,6 +101,7 @@ int App::run(const Options& opt) {
             songs_.size());
 
     SDL_SetAppMetadata(app::kDisplayName, app::kVersion, app::kAppId);
+    Input::prepareSdl();
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         SDL_Log("gd24: cannot start SDL: %s", SDL_GetError());
         return 2;
@@ -112,6 +113,7 @@ int App::run(const Options& opt) {
     }
     if (!audio_.open(error)) SDL_Log("audio: %s (continuing without sound)", error.c_str());
     applyVolume();
+    if (const char* v = SDL_getenv("GD24_VIRTUAL_PAD")) SDL_Log("input: virtual pad %s: id %u", v, unsigned(Input::attachVirtualPad(v)));
     DevAids aids;
     startNs_ = SDL_GetTicksNS();
     while (!quit_) {
@@ -126,6 +128,8 @@ int App::run(const Options& opt) {
         if (aids.quitDue(ms)) quit_ = true;
     }
     if (decoding_.valid()) decoding_.wait();
+    if (screen_ == Screen::Gamepads) gamepads_.exit();
+    input_.close();
     audio_.close();
     canvas_.shutdown();
     SDL_DestroyWindow(window_);
@@ -138,54 +142,55 @@ void App::handleEvent(const SDL_Event& e) {
     switch (e.type) {
     case SDL_EVENT_QUIT:
         quit_ = true;
-        break;
-    case SDL_EVENT_KEY_DOWN:
-        switch (e.key.key) {
-        case SDLK_UP: menu(Menu::Up); break;
-        case SDLK_DOWN: menu(Menu::Down); break;
-        case SDLK_LEFT: menu(Menu::Left); break;
-        case SDLK_RIGHT: menu(Menu::Right); break;
-        case SDLK_RETURN: case SDLK_KP_ENTER: menu(Menu::Confirm); break;
-        case SDLK_ESCAPE: case SDLK_BACKSPACE: menu(Menu::Back); break;
-        case SDLK_TAB: menu(Menu::Select); break;
-        case SDLK_F11: menu(Menu::Start); break;
-        default: break;
-        }
-        break;
-    case SDL_EVENT_GAMEPAD_ADDED:
-        SDL_OpenGamepad(e.gdevice.which);
-        break;
-    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-        switch (e.gbutton.button) {
-        case SDL_GAMEPAD_BUTTON_DPAD_UP: menu(Menu::Up); break;
-        case SDL_GAMEPAD_BUTTON_DPAD_DOWN: menu(Menu::Down); break;
-        case SDL_GAMEPAD_BUTTON_DPAD_LEFT: menu(Menu::Left); break;
-        case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: menu(Menu::Right); break;
-        case SDL_GAMEPAD_BUTTON_SOUTH: menu(Menu::Confirm); break;
-        case SDL_GAMEPAD_BUTTON_EAST: menu(Menu::Back); break;
-        case SDL_GAMEPAD_BUTTON_START: menu(Menu::Start); break;
-        case SDL_GAMEPAD_BUTTON_BACK: menu(Menu::Select); break;
-        default: break;
-        }
-        break;
+        return;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
         if (e.button.button == SDL_BUTTON_LEFT) {
             float x = 0, y = 0;
             canvas_.windowToCanvas(e.button.x, e.button.y, x, y);
             click(x, y);
         }
-        break;
+        return;
     case SDL_EVENT_MOUSE_WHEEL:
-        if (screen_ == Screen::Status) {
+        if (screen_ == Screen::Status)
             scroll_ = std::clamp(scroll_ + (e.wheel.y < 0 ? 3 : -3), 0, std::max(0, int(songs_.size()) - kRows));
-        }
-        break;
+        return;
     default:
         break;
     }
+    // Keys and controllers: the input layer's PSP buttons (input/input.h).
+    events_.clear();
+    input_.handle(e, events_);
+    for (const InputEvent& ev : events_) {
+        if (!ev.down) continue;
+        if (SDL_getenv("GD24_INPUTLOG")) SDL_Log("input: %s", actionName(ev.action));
+        switch (ev.action) {
+        case Action::Up: menu(Menu::Up); break;
+        case Action::Down: menu(Menu::Down); break;
+        case Action::Left: menu(Menu::Left); break;
+        case Action::Right: menu(Menu::Right); break;
+        case Action::Cross: menu(Menu::Confirm); break;
+        case Action::Circle: menu(Menu::Back); break;
+        case Action::Start: menu(Menu::Start); break;
+        case Action::Select: menu(Menu::Select); break;
+        default: break;
+        }
+    }
+}
+
+void App::openGamepads() {
+    screen_ = Screen::Gamepads;
+    gamepads_.enter();
 }
 
 void App::menu(Menu m) {
+    if (screen_ == Screen::Gamepads) {
+        static const GamepadsScreen::Key kKeys[] = {GamepadsScreen::Key::Up, GamepadsScreen::Key::Down, GamepadsScreen::Key::Left,
+                                                    GamepadsScreen::Key::Right, GamepadsScreen::Key::Confirm, GamepadsScreen::Key::Back};
+        if (m == Menu::Select) return;
+        if (m == Menu::Start) m = Menu::Confirm;  // Enter (the keyboard's Start) selects here
+        if (!gamepads_.key(kKeys[int(m)])) gamepads_.exit(), screen_ = Screen::Status;
+        return;
+    }
     if (screen_ == Screen::Status) {
         const int n = int(songs_.size());
         if (m == Menu::Up && n) sel_ = (sel_ + n - 1) % n;
@@ -193,15 +198,18 @@ void App::menu(Menu m) {
         else if (m == Menu::Left && n) sel_ = std::max(0, sel_ - kRows);
         else if (m == Menu::Right && n) sel_ = std::min(n - 1, sel_ + kRows);
         else if (m == Menu::Start) screen_ = Screen::Enhanced, esel_ = 0;
+        else if (m == Menu::Select) openGamepads();
         else if (m == Menu::Confirm && n) playPreview(sel_);
         else if (m == Menu::Back) audio_.stop(), playingSong_ = -1, status_.clear();
         if (sel_ < scroll_) scroll_ = sel_;
         if (sel_ >= scroll_ + kRows) scroll_ = sel_ - kRows + 1;
         return;
     }
-    // ENHANCED: the options, then "Back" and "Quit".
+    // ENHANCED: the options, then "Gamepads", "Back" and "Quit". Start
+    // (the keyboard's Enter) selects as Cross does.
+    if (m == Menu::Start) m = Menu::Confirm;
     const auto& opts = Settings::options();
-    const int rows = int(opts.size()) + 2;
+    const int rows = int(opts.size()) + 3;
     if (m == Menu::Up) esel_ = (esel_ + rows - 1) % rows;
     else if (m == Menu::Down) esel_ = (esel_ + 1) % rows;
     else if ((m == Menu::Left || m == Menu::Right || m == Menu::Confirm) && esel_ < int(opts.size())) {
@@ -211,9 +219,11 @@ void App::menu(Menu m) {
         if (std::strcmp(o.key, "screen_mode") == 0) applyScreenMode();
         if (std::strcmp(o.key, "language") == 0) reloadSongs();
         if (std::strcmp(o.key, "volume") == 0) applyVolume();
-    } else if (m == Menu::Back || m == Menu::Start || (m == Menu::Confirm && esel_ == int(opts.size()))) {
+    } else if (m == Menu::Confirm && esel_ == int(opts.size())) {
+        openGamepads();
+    } else if (m == Menu::Back || (m == Menu::Confirm && esel_ == int(opts.size()) + 1)) {
         screen_ = Screen::Status;
-    } else if (m == Menu::Confirm && esel_ == int(opts.size()) + 1) {
+    } else if (m == Menu::Confirm && esel_ == int(opts.size()) + 2) {
         quit_ = true;
     }
 }
@@ -271,6 +281,10 @@ void App::pollPreview() {
 }
 
 void App::click(float x, float y) {
+    if (screen_ == Screen::Gamepads) {
+        if (!gamepads_.click(x, y)) gamepads_.exit(), screen_ = Screen::Status;
+        return;
+    }
     if (screen_ == Screen::Status) {
         if (x >= kListX && x < Canvas::kW - kListX && y >= kListY && y < kListY + kRows * kRowH) {
             const int row = scroll_ + int((y - kListY) / kRowH);
@@ -279,12 +293,13 @@ void App::click(float x, float y) {
                 menu(Menu::Confirm);
             }
         } else if (y >= Canvas::kH - 40) {
-            // The help bar: ENHANCED on the right.
-            if (x > Canvas::kW / 2) menu(Menu::Start);
+            // The help bar: GAMEPADS and ENHANCED on the right.
+            if (x > Canvas::kW * 0.75f) menu(Menu::Start);
+            else if (x > Canvas::kW / 2) menu(Menu::Select);
         }
         return;
     }
-    const int rows = int(Settings::options().size()) + 2;
+    const int rows = int(Settings::options().size()) + 3;
     const int row = int((y - 120) / 40);
     if (y >= 120 && row < rows) {
         esel_ = row;
@@ -295,6 +310,7 @@ void App::click(float x, float y) {
 void App::draw() {
     canvas_.clear(kBg);
     if (screen_ == Screen::Status) drawStatus();
+    else if (screen_ == Screen::Gamepads) gamepads_.draw(canvas_);
     else drawEnhanced();
 }
 
@@ -344,14 +360,14 @@ void App::drawStatus() {
         std::snprintf(t, sizeof t, "%5.1f s", audio_.positionSec());
         canvas_.text(Canvas::kW - 32 - Canvas::textWidth(t, 2), kListY + kRows * kRowH + 34, t, kDim, 2);
     }
-    drawHelp({{"Up/Down", "song"}, {"Confirm", "preview"}, {"Back", "stop"}, {"Start", "ENHANCED"}});
+    drawHelp({{"Confirm", "preview"}, {"Back", "stop"}, {"Select", "GAMEPADS"}, {"Start", "ENHANCED"}});
 }
 
 void App::drawEnhanced() {
     canvas_.text(32, 20, "ENHANCED", kAccent, 3);
     canvas_.text(32, 56, "gd24's settings (saved in enhanced.txt)", kDim, 2);
     const auto& opts = Settings::options();
-    const int rows = int(opts.size()) + 2;
+    const int rows = int(opts.size()) + 3;
     for (int i = 0; i < rows; ++i) {
         const float y = 120 + float(i) * 40;
         if (i == esel_) canvas_.fill(24, y - 6, Canvas::kW - 48, 34, kRow);
@@ -360,7 +376,8 @@ void App::drawEnhanced() {
             canvas_.text(40, y + 4, opts[size_t(i)].label, c, 2);
             canvas_.text(520, y + 4, "< " + settings_.shown(opts[size_t(i)]) + " >", c, 2);
         } else {
-            canvas_.text(40, y + 4, i == int(opts.size()) ? "Back" : "Quit", c, 2);
+            const int k = i - int(opts.size());
+            canvas_.text(40, y + 4, k == 0 ? "Gamepads" : k == 1 ? "Back" : "Quit", c, 2);
         }
     }
     drawHelp({{"Left/Right", "change"}, {"Back", "return"}});
