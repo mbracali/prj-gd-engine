@@ -6,6 +6,8 @@ inside the Guitar Dream Universal Launcher's release
 
 ## [Unreleased]
 
+## [0.0.9] - 2026-11-21
+
 ### Added
 - Band games: the camera shows the player who failed out, and the one who saves them, as in Rock Band.
 

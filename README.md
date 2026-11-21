@@ -35,8 +35,8 @@ This is a list of all the planned and already decompiled games. Every game is pl
 | gd-game-03 | Guitar Hero Encore: Rocks the 80s | Playstation 2 | 93% Playable  |
 | gd-game-04 | Guitar Hero III: Legends of Rock  | Xbox 360      | 87% Playable  |
 | gd-game-05 | Rock Band                         | Xbox 360      | 78% Playable  |
-| gd-game-06 | Guitar Hero: Aerosmith            | Xbox 360      | --            |
-| gd-game-07 | Guitar Hero World Tour            | Xbox 360      | --            |
+| gd-game-06 | Guitar Hero: Aerosmith            | Xbox 360      | 34% Playable  |
+| gd-game-07 | Guitar Hero World Tour            | Xbox 360      | 30% Playable  |
 | gd-game-08 | Rock Band 2                       | Xbox 360      | --            |
 | gd-game-09 | The Beatles: Rock Band            | Xbox 360      | --            |
 | gd-game-10 | Guitar Hero: Metallica            | Xbox 360      | 69% Playable  |
