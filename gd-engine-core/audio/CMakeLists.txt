@@ -171,6 +171,13 @@ if(GDCORE_AUDIO_OPENAL)
       -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET})
   endif()
 
+  # No C++23 "import std" in the OpenAL sub-build: a compiler that advertises
+  # import-std support (the Android NDK Clang) makes CMake synthesise the std
+  # module and scan the runner's host libstdc++ (GCC 15) std.cc with the wrong
+  # toolchain -> fatal error. OpenAL is its own CMake configure, so it needs the
+  # flags here (the main build passes them separately). We use no C++ modules.
+  list(APPEND oal_args -DCMAKE_CXX_MODULE_STD=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF)
+
   include(ExternalProject)
   set(oal_bin ${CMAKE_CURRENT_BINARY_DIR}/openal-soft-build)
   ExternalProject_Add(gdcore_openal_build
