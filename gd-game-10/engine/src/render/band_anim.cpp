@@ -25,6 +25,28 @@ uint32_t keyOf(const qb::Value* v) {
     return v && (v->type == qb::Type::Key || v->type == qb::Type::KeyPtr) ? v->key : 0;
 }
 
+// gh4 Drumkit_anim_iterator's note switch [C scripts\guitar\guitar_hand_events.qb]:
+// a <song>_drums_notes value -> the drumkit_anims[] index whose difference clip
+// the DrumKit plays. Normal play fires 73..85 (90..99 are the Metallica
+// faceoff/battle twins of the same cases; 60..69 is the audio track). 74 (Tom_3)
+// is never charted, 83 unused; snare (4) only if the kit has one.
+int drumKitIndex(int note) {
+    switch (note) {
+        case 73: return 0;   // GH_Drum_Kick
+        case 75: return 2;   // GH_Drum_Tom_2
+        case 76: return 3;   // GH_Drum_Tom_1
+        case 77: return 4;   // GH_Drum_Snare
+        case 78: return 5;   // GH_Drum_Cymbal_HH_Closed
+        case 79: return 6;   // GH_Drum_Cymbal_HH_Open
+        case 80: return 7;   // GH_Drum_Cymbal_3
+        case 81: return 8;   // GH_Drum_Cymbal_1
+        case 82: return 9;   // GH_Drum_Cymbal_2
+        case 84: return 12;  // GH_Drum_Cymbal_HH_Open
+        case 85: return 13;  // GH_Drum_Cymbal_4
+        default: return -1;
+    }
+}
+
 bool hasFlag(const qb::Struct& st, uint32_t flag) {
     for (const qb::Item& it : st.items)
         if (it.name == 0 && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr) && it.value.key == flag) return true;
@@ -400,6 +422,7 @@ bool Animator::init(const Setup& s, std::string& error) {
     shortStrum_ = qbInt(g, K("short_strum_max_gem_length"), 150), medStrum_ = qbInt(g, K("med_strum_max_gem_length"), 600);
     fingerPress_ = numOf(g, "finger_press_blend_time", 0.07f), fingerRelease_ = numOf(g, "finger_release_blend_time", 0.2f);
     fretBlend_ = numOf(g, "fret_blend_time", 0.1f), drumBlend_ = numOf(g, "drum_blend_time", 0.1f);
+    drumKitBlend_ = numOf(g, "drum_kit_blend_time", 0.05f);
     armBlendOutDelay_ = numOf(g, "drummer_arm_blend_out_delay", 0.25f), twistRate_ = numOf(g, "drummer_twist_rate", 0.05f);
     const double strumLead = qbInt(g, K("strum_anim_lead_time"), 250), drumLead = qbInt(g, K("drum_anim_lead_time"), 150);
 
@@ -512,6 +535,21 @@ bool Animator::init(const Setup& s, std::string& error) {
             }
         }
     }
+    // gh4: the drummer's arms are mocap, but the DrumKit's pieces (cymbals,
+    // toms, snare, kick) still wobble per hit. Drumkit_anim_iterator walks
+    // <song>_drums_notes and sends applydrumkitdifference_playanim of
+    // drumkit_anims[i] to the DrumKit; here that is a difference clip composed
+    // onto the pose by drumKit_[i] [C scripts\guitar\guitar_hand_events.qb].
+    if (role_ == band::Role::Drummer && model_->member.gh4) {
+        // note 85 (drumkit_anims[13], Cymbal_4) is gated on is_current_band_metallica
+        // in the iterator; for the drummer, "the band is Metallica" <=> the drummer
+        // is Lars (same proxy as the mocap loop below) [C guitar_hand_events.qb].
+        const bool metallica = model_->member.profileName.rfind("LarsUlrich", 0) == 0;
+        for (const ChartEvent& e : s.chart->drums) {
+            const int idx = drumKitIndex(e.note);
+            if (idx >= 0 && (idx != 13 || metallica)) add(e.time, Ev::DrumKit, idx, 0);
+        }
+    }
     // gh4: Band_PlayClip {clip startframe}: the clip struct's anims.<member>
     // from that frame, its arms.<member> (the song's mocap: <song>_S_01 for
     // the singer and the bassist, _D_ the drummer, _G_ the guitarist) [C data
@@ -528,6 +566,18 @@ bool Animator::init(const Setup& s, std::string& error) {
                 for (const qb::File& f : *s.songFiles)
                     if ((cs = structOf(f.find(clipKey)))) break;
             const qb::Struct* anims = cs ? structOf(cs->find(K("anims"))) : nullptr;
+            // A clip whose anims has no entry for this member sends it to idle
+            // (0x82196A90: BandManager_ChangeIk + the band manager's idle,
+            // 0x8211D6B8 -> the member's vtable +0x14): the guitarist's,
+            // bassist's and singer's 0x82122FB0 ends a running clip there
+            // (end_moment_anim) and picks an idle with blend 0; the drummer's
+            // (0x82404908) does nothing; $none leaves the member alone [C]
+            // (GD10-069 / D120). GD10_CLIP_IDLE_LEGACY=1: no entry = $none.
+            static const bool clipIdleLegacy = std::getenv("GD10_CLIP_IDLE_LEGACY") != nullptr;
+            if (anims && !anims->find(model_->member.object) && role_ != band::Role::Drummer && !clipIdleLegacy) {
+                add(tv->number(), Ev::ClipIdle, 0, 0, p);
+                continue;
+            }
             const uint32_t key = anims ? keyOf(anims->find(model_->member.object)) : 0;
             if (!key || key == K("none")) continue;
             Mocap mc;
@@ -544,12 +594,25 @@ bool Animator::init(const Setup& s, std::string& error) {
             mocaps_.push_back(mc);
             add(tv->number(), Ev::Mocap, int(mocaps_.size() - 1), 0, p);
         }
+    const bool faceDump = std::getenv("GD10_FACELOG") && role_ == band::Role::Vocalist;
+    int perfForMe = 0;
     for (const qb::Struct* p : s.performance) {
         const qb::Value* tv = p->find(K("time"));
         const qb::Struct* params = structOf(p->find(K("params")));
         if (!tv || !params || keyOf(params->find(K("name"))) != model_->member.object) continue;
+        ++perfForMe;
+        if (faceDump) {
+            const uint32_t scr = keyOf(p->find(K("scr")));
+            const qb::Value* fat = params->find(K("fa_type"));
+            if (scr == K("band_playfacialanim") || scr == K("band_changefacialanims"))
+                SDL_Log("face: schedule %s anim=%s fa_type=%s time=%.0f", qbkey::name(scr).c_str(), qbkey::name(keyOf(params->find(K("anim")))).c_str(),
+                        fat && fat->type == qb::Type::String ? fat->str.c_str() : "-", tv->number());
+        }
         add(tv->number(), Ev::Perf, 0, 0, p);
     }
+    if (faceDump)
+        SDL_Log("face: %s object=%s: %d performance events routed to me", model_->member.profileName.c_str(),
+                qbkey::name(model_->member.object).c_str(), perfForMe);
     std::stable_sort(fixed_.begin(), fixed_.end(), [](const Event& a, const Event& b) { return a.t < b.t; });
     for (size_t i = 0; i < fixed_.size(); ++i) fixed_[i].seq = i;
     seq_ = fixed_.size() + 1;
@@ -920,7 +983,22 @@ void Animator::facial(double t, float blend) {
     facialAnim_ = K("idle");
     if (!arr || arr->type != qb::Type::Array || !arr->arr || arr->arr->values.empty()) return;
     const auto& v = arr->arr->values;
-    const anim::Clip* c = clip(keyOf(&v[random(uint32_t(v.size()))]));
+    uint32_t faceKey = keyOf(&v[random(uint32_t(v.size()))]);
+    // facial_anim_loop picks at random among the member's idle variants [C
+    // script]. James' three generic idle clips (genericFace_1/_2/_3) each
+    // animate the eye, eyelid and gaze bones across their full length (294 /
+    // 356 / 585 eyelid rotation keys, the same range), so none holds the eyes
+    // shut; the song also switches him to _rocking / _hrock hard-rock faces.
+    // An earlier build pinned James to genericFace_1 on a misreading of _2/_3,
+    // which froze his idle and suppressed the authored rocking faces, leaving
+    // him with a single calm, downcast expression (GM-009). Restore the
+    // authored random pick; GD10_FACE_LEGACY keeps the old forced override.
+    if (std::getenv("GD10_FACE_LEGACY") && role_ == band::Role::Vocalist && model_->member.profileName == "James")
+        faceKey = K("GH_Rocker_Male_genericFace_1");
+    const anim::Clip* c = clip(faceKey);
+    if (std::getenv("GD10_ANIMLOG") || (std::getenv("GD10_FACELOG") && role_ == band::Role::Vocalist))
+        SDL_Log("anim: %.0f ms role %d (%s) face set %s / %s -> %s (%s)", t, int(role_), model_->member.profileName.c_str(), qbkey::name(facialAnims_).c_str(),
+                qbkey::name(facialAnim_).c_str(), qbkey::name(faceKey).c_str(), c ? "loaded" : "missing clip");
     face_.play(c, t, blend);
     ++stats_.facials;
     // hero_wait_until_anim_finished, then Wait 1 gameframe [C script].
@@ -930,6 +1008,8 @@ void Animator::facial(double t, float blend) {
 // play_special_facial_anim: the anim (no blend), then facial_anim_loop again [C script].
 void Animator::playFacial(uint32_t anim, double t) {
     const anim::Clip* c = clip(anim);
+    if (std::getenv("GD10_FACELOG") && role_ == band::Role::Vocalist)
+        SDL_Log("face: %.0f ms %s playFacial %s (%s)", t, model_->member.profileName.c_str(), qbkey::name(anim).c_str(), c ? "loaded" : "MISSING");
     ++faceGen_;
     face_.play(c, t, 0);
     ++stats_.facials;
@@ -1014,6 +1094,19 @@ void Animator::handle(const Event& e) {
                 facialAnims_ = facialAnimsDefault_;
             }
             if (facialAnims_ == K("none")) facialAnims_ = 0;
+            // Some authored fa_type values name optional variants (notably
+            // *_eyesclosed) that have no animation struct for the selected
+            // character. Leaving the last facial clip frozen in that case
+            // can strand a singer with shut eyes for the rest of the song.
+            // Revert to the character's normal face set when that variant is
+            // absent; song-specific mouth clips remain independently playable.
+            if (facialAnims_ && facialAnims_ != facialAnimsDefault_ && !structOf(g_->find(facialAnims_)))
+                facialAnims_ = facialAnimsDefault_;
+            if (std::getenv("GD10_FACELOG") && role_ == band::Role::Vocalist) {
+                const qb::Value* type = p->find(K("fa_type"));
+                SDL_Log("face: %.0f ms %s changeFacialAnims fa_type=%s -> %s", t, model_->member.profileName.c_str(),
+                        type && type->type == qb::Type::String ? type->str.c_str() : "(none)", qbkey::name(facialAnims_).c_str());
+            }
             const qb::Value* bd = p->find(K("blend_duration"));
             facial(t, bd ? float(bd->number()) : 0.3f);
         }
@@ -1092,21 +1185,25 @@ void Animator::handle(const Event& e) {
     }
     case Ev::BodyDone:
         if (e.gen == bodyGen_) {
-            if (mocapPlaying_ && model_->member.gh4) {
-                // end_moment_anim: the moment_blend switch off and the body
-                // timer unpaused at once (blendduration 0); band_setikchain
-                // guitar for a guitar / bass / rhythm part, else slave [C script].
-                mocapPlaying_ = false;
-                bodyBlend_ = 0.0f;
-                ragdollResets_.push_back(t);
-                // end_moment_anim / return_characters_to_idle_at_song_time:
-                // wait a game frame, band_movetostartnode [C scripts].
-                moveToNode(t + kFrameMs, std::string());
-                const bool guitarChain = guitarLike();
-                setIkTargets(t, guitarChain ? 0 : 1, guitarChain ? 0 : 1);
-            }
+            if (mocapPlaying_ && model_->member.gh4) endMoment(t);
             mocapPlaying_ = false;
             bodyFinished(t);
+        }
+        break;
+    case Ev::ClipIdle:
+        // 0x82122FB0 (PlayIdle, restart false): only for a member in a clip
+        // (+0x39); kills handle_moment_anim_blending, runs end_moment_anim,
+        // then the idle pick (0x82122EA0 with blend 0) [C]. The port keeps
+        // the clip flag only while the clip plays (the original's lasts to
+        // the next idle pick, where a late call only restarts the idle) [I].
+        if (mocapPlaying_ && model_->member.gh4) {
+            endMoment(t);
+            mocapPlaying_ = false;
+            specialOnce_ = false;
+            scriptedClip_ = 0;
+            nextAnim_ = 0;
+            currentAnim_ = K("idle"), cycle_ = true, repeat_ = 1;
+            bodyIteration(t);
         }
         break;
     case Ev::ClipEvent:
@@ -1158,6 +1255,17 @@ void Animator::handle(const Event& e) {
         if (!ca || ca->type != qb::Type::Array || !ca->arr || size_t(which) >= ca->arr->values.size()) break;
         if (const anim::Clip* c = clip(keyOf(&ca->arr->values[size_t(which)]))) {
             cymbal_[which].play(c, t, drumBlend_);
+            ++stats_.cymbals;
+        }
+        break;
+    }
+    case Ev::DrumKit: {
+        // gh4: play drumkit_anims[e.a] (a difference clip) on its kit node;
+        // drumKit_blend_time is the applydrumkitdifference_playanim blend_period.
+        const qb::Value* da = g_->find(K("drumkit_anims"));
+        if (!da || da->type != qb::Type::Array || !da->arr || size_t(e.a) >= da->arr->values.size()) break;
+        if (const anim::Clip* c = clip(keyOf(&da->arr->values[size_t(e.a)]))) {
+            drumKit_[e.a].play(c, t, drumKitBlend_);
             ++stats_.cymbals;
         }
         break;
@@ -1240,6 +1348,8 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
     if (role_ == band::Role::Drummer) {
         for (const Node& n : drumArm_) evalNode(rig_, n, ms, pose, false, tmp);
         for (const Node& n : cymbal_) evalNode(rig_, n, ms, pose, false, tmp);
+        // gh4: the DrumKit difference anims compose their wobble onto the pose.
+        for (const Node& n : drumKit_) evalDelta(rig_, n, ms, 1.0f, pose, tmp);
         if (twistClip_ && twist_ != 0) {
             Node tw;
             tw.plays.push_back({twistClip_, 0, 0});
@@ -1397,6 +1507,17 @@ float Animator::ikMiss(double ms, const std::vector<Mat34>& world) const {
         worst = std::max(worst, vlen(vsub(posOf(world[size_t(c.b2)]), posOf(world[size_t(tgt)]))));
     }
     return worst;
+}
+
+// end_moment_anim: the moment_blend switch off and the body timer unpaused
+// at once (blendduration 0); band_setikchain guitar for a guitar / bass /
+// rhythm part, else slave; a game frame later band_movetostartnode [C scripts].
+void Animator::endMoment(double t) {
+    bodyBlend_ = 0.0f;
+    ragdollResets_.push_back(t);
+    moveToNode(t + kFrameMs, std::string());
+    const bool guitarChain = guitarLike();
+    setIkTargets(t, guitarChain ? 0 : 1, guitarChain ? 0 : 1);
 }
 
 void Animator::setIkTargets(double t, int left, int right) {

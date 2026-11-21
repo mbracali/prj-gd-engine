@@ -13,6 +13,7 @@
 #include "launcher.h"
 #include "module_host.h"
 #include "platform.h"
+#include "updater.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -108,6 +109,9 @@ int main(int argc, char** argv) {
             value(cmd.iso);
         } else if (a == "--exit-after") {
             cmd.exitAfter = true;
+        } else if (a == "--update-selftest") {
+            attachConsole();
+            return update::selfTest();
         } else if (a == "--list") {
             listOnly = true;
         } else if (a == "--version" || a == "-v") {

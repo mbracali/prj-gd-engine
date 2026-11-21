@@ -30,7 +30,9 @@ bool matches(uint8_t shape, const TrackNote& n) {
 
 int PlayerStats::multiplier() const {
     const int r = multiplierRun;
-    const int m = r < 10 ? 1 : r < 20 ? 2 : r < 30 ? 3 : 4;  // [C 0x8210BB40, 0x8210A748]
+    // Enhanced > CHEATS > Always Max Multiplier (issue #94): the run-based
+    // multiplier reads as its top (4x) regardless of the streak when on.
+    const int m = Player::maxMultiplier ? 4 : r < 10 ? 1 : r < 20 ? 2 : r < 30 ? 3 : 4;  // [C 0x8210BB40, 0x8210A748]
     return starPowerActive ? m * 2 : m;
 }
 
@@ -270,6 +272,11 @@ void Player::updateStarPower(double now, double dt, const FrameInput& in) {
             events_.push_back({PlayerEvent::Kind::StarPowerOff, -1, now});
         }
     }
+    // Enhanced > CHEATS > Star Power Always Full (issue #94): the meter is
+    // pinned at the top after any drain, so it is always available and an
+    // active deploy never runs out. Co-op's partner pins its own meter in its
+    // own updateStarPower.
+    if (fullStarPower) st_.starPower = 100.0f;
 }
 
 void Player::frame(double now, double dt, const FrameInput& raw) {

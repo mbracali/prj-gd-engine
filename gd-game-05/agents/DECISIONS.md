@@ -2557,3 +2557,74 @@ pattern). Each says what, why and how to undo it.
   the three screens 18 -> 0; shots band_profile.bmp, band_lineup.bmp,
   solo_profile.bmp show the data.
 - **Undo:** GD05_CHARPROFILE_LEGACY=1, GD05_BANDPROFILE_LEGACY=1.
+
+## D137
+- **What (2026-11-17, GD05-129):** a solo section's blue track. The track's
+  beat_markers.grp holds guitar_solo_mask.wid (guitar_solo_mask.mesh, a
+  strip 19.7 wide and 1 unit long, surface_w_norm.mat); RB's bar builder
+  (RB 0x828122D0) adds one instance a solo at the solo's start (the span
+  from the track's solo list, RB 0x8242A888), the instance matrix's y
+  scaled to the solo's length in track units [C]. The port never drew it.
+  Now drawn before the bar lines for the player's chart solos (any part).
+  guitar_solo_cap.wid (brackets) has no reference in the executable [C],
+  not drawn.
+- **Measured:** mainoffender guitar, solo 9831..23715 ms: track centre
+  column at 12.0 s mean blue 14 -> 51; at 9.3 s the mask's edge sits at
+  the solo start up the track.
+- **Undo:** GD05_SOLOMASK_LEGACY=1.
+
+## D138
+- **What (2026-11-17, GD05-131):** a specular map is tinted by the
+  material's specular colour. RB's lit + specular-map pixel shader
+  (ark/xbox_shaders #33, through gd04's Xenos translator) computes
+  r1 = specular map x gSpecular (c2) and lights the highlight with r1.rgb,
+  the power from r1.a [C data]; the port used the map's colour alone. The
+  profile screens' wallpaper.mat (tour_band_profile / tour_char_profile)
+  draws its pattern only as a specular map (ribcage_wallpaper.tex) tinted
+  (0.176, 0.122, 0.008) over black: the port drew it bright yellow.
+- **Measured:** walk rb_career_screens_band band_profile.bmp, panel mean
+  RGB 128,128,78 -> 29,20,6; band_hub.bmp unchanged (its wallpaper's
+  specular is white). In songs every specular-mapped material's highlight
+  takes its colour too: inbloom 25 s (GD05_TRACK=0 GD05_HUD=0) luma
+  42.4 -> 38.1, 22.6 % of pixels changed (guitar and skin highlights
+  weaker); 15 s 10.0 -> 9.8.
+- **Undo:** GD05_SPECMAP_LEGACY=1 (the material upload sends white with a map).
+
+## D139
+- **What (2026-11-17, GD05-133):** sustain tails on the slots' curve. The
+  gems stand on their smasher's (x, z) turned by its roll (D129, RB
+  0x828167F0); the tails were built flat at the data's slot x, z 0. Each
+  tail row now goes through the same xfm (the tail builder's use of it is
+  [I]).
+- **Measured (inbloom, GD05_TAILTEST=1 GD05_TAILCURVE_LOG=1):** tail middle
+  above its smasher (smasher frame), lanes 0..3: 0.460 / 0.271 / 0.220 /
+  0.319 -> 0.220 each (the gems 0.546 each), rolled as their smasher.
+- **Undo:** GD05_TAILCURVE_LEGACY=1.
+
+## D140
+- **What (2026-11-17, GD05-132):** the shell's characters (the band hub,
+  the character screens: RbCharPreview) play RB's shell clips. RB's
+  CharDriver main change_clips (char_objects.dta) gives the main driver
+  anim/<gender>_<inst>_shell.milo in the shell, and the shell character
+  plays its "attitude" then its "shell" group (RB 0x82842738) [C]. The
+  port played the song clip set's stand group (arm flags on: both hand
+  IKs at 1 with no strum / fret clip, the strum hand raised to
+  bone_pick_strum).
+- **Measured (walk rb_career_screens_band):** guitarist's clip
+  stand_rhythm_ext_c_med_04 -> stand_idle_shell_guitar_02, hand weights
+  1 / 1 -> 0 / 0, right hand +41.9 -> -6.0 units from the pelvis
+  (height); band_hub.bmp: the arm down.
+- **Undo:** GD05_SHELLCLIPS_LEGACY=1.
+
+## D141
+- **What (2026-11-17, GD05-134):** band fail / revive shots. worldbase.dta
+  player_failed (player.dta disable_player) picks BFTB_<B|D|G|V>_FAIL by
+  the failed member's track; player_saved (save_player, the causer's
+  track) runs player_saved_activate 0.35 s later: BFTB_<I>_REVIVE; both
+  hold the picks for (min_time + zero_time) / 30 s, and
+  start_directed_cut does nothing while $camera.num_players_failed > 0
+  [C data]. The port's per-member fail / save (updateSeats) had no shots.
+- **Measured:** inbloom guitar,bass,drum, player 1 idle, GD05_AUTODEPLOY=1:
+  coop_bftb_gf.shot at 12.45 s (guitar out), coop_bftb_br.shot at
+  17.24 s (bass saved her).
+- **Undo:** GD05_FAILSHOTS_LEGACY=1.

@@ -509,6 +509,7 @@ void Hud2P::draw(Canvas& c, const TextureCache& tex, const Match& m, double now)
             }
         }
     }
+    if (alertsOnly_) items.clear();  // gh4's HUD draws the meters, scores and Star Power (GD10-067)
     std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.z < b.z; });
     for (const Item& it : items) {
         if (it.alpha <= 0.002f || !it.tex) continue;
@@ -533,6 +534,7 @@ void Hud2P::draw(Canvas& c, const TextureCache& tex, const Match& m, double now)
     }
     // The alerts' glow burst (z 50) and lightning (800x100 at the text - (0,20), z 45) [C scripts].
     for (const Alerts& al : alerts_) {
+        if (noAlerts_) break;
         if (al.glow.running(now)) {
             const HudAnim::Props g = al.glow.at(now);
             float w = 64, h = 64;
@@ -554,7 +556,7 @@ void Hud2P::draw(Canvas& c, const TextureCache& tex, const Match& m, double now)
     const std::array<uint8_t, 4> white{255, 255, 255, 255}, black{0, 0, 0, 255};
     for (int p = 0; p < 2; ++p) {
         const PlayerState& s = ps_[size_t(p)];
-        if (mode_ != 2 && !(mode_ == 0 && p == 1)) {
+        if (mode_ != 2 && !(mode_ == 0 && p == 1) && !alertsOnly_) {
             // Score text: num_a9 1.1 at (222,70) (co-op (226,85)), squeezed to the frame [C setup_hud].
             const Xf at = scoreXf[size_t(p)].child(mode_ == 0 ? 226.0f : 222.0f, mode_ == 0 ? 85.0f : 70.0f);
             float k = 1.1f * scale_;
@@ -573,7 +575,7 @@ void Hud2P::draw(Canvas& c, const TextureCache& tex, const Match& m, double now)
             }
         }
     }
-    for (int p = 0; p < 2; ++p) {
+    for (int p = 0; p < 2 && !noAlerts_; ++p) {
         const Alerts& al = alerts_[size_t(p)];
         char b[48];
         std::snprintf(b, sizeof b, "%d Note Streak!", al.comboN);

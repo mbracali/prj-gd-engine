@@ -443,10 +443,38 @@ std::vector<Member> chooseBandGh4(const Globals& g, uint32_t songKey) {
     std::vector<Want> want;
     const uint32_t partRole = p1Part == K("guitar") ? K("guitarist") : p1Part == K("bass") ? K("bassist") : p1Part == K("drum") ? K("drummer")
                                                                                                                                : K("vocalist");
+    const uint32_t p1Role = p1Part == K("guitar") ? K("guitarist") : p1Part == K("bass") ? K("bassist") : p1Part == K("drum") ? K("drummer")
+                                                                                                                              : K("vocalist");
+    // get_player_part / replace_with_celeb [C script guitar_band_builder]: for
+    // a celeb band the song replaces player 1's own character with the band's
+    // credited member for the part, unless that member is RandomCharacter. The
+    // celeb bands are the three Metallica line-ups (the standard one, the ALT
+    // outfits and the ZomB / Death Magnetic zombies -- is_current_band_metallica
+    // is true for all three), Band_Lemmy and Band_KingDiamond (their one celeb
+    // is the vocalist, the rest RandomCharacter). Every other band keeps the
+    // player's own character. Matching only band_metallica before left James'
+    // alt / zombie line-ups and a player singing as Lemmy / King Diamond showing
+    // the player's generic character instead of the credited member.
+    auto isBand = [&](const char* n) { return band == globalStruct(g, K(n)); };
+    const bool legacyBand = std::getenv("GD10_BAND_LEGACY") != nullptr;  // restore the band_metallica-only replacement
+    const bool celebBand = legacyBand ? isBand("band_metallica")
+                                      : (isBand("band_metallica") || isBand("band_metallica_alt") || isBand("band_metallica_zomb") ||
+                                         isBand("Band_Lemmy") || isBand("Band_KingDiamond"));
+    if (celebBand) {
+        const uint32_t m = bandOf(p1Role == K("guitarist") ? "guitarist" : p1Role == K("bassist") ? "bassist" : p1Role == K("drummer") ? "drummer" : "vocalist");
+        if (m && (legacyBand || m != K("RandomCharacter"))) p1Char = m;
+    }
     if (!findProfileGh4(g, p1Char)) p1Char = bandOf(p1Part == K("guitar") ? "guitarist" : p1Part == K("bass") ? "bassist"
                                                        : p1Part == K("drum")                    ? "drummer"
                                                                                                 : "vocalist");
-    want.push_back({partRole, p1Part, p1Char});
+    // The vocalist's real (animation) part: James plays rhythm guitar, Lemmy
+    // the bass, while singing [C script get_player_part].
+    uint32_t p1RealPart = p1Part;
+    if (p1Part == K("vocals")) {
+        if (p1Char == K("James") || p1Char == K("James_ALT") || p1Char == K("James_ZomB")) p1RealPart = K("rhythm");
+        else if (p1Char == K("lemmy")) p1RealPart = K("bass");
+    }
+    want.push_back({partRole, p1RealPart, p1Char});
     auto has = [&](uint32_t object) {
         for (const Want& w : want)
             if (w.object == object) return true;
@@ -497,6 +525,15 @@ std::vector<Member> chooseBandGh4(const Globals& g, uint32_t songKey) {
         used.push_back(keyOf(prof->find(K("name"))));
         Member m;
         if (memberGh4(g, *prof, w.object, w.part, songKey, m)) out.push_back(std::move(m));
+    }
+    if (std::getenv("GD10_BANDLOG")) {
+        uint32_t bandKey = 0;
+        if (songSt)
+            if (const uint32_t b = keyOf(songSt->find(K("band")))) bandKey = b;
+        SDL_Log("band: song=%s band=%s (metallica=%d) members=%zu", qbkey::name(songKey).c_str(),
+                bandKey ? qbkey::name(bandKey).c_str() : "default_band", band == globalStruct(g, K("band_metallica")) ? 1 : 0, out.size());
+        for (const Member& m : out)
+            SDL_Log("band:   want role=%d part=%s -> %s", int(m.role), qbkey::name(m.part).c_str(), m.profileName.c_str());
     }
     return out;
 }

@@ -132,6 +132,15 @@ bool ensureGlitches(Vm& vm) {
     return changed;
 }
 
+bool unlockEverything(Vm& vm) {
+    // GH3's own debug unlock-all (playday_unlockall -> GlobalTags_UnlockAll),
+    // the same one the DEBUG MENU's "Unlock All" runs: every song, venue,
+    // guitar, character, outfit, style and bonus video is unlocked save-wide.
+    const bool ran = vm.run(qbkey::key("playday_unlockall"), qb::Struct{});
+    SDL_Log("cheat_unlock_all: unlock-everything %s", ran ? "run (playday_unlockall)" : "FAILED: playday_unlockall not found");
+    return ran;
+}
+
 namespace {
 
 struct StoreState {

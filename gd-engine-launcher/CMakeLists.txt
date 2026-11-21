@@ -39,9 +39,12 @@ target_sources(gdul PRIVATE
   src/iso_probe.cpp
   src/module_host.cpp
   src/explorer.cpp
+  src/songs.cpp
   src/action_log.cpp
   src/platform.cpp
   src/ui_sounds.cpp
+  src/update_ui.cpp
+  src/updater.cpp
   src/yaml.cpp
 )
 target_include_directories(gdul PRIVATE src sdk)
@@ -131,4 +134,6 @@ if(GDUL_BUILD_TESTS AND NOT ANDROID)
   # The list order: playable games first (tests/order/run_order.cmake, `ctest -R gdul_order`).
   add_test(NAME gdul_order COMMAND ${CMAKE_COMMAND} -DGDUL=$<TARGET_FILE:gdul> -DDIR=${CMAKE_BINARY_DIR}/order-test
            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/order/run_order.cmake)
+  # Updates (GDUL-031): version compare, asset pick, release JSON, SHA-256, the swap and its rollback.
+  add_test(NAME gdul_update COMMAND $<TARGET_FILE:gdul> --update-selftest)
 endif()

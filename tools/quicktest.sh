@@ -9,7 +9,7 @@
 # for releases only.
 #
 #   tools/quicktest.sh [options] [game ...]
-#     game            gd01 gd02 gd03 gd04 gd05 gd10 (or 01, 1 ...); none: the
+#     game            gd01 gd02 gd03 gd04 gd05 gd06 gd07 gd10 (or 01, 1 ...); none: the
 #                     games touched by the changes against --base
 #     --base <ref>    the base of the changes (default origin/develop, else main)
 #     --jobs <n>      games tested at once (default 1: one game binary at a time)
@@ -26,6 +26,12 @@
 set -uo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 isos="${QUICKTEST_ISOS:-$root/original_isos}"
+# ccache (wave 20261118 §2): the same build speed-up as scripts/build.sh, so a
+# reconfigure/rebuild here reuses compiled objects. No-op without ccache
+# installed; GDUL_NO_CCACHE=1 off.
+if [ -z "${GDUL_NO_CCACHE:-}" ] && [ -z "${CMAKE_CXX_COMPILER_LAUNCHER:-}" ] && command -v ccache >/dev/null; then
+  export CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache
+fi
 base="" jobs=1 bjobs=4 build=1 forced_walks="" list=0
 games=()
 while [ $# -gt 0 ]; do
@@ -46,6 +52,7 @@ dir_of() { echo "$root/gd-game-$1/engine"; }
 build_of() {
   case "$1" in
     01) echo build/linux ;; 02) echo build/bl02 ;; 03) echo build/bl03 ;; 04) echo build/bl04 ;; 05) echo build/bl05 ;;
+    06) echo "${GD06_BUILD:-build/linux}" ;; 07) echo "${GD07_BUILD:-build/linux}" ;;
     10) echo "${GD10_BUILD:-build/dev}" ;;
   esac
 }
@@ -56,6 +63,8 @@ iso_of() {
     03) echo "$isos/PS2 - Guitar Hero Encore - Rocks the 80s (USA).iso" ;;
     04) echo "$isos/X360 - Guitar Hero III - Legends of Rock (USA) (Rev 1).iso" ;;
     05) echo "$isos/X360 - Rock Band (USA).iso" ;;
+    06) echo "$isos/X360 - Guitar Hero - Aerosmith (USA, Europe).iso" ;;
+    07) echo "$isos/X360 - Guitar Hero World Tour (USA, Europe) (En,Fr,De,Es,It).iso" ;;
     10) echo "$isos/X360 - Guitar Hero - Metallica (USA, Europe) (En,Fr,De,Es,It).iso" ;;
   esac
 }
@@ -65,7 +74,7 @@ walk_map() {
   case "$1" in
     01) echo "ui:enhanced ui:quickplay input:gamepads audio:quickplay game:quickplay render:quickplay *:quickplay" ;;
     02|03|05) echo "ui:enhanced ui:quickplay input:options audio:quickplay game:quickplay render:quickplay char:quickplay *:quickplay" ;;
-    04|10) echo "ui:options ui:quickplay input:gamepads audio:quickplay game:quickplay render:quickplay *:quickplay" ;;
+    04|06|07|10) echo "ui:options ui:quickplay input:gamepads audio:quickplay game:quickplay render:quickplay *:quickplay" ;;
   esac
 }
 
@@ -75,7 +84,7 @@ fi
 changed="$( (git -C "$root" diff --name-only "$base"...HEAD; git -C "$root" diff --name-only HEAD; \
              git -C "$root" ls-files --others --exclude-standard) 2>/dev/null | sort -u)"
 if [ ${#games[@]} -eq 0 ]; then
-  for g in 01 02 03 04 05 10; do
+  for g in 01 02 03 04 05 06 07 10; do
     if echo "$changed" | grep -q "^gd-game-$g/engine/" || echo "$changed" | grep -q "^gd-engine-core/"; then games+=("$g"); fi
   done
 fi

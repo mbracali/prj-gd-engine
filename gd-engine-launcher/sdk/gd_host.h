@@ -206,6 +206,18 @@ typedef struct GdExplorer {
     // the selected model at once (it may reload it: the module makes its own
     // context current, the launcher its own again afterwards).
     void (*show_instrument)(void* self, int shown);
+
+    // (gdul 1.1.x, optional: read only when `size` covers them.) Instrument
+    // variants of the selected model: an era / line the instrument belongs to
+    // (Guitar Hero, Rock Band, World Tour and later...), for games that ship
+    // more than one. 0 or 1 means the model has a single instrument (the
+    // launcher then offers no variant choice). variant_name(i) labels variant
+    // i ("Guitar Hero", "Rock Band", "World Tour"); set_instrument_variant
+    // switches to it (like show_instrument, it may reload the model). A game
+    // with only its own instruments leaves these NULL.
+    int (*instrument_variant_count)(void* self);
+    const char* (*instrument_variant_name)(void* self, int index);
+    void (*set_instrument_variant)(void* self, int index);
 } GdExplorer;
 
 // A GdExplorer field the module has (its `size` covers it).
@@ -230,6 +242,56 @@ typedef void (*GdUiSoundFn)(void* user, const char* role, const float* stereo, i
 typedef int (*GdGameUiSoundsFn)(const GdHost* host, GdUiSoundFn sound, void* user);
 
 #define GD_GAME_UI_SOUNDS_SYMBOL "gd_game_ui_sounds"
+
+// ---- Song previews (optional): "Hear the songs" ----
+//
+// A module may export
+//
+//     extern "C" const GdSongs* gd_game_songs(const GdHost* host);
+//
+// so the launcher can let the player hear a short preview of each song on the
+// disc. The module lists the disc's songs and decodes a preview of one on
+// demand into interleaved float PCM, with its own audio loaders (the same
+// ones the game plays songs with). No window or GL work: the launcher plays
+// the PCM through its own audio device. The library stays loaded until
+// close(). This mirrors GdExplorer: plain C, fields only ever appended.
+
+// One song on the disc.
+typedef struct GdSong {
+    const char* id;      // the song's internal id ("ttfatf")
+    const char* title;   // "Thank You for the Flies"
+    const char* artist;  // "The Sword", may be ""
+    const char* detail;  // a second line (tier, length...), may be ""
+} GdSong;
+
+// A decoded preview: interleaved stereo float samples the module fills.
+typedef struct GdSongPcm {
+    float* samples;    // the launcher's buffer, `capacity` floats (frames * 2)
+    int capacity;      // its size in floats
+    int frames;        // frames the module wrote (out); <= capacity / 2
+    int rate;          // sample rate the module wrote (out)
+    float start_seconds;  // where in the song the preview should start (in): the
+                          // game's preview offset, or 0 for the beginning
+} GdSongPcm;
+
+typedef struct GdSongs {
+    uint32_t size;  // sizeof(GdSongs) of the module (fields only ever appended)
+    void* self;
+    int (*song_count)(void* self);
+    int (*song)(void* self, int index, GdSong* out);  // 0 on success
+    // Decodes a preview of song `index` into out->samples (out->capacity
+    // floats). Fills out->frames and out->rate. Returns 0 when it decoded
+    // something, non-zero on failure. May take a moment (the launcher shows
+    // that it is loading); called on the launcher's thread.
+    int (*decode_preview)(void* self, int index, GdSongPcm* out);
+    void (*close)(void* self);
+} GdSongs;
+
+#define GD_SONGS_HAS(api, field) ((api)->size >= offsetof(GdSongs, field) + sizeof((api)->field) && (api)->field)
+
+typedef const GdSongs* (*GdGameSongsFn)(const GdHost* host);
+
+#define GD_GAME_SONGS_SYMBOL "gd_game_songs"
 
 #ifdef __cplusplus
 }

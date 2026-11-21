@@ -52,6 +52,7 @@ struct Element {
     bool zGiven = false;  // without its own z_priority an element draws at its parent's [I]
     std::array<uint8_t, 4> rgba{255, 255, 255, 255};
     uint32_t texture = 0, font = 0;
+    uint32_t missingMaterial = 0;  // a material with no texture loaded: not drawn (GD10-068)
     uint32_t texContext = 0;  // the asset context the texture was set under (PushAssetContext), 0: global
     std::string text;
     bool hidden = false, flipH = false, flipV = false, notFocusable = false, blockEvents = false;
@@ -230,6 +231,7 @@ public:
     std::vector<HelpBarPill> helpBarLayout() const;
     // The drawn bounds of an element (false: not drawn in the last frame).
     bool drawnBounds(uint32_t id, float& x0, float& y0, float& x1, float& y1) const;
+    bool drawnTextBounds(const std::string& text, float& x0, float& y0, float& x1, float& y1) const;
     uint64_t drawCount() const { return drawCount_; }
     struct Stats {
         uint64_t created = 0, destroyed = 0, morphs = 0, events = 0, handlersRun = 0, textDrawn = 0, spritesDrawn = 0;

@@ -942,6 +942,12 @@ void Vm::runNow(uint32_t id) {
 }
 
 void Vm::update(double dtMs) {
+    // GD10_UI_SLOW=<n>: diagnostic slow-motion for script-driven anims (menu
+    // transitions). Divides the time step so a ~250 ms zoom plays over n x
+    // longer, making a one-frame transition glitch sit on screen long enough
+    // to see and screenshot. Default 1 (off).
+    static const double uiSlow = [] { const char* s = SDL_getenv("GD10_UI_SLOW"); double v = s ? std::atof(s) : 1.0; return v >= 1.0 ? v : 1.0; }();
+    if (uiSlow > 1.0 && slowArmed) dtMs /= uiSlow;
     clockMs_ += dtMs;
     if (dtMs > 0) frameMs_ = dtMs;
     // Scripts spawned during this update start next frame (the list grows).

@@ -368,6 +368,7 @@ if(GD02_MODULE)
   get_target_property(gd02_srcs gd02 SOURCES)
   list(FILTER gd02_srcs EXCLUDE REGEX "\\.(rc|icns)$")
   add_library(gd02_module SHARED ${gd02_srcs} src/platform/module_entry.cpp src/platform/module_explore.cpp
+              src/platform/module_songs.cpp
               ${GD02_HOST_SDK}/gd_module_shim.cpp)
   foreach(prop INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS LINK_LIBRARIES LINK_OPTIONS)
     get_target_property(value gd02 ${prop})

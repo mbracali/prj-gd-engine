@@ -1030,21 +1030,35 @@ void SongHooks::frame(SongScreen& s, double now) {
 void SongHooks::beginHud(SongScreen& s) {
     // gh4's HUD (GD10-063): start_gem_scroller's setup_band_hud after the
     // players' setup_highway (get_highway_pos_and_scale: one non-vocal
-    // player's hud_parent alias_g1) [C scripts]. One player for now: the
-    // two-player modes keep the port's HUDs (render/hud2p). The HUD comes at
+    // player's hud_parent alias_g1; two: player 1 alias_g1 on the left,
+    // player 2 alias_g2 on the right) [C scripts]. update_hud_layout picks
+    // hud_1g for one guitarist, hud_2g for two (face-off / pro face-off: its
+    // HUD_band_battle as the face-off meter); battle's layout
+    // (battle_hud_2d_elements) has no desc: the port's battle HUD
+    // (render/hud2p) stays [C script update_hud_layout]. The HUD comes at
     // alpha 0; move_2d_elements_to_default shows it (frameHud).
     // GD10_HUD_LEGACY=1: GH3's Hud2D as before.
+    // GD10_HUD2P_LEGACY=1: two players keep render/hud2p's GH3 HUD (before GD10-067).
     hud_.clear();
     gh4Hud_ = hudShown_ = false;
-    streakOn_ = bulbsOn_ = false;
+    streakOn_ = {false, false};
+    bulbsOn_ = false;
     static const bool legacy = SDL_getenv("GD10_HUD_LEGACY") != nullptr;
-    if (legacy || players_ != 1) return;
+    static const bool legacy2p = SDL_getenv("GD10_HUD2P_LEGACY") != nullptr;
+    if (legacy) return;
+    const GameMode mode = s.match().mode();
+    if (players_ == 2 && (legacy2p || s.match().battleMode() || mode == GameMode::Coop)) return;
+    if (players_ < 1 || players_ > 2) return;
+    hudPlayers_ = players_;
     Vm& vm = fe_.vm();
-    if (const qb::Value* cur = vm.global(K("player1_status")); cur && cur->st) {
-        qb::Value v = *cur;
-        v.st = std::make_shared<qb::Struct>(*cur->st);
-        Vm::set(*v.st, K("hud_parent"), Vm::makeKey(K("alias_g1")));
-        vm.setGlobal(K("player1_status"), v);
+    for (int p = 1; p <= players_; ++p) {
+        const std::string ps = "player" + std::to_string(p) + "_status";
+        if (const qb::Value* cur = vm.global(K(ps.c_str())); cur && cur->st) {
+            qb::Value v = *cur;
+            v.st = std::make_shared<qb::Struct>(*cur->st);
+            Vm::set(*v.st, K("hud_parent"), Vm::makeKey(K(p == 1 ? "alias_g1" : "alias_g2")));
+            vm.setGlobal(K(ps.c_str()), v);
+        }
     }
     if (fe_.ui().find(K("hud_root"))) {
         qb::Struct d;
@@ -1053,32 +1067,66 @@ void SongHooks::beginHud(SongScreen& s) {
     }
     vm.run(K("setup_band_hud"), qb::Struct{});
     gh4Hud_ = fe_.ui().find(K("hud_root")) != nullptr;
+    // GD10 score-widget bug: in single player the original HUD shows only the
+    // thin score/star plaque -- no separate boxed note-streak counter below it
+    // (reference frames t485/t600/t715 at every streak level). setup_band_hud
+    // builds the solo meter (uidesc_solo_play_rock_meter) with the band streak
+    // plaque element present; hide that `streak` subtree in solo so the port
+    // matches the original. GD10_SCOREFRAME_LEGACY=1: leave the streak box drawn.
+    static const bool scoreFrameLegacy = SDL_getenv("GD10_SCOREFRAME_LEGACY") != nullptr;
+    if (gh4Hud_ && players_ == 1 && !scoreFrameLegacy)
+        if (ui::Element* root = fe_.ui().find(K("hud_root"))) {
+            std::vector<ui::Element*> q{root};
+            for (size_t i = 0; i < q.size(); ++i) {
+                if (q[i]->localId == K("streak")) q[i]->hidden = true;
+                for (auto& ch : q[i]->children) q.push_back(ch.get());
+            }
+        }
     // projected_song_stars: the base score of the notes judged so far [I].
-    const NoteTrack& t = s.match().track(0);
-    basePrefix_.assign(t.notes.size() + 1, 0.0);
-    for (size_t i = 0; i < t.notes.size(); ++i)
-        basePrefix_[i + 1] = basePrefix_[i] + 50.0 * t.notes[i].fretCount() + (t.notes[i].sustain ? t.notes[i].maxSustainPoints : 0);
-    s.hud().setAlertsOnly(gh4Hud_);
+    for (int p = 0; p < 2; ++p) {
+        basePrefix_[size_t(p)].clear();
+        if (p >= players_) continue;
+        const NoteTrack& t = s.match().track(p);
+        std::vector<double>& b = basePrefix_[size_t(p)];
+        b.assign(t.notes.size() + 1, 0.0);
+        for (size_t i = 0; i < t.notes.size(); ++i)
+            b[i + 1] = b[i] + 50.0 * t.notes[i].fretCount() + (t.notes[i].sustain ? t.notes[i].maxSustainPoints : 0);
+    }
+    if (players_ == 1) s.hud().setAlertsOnly(gh4Hud_);
+    else s.setHud2pAlertsOnly(gh4Hud_);
+    // gh4's messages (GD10-068) replace GH3's alerts ("<n> Note Streak!",
+    // "Star Power Ready") under its HUD. GD10_HUD_MESSAGES_LEGACY=1: GH3's alerts as before.
+    static const bool msgLegacy = SDL_getenv("GD10_HUD_MESSAGES_LEGACY") != nullptr;
+    gh4Messages_ = gh4Hud_ && !msgLegacy;
+    msgRun_ = {0, 0}, msgSp_ = {0, 0}, msgMissed_ = {false, false};
+    if (players_ == 1) s.hud().setNoAlerts(gh4Messages_);
+    else s.setHud2pNoAlerts(gh4Messages_);
     const qb::Value* lay = vm.global(K("g_hud_2d_struct_used"));
-    SDL_Log("hud: gh4 HUD %s (layout %s), %zu widgets", gh4Hud_ ? "up" : "NOT built", lay && lay->st ? "struct" : "none", hud_.widgets());
+    const qb::Value* dn = lay && lay->st ? lay->st->find(K("desc_interface")) : nullptr;
+    SDL_Log("hud: gh4 HUD %s (layout %s, %d players), %zu widgets", gh4Hud_ ? "up" : "NOT built", dn ? dn->str.c_str() : "none", players_, hud_.widgets());
 }
 
 void SongHooks::frameHud(SongScreen& s, double now) {
     if (!gh4Hud_) return;
     Vm& vm = fe_.vm();
-    const Player& pl = s.match().player(0);
-    const PlayerStats& st = pl.stats();
     std::array<HudWidgets::Values, 4> v{};
-    HudWidgets::Values& a = v[0];
-    a.score = st.score, a.streak = st.currentRun, a.multiplier = st.multiplier(), a.spActive = st.starPowerActive;
-    a.starPower = st.starPower, a.health = st.health, a.missedNote = st.misses > 0;
-    // projected_song_stars: score / the judged notes' base score x
-    // star_count_projection_base_mult, then 3 + to star4's cutoff, 4 + to
-    // star5's, under the base 3 x the ratio [C 0x82118C30; I: the ratio's
-    // inputs, the C's other term under the base].
-    {
-        const size_t cur = std::min(pl.current(), basePrefix_.empty() ? 0 : basePrefix_.size() - 1);
-        const double base = basePrefix_.empty() ? 0 : basePrefix_[cur];
+    for (int p = 0; p < hudPlayers_; ++p) {
+        const Player& pl = s.match().player(p);
+        const PlayerStats& st = pl.stats();
+        HudWidgets::Values& a = v[size_t(p)];
+        a.score = st.score, a.streak = st.currentRun, a.multiplier = st.multiplier(), a.spActive = st.starPowerActive;
+        a.starPower = st.starPower, a.health = st.health, a.missedNote = st.misses > 0;
+        // projected_song_stars: score / the judged notes' base score x
+        // star_count_projection_base_mult, then 3 + to star4's cutoff, 4 + to
+        // star5's, under the base 3 x the ratio [C 0x82118C30; I: the ratio's
+        // inputs, the C's other term under the base].
+        const std::vector<double>& bp = basePrefix_[size_t(p)];
+        const size_t cur = std::min(pl.current(), bp.empty() ? 0 : bp.size() - 1);
+        // bp[cur] already counts the full sustain of a note whose head was
+        // judged; the score only accrues that sustain as it is held, so leave
+        // the not-yet-held portion out to keep the ratio steady through long
+        // sustains (GD10: The Unforgiven's bar dipped on every held note).
+        const double base = (bp.empty() ? 0 : bp[cur]) - pl.sustainUnawarded();
         const float x = base > 0 ? float(st.score / base) : 0.0f;
         const float b = Vm::number(vm.global(K("star_count_projection_base_mult")), 1);
         float s4 = 2.0f, s5 = 2.8f;
@@ -1090,7 +1138,29 @@ void SongHooks::frameHud(SongScreen& s, double now) {
         if (x >= b) a.stars = x >= s4 ? 4 + (s5 != s4 ? c01((x - s4) / (s5 - s4)) : 1) : 3 + (s4 != b ? c01((x - b) / (s4 - b)) : 1);
         else a.stars = b > 0 ? 3 * c01(x / b) : 0;
     }
-    hud_.update(v, 1, now);
+    // Two players: the band's values [I: the C's band values not decoded]:
+    // band1_* the band's (score summed, health the average as co-op's fail
+    // rule 0x8210FD18, the lower streak and multiplier, Star Power the
+    // lower), band2_* none; faceoff_ratio (score1 - score2) / (score1 +
+    // score2), player 1 ahead > 0 (its needle's value_range [1 -1] -> [-51.5
+    // 51.5]: player 1's side the left; amber, team 1's colour, lit 0 .. 0.1).
+    HudWidgets::Band band;
+    if (hudPlayers_ == 2) {
+        band.on = true;
+        HudWidgets::Values& t = band.team[0];
+        t.score = v[0].score + v[1].score;
+        t.health = (v[0].health + v[1].health) * 0.5f;
+        t.streak = std::min(v[0].streak, v[1].streak);
+        t.multiplier = std::min(v[0].multiplier, v[1].multiplier);
+        t.starPower = std::min(v[0].starPower, v[1].starPower);
+        t.spActive = v[0].spActive && v[1].spActive;
+        t.missedNote = v[0].missedNote || v[1].missedNote;
+        t.stars = std::min(v[0].stars, v[1].stars);
+        const double sum = v[0].score + v[1].score;
+        band.faceoffRatio = sum > 0 ? float((v[0].score - v[1].score) / sum) : 0.0f;
+    }
+    hud_.update(v, hudPlayers_, now, band);
+    if (gh4Messages_) frameMessages(s, v, now);
     // The C's player1_streak_started / _ended with the streak over / under
     // 10 (0x82118710), starpower_bulbs_unhide / _hide across 50 (the
     // drain's hide: star_power_activate_and_drain) [C; I: raised on a change].
@@ -1122,9 +1192,22 @@ void SongHooks::frameHud(SongScreen& s, double now) {
             vm.run(K("LaunchEvent"), l);
         }
     };
-    const bool streak = st.currentRun > 9;
-    if (streak != streakOn_) streakOn_ = streak, broadcastType(streak ? "player1_streak_started" : "player1_streak_ended");
-    const bool bulbs = st.starPower >= 50;
+    // player<n>_streak_started / _ended for each player (band scoring
+    // modes: band<n>_; HUD_setup_streak_meter_animation) [C scripts; I: band].
+    {
+        bool bandScoring = false;  // GameMode_IsBandScoring: <mode>_props cooperative
+        if (const qb::Value* gm = vm.global(K("game_mode")); gm && hudPlayers_ > 1)
+            if (const qb::Value* ps = vm.global(qbkey::key(qbkey::name(gm->key) + "_props")); ps && ps->st)
+                if (const qb::Value* c = vm.globals().field(*ps->st, K("cooperative"))) bandScoring = c->key == K("true") || c->number() != 0;
+        for (int p = 0; p < hudPlayers_; ++p) {
+            const bool streak = v[size_t(p)].streak > 9;
+            if (streak == streakOn_[size_t(p)]) continue;
+            streakOn_[size_t(p)] = streak;
+            const std::string ev = std::string(bandScoring ? "band" : "player") + std::to_string(p + 1) + (streak ? "_streak_started" : "_streak_ended");
+            broadcastType(ev.c_str());
+        }
+    }
+    const bool bulbs = v[0].starPower >= 50;
     if (bulbs != bulbsOn_) bulbsOn_ = bulbs, broadcastType(bulbs ? "starpower_bulbs_unhide" : "starpower_bulbs_hide");
     // intro_hud_move -> move_2d_elements_to_default: hud_root alpha 1 over
     // 0.25 s at current_intro's hud_start_time + hud_move_time after the
@@ -1143,6 +1226,55 @@ void SongHooks::frameHud(SongScreen& s, double now) {
             Vm::set(p, K("time"), Vm::makeFloat(0.25f));
             vm.run(K("SetScreenElementProps"), p);
         }
+    }
+}
+
+void SongHooks::frameMessages(SongScreen& s, const std::array<HudWidgets::Values, 4>& v, double now) {
+    // gh4's in-song messages (GD10-068), as the C spawns their scripts; the
+    // scripts make the text (hud_create_message under the player's
+    // `message` container, GetHUDMessageParent) and its style (the fire
+    // flames, hud_message_flame_style*) and sounds:
+    // - hot_start_achieved player = <n>: the streak reaching
+    //   hot_start_min_streak (25) with no note missed yet [C 0x82118088; I:
+    //   the C's per-player flag = no miss so far];
+    // - hud_show_note_streak_combo player combo: the streak passing 50
+    //   (combo 50), then each hundred past it (combo = the hundred) [C
+    //   0x82119280, 0x8211B468];
+    // - show_star_power_ready player_status = player<n>_status: the Star
+    //   Power reaching 50 out of Star Power [I: GH3's rule, as Hud2D's].
+    Vm& vm = fe_.vm();
+    (void)s;
+    const int minStreak = int(Vm::number(vm.global(K("hot_start_min_streak")), 25));
+    for (int p = 0; p < hudPlayers_; ++p) {
+        const HudWidgets::Values& a = v[size_t(p)];
+        const int run = a.streak, prev = msgRun_[size_t(p)];
+        if (a.missedNote) msgMissed_[size_t(p)] = true;
+        qb::Struct q;
+        Vm::set(q, K("player"), Vm::makeInt(p + 1));
+        if (!msgMissed_[size_t(p)] && prev < minStreak && run >= minStreak) {
+            vm.spawn(K("hot_start_achieved"), q);
+            ++messages_;
+            SDL_Log("hud message: hot start, player %d (streak %d) at %.0f ms", p + 1, run, now);
+        }
+        int combo = 0;
+        if (prev < 50 && run > 49) combo = 50;
+        else if (prev > 50 && run % 100 < prev % 100 && run > prev) combo = run - run % 100;
+        if (combo) {
+            qb::Struct c = q;
+            Vm::set(c, K("combo"), Vm::makeInt(combo));
+            vm.spawn(K("hud_show_note_streak_combo"), c);
+            ++messages_;
+            SDL_Log("hud message: %d note streak, player %d at %.0f ms", combo, p + 1, now);
+        }
+        msgRun_[size_t(p)] = run;
+        if (!a.spActive && a.starPower >= 50 && msgSp_[size_t(p)] < 50) {
+            qb::Struct r;
+            Vm::set(r, K("player_status"), Vm::makeKey(qbkey::key("player" + std::to_string(p + 1) + "_status")));
+            vm.spawn(K("show_star_power_ready"), r);
+            ++messages_;
+            SDL_Log("hud message: Star Power ready, player %d at %.0f ms", p + 1, now);
+        }
+        msgSp_[size_t(p)] = a.starPower;
     }
 }
 
@@ -1182,6 +1314,16 @@ void SongHooks::draw(Canvas& c, double nowMs) {
 void SongHooks::setPaused(bool paused) {
     if (!active_ || paused == paused_) return;
     paused_ = paused;
+    // GD10 pause-HUD bug: a blocking full-screen menu (the pause menu) must
+    // hide the whole gameplay HUD. For gh4 the rock meter, score/star widget,
+    // multiplier and Star Power tubes all live under hud_root (drawn by the UI
+    // system over the frozen song); the port left them drawn, so they poked out
+    // around the pause overlay. Hide the hud_root subtree while paused and
+    // restore it on resume. (SongHooks::draw already gates its bolts/fx on
+    // paused_.) GD10_HUD_PAUSE_LEGACY=1: keep the HUD drawn while paused.
+    static const bool hudPauseLegacy = SDL_getenv("GD10_HUD_PAUSE_LEGACY") != nullptr;
+    if (!hudPauseLegacy && gh4Hud_)
+        if (ui::Element* r = fe_.ui().find(K("hud_root"))) r->hidden = paused;
     for (auto& r : fe_.vm().runs())
         if (runs_.count(r->id)) r->paused = paused;
 }
@@ -1355,36 +1497,51 @@ void SongHooks::addNatives() {
         song_->highwayOf(pl).setAllWhammyValues(Vm::number(Vm::param(p, K("value")), 1));
         return true;
     });
-    // setsoundbusseffects effect = {effect name params} | effect = $<global>
-    // [time = s]: the guitar buss's GuitarEcho1 / GuitarReverb1 drive
-    // audio/guitar_fx; the crowd buss's CrowdEcho1 / InGameReverb1 are kept
-    // (the port's sound effects are not on busses) [C scripts GH_Star_Power_Verb_On, GuitarEvent_EnterVenue].
+    // setsoundbusseffects effect = {name params} | effect = $<global> |
+    //   effects = [ {name params} ... ]  [time = s]: the guitar buss's
+    // Guitar1/2PitchShift drives the whammy pitch (audio/mixer), GuitarEcho1 /
+    // GuitarReverb1 drive audio/guitar_fx; the crowd buss's CrowdEcho1 /
+    // InGameReverb1 are kept (the port's sound effects are not on busses).
+    // GM-010 fix: the whammy passes the PLURAL `effects` array form
+    // (set_whammy_pitchshift: effects = [ { effect = whammy name =
+    // Guitar1PitchShift pitch = (1.0 - pitchtweak) } ]); the old code read only
+    // the singular `effect`, so whammy never changed the sound [C scripts
+    // GH_Star_Power_Verb_On, GuitarEvent_EnterVenue, set_whammy_pitchshift].
     vm.addNative("setsoundbusseffects", [this](Vm& v, ScriptRun&, qb::Struct& p) {
-        const qb::Value* e = Vm::param(p, K("effect"));
-        if (e && (e->type == qb::Type::Key || e->type == qb::Type::KeyPtr)) e = v.global(e->key);
-        if (!e || !e->st) return true;
-        ++k_.bussEffects;
-        const qb::Struct& es = *e->st;
-        const uint32_t name = keyOf(v.globals().field(es, K("name")));
-        GuitarFx::Params gp = mixer_.guitarFx().params();
-        auto num = [&](const char* n, float& out) {
-            if (const qb::Value* x = v.globals().field(es, K(n)); x && (x->type == qb::Type::Int || x->type == qb::Type::Float)) out = x->number();
+        const float time = Vm::number(Vm::param(p, K("time")), 0);
+        auto apply = [&](const qb::Struct& es) {
+            ++k_.bussEffects;
+            const uint32_t name = keyOf(v.globals().field(es, K("name")));
+            auto num = [&](const char* n, float& out) {
+                if (const qb::Value* x = v.globals().field(es, K(n)); x && (x->type == qb::Type::Int || x->type == qb::Type::Float)) out = x->number();
+            };
+            if (name == K("Guitar1PitchShift") || name == K("Guitar2PitchShift")) {
+                float pitch = 1;
+                num("pitch", pitch);
+                mixer_.setGuitarPitch(name == K("Guitar1PitchShift") ? 0 : 1, pitch);
+                return;
+            }
+            GuitarFx::Params gp = mixer_.guitarFx().params();
+            if (name == K("GuitarEcho1")) {
+                num("delay", gp.echoDelayMs), num("DecayRatio", gp.echoDecay), num("Drymix", gp.echoDry), num("Wetmix", gp.echoWet);
+            } else if (name == K("GuitarReverb1")) {
+                num("ReverbLevel", gp.reverbLevelMb), num("ReflectionsLevel", gp.reflectionsLevelMb), num("DecayTime", gp.decayTime);
+                num("ReflectionsDelay", gp.reflectionsDelay), num("ReverbDelay", gp.reverbDelay);
+            } else {
+                return;
+            }
+            mixer_.guitarFx().set(gp, time);
         };
-        if (name == K("Guitar1PitchShift") || name == K("Guitar2PitchShift")) {
-            float pitch = 1;
-            num("pitch", pitch);
-            mixer_.setGuitarPitch(name == K("Guitar1PitchShift") ? 0 : 1, pitch);
-            return true;
-        }
-        if (name == K("GuitarEcho1")) {
-            num("delay", gp.echoDelayMs), num("DecayRatio", gp.echoDecay), num("Drymix", gp.echoDry), num("Wetmix", gp.echoWet);
-        } else if (name == K("GuitarReverb1")) {
-            num("ReverbLevel", gp.reverbLevelMb), num("ReflectionsLevel", gp.reflectionsLevelMb), num("DecayTime", gp.decayTime);
-            num("ReflectionsDelay", gp.reflectionsDelay), num("ReverbDelay", gp.reverbDelay);
-        } else {
-            return true;
-        }
-        mixer_.guitarFx().set(gp, Vm::number(Vm::param(p, K("time")), 0));
+        auto resolve = [&](const qb::Value* x) -> const qb::Struct* {
+            if (x && (x->type == qb::Type::Key || x->type == qb::Type::KeyPtr)) x = v.global(x->key);
+            return x ? x->st.get() : nullptr;
+        };
+        // Singular form: effect = {..} | effect = $<global>.
+        if (const qb::Struct* es = resolve(Vm::param(p, K("effect")))) apply(*es);
+        // Plural form (the whammy): effects = [ {..} ... ].
+        if (const qb::Value* arr = Vm::param(p, K("effects")); arr && arr->type == qb::Type::Array && arr->arr)
+            for (const qb::Value& item : arr->arr->values)
+                if (const qb::Struct* es = resolve(&item)) apply(*es);
         return true;
     });
     // SetSoundBussParams {<BussSet> time = s}: Right_Notes_Player1's vol (dB)

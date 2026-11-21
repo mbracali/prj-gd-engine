@@ -70,6 +70,8 @@ public:
     // ("<n> Note Streak!", "Star Power Ready", their glow burst and
     // lightning) draw here, not GH3's rock meter, score body and counter.
     void setAlertsOnly(bool on) { alertsOnly_ = on; }
+    // gh4's own messages up (GD10-068): GH3's alerts not drawn either.
+    void setNoAlerts(bool on) { noAlerts_ = on; }
 
     // The song's start (current_starttime, ms): the intro's times count from it.
     void setStart(double startMs) { startMs_ = startMs; }
@@ -137,7 +139,7 @@ private:
     HudAnim comboText_, glowburst_, readyText_;
     double lightningStart_ = -1e18;
     double startMs_ = 0;
-    void drawAlert(Canvas& c, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align) const;
+    void drawAlert(Canvas& c, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align, bool outline = false) const;
     // Star Power look.
     bool ready_ = false, active_ = false;
     double readyStart_ = -1e18, activeStart_ = -1e18, offStart_ = -1e18;
@@ -147,6 +149,7 @@ private:
     std::array<Track, 3> bigTube_;  // tubes 4..6: initial (0,0) -> final (0,-170)
     bool started_ = false;
     bool alertsOnly_ = false;
+    bool noAlerts_ = false;
 };
 
 // The HUD alerts' scripts, shared by both HUDs [C scripts hud_show_note_streak_combo,
@@ -157,7 +160,7 @@ void combo(HudAnim& text, HudAnim& glow, double at, float x, float y, float base
 // "Star Power Ready" at (x, y), base scale, the big scale's multiplier.
 void ready(HudAnim& text, double at, float x, float y, float base, float mult);
 // Draws an alert's text (shadow (2,2) black).
-void draw(Canvas& c, const Hud2D::TextFn& text, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align);
+void draw(Canvas& c, const Hud2D::TextFn& text, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align, bool outline = false);
 }  // namespace hudalert
 
 // The song's intro texts (setup_sprites' intro_song_info_text,

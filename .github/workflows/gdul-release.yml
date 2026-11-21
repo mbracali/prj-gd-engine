@@ -4,8 +4,10 @@
 # the repo guard and every platform's build, then publishes release
 # gdul/vX.Y.Z, marked Latest. Each download packs the newest version of every
 # ready game (the game's guitar_dream_version on main); a game module whose
-# version (and the launcher's module SDK) is the same as in the previous gdul
-# release is taken from that release's download instead of being built again.
+# build key (its game's sources, gd-engine-core, the module SDK, the recipes,
+# the toolchain: buildkey.txt next to the module, GDREL-010) is the same as in
+# the previous gdul release is taken from that release's download instead of
+# being built again.
 # A merge without a new launcher_version does nothing (one quick check); if it
 # bumps a game's version, the check warns that launcher_version needs a bump
 # too for the game to ship. Builds Linux x86_64, Windows x86_64, macOS arm64
@@ -147,10 +149,39 @@ jobs:
         with:
           path: gd-engine-launcher/build/portable/sdl3-prefix
           key: sdl3-gdul-ubuntu2204-${{ hashFiles('gd-engine-launcher/scripts/build_linux_portable.sh', 'gd-game-02/engine/build_linux_portable.sh') }}
+      # The toolchain, in the library caches' keys (GDREL-010): the system's release and its build tools.
+      - name: Toolchain id
+        shell: bash
+        run: |
+          # (gcc-12 and the rest come from build_linux_portable.sh's apt line, Ubuntu 22.04's updates.)
+          { grep -E '^(ID|VERSION)=' /etc/os-release; grep -E 'apt-get install|pip3 install' gd-engine-launcher/scripts/build_linux_portable.sh; } > "$RUNNER_TEMP/toolchain.txt"
+          echo "TOOLCHAIN_ID=$(sha256sum "$RUNNER_TEMP/toolchain.txt" | cut -c1-16)" >> "$GITHUB_ENV"
+          cat "$RUNNER_TEMP/toolchain.txt"
+      # Libraries that rarely change, kept between releases (GDREL-010), in
+      # the folders the builds already use; keyed by the toolchain (TOOLCHAIN_ID)
+      # and the files that pin and configure them. A key miss restores the
+      # newest FFmpeg entry of the same toolchain: each FFmpeg prefix is reused
+      # only when its FFMPEG-BUILD.txt stamp (version and configure options) is
+      # the recipe's, else built again, and the job saves under the new key.
+      # The gd-engine-core folder has no fallback (a pin change starts it
+      # afresh, so old versions don't pile up); its sources are still checked
+      # by their SHA-256 stamps and gdcore_shaderc is keyed by its own pins.
+      # FFmpeg: gd02's, gd04's, gd05's (suffix _gd05) and gd10's builds.
       - uses: actions/cache@v6
         with:
-          path: gd-game-02/engine/build/ffmpeg/linux/ffmpeg-prefix
-          key: ffmpeg-gdul-ubuntu2204-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+          path: |
+            gd-game-02/engine/build/ffmpeg/linux/ffmpeg-prefix
+            gd-game-04/engine/build/ffmpeg/linux/ffmpeg-prefix
+            gd-game-05/engine/build/ffmpeg/linux/ffmpeg-prefix
+            gd-game-10/engine/build/ffmpeg/linux/ffmpeg-prefix
+          key: ffmpeg-gdul-ubuntu2204-${{ env.TOOLCHAIN_ID }}-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-game-04/engine/build_common.sh', 'gd-game-05/engine/build_common.sh', 'gd-game-10/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+          restore-keys: ffmpeg-gdul-ubuntu2204-${{ env.TOOLCHAIN_ID }}-
+      # gd-engine-core's pinned sources (glslang, SPIRV-Tools, KTX, SDL3_image,
+      # libchdr...) and its gdcore_shaderc host tool (built once per machine).
+      - uses: actions/cache@v6
+        with:
+          path: gd-engine-core/build/deps
+          key: gdcore-deps-ubuntu2204-${{ env.TOOLCHAIN_ID }}-${{ hashFiles('gd-engine-core/cmake/gdcore_deps.cmake', 'gd-engine-core/render/cmake/*.cmake', 'gd-engine-core/render/tools/shaderc/**') }}
       # The FFmpeg source tarball, kept across script changes so a release
       # doesn't depend on ffmpeg.org answering (its SHA-256 is checked on use).
       - uses: actions/cache@v6
@@ -158,7 +189,9 @@ jobs:
           path: |
             gd-game-02/engine/build/ffmpeg-src
             gd-game-04/engine/build/ffmpeg-src
-          key: ffmpeg-src-7.1.5
+            gd-game-05/engine/build/ffmpeg-src
+            gd-game-10/engine/build/ffmpeg-src
+          key: ffmpeg-src-7.1.5-4games
       - uses: actions/download-artifact@v8
         if: needs.previous.result == 'success'
         with:
@@ -241,10 +274,38 @@ jobs:
               echo "CMAKE_C_COMPILER_LAUNCHER=ccache"; echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"; } >> "$GITHUB_ENV"
             ccache -z >/dev/null || true
           else echo "no ccache: a full build"; fi
+      # The toolchain, in the library caches' keys (GDREL-010): the Steam Runtime's build and its compilers.
+      - name: Toolchain id
+        shell: bash
+        run: |
+          { grep -E '^(ID|VERSION_ID|BUILD_ID)=' /etc/os-release; gcc --version | head -1; gcc-14 --version | head -1; } > "$RUNNER_TEMP/toolchain.txt"
+          echo "TOOLCHAIN_ID=$(sha256sum "$RUNNER_TEMP/toolchain.txt" | cut -c1-16)" >> "$GITHUB_ENV"
+          cat "$RUNNER_TEMP/toolchain.txt"
+      # Libraries that rarely change, kept between releases (GDREL-010), in
+      # the folders the builds already use; keyed by the toolchain (TOOLCHAIN_ID)
+      # and the files that pin and configure them. A key miss restores the
+      # newest FFmpeg entry of the same toolchain: each FFmpeg prefix is reused
+      # only when its FFMPEG-BUILD.txt stamp (version and configure options) is
+      # the recipe's, else built again, and the job saves under the new key.
+      # The gd-engine-core folder has no fallback (a pin change starts it
+      # afresh, so old versions don't pile up); its sources are still checked
+      # by their SHA-256 stamps and gdcore_shaderc is keyed by its own pins.
+      # FFmpeg: gd02's, gd04's, gd05's (suffix _gd05) and gd10's builds.
       - uses: actions/cache@v6
         with:
-          path: gd-game-02/engine/build/ffmpeg/steamdeck/ffmpeg-prefix
-          key: ffmpeg-gdul-sniper-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+          path: |
+            gd-game-02/engine/build/ffmpeg/steamdeck/ffmpeg-prefix
+            gd-game-04/engine/build/ffmpeg/steamdeck/ffmpeg-prefix
+            gd-game-05/engine/build/ffmpeg/steamdeck/ffmpeg-prefix
+            gd-game-10/engine/build/ffmpeg/steamdeck/ffmpeg-prefix
+          key: ffmpeg-gdul-sniper-${{ env.TOOLCHAIN_ID }}-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-game-04/engine/build_common.sh', 'gd-game-05/engine/build_common.sh', 'gd-game-10/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+          restore-keys: ffmpeg-gdul-sniper-${{ env.TOOLCHAIN_ID }}-
+      # gd-engine-core's pinned sources (glslang, SPIRV-Tools, KTX, SDL3_image,
+      # libchdr...) and its gdcore_shaderc host tool (built once per machine).
+      - uses: actions/cache@v6
+        with:
+          path: gd-engine-core/build/deps
+          key: gdcore-deps-sniper-${{ env.TOOLCHAIN_ID }}-${{ hashFiles('gd-engine-core/cmake/gdcore_deps.cmake', 'gd-engine-core/render/cmake/*.cmake', 'gd-engine-core/render/tools/shaderc/**') }}
       # The FFmpeg source tarball, kept across script changes so a release
       # doesn't depend on ffmpeg.org answering (its SHA-256 is checked on use).
       - uses: actions/cache@v6
@@ -252,7 +313,9 @@ jobs:
           path: |
             gd-game-02/engine/build/ffmpeg-src
             gd-game-04/engine/build/ffmpeg-src
-          key: ffmpeg-src-7.1.5
+            gd-game-05/engine/build/ffmpeg-src
+            gd-game-10/engine/build/ffmpeg-src
+          key: ffmpeg-src-7.1.5-4games
       - uses: actions/download-artifact@v8
         if: needs.previous.result == 'success'
         with:
@@ -330,10 +393,39 @@ jobs:
               echo "CMAKE_C_COMPILER_LAUNCHER=ccache"; echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"; } >> "$GITHUB_ENV"
             ccache -z >/dev/null || true
           else echo "no ccache: a full build"; fi
+      # The toolchain, in the library caches' keys (GDREL-010): Fedora's release, its gcc and MinGW packages.
+      - name: Toolchain id
+        shell: bash
+        run: |
+          { grep -E '^(ID|VERSION_ID)=' /etc/os-release; gcc --version | head -1
+            rpm -q gcc-c++ mingw64-gcc-c++ mingw64-crt mingw64-winpthreads || true; } > "$RUNNER_TEMP/toolchain.txt"
+          echo "TOOLCHAIN_ID=$(sha256sum "$RUNNER_TEMP/toolchain.txt" | cut -c1-16)" >> "$GITHUB_ENV"
+          cat "$RUNNER_TEMP/toolchain.txt"
+      # Libraries that rarely change, kept between releases (GDREL-010), in
+      # the folders the builds already use; keyed by the toolchain (TOOLCHAIN_ID)
+      # and the files that pin and configure them. A key miss restores the
+      # newest FFmpeg entry of the same toolchain: each FFmpeg prefix is reused
+      # only when its FFMPEG-BUILD.txt stamp (version and configure options) is
+      # the recipe's, else built again, and the job saves under the new key.
+      # The gd-engine-core folder has no fallback (a pin change starts it
+      # afresh, so old versions don't pile up); its sources are still checked
+      # by their SHA-256 stamps and gdcore_shaderc is keyed by its own pins.
+      # FFmpeg: gd02's, gd04's, gd05's (suffix _gd05) and gd10's builds.
       - uses: actions/cache@v6
         with:
-          path: gd-game-02/engine/build/ffmpeg/windows/ffmpeg-prefix
-          key: ffmpeg-gdul-mingw-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+          path: |
+            gd-game-02/engine/build/ffmpeg/windows/ffmpeg-prefix
+            gd-game-04/engine/build/ffmpeg/windows/ffmpeg-prefix
+            gd-game-05/engine/build/ffmpeg/windows/ffmpeg-prefix
+            gd-game-10/engine/build/ffmpeg/windows/ffmpeg-prefix
+          key: ffmpeg-gdul-mingw-${{ env.TOOLCHAIN_ID }}-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-game-04/engine/build_common.sh', 'gd-game-05/engine/build_common.sh', 'gd-game-10/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+          restore-keys: ffmpeg-gdul-mingw-${{ env.TOOLCHAIN_ID }}-
+      # gd-engine-core's pinned sources (glslang, SPIRV-Tools, KTX, SDL3_image,
+      # libchdr...) and its gdcore_shaderc host tool (built once per machine).
+      - uses: actions/cache@v6
+        with:
+          path: gd-engine-core/build/deps
+          key: gdcore-deps-mingw-${{ env.TOOLCHAIN_ID }}-${{ hashFiles('gd-engine-core/cmake/gdcore_deps.cmake', 'gd-engine-core/render/cmake/*.cmake', 'gd-engine-core/render/tools/shaderc/**') }}
       # The FFmpeg source tarball, kept across script changes so a release
       # doesn't depend on ffmpeg.org answering (its SHA-256 is checked on use).
       - uses: actions/cache@v6
@@ -341,7 +433,9 @@ jobs:
           path: |
             gd-game-02/engine/build/ffmpeg-src
             gd-game-04/engine/build/ffmpeg-src
-          key: ffmpeg-src-7.1.5
+            gd-game-05/engine/build/ffmpeg-src
+            gd-game-10/engine/build/ffmpeg-src
+          key: ffmpeg-src-7.1.5-4games
       - uses: actions/download-artifact@v8
         if: needs.previous.result == 'success'
         with:
@@ -409,10 +503,38 @@ jobs:
             ccache -z >/dev/null || true
           else echo "no ccache: a full build"; fi
       - run: brew install bash ninja sdl3 dylibbundler ccache
+      # The toolchain, in the library caches' keys (GDREL-010): the runner's macOS, Apple clang and SDK.
+      - name: Toolchain id
+        shell: bash
+        run: |
+          { uname -m; sw_vers -productVersion; cc --version | head -1; xcrun --show-sdk-version || true; } > "$RUNNER_TEMP/toolchain.txt"
+          echo "TOOLCHAIN_ID=$(shasum -a 256 "$RUNNER_TEMP/toolchain.txt" | cut -c1-16)" >> "$GITHUB_ENV"
+          cat "$RUNNER_TEMP/toolchain.txt"
+      # Libraries that rarely change, kept between releases (GDREL-010), in
+      # the folders the builds already use; keyed by the toolchain (TOOLCHAIN_ID)
+      # and the files that pin and configure them. A key miss restores the
+      # newest FFmpeg entry of the same toolchain: each FFmpeg prefix is reused
+      # only when its FFMPEG-BUILD.txt stamp (version and configure options) is
+      # the recipe's, else built again, and the job saves under the new key.
+      # The gd-engine-core folder has no fallback (a pin change starts it
+      # afresh, so old versions don't pile up); its sources are still checked
+      # by their SHA-256 stamps and gdcore_shaderc is keyed by its own pins.
+      # FFmpeg: gd02's, gd04's, gd05's (suffix _gd05) and gd10's builds.
       - uses: actions/cache@v6
         with:
-          path: gd-game-02/engine/build/ffmpeg/macos/ffmpeg-prefix
-          key: ffmpeg-gdul-macos-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+          path: |
+            gd-game-02/engine/build/ffmpeg/macos/ffmpeg-prefix
+            gd-game-04/engine/build/ffmpeg/macos/ffmpeg-prefix
+            gd-game-05/engine/build/ffmpeg/macos/ffmpeg-prefix
+            gd-game-10/engine/build/ffmpeg/macos/ffmpeg-prefix
+          key: ffmpeg-gdul-macos-${{ env.TOOLCHAIN_ID }}-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-game-04/engine/build_common.sh', 'gd-game-05/engine/build_common.sh', 'gd-game-10/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+          restore-keys: ffmpeg-gdul-macos-${{ env.TOOLCHAIN_ID }}-
+      # gd-engine-core's pinned sources (glslang, SPIRV-Tools, KTX, SDL3_image,
+      # libchdr...) and its gdcore_shaderc host tool (built once per machine).
+      - uses: actions/cache@v6
+        with:
+          path: gd-engine-core/build/deps
+          key: gdcore-deps-macos-${{ env.TOOLCHAIN_ID }}-${{ hashFiles('gd-engine-core/cmake/gdcore_deps.cmake', 'gd-engine-core/render/cmake/*.cmake', 'gd-engine-core/render/tools/shaderc/**') }}
       # The FFmpeg source tarball, kept across script changes so a release
       # doesn't depend on ffmpeg.org answering (its SHA-256 is checked on use).
       - uses: actions/cache@v6
@@ -420,7 +542,9 @@ jobs:
           path: |
             gd-game-02/engine/build/ffmpeg-src
             gd-game-04/engine/build/ffmpeg-src
-          key: ffmpeg-src-7.1.5
+            gd-game-05/engine/build/ffmpeg-src
+            gd-game-10/engine/build/ffmpeg-src
+          key: ffmpeg-src-7.1.5-4games
       - uses: actions/download-artifact@v8
         if: needs.previous.result == 'success'
         with:
@@ -501,10 +625,39 @@ jobs:
             ~/.gradle/wrapper
             gd-engine-launcher/build/android/SDL3-*
           key: android-gdul-${{ hashFiles('gd-engine-launcher/android/**/*.gradle', 'gd-engine-launcher/android/gradle/wrapper/*.properties', 'gd-game-02/engine/build_android.sh') }}
+      # The toolchain, in the library caches' keys (GDREL-010): the runner's release and gcc, the NDK.
+      - name: Toolchain id
+        shell: bash
+        run: |
+          # (The NDK is the one setup-android installs above; the host's gcc builds gdcore_shaderc.)
+          { grep -E '^(ID|VERSION_ID)=' /etc/os-release; gcc --version | head -1; cat "$ANDROID_HOME/ndk/28.2.13676358/source.properties" || echo "ndk 28.2.13676358"; } > "$RUNNER_TEMP/toolchain.txt"
+          echo "TOOLCHAIN_ID=$(sha256sum "$RUNNER_TEMP/toolchain.txt" | cut -c1-16)" >> "$GITHUB_ENV"
+          cat "$RUNNER_TEMP/toolchain.txt"
+      # Libraries that rarely change, kept between releases (GDREL-010), in
+      # the folders the builds already use; keyed by the toolchain (TOOLCHAIN_ID)
+      # and the files that pin and configure them. A key miss restores the
+      # newest FFmpeg entry of the same toolchain: each FFmpeg prefix is reused
+      # only when its FFMPEG-BUILD.txt stamp (version and configure options) is
+      # the recipe's, else built again, and the job saves under the new key.
+      # The gd-engine-core folder has no fallback (a pin change starts it
+      # afresh, so old versions don't pile up); its sources are still checked
+      # by their SHA-256 stamps and gdcore_shaderc is keyed by its own pins.
+      # FFmpeg: gd02's, gd04's, gd05's (suffix _gd05) and gd10's builds.
       - uses: actions/cache@v6
         with:
-          path: gd-game-02/engine/build/ffmpeg/android/*/ffmpeg-prefix
-          key: ffmpeg-gdul-android-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+          path: |
+            gd-game-02/engine/build/ffmpeg/android/*/ffmpeg-prefix
+            gd-game-04/engine/build/ffmpeg/android/*/ffmpeg-prefix
+            gd-game-05/engine/build/ffmpeg/android/*/ffmpeg-prefix
+            gd-game-10/engine/build/ffmpeg/android/*/ffmpeg-prefix
+          key: ffmpeg-gdul-android-${{ env.TOOLCHAIN_ID }}-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-game-04/engine/build_common.sh', 'gd-game-05/engine/build_common.sh', 'gd-game-10/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+          restore-keys: ffmpeg-gdul-android-${{ env.TOOLCHAIN_ID }}-
+      # gd-engine-core's pinned sources (glslang, SPIRV-Tools, KTX, SDL3_image,
+      # libchdr...) and its gdcore_shaderc host tool (built once per machine).
+      - uses: actions/cache@v6
+        with:
+          path: gd-engine-core/build/deps
+          key: gdcore-deps-android-${{ env.TOOLCHAIN_ID }}-${{ hashFiles('gd-engine-core/cmake/gdcore_deps.cmake', 'gd-engine-core/render/cmake/*.cmake', 'gd-engine-core/render/tools/shaderc/**') }}
       # The FFmpeg source tarball, kept across script changes so a release
       # doesn't depend on ffmpeg.org answering (its SHA-256 is checked on use).
       - uses: actions/cache@v6
@@ -512,7 +665,9 @@ jobs:
           path: |
             gd-game-02/engine/build/ffmpeg-src
             gd-game-04/engine/build/ffmpeg-src
-          key: ffmpeg-src-7.1.5
+            gd-game-05/engine/build/ffmpeg-src
+            gd-game-10/engine/build/ffmpeg-src
+          key: ffmpeg-src-7.1.5-4games
       - uses: actions/download-artifact@v8
         if: needs.previous.result == 'success'
         with:

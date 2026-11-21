@@ -5,7 +5,7 @@
 # game in games.yaml with ready_to_play true, on every system (no exemption:
 # a launcher never ships without a ready game's module), its module
 # (exporting gd_game_run) and the libraries it needs, non-empty, and listed
-# in gd-engine-games/manifest.json; a desktop download's recomplauncher.json (GDUL-032). Fails loudly otherwise. build.sh runs it on every build it assembles, the
+# in gd-engine-games/manifest.json (with its game-info.yaml's version); a desktop download's recomplauncher.json (GDUL-032). Fails loudly otherwise. build.sh runs it on every build it assembles, the
 # gdul release workflow on every archive before it is uploaded.
 #
 # Usage: gd-engine-launcher/scripts/verify_bundle.sh <build folder | .zip | .tar.gz | .apk | .AppImage> [linux|steamdeck|windows|macos|android]
@@ -217,6 +217,15 @@ for gi in "${game_infos[@]}"; do
   want="$(basename "$mod")"
   [ "$(manifest_get "m.get('games',{}).get('$id',{}).get('module','')")" = "$want" ] ||
     fail "manifest.json does not list $id's module $want"
+  # The manifest's version is the game-info.yaml's (a module reused from the
+  # previous release keeps this release's version, GDREL-010), and a build
+  # key next to the module is one SHA-256.
+  ver="$(yaml_value "$games/$gi" guitar_dream_version)"
+  [ "$(manifest_get "m.get('games',{}).get('$id',{}).get('guitar_dream_version','')")" = "$ver" ] ||
+    fail "manifest.json's guitar_dream_version for $id is not its game-info.yaml's ($ver)"
+  if [ -f "$d/buildkey.txt" ] && ! grep -qxE '[0-9a-f]{64}' "$d/buildkey.txt"; then
+    fail "$id's buildkey.txt is not a build key"
+  fi
   if [ ! -s "$mod" ]; then
     fail "$id's module ${mod#"$root"/} (missing or empty)"
   else
@@ -239,6 +248,16 @@ for gi in "${game_infos[@]}"; do
   fi
   case "$nn" in
     02|10)  # FFmpeg (videos, sound effects) and its LGPL notice
+      for lib in avformat avcodec avutil; do
+        case "$os" in
+          windows) one_of "$id: $lib-*.dll" "$libs/$lib"-*.dll ;;
+          linux) one_of "$id: lib$lib.so.N" "$libs/lib$lib".so.[0-9]* ;;
+          macos) one_of "$id: lib$lib.N.dylib" "$libs/lib$lib".[0-9]*.dylib ;;
+          android) one_of "$id: lib$lib.so" "$libs/lib$lib.so" ;;
+        esac
+      done
+      nonempty "$d/licenses/FFmpeg-LICENSE.LGPL-2.1.txt" ;;
+    06|07)  # Guitar Hero: Aerosmith / World Tour — FFmpeg (XMA audio, Bink videos) and its LGPL notice
       for lib in avformat avcodec avutil; do
         case "$os" in
           windows) one_of "$id: $lib-*.dll" "$libs/$lib"-*.dll ;;

@@ -81,6 +81,21 @@ FrontEnd::~FrontEnd() {
 bool FrontEnd::start() { return vm_->run(qbkey::key("guitar_startup"), qb::Struct{}); }
 
 void FrontEnd::handle(const InputEvent& e) {
+    // The Metallica main-menu CAREER handler shares uistate_game_mode with
+    // Quickplay but its script only changes state; unlike Quickplay it leaves
+    // game_mode at the boot default (p1_quickplay). Preserve the selected
+    // route before that screen creates its Single/Band choices.
+    if (e.down && (e.action == Action::Confirm || e.action == Action::Fret0) && flowState() == "main_menu_fs") {
+        for (const ui::Element* focused : ui_->focusedElements()) {
+            bool career = false;
+            for (const ui::Element::Handler& h : focused->handlers)
+                career = career || (h.event == qbkey::key("pad_choose") && h.script == qbkey::key("main_menu_select_career"));
+            if (career) {
+                vm_->setGlobal(qbkey::key("game_mode"), qs::Vm::makeKey(qbkey::key("p1_career")));
+                break;
+            }
+        }
+    }
     // The held frets as GH3's patterns (green 0x10000 .. orange 0x1) for GetHeldPattern.
     if (isFret(e.action)) {
         const uint32_t bit = 0x10000u >> (4 * fretOf(e.action));
@@ -230,6 +245,10 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     static const bool flowLog = SDL_getenv("GD10_FLOWLOG") != nullptr;
     if (const uint32_t st = states ? states->top() : 0; st != lastFlowState_) {
         lastFlowState_ = st;
+        if (SDL_getenv("GD10_UIFLOWDUMP")) {
+            SDL_Log("ui: flow changed to %s", qbkey::name(st).c_str());
+            ui_->dump();
+        }
         if (flowLog) SDL_Log("flow: %s", qbkey::name(st).c_str());
         loadtimes::mark(("flow " + qbkey::name(st)).c_str());
     }
@@ -239,6 +258,7 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
         // unlock_all_profiles) stand for The Glitches until its band is built.
         if (states && states->top() == qbkey::key("uistate_mainmenu")) {
             glitchesDone_ = true;
+            qs::Vm::slowArmed = true;  // GD10_UI_SLOW: slow menus from here, not boot
             if (!SDL_getenv("GD10_NO_GLITCHES")) {  // (development aid: off)
                 qb::Struct p;
                 qs::Vm::set(p, qbkey::key("songs_only"), qs::Vm::makeInt(0));
@@ -255,7 +275,7 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     }
     // During a song GH3's scripts keep running (the attract mode's input
     // check, the end-of-song events) and their elements draw over it [C: one VM].
-    scene_->setSuspended(songPlaying || songOutro);  // the menus' characters wait while the song's band plays
+    scene_->setSuspended(songPlaying || songOutro || songVenueBackground);  // the menus' characters wait while the song's band plays
     accum_ += dtMs;
     int steps = 0;
     // Practice's setslomo: the scripts' clock (Wait n seconds: the intro's
@@ -271,7 +291,7 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
         ++steps;
     }
     if (accum_ > kStepMs * 8) accum_ = 0;
-    if (!songPlaying && !songOutro) scene_->draw(c);
+    if (!songPlaying && !songOutro && !songVenueBackground) scene_->draw(c);
     ui_->draw(c);
 }
 

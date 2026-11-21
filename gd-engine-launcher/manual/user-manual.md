@@ -121,6 +121,39 @@ for this run only. Anything after `--` goes to the game itself. `--help`
 lists every option; on Windows run it from a terminal (Command Prompt or
 PowerShell) to see the text.
 
+## Updates
+
+The launcher can update itself. At start it asks GitHub for the latest
+release (only the release's public page data; no account, nothing about you
+is sent). When a newer version is out it shows **Update available** with the
+version and its highlights:
+
+- **Update now**: downloads this system's package next to the launcher,
+  checks it against the release's `SHA256SUMS.txt`, replaces the launcher's
+  program files and restarts it. Your `original_isos/`, saves, settings, logs
+  and anything you added to the folder are never touched. The replaced files
+  are kept in `.gdul-update/` until the new version has started; if it does
+  not start, the old version is put back.
+- **Skip this version**: no more prompts for that version.
+- **Later**: asks again at the next start.
+
+Nothing is downloaded or changed until you pick **Update now**.
+
+Click the version badge next to UNIVERSAL LAUNCHER (or press U) for the
+**Updates** menu: **Check for updates** now, and turn the check at start off
+or on (saved in `update.txt` in the save folder). Without a network the check
+fails quietly (one line in `gdul.log`).
+
+- **Windows, Linux (.tar.gz), Steam Deck, macOS**: update in place as above.
+  The Steam Deck download stays the Steam Deck download. The launcher's
+  folder must be writable (not under Program Files).
+- **Linux AppImage**: it keeps updating with AppImageUpdate, AppManager or
+  Gear Lever (zsync); the prompt opens the release page.
+- **Android**: **Update now** downloads the new APK in your browser; open it
+  to install over the current one (Android may ask you to allow installs
+  from the browser). Your discs and saves stay.
+- **RecompLauncher**: it updates the launcher itself; no check, no prompt.
+
 ## Your files
 
 The launcher keeps its settings and a log in your user folder:

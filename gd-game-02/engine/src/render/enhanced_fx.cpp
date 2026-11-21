@@ -21,10 +21,11 @@ struct EnhBlock {
     float prevViewProj[16];
     float texel[4];   // xy the source's texel
     float size[4];    // xy the source's size, zw the output's
-    float fx[4];      // x bloom, z cinematic, w grade
+    float fx[4];      // x bloom, y 1: the 1.1.16 cinematic curve (GD02_CINEMATIC_LEGACY), z cinematic, w grade
     float ao[4];      // x the occlusion's exponent (0 off), y its radius
     float pass[4];    // per pass (star blur, TAA, finish, RCAS, downsample, luminance, exposure)
-    float hdr[4];     // HDR: x the display's headroom (linear, 1 = SDR), y the encoded white (1, above with True HDR)
+    float hdr[4];     // HDR: x the display's headroom (linear, 1 = SDR), y the encoded white (1, above with True HDR),
+                      // z 1: the 1.1.16 ACES tone map and exposure (GD02_HDR_TONE_LEGACY)
 };
 
 const char* kVertex = R"(
@@ -152,6 +153,16 @@ vec3 acesHdr(vec3 x) {
     vec3 hi = a + r * (1.0 - exp(-max(x - 0.5, 0.0) * s / r));
     return mix(aces(x), hi, step(0.5, x));
 }
+// GD02-163 (#115): the original's picture below the knee (linear light 0.8)
+// untouched, then an exponential shoulder of slope 1 there that reaches the
+// peak (1.0 SDR, the display's headroom with True HDR). ACES's toe (slope
+// 0.21 at black) took about half the light out of GH2's dark stages.
+vec3 shoulder(vec3 x, float peak) {
+    const float k = 0.8;
+    float r = peak - k;
+    vec3 hi = k + r * (1.0 - exp(-max(x - k, 0.0) / r));
+    return mix(x, hi, step(k, x));
+}
 #endif
 vec3 saturation(vec3 c, float s) { return mix(vec3(luma(c)), c, s); }
 vec3 grade(vec3 c, int g) {
@@ -203,7 +214,8 @@ void main() {
 #if GD_HDR
     // Exposure and tone map in linear light, back to the display's encoding.
     vec3 lin = toLinear(min(c, vec3(64.0))) * texture(sExposure, vec2(0.5)).r;
-    c = toSrgb(uHdr.x > 1.0 ? acesHdr(lin) : aces(lin));
+    if (uHdr.z > 0.5) c = toSrgb(uHdr.x > 1.0 ? acesHdr(lin) : aces(lin));
+    else c = toSrgb(shoulder(lin, uHdr.x));
     // HDR output: the colour looks below apply to the SDR range; highlights above it ride along.
     vec3 over = vec3(0.0);
 #endif
@@ -214,15 +226,17 @@ void main() {
         float l = luma(c);
         c = mix(vec3(l), c, 1.12);
         c = clamp(c, 0.0, 1.0);
-        c = mix(c, c * c * (3.0 - 2.0 * c), 0.4);
+        // GD02-163 (#115): the S-curve only lifts the highs (it darkened
+        // everything below mid grey, the most of GH2's stages) and the
+        // vignette is lighter (0.88 at the corners, was 0.7).
+        vec3 s = mix(c, c * c * (3.0 - 2.0 * c), 0.4);
+        c = uFx.y > 0.5 ? s : max(c, s);
         c += vec3(0.025, 0.006, -0.02) * l - vec3(0.012, -0.004, -0.022) * (1.0 - l) * 0.6;
         float v = length((vUv - 0.5) * vec2(1.25, 1.0));
-#if GD_HDR
-        float vig = mix(1.0, 0.7, smoothstep(0.35, 0.9, v));
+        float vig = mix(1.0, uFx.y > 0.5 ? 0.7 : 0.88, smoothstep(0.35, 0.9, v));
         c *= vig;
+#if GD_HDR
         if (uHdr.x > 1.0) c += over * vig;
-#else
-        c *= mix(1.0, 0.7, smoothstep(0.35, 0.9, v));
 #endif
     }
     int g = int(uFx.w + 0.5);
@@ -522,7 +536,8 @@ uniform sampler2D sLum;
 uniform sampler2D sPrev;
 void main() {
     float avg = exp(texture(sLum, vec2(0.5)).r);
-    float target = exp2(clamp(0.5 * log2(0.012 / max(avg, 1e-4)), -0.5, 0.5));
+    // GD02-163: never below the original's exposure (the 1.1.16 one, uHdr.z, closed down to -0.5).
+    float target = exp2(clamp(0.5 * log2(0.012 / max(avg, 1e-4)), uHdr.z > 0.5 ? -0.5 : 0.0, 0.5));
     float prev = texture(sPrev, vec2(0.5)).r;
     fragColor = vec4(mix(prev, target, uPass.x), 0.0, 0.0, 1.0);
 }
@@ -531,6 +546,11 @@ uniform sampler2D sTex;
 void main() { fragColor = vec4(texture(sTex, vUv).rgb, 1.0); }
 #endif
 )";
+
+bool legacyEnv(const char* name) {
+    const char* v = SDL_getenv(name);
+    return v && v[0] == '1';
+}
 
 const VertexLayout& triangleLayout() {
     static const VertexLayout layout = [] {
@@ -707,6 +727,8 @@ void EnhancedFx::pass(Pass p, Target* dst, const TextureId* tex, int slots, cons
 bool EnhancedFx::autoExposure(TextureId color, int sw, int sh) {
     (void)sw, (void)sh;
     EnhBlock k{};
+    static const bool toneLegacy = legacyEnv("GD02_HDR_TONE_LEGACY");
+    k.hdr[2] = toneLegacy ? 1.0f : 0.0f;  // the 1.1.16 exposure range (PASS_ADAPT)
     TextureId src = color;
     for (int i = 0, size = 64; i < 4; ++i, size /= 4) {
         if (!ensure(lum_[i], size, size, true)) return false;
@@ -753,6 +775,11 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
     const bool wide = peak > 1.0f;
     b.hdr[0] = peak;
     b.hdr[1] = wide ? 1.055f * std::pow(peak, 1 / 2.4f) - 0.055f : 1.0f;  // the encoded white
+    // GD02-163 (#115): Emulated / True HDR and Cinematic no longer darken the
+    // stages; GD02_HDR_TONE_LEGACY=1 / GD02_CINEMATIC_LEGACY=1 bring back 1.1.16's.
+    static const bool toneLegacy = legacyEnv("GD02_HDR_TONE_LEGACY"), cineLegacy = legacyEnv("GD02_CINEMATIC_LEGACY");
+    b.hdr[2] = toneLegacy ? 1.0f : 0.0f;
+    b.fx[1] = cineLegacy ? 1.0f : 0.0f;
 
     // 1. The blur pyramid (dual Kawase) for bloom.
     const bool pyramid = s.bloom != 0;

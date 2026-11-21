@@ -191,6 +191,7 @@ private:
     std::unique_ptr<SongScreen> outroSong_;  // the ended song's venue, drawn during GH3's end transition
     double outroFrom_ = 0, outroWall_ = 0;
     long long outroFrames_ = 0;  // frames drawn with the ended song's venue (logged when it ends)
+    bool outroFailBackground_ = false;  // keep the failed venue under its fail screen
     // GH3's song scripts over the native core (D10; GD10_NO_HOOKS=1: off, the earlier path).
     std::unique_ptr<SongHooks> hooks_;
     std::unique_ptr<Walk> walk_;
@@ -1196,11 +1197,12 @@ void App::restartToEnhanced() {
         press(Action::Confirm);
     } else if (st == "main_menu_fs") {
         float x0, y0, x1, y1;
-        if (menuMouseAllowed() && front_->ui().drawnBounds(qbkey::key("main_menu_options_text"), x0, y0, x1, y1)) {
+        if (menuMouseAllowed() && front_->ui().drawnTextBounds("SETTINGS", x0, y0, x1, y1)) {
             menuMouse((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, 0);
             menuMouse((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, 1);
         } else {
-            press(Action::Up), press(Action::Confirm);  // CAREER wraps up to OPTIONS
+            for (int i = 0; i < 5; ++i) press(Action::Down);  // CAREER -> SETTINGS
+            press(Action::Confirm);
         }
     } else if (st == "options_select_option_fs") {
         ports_->open(PortScreens::Id::Enhanced);
@@ -1486,9 +1488,21 @@ void App::frame() {
             // restart's start_gem_scroller follows as a new request. A won
             // song's end (songOutro): the flow's kill_gem_scroller.
             const bool outro = front_->songOutro;
+            const bool failed = outro && song_ && song_->failed();
             front_->songKill = false, front_->songPaused = false, front_->songPlaying = false, front_->songOutro = false;
             if (hooks_) hooks_->end(!outro);
-            song_.reset();
+            if (failed) {
+                // GH3's fail menu stays over the paused song. Keep its last
+                // venue frame after kill_gem_scroller removes the highway;
+                // the non-song menu path otherwise clears to black.
+                outroSong_ = std::move(song_);
+                outroFrom_ = outroSong_->lastMs();
+                outroWall_ = double(SDL_GetTicksNS()) / 1e6;
+                outroFailBackground_ = true;
+                outroFrames_ = 0;
+            } else {
+                song_.reset();
+            }
             mixer_.stop();
             input_.setInGame(false);
             if (walk_ && !outro) ++walk_->songsEnded;
@@ -1528,11 +1542,13 @@ void App::frame() {
         if (!more && front_) {
             // Back to GH3's own flow (results, setlist).
             const FrontEnd::SongResult r = songResult();
+            const bool failed = song_->failed();
             if (hooks_) hooks_->end(false);
             // GH3's SongWon / SongLost transition runs on over the venue
             // (the band's win / lose stance, cameras_win / _lose) [C data].
             outroSong_ = std::move(song_);
             outroFrom_ = outroSong_->lastMs(), outroWall_ = double(SDL_GetTicksNS()) / 1e6;
+            outroFailBackground_ = failed;
             mixer_.stop();
             input_.setInGame(false);
             front_->songEnded(r);
@@ -1585,6 +1601,8 @@ void App::frame() {
             if (s.checksum == front_->songRequest.song) info = &s;
         std::string err;
         outroSong_.reset();
+        outroFailBackground_ = false;
+        front_->songVenueBackground = false;
         song_ = std::make_unique<SongScreen>();
         if (songPreload_) song_->usePreload(std::move(songPreload_));
         for (int s = 0; s < 2; ++s) hadDevice_[s] = input_.padConnected(s), unplugReported_[s] = false;
@@ -1647,6 +1665,7 @@ void App::frame() {
                 SDL_Log("setlist preview: %s still playing as the song started", front_->setlistPreview.prefix.c_str());
                 front_->setlistPreview.active = false;
             }
+            front_->songOutro = false;
             front_->songPlaying = true;
             song_->setHoldAfterWin(true);  // GH3's scripts end a won song (songOutro)
             // Common_Intro_Transition's GH_SFX_Intro_WarmUp: the zone's crowd
@@ -1655,6 +1674,7 @@ void App::frame() {
             if (song_->venue()) {
                 static std::set<std::string> zonesHeard;
                 const std::string& z = song_->venue()->venue().zone;
+                hitch::Scope zs("zone sounds");
                 if (zonesHeard.insert(z).second) front_->sfx.addPak(*disc_, "DATA/COMPRESSED/ZONES/" + z + ".pak.xen");
             }
             // The transition's own sound entry (Common_<t>_Transition's
@@ -1716,6 +1736,27 @@ void App::frame() {
                     return ui->textWidth(font, t, scale * ui->fontLineHeight(font), spacing);
                 });
             if (walk_) ++walk_->songsStarted;
+            // GD10-070: the song's first frame drawn once now, its clock still
+            // held (SongScreen::frame starts the mixer), so the venue's,
+            // highway's and HUD's pipelines are made here under the loading
+            // screen and not on the first song frame (a second on a cold
+            // pipeline cache, with the music running) [I: the original warms
+            // its shaders while loading]. GD10_PIPELINE_PREWARM_LEGACY=1: off.
+            static const bool prewarmLegacy = SDL_getenv("GD10_PIPELINE_PREWARM_LEGACY") != nullptr;
+            if (!prewarmLegacy) {
+                hitch::Scope ps("pipeline prewarm");
+                canvas_.begin(SDL_Color{0, 0, 0, 255});
+                {
+                    hitch::Scope ss("prewarm song");
+                    song_->prewarm(canvas_, textures_.get());
+                }
+                if (hooks_) {
+                    hitch::Scope hs2("prewarm hud");
+                    hooks_->draw(canvas_, song_->firstFrameMs());
+                }
+                hitch::Scope es("prewarm present");
+                canvas_.end();
+            }
         }
         return;
     }
@@ -1759,15 +1800,30 @@ void App::frame() {
             // the song's end; the results come after it) [C data Default_SongWon_Transition].
             if (outroSong_) {
                 const double el = double(nowNs) / 1e6 - outroWall_;
+                const std::string state = front_ ? front_->flowState() : std::string();
+                const bool failFlow = outroFailBackground_ && (state.find("fail") != std::string::npos || state.find("gameplay") != std::string::npos);
                 if (const qb::Value* t = front_ ? front_->vm().global(qbkey::key("current_transition")) : nullptr)
                     if (t->key == qbkey::key("preencore") || t->key == qbkey::key("preboss"))
                         outroSong_->outroCameras(outroFrom_ + el, t->key == qbkey::key("preencore") ? "cameras_preencore" : "cameras_preboss");
-                if (el >= outroSong_->transitionMs() || !outroSong_->drawOutro(canvas_, outroFrom_ + el)) {
+                if (failFlow) {
+                    // The failed-song event opens its menu after the end
+                    // transition. Hold the venue across both states so the
+                    // menu never falls through to a black frame.
+                    if (outroSong_->drawOutro(canvas_, outroFrom_)) ++outroFrames_;
+                    else outroSong_.reset(), outroFailBackground_ = false;
+                } else if (el >= outroSong_->transitionMs() || !outroSong_->drawOutro(canvas_, outroFrom_ + el)) {
                     SDL_Log("song: end transition drawn over the venue for %lld frames", outroFrames_);
-                    outroSong_.reset(), outroFrames_ = 0;
+                    outroSong_.reset(), outroFrames_ = 0, outroFailBackground_ = false;
                 } else {
                     ++outroFrames_;
                 }
+            }
+            // Keep the menu venue suspended under the game's fail result;
+            // its UI still advances and draws over the retained song venue.
+            if (front_) {
+                const std::string state = front_->flowState();
+                front_->songVenueBackground = outroFailBackground_ &&
+                                              (state.find("fail") != std::string::npos || state.find("gameplay") != std::string::npos);
             }
             {
                 hitch::Scope hs("ui");

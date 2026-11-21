@@ -133,26 +133,29 @@ static void checkGuitarFx(const std::function<void(const std::string&)>& fail) {
     }
 }
 
-// GDALL-050: the graphics backend defaults to Vulkan on Windows / Linux (local
-// elsewhere); an enhanced.json older than version 3 has its "local" (the old
-// default) turned into it once; local saved by this version stays.
+// Wave 20261118 §4 (supersedes GDALL-050): the shared core backend is the
+// default everywhere — Vulkan on Windows / Linux / Steam Deck / Android, sdl3
+// on macOS; audio is miniaudio everywhere. An enhanced.json older than version
+// 4 takes the new defaults of the policy keys once (its "local" graphics /
+// audio become the new defaults); local picked by this version stays.
 static void checkBackendDefault(const std::function<void(const std::string&)>& fail) {
-#if !defined(__APPLE__) && !defined(__ANDROID__)
-    const std::string want = "vulkan";
+#if defined(__APPLE__)
+    const std::string wantGfx = "sdl3";
 #else
-    const std::string want = "local";
+    const std::string wantGfx = "vulkan";  // Windows, Linux, Steam Deck, Android
 #endif
-    if (enhancedDefault("graphics_backend") != want || enhancedDefault("graphics_backend", true) != want || enhancedDefault("audio_backend") != "local")
-        fail("graphics backend default: " + enhancedDefault("graphics_backend") + ", want " + want);
-    const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("gdall050-" + std::to_string(std::rand()));
+    const std::string wantAudio = "miniaudio";
+    if (enhancedDefault("graphics_backend") != wantGfx || enhancedDefault("graphics_backend", true) != wantGfx || enhancedDefault("audio_backend") != wantAudio)
+        fail("backend defaults: graphics " + enhancedDefault("graphics_backend") + " audio " + enhancedDefault("audio_backend") + ", want " + wantGfx + " / " + wantAudio);
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("gd-wave4-" + std::to_string(std::rand()));
     std::filesystem::create_directories(dir);
     const std::string d = dir.string() + "/";
     std::ofstream(d + "enhanced.json") << R"({"version": 2, "settings": {"graphics_backend": "local", "audio_backend": "local"}})";
     EnhancedStore st;
     st.load(d);
-    if (st.get("graphics_backend") != want || st.get("audio_backend") != "local")
-        fail("an old enhanced.json's local graphics backend: " + st.get("graphics_backend") + ", want " + want);
-    st.set("graphics_backend", "local");  // the player picks local: saved as version 3
+    if (st.get("graphics_backend") != wantGfx || st.get("audio_backend") != wantAudio)
+        fail("an old enhanced.json's local backends: graphics " + st.get("graphics_backend") + " audio " + st.get("audio_backend") + ", want " + wantGfx + " / " + wantAudio);
+    st.set("graphics_backend", "local");  // the player picks local: saved as version 4
     EnhancedStore again;
     again.load(d);
     if (again.get("graphics_backend") != "local") fail("local picked in a new enhanced.json became " + again.get("graphics_backend"));

@@ -101,6 +101,34 @@ Mat34 inverse(const Mat34& m) {
 
 Vec axisOf(const Quat& q, int k) { return bandanim::qrot(q, k == 0 ? Vec{1, 0, 0} : k == 1 ? Vec{0, 1, 0} : Vec{0, 0, 1}); }
 
+// Closest points on two line segments (the centre lines of Havok capsules).
+void closestSegments(Vec p1, Vec q1, Vec p2, Vec q2, Vec& c1, Vec& c2) {
+    const Vec d1 = sub(q1, p1), d2 = sub(q2, p2), r = sub(p1, p2);
+    const float a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r);
+    float s = 0, t = 0;
+    if (a <= 1e-12f && e <= 1e-12f) { c1 = p1; c2 = p2; return; }
+    if (a <= 1e-12f) t = std::clamp(f / e, 0.0f, 1.0f);
+    else {
+        const float c = dot(d1, r);
+        if (e <= 1e-12f) s = std::clamp(-c / a, 0.0f, 1.0f);
+        else {
+            const float b = dot(d1, d2), denom = a * e - b * b;
+            if (std::fabs(denom) > 1e-12f) s = std::clamp((b * f - c * e) / denom, 0.0f, 1.0f);
+            t = (b * s + f) / e;
+            if (t < 0) t = 0, s = std::clamp(-c / a, 0.0f, 1.0f);
+            else if (t > 1) t = 1, s = std::clamp((b - c) / a, 0.0f, 1.0f);
+        }
+    }
+    c1 = add(p1, mul(d1, s)); c2 = add(p2, mul(d2, t));
+}
+
+void capsuleWorld(const havok::Shape& sh, const Rt& x, Vec& a, Vec& z) {
+    const Vec off{sh.translation[0], sh.translation[1], sh.translation[2]};
+    const Vec p{sh.a[0] + off.x, sh.a[1] + off.y, sh.a[2] + off.z};
+    const Vec q{sh.b[0] + off.x, sh.b[1] + off.y, sh.b[2] + off.z};
+    a = add(x.t, bandanim::qrot(x.q, p)); z = add(x.t, bandanim::qrot(x.q, q));
+}
+
 // The rotation by the rotation vector w*h, applied after q.
 Quat integrate(const Quat& q, Vec w, float h) {
     const float a = len(w) * h;
@@ -141,6 +169,7 @@ bool AccessorySim::init(const bandanim::Rig& rig, const havok::Physics& rag, con
         b.maxAng = hb.maxAngularVelocity > 0 ? hb.maxAngularVelocity : 200.0f;
         b.linDamp = hb.linearDamping;
         b.angDamp = hb.angularDamping;
+        b.shape = hb.shape;
         // The skeleton mapper's simple mapping [C 821AF798 hkaSkeletonMapperUtils::createMapping
         // by name]: bone = body * (body bind)^-1 * (bone bind), the .rag's bodies
         // sitting at the bind pose [C data].
@@ -415,6 +444,48 @@ void AccessorySim::step(State& s, const std::vector<Mat34>& world, const Vec& gr
         const Vec com = add(add(st.x.t, bandanim::qrot(st.x.q, b.com)), mul(st.v, dt));
         st.x.q = integrate(st.x.q, st.w, dt);
         st.x.t = sub(com, bandanim::qrot(st.x.q, b.com));
+    }
+    // The original Havok world also resolves contacts. The accessory-only
+    // solver above handles its joints; now resolve the capsule contacts
+    // against the keyframed body capsules in the same .rag. This keeps hair,
+    // chains and coat tails outside the character collision proxies.
+    // A few relaxation passes: a deep overlap pushed out of one body capsule can
+    // land in another, so more passes resolve the common cases (capsule pairs
+    // only, negligible cost). A rare deep single-frame overlap may keep a small
+    // residual, same as Havok's own iterative contact solver.
+    for (int pass = 0; pass < 4; ++pass) {
+        for (size_t i = 0; i < bodies_.size(); ++i) {
+            const Body& aBody = bodies_[i];
+            if (!aBody.dynamic || aBody.shape.kind != havok::Shape::Capsule) continue;
+            Vec a0, a1; capsuleWorld(aBody.shape, s.b[i].x, a0, a1);
+            for (size_t j = 0; j < bodies_.size(); ++j) {
+                const Body& bBody = bodies_[j];
+                if (bBody.dynamic || bBody.shape.kind != havok::Shape::Capsule) continue;
+                // Havok's linked-body collision filter suppresses contact
+                // between a constrained accessory and its anchor body.
+                bool linked = false;
+                for (const Con& c : cons_)
+                    if (c.active && c.a == int(i) && c.b == int(j)) { linked = true; break; }
+                if (linked) continue;
+                Vec b0, b1, ca, cb; capsuleWorld(bBody.shape, s.b[j].x, b0, b1);
+                closestSegments(a0, a1, b0, b1, ca, cb);
+                const Vec delta = sub(ca, cb);
+                const float d = len(delta), minD = aBody.shape.radius + bBody.shape.radius;
+                if (d >= minD || minD <= 0) continue;
+                Vec n = d > 1e-6f ? mul(delta, 1.0f / d) : norm(cross(sub(a1, a0), sub(b1, b0)));
+                if (len(n) < 1e-6f) {
+                    const Vec axis = norm(sub(a1, a0));
+                    n = norm(cross(axis, {0, 1, 0}));
+                    if (len(n) < 1e-6f) n = norm(cross(axis, {1, 0, 0}));
+                }
+                if (len(n) < 1e-6f) continue;
+                const float penetration = minD - d;
+                s.b[i].x.t = add(s.b[i].x.t, mul(n, penetration));
+                const float inward = dot(s.b[i].v, n);
+                if (inward < 0) s.b[i].v = sub(s.b[i].v, mul(n, inward));
+                a0 = add(a0, mul(n, penetration)); a1 = add(a1, mul(n, penetration));
+            }
+        }
     }
 }
 

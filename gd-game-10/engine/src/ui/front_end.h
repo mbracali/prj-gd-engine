@@ -95,6 +95,7 @@ public:
         double endMs = -1, startMs = 0;
     } preloadRequest;
     bool songPlaying = false;
+    bool songVenueBackground = false;  // a failed result keeps the frozen song venue behind its UI
     // The last song's first gem against its clocks (SongScreen::SyncCheck; walk practice's check:sync).
     struct SongSync {
         bool measured = false;

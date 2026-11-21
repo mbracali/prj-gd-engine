@@ -57,7 +57,7 @@ if(ANDROID)
 else()
   find_package(SDL3 REQUIRED CONFIG)
 endif()
-add_library(gd01_module SHARED ${gd01_srcs} gd01_module_entry.cpp gd01_module_explore.cpp gd01_module_sounds.cpp ${GDUL_SDK}/gd_module_shim.cpp)
+add_library(gd01_module SHARED ${gd01_srcs} gd01_module_entry.cpp gd01_module_explore.cpp gd01_module_sounds.cpp ${GD01_ENGINE}/src/platform/module_songs.cpp ${GDUL_SDK}/gd_module_shim.cpp)
 target_include_directories(gd01_module PRIVATE ${GD01_ENGINE}/src ${GDUL_SDK})
 target_link_libraries(gd01_module PRIVATE SDL3::SDL3)
 

@@ -56,6 +56,7 @@ This is a list of all the planned and already decompiled games. Every game is pl
 | gd-game-24 | Rock Band Unplugged               | PSP           | --            |
 | gd-game-25 | DJ Hero                           | Xbox 360      | --            |
 | gd-game-26 | DJ Hero 2                         | Xbox 360      | --            |
+| gd-game-27 | Guitar Hero Live                  | Xbox One      | --            |
 
 
 ## Tools

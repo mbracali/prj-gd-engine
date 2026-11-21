@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/material.h"
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <cstring>
 
@@ -175,7 +177,11 @@ void MaterialRenderer::draw(const GpuMesh& mesh, const Mat4* bones, const Materi
 
     StdMaterialBlock mb{};
     put4(mb.diffuse, m.color[0], m.color[1], m.color[2], m.alpha);
-    put4(mb.specular, m.specularRgb[0], m.specularRgb[1], m.specularRgb[2], m.specularPower);
+    // GD05-131: the specular map is tinted by the specular colour in the
+    // shader; GD05_SPECMAP_LEGACY=1 sends white with a map (the map alone).
+    static const bool specMapLegacy = SDL_getenv("GD05_SPECMAP_LEGACY") != nullptr;
+    if (specMapLegacy && m.specularMap) put4(mb.specular, 1.0f, 1.0f, 1.0f, m.specularPower);
+    else put4(mb.specular, m.specularRgb[0], m.specularRgb[1], m.specularRgb[2], m.specularPower);
     put16(mb.texXfm, m.texXfm);
     put4(mb.multipliers, m.emissiveMultiplier, m.intensify ? 2.0f : 1.0f, 0, 0);
     // The fade-out's target colour: white for multiply (no darkening), else transparent black.

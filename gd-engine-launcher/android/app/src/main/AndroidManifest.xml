@@ -12,6 +12,8 @@
     <uses-feature android:name="android.hardware.type.pc" android:required="false" />
 
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- The update check (GDUL-031): GitHub's public release API, nothing else -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Rock Band's vocals (gd-game-05): asked once, at the first start -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />

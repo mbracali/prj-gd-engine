@@ -398,12 +398,14 @@ A game's `game-info.yaml` says how to recognise its disc:
 
 ```yaml
 iso_signatures:
-  - format: xdvdfs            # iso9660 (PlayStation 2, ...) or xdvdfs (Xbox, Xbox 360)
+  - format: xdvdfs            # iso9660 (PlayStation 2, PSP, ...) or xdvdfs (Xbox, Xbox 360)
     xex_title_id: "415607E7"  # Xbox 360: default.xex's title ID
   - format: iso9660
     ps2_boot: "SLUS_212.24"   # PlayStation 2: SYSTEM.CNF's BOOT2 program
     volume_id: "..."          # optional: the ISO 9660 volume name
     files: [SYSTEM.CNF]       # optional: names that must be in the root folder
+  - format: iso9660
+    psp_disc_id: "ULUS-10418" # PlayStation Portable: UMD_DATA.BIN's disc ID
 ```
 
 Every field given must match; a disc matching any signature belongs to the

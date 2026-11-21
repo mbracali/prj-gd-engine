@@ -31,9 +31,9 @@ pull requests or branches, no bots).
    - finds the previous `gdul/v*` release and downloads its files;
    - runs the repo guard and the secret scan, and builds each system with
      `gd-engine-launcher/scripts/build.sh <os> --previous <its download,
-     unpacked>`: a game module whose `guitar_dream_version` (game-info.yaml)
-     and launcher module SDK (`sdk/`, `modules/gdNN/`) are the same as in that
-     release's `manifest.json` is copied from it, the others are built;
+     unpacked>`: a game module whose build key (`buildkey.txt` next to the
+     module, see "Release build speed" below) is the same as in that
+     release's download is copied from it, the others are built;
    - publishes the release `gdul/vX.Y.Z` (tagged on the merge commit, marked
      Latest; its notes carry the `## X.Y.Z` section of
      `gd-engine-launcher/CHANGELOG.md`, so write the Highlights there first)
@@ -148,7 +148,7 @@ carried, so Windows refused to load the game ("LoadLibrary failed (error
 - `ship_winpthread` (gd-game-02/engine/build_common.sh) puts the DLL and its
   licence next to FFmpeg, for the launcher and for gd02's own download.
 - A module is reused from the previous release only if the packaging
-  scripts are unchanged too (`module_inputs_hash`).
+  scripts are unchanged too (they are part of its build key, GDREL-010).
 - Before calling a Windows build good, load each module for real: Steam's
   Proton has a `wine` (`files/bin/wine`) that runs a 10-line
   `LoadLibraryExW` test program against the download.
@@ -181,6 +181,61 @@ no recipe for, so the check passed. Now:
   path through the descriptor (`pread`). Test it on the x86-64 emulator:
   `GDUL_ABI=x86_64 scripts/build.sh android`, `adb push` the discs to
   `/sdcard/Download`, Load ISO, start each game.
+
+## Release build speed: caches and module reuse (GDREL-010)
+
+Nearly all of a release job's time is the six game modules (1.1.16, every
+module built, ccache still empty: Windows 33.5 of 35 min, Android 30 of 33,
+Steam Deck 22 of 24, Linux 14.5 of 17, macOS 11.4 of 12; 3.5 to 6.5 min per
+module on Windows). Three things keep work between releases; none of them
+changes what a download contains.
+
+- **ccache** (each job, `~/.ccache`, 1.5 GB, a new entry per run restored
+  from the newest one): unchanged source files are not compiled again. The
+  "ccache hits" line at the end of each job shows the rate.
+- **Library caches** (`actions/cache`, in the folders the builds already use):
+  the four FFmpeg builds (gd02, gd04, gd05 with its `_gd05` suffix, gd10;
+  `gd-game-NN/engine/build/ffmpeg/<os>/ffmpeg-prefix`), gd-engine-core's
+  pinned sources and its `gdcore_shaderc` host tool (glslang / SPIRV-Tools,
+  built once per machine; `gd-engine-core/build/deps`), the FFmpeg tarball,
+  Linux's SDL3 and Android's SDL3 source / Gradle. Keys: the platform, the
+  job's toolchain (`TOOLCHAIN_ID`: compiler and package versions, the
+  "Toolchain id" step) and the files that pin and configure each library.
+  FFmpeg falls back to the newest entry of the same toolchain: a prefix is
+  used only when its `FFMPEG-BUILD.txt` stamp (version, configure options) is
+  the recipe's, else it is built again. gd-engine-core's sources are checked
+  by their SHA-256 stamps as always.
+- **Module reuse**: `build.sh` writes `gd-engine-games/gd-game-NN/buildkey.txt`
+  next to every module (in the APK under `assets/`), the SHA-256 of
+  everything that goes into it on that system (`module_build_key`): the
+  game's folder (git's files, by content) except `game-info.yaml`,
+  `CHANGELOG.md`, `agents/` and `docs/`; gd-engine-core (except `docs/`);
+  the module SDK (`sdk/`), `modules/gdNN/`; `build.sh`,
+  `build_linux_portable.sh`, `build_steamdeck.sh`; the system, processor
+  and toolchain (C / C++ compiler versions, CMake, SDL3's headers, the
+  flags, the NDK, Fedora's MinGW packages, the macOS SDK; gd01's DLSS
+  library on Linux). The next release takes a module from the previous
+  release's download only when that download has the same key for it, its
+  manifest lists the module and every file the folder lists is there
+  (`native-libs.txt`, `core-libs.txt`, `root-files.txt`); the game's
+  `game-info.yaml` (its new version) is copied fresh and the manifest says
+  `"reused": true`. A version bump alone reuses the module (versions are not
+  compiled in). Anything else builds it: no key (1.1.16 and older), a
+  different key, an unreadable previous download, a missing file, `--force`.
+  The line "gd-game-NN: building (why)" says which; the key's inputs are in
+  `gd-engine-launcher/logs/<os>-gd-game-NN.buildkey.txt`.
+  `verify_bundle.sh` still checks every download in full, and now also that
+  the manifest's version of each game is its `game-info.yaml`'s and that a
+  `buildkey.txt` is a SHA-256.
+
+What to expect: the first release with this (1.1.17) has nothing to reuse
+(1.1.16 has no keys) and fills the library caches; it is the first run with
+a warm ccache. From the release after on, each game whose key did not change
+costs seconds instead of its minutes. A change to gd-engine-core, the SDK,
+`build.sh` or a compiler update changes every key: that release builds every
+module (with ccache). In 1.1.14 .. 1.1.16 every game and the core / SDK /
+recipes changed each time, so reuse pays off when a release leaves games
+untouched; ccache and the library caches help every release.
 
 ## Test builds on GitHub (by hand)
 

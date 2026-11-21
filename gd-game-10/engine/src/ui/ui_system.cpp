@@ -231,6 +231,11 @@ Element* UiSystem::resolve(const qb::Value* v) const {
     return nullptr;
 }
 
+static bool materialLegacy() {
+    static const bool on = SDL_getenv("GD10_UI_MATERIAL_LEGACY") != nullptr;
+    return on;
+}
+
 void UiSystem::setTexture(Element& e, uint32_t key) {
     e.texture = key;
     const uint32_t ctx = assetContexts_.empty() ? 0 : assetContexts_.back();
@@ -339,8 +344,19 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         else if (n == K("rot_angle")) e.rot = v.number();
         else if (n == K("relative_rot_angle")) e.rot += v.number();
         else if (n == K("texture")) newTexture = v.key;
+        else if (n == K("material") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr) && !materialLegacy()) {
+            // A sprite's material (the HUD messages' fire, hud_message_fire's
+            // fire_2D_Notestreak_Small / fire_2D_Starpower): its first
+            // texture, still (GD10-068) [C data; I: the material's own
+            // animation not drawn]. GD10_UI_MATERIAL_LEGACY=1: ignored as before.
+            // One not loaded (the fire's are on no pak the port loads) is not
+            // drawn: it was a plain white rectangle [I].
+            if (const uint32_t t = tex_.materialTexture(v.key)) newTexture = t, e.missingMaterial = 0;
+            else if (v.key) e.missingMaterial = v.key;
+            if (e.missingMaterial && SDL_getenv("GD10_HUDLOG")) SDL_Log("ui: material %s has no texture", qbkey::name(v.key).c_str());
+        }
         else if (n == K("blend") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr))
-            e.blend = v.key == K("add") ? 1 : (v.key == K("subtract") || v.key == K("sub")) ? 2 : 0;
+            e.blend = v.key == K("add") ? 1 : (v.key == K("subtract") || v.key == K("sub")) ? 2 : v.key == K("brighten") ? 3 : 0;
         else if (n == K("font")) e.font = v.key;
         else if (n == K("fit_width") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr))
             e.fitW = v.key == K("expand dims") ? 1 : v.key == K("scale each line if larger") ? 2 : v.key == K("scale each line to fit") ? 3 : 0;
@@ -1334,7 +1350,44 @@ void UiSystem::draw(Canvas& c) {
         // z: the explicit z_priority (it sticks), else the parent's z + 1, 0
         // without a parent [C SetParent 0x8221D5F0 -> SetZTree 0x8221C160].
         const float z = e.zGiven ? e.z : (e.parent ? n.z + 1.0f : 0.0f);
-        items.push_back({&e, cx, cy, wsx, wsy, wa, wrot, z, n.depth, n.clip});
+        // GD10 menu-transition top-line bug: the authored transition
+        // menu_transition_in_spawned is a CENTRE-anchored zoom of the whole
+        // menu anchor (scale ~1.4 -> 1.0). A viewport-filling backdrop carried
+        // by that transform exposes the viewport clear colour at an edge on any
+        // frame the zoom leaves a backdrop that is only exactly screen-sized --
+        // the owner's thin "line on the top of the screen, showing something
+        // behind it". So we draw a viewport-sized backdrop so it ALWAYS covers
+        // the full 16:9 picture: fill the screen, scale up with the scene but
+        // never below full coverage, centred. No edge -- top included -- can
+        // then gap at any point of the zoom, while the scene still zooms in. At
+        // rest (scene scale 1) this reproduces the old full-screen backdrop
+        // exactly (pos 0,0, size 1280x720). GD10_MENUZOOM_LEGACY=1 freezes the
+        // backdrop at its native size (the pre-fix behaviour) for comparison.
+        static const bool menuZoomLegacy = SDL_getenv("GD10_MENUZOOM_LEGACY") != nullptr;
+        // GD10 menu-transition top-"line" bug: during the zoom-in (scale ~1.4 ->
+        // 1.0) the screen's full-height backdrop and its edge-darkening shadow
+        // (inner_shadow) are nudged a few px DOWN, uncovering the very top of
+        // the picture, where the bright wall then shows for a frame or two --
+        // the owner's thin bright "line on top, showing something behind it"
+        // (the original keeps that edge covered/dark). Any large full-height
+        // sprite (a backdrop or an edge shadow, left/right halves included) is
+        // pinned so its top never drops below the screen top during a
+        // transition: clamp its top edge to y<=0 and keep it covering down past
+        // the bottom, so the top stays covered the whole zoom. Non-transition
+        // frames are unaffected (the top is already at/above 0).
+        // GD10_MENUZOOM_LEGACY=1 restores the raw transform for comparison.
+        const bool bigCover = e.type == kSprite && e.w >= 600 && e.h >= 680 && wsx > 0 && wsy > 0;
+        if (bigCover && !menuZoomLegacy && (cy > 0.0f || cy + e.h * wsy < kScreenH)) {
+            // Extend vertically so the sprite spans at least the whole picture,
+            // with its top at or above y=0 (never a top gap) and bottom at or
+            // below the screen bottom (never a bottom gap).
+            const float top = std::min(cy, 0.0f);
+            const float bottom = std::max(cy + e.h * wsy, kScreenH);
+            const float nwsy = (bottom - top) / e.h;
+            items.push_back({&e, cx, top, wsx, nwsy, wa, wrot, z, n.depth, n.clip});
+        } else {
+            items.push_back({&e, cx, cy, wsx, wsy, wa, wrot, z, n.depth, n.clip});
+        }
         // A text's shadow: pos + shadow_offs (screen px), z - 0.005 [C 0x8231A8C0].
         if (e.shadow && (e.type == kText || e.type == kTextBlock) && !e.text.empty())
             items.push_back({&e, cx + e.shadowX, cy + e.shadowY, wsx, wsy, wa, wrot, z - 0.005f, n.depth, n.clip, true});
@@ -1397,15 +1450,15 @@ void UiSystem::draw(Canvas& c) {
             if (e.flipH) std::swap(v0, v1);
             const Vertex a = P(0, 0, u0, v0, e.rgba), b = P(w, 0, u1, v0, e.rgba), cc = P(w, h, u1, v1, e.rgba), d = P(0, h, u0, v1, e.rgba);
             const Vertex q[6] = {a, b, cc, a, cc, d};
-            c.draw(q, 6, int(id.id), e.blend == 1 ? Blend::Add : e.blend == 2 ? Blend::Sub : Blend::Alpha);
+            c.draw(q, 6, int(id.id), e.blend == 1 ? Blend::Add : e.blend == 2 ? Blend::Sub : e.blend == 3 ? Blend::Brighten : Blend::Alpha);
             ++stats_.spritesDrawn;
-        } else if (e.type == kSprite && !e.texture && e.w > 0 && e.h > 0) {
+        } else if (e.type == kSprite && !e.texture && e.w > 0 && e.h > 0 && !e.missingMaterial) {
             // A sprite without a texture is a plain rectangle in its colour
             // (the detailed stats' paper and row highlights) [I].
             const float w = e.w * it.wsx, h = e.h * it.wsy;
             const Vertex a = P(0, 0, 0, 0, e.rgba), b = P(w, 0, 0, 0, e.rgba), cc = P(w, h, 0, 0, e.rgba), d = P(0, h, 0, 0, e.rgba);
             const Vertex q[6] = {a, b, cc, a, cc, d};
-            c.draw(q, 6, 0, e.blend == 1 ? Blend::Add : e.blend == 2 ? Blend::Sub : Blend::Alpha);
+            c.draw(q, 6, 0, e.blend == 1 ? Blend::Add : e.blend == 2 ? Blend::Sub : e.blend == 3 ? Blend::Brighten : Blend::Alpha);
             ++stats_.spritesDrawn;
         } else if ((e.type == kText || e.type == kTextBlock) && !e.text.empty()) {
             const FontEntry* fe = fontFor(e.font);
@@ -1661,7 +1714,18 @@ bool UiSystem::unionBounds(const Element& e, float& x0, float& y0, float& x1, fl
 
 bool UiSystem::drawnBounds(uint32_t id, float& x0, float& y0, float& x1, float& y1) const {
     const Element* e = find(id);
-    return e && unionBounds(*e, x0, y0, x1, y1);
+    if (e) return unionBounds(*e, x0, y0, x1, y1);
+    return false;
+}
+
+bool UiSystem::drawnTextBounds(const std::string& text, float& x0, float& y0, float& x1, float& y1) const {
+    for (const auto& [key, candidate] : byId_)
+        if ((candidate->type == kText || candidate->type == kTextBlock) && candidate->text == text && candidate->bx1 > candidate->bx0 && candidate->by1 > candidate->by0) {
+            if (unionBounds(*candidate, x0, y0, x1, y1)) return true;
+            x0 = candidate->bx0, y0 = candidate->by0, x1 = candidate->bx1, y1 = candidate->by1;
+            return true;
+        }
+    return false;
 }
 
 bool UiSystem::menuAt(float x, float y, bool focus, bool* isList) {
@@ -1683,7 +1747,11 @@ bool UiSystem::menuAt(float x, float y, bool focus, bool* isList) {
                 if (h.event != K("focus")) continue;
                 for (const char* name : {"id", "text_id"})
                     if (const qb::Value* v = qs::Vm::param(h.params, K(name)); v && v->type == qb::Type::Key && !got)
-                        if (const Element* t = find(v->key); t && t != &ch) got = unionBounds(*t, x0, y0, x1, y1);
+                        if (const Element* t = find(v->key); t && t != &ch) {
+                            got = unionBounds(*t, x0, y0, x1, y1);
+                            if (!got && t->bx1 > t->bx0 && t->by1 > t->by0)
+                                x0 = t->bx0, y0 = t->by0, x1 = t->bx1, y1 = t->by1, got = true;
+                        }
             }
             if (!got || x < x0 - 4 || x > x1 + 4 || y < y0 - 4 || y > y1 + 4) continue;
             // Overlapping entries: the one whose centre is nearest wins.
@@ -1715,29 +1783,42 @@ std::vector<UiSystem::HelpPillHit> UiSystem::helperPills() const {
     if (!box) return out;
     // add_user_control_helper's button glyphs, as SetText leaves them
     // (\m0 / \m1 through meta_button_map) [C script add_user_control_helper].
-    static const char* const kButtons[][2] = {{"\\m0", "green"},  {"\\m1", "red"},      {"\\b6", "yellow"}, {"\\b7", "blue"},
-                                              {"\\b8", "orange"}, {"\\bb", "strumbar"}, {"\\ba", "start"}};
+    static const char* const kButtons[][2] = {{"\\m0", "green"},  {"\\m1", "red"},      {"\\b4", "green"}, {"\\b6", "yellow"},
+                                              {"\\b7", "blue"},  {"\\b8", "orange"}, {"\\bb", "strumbar"}, {"\\ba", "start"}};
     auto buttonOf = [&](const Element* b) -> std::string {
         if (!b) return {};
         for (const auto& k : kButtons)
             if (b->text == setText(k[0])) return k[1];
         return {};
     };
-    const auto& kids = box->children;
-    for (size_t i = 0; i < kids.size(); ++i) {
-        const Element* c = kids[i].get();
-        if (c->type != kText || c->text.empty() || c->drawnIn != drawCount_ || c->text[0] == '\\') continue;
-        // Its glyph: uc_button_N for the text uc_text_N (the auto-centred
-        // pills), else the glyph made just after it (or, without a pill,
-        // just before it) [C script add_user_control_helper].
+    std::vector<const Element*> nodes;
+    std::vector<const Element*> stack{box};
+    while (!stack.empty()) {
+        const Element* n = stack.back();
+        stack.pop_back();
+        if (n->hidden) continue;
+        nodes.push_back(n);
+        for (auto it = n->children.rbegin(); it != n->children.rend(); ++it) stack.push_back(it->get());
+    }
+    for (const Element* c : nodes) {
+        if ((c->type != kText && c->type != kTextBlock) || c->text.empty() || c->text[0] == '\\' || c->drawnIn != drawCount_ ||
+            c->bx1 <= c->bx0 || c->by1 <= c->by0) continue;
+        // Helper descendants live below generated container and desc nodes,
+        // not beside user_control_container. Pair each label with the nearest
+        // visible glyph immediately to its left in the same bar row.
         const Element* glyph = nullptr;
-        for (int n = 0; n < 16 && !glyph; ++n)
-            if (c->id == K(("uc_text_" + std::to_string(n)).c_str())) glyph = find(K(("uc_button_" + std::to_string(n)).c_str()));
-        if (!glyph && i + 1 < kids.size() && !kids[i + 1]->text.empty() && kids[i + 1]->text[0] == '\\') glyph = kids[i + 1].get();
-        if (!glyph && i > 0 && !kids[i - 1]->text.empty() && kids[i - 1]->text[0] == '\\') glyph = kids[i - 1].get();
+        float nearest = 1e30f;
+        for (const Element* g : nodes) {
+            if ((g->type != kText && g->type != kTextBlock) || g->text.empty() || g->text[0] != '\\' || g->drawnIn != drawCount_ ||
+                g->glyphIn != drawCount_ || g->bx1 <= g->bx0 || g->by1 <= g->by0) continue;
+            const float vertical = std::max(0.0f, std::max(g->by0 - c->by1, c->by0 - g->by1));
+            const float gap = c->bx0 - g->bx1;
+            if (vertical > 8 || gap < -4 || gap > 48) continue;
+            if (gap < nearest) nearest = gap, glyph = g;
+        }
         // The pill: the text and its glyph on the left [I].
         HelpPillHit h{c->text, buttonOf(glyph), c->bx0 - 40, c->by0, c->bx1, c->by1};
-        if (glyph && glyph->drawnIn == drawCount_)
+        if (glyph)
             h.x0 = std::min(c->bx0, glyph->bx0), h.y0 = std::min(h.y0, glyph->by0), h.x1 = std::max(h.x1, glyph->bx1), h.y1 = std::max(h.y1, glyph->by1);
         for (char& ch : h.text) ch = char(std::toupper(static_cast<unsigned char>(ch)));
         out.push_back(h);
@@ -1747,9 +1828,8 @@ std::vector<UiSystem::HelpPillHit> UiSystem::helperPills() const {
     // takes the mouse, not just its glyph and text [C script
     // add_user_control_helper: a body, then its two Control_pill_end].
     for (int pass = 0; pass < 2; ++pass)
-        for (const auto& k : kids) {
-            const Element* sp = k.get();
-            if (sp->type == kText || sp->drawnIn != drawCount_) continue;
+        for (const Element* sp : nodes) {
+            if (sp->type == kText || sp->type == kTextBlock || sp->drawnIn != drawCount_ || sp->bx1 <= sp->bx0 || sp->by1 <= sp->by0) continue;
             HelpPillHit* best = nullptr;
             float bestD = 1e30f;
             for (HelpPillHit& h : out) {
@@ -2190,7 +2270,13 @@ void UiSystem::addNatives() {
     vm_.addNative("DestroyScreenElement", [this](Vm&, ScriptRun&, qb::Struct& p) {
         Element* e = resolve(Vm::param(p, K("id")));
         if (!e) return false;
-        if (e == root_.get() || Vm::flag(p, K("dont_recurse"))) {
+        // preserve_parent: its children only, the element and the scripts
+        // running on it stay (hud_wait_and_create_message empties the
+        // player's message container, then makes the new message in it:
+        // destroying the container killed the script, GD10-068) [C scripts; I].
+        // GD10_PRESERVE_PARENT_LEGACY=1: the element destroyed as before.
+        static const bool ppLegacy = SDL_getenv("GD10_PRESERVE_PARENT_LEGACY") != nullptr;
+        if (e == root_.get() || Vm::flag(p, K("dont_recurse")) || (!ppLegacy && Vm::flag(p, K("preserve_parent")))) {
             while (!e->children.empty()) destroy(e->children.back().get());
         } else {
             destroy(e);

@@ -41,11 +41,18 @@ public:
         float stars = 0;      // projected_song_stars, 0 .. 5
         bool missedNote = false;
     };
+    // The band's values (band<n>_*, band_health, faceoff_ratio) with two or
+    // more players (GD10-067); off: the band's values are player 1's (one player).
+    struct Band {
+        bool on = false;
+        std::array<Values, 2> team{};  // band1_*, band2_* (band_*: team 1)
+        float faceoffRatio = 0;        // -1 .. 1, player 1 ahead > 0
+    };
     // AttachHudWidget on `vm`, its outputs on `ui`'s elements.
     void addNatives(qs::Vm& vm, ui::UiSystem& ui);
     void clear();
     // One frame: every widget's outputs from `players` (`count` of them) at song time `nowMs`.
-    void update(const std::array<Values, 4>& players, int count, double nowMs);
+    void update(const std::array<Values, 4>& players, int count, double nowMs, const Band& band);
     size_t widgets() const { return widgets_.size(); }
     uint64_t outputsSet() const { return outputsSet_; }
     // The desc props set so far, by name (walk checks).
@@ -60,10 +67,11 @@ private:
     struct Widget {
         int id = 0;
         int player = 0;      // 0-based; the band's values: player 0 [I]
+        int team = -1;       // a band value's team (0: band1_ / band_ / faceoff_ratio, 1: band2_)
         uint32_t value = 0;  // the input's value name
         std::vector<Output> outs;
     };
-    double input(const Widget& w, const std::array<Values, 4>& players, double nowMs) const;
+    double input(const Widget& w, const std::array<Values, 4>& players, double nowMs, const Band& band) const;
     void apply(Widget& w, Output& o, double v, const Values& pl, double nowMs);
     void setProp(uint32_t descId, uint32_t prop, const qb::Value& v, Output& o);
 

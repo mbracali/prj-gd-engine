@@ -23,7 +23,11 @@ struct Vertex {
     uint8_t r, g, b, a;
 };
 
-enum class Blend { Opaque, Alpha, Add, Sub };  // Sub: destination - source x alpha
+// Sub: destination - source x alpha. Brighten: destination x (1 + source) --
+// the Neversoft "brighten" screen-element blend (GL src=DST_COLOR, dst=ONE);
+// over a dark area it stays dark (a subtle tint), over a bright area it
+// brightens, unlike Alpha which would paint the source flat on top.
+enum class Blend { Opaque, Alpha, Add, Sub, Brighten };
 
 class Canvas {
 public:
@@ -55,6 +59,9 @@ public:
     static inline int blackFrames = 0;
     // Walks (shot:<name> with GD10_WALK_SHOTS=<dir>): the next presented frame is saved there.
     static inline std::string shotPath;
+    // Walks (fdump:on/off with GD10_FRAMEDUMP=<dir>): while armed, every
+    // presented frame is saved there (a whole transition, frame by frame).
+    static inline bool frameDumpArmed = false;
 
     // Triangles (three vertices each). `texture` is a gfx::TextureId's id,
     // 0 for plain colour (the vertices' uv are then ignored).

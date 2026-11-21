@@ -109,6 +109,13 @@ private:
 // framebuffer's back buffer of whichever GL context is current, as opaque
 // RGBA rows (bottom row first), touching no other state. The launcher reads
 // a game module's model explorer frame with it (explorer.cpp).
-bool readBackBuffer(int x, int y, int w, int h, std::vector<uint8_t>& out);
+// `keepAlpha`: leave the read-back alpha as it is (for a transparent capture)
+// instead of forcing every pixel opaque.
+bool readBackBuffer(int x, int y, int w, int h, std::vector<uint8_t>& out, bool keepAlpha = false);
+
+// Writes an 8-bit RGBA PNG (top row first), no dependency beyond zlib's
+// stored deflate (the launcher writes a transparent model shot with it,
+// explorer.cpp). false when the file cannot be opened.
+bool writePng(const std::string& path, int w, int h, const uint8_t* rgba);
 
 }  // namespace gfx

@@ -2,6 +2,9 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/venue_lights.h"
 
+#include <SDL3/SDL_log.h>
+#include <SDL3/SDL_stdinc.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -26,7 +29,7 @@ const char* perfName(Performance p) { return p == Performance::Poor ? "poor" : p
 
 }  // namespace
 
-void LightShow::init(const Venue& v, const Globals& g, const Chart& chart) {
+void LightShow::init(const Venue& v, const Globals& g, const Chart& chart, uint32_t songKey) {
     v_ = &v, g_ = &g;
     notes_ = chart.lightshow;
     std::stable_sort(notes_.begin(), notes_.end(), [](const ChartEvent& a, const ChartEvent& b) { return a.time < b.time; });
@@ -65,6 +68,59 @@ void LightShow::init(const Venue& v, const Globals& g, const Chart& chart) {
     // change: LS_ALWAYS, LS_3_5_PRE and LS_ENCORE_PRE on [C scripts; I: the
     // quickplay values]; LightShow_InitEventMappings: LS_SPOTLIGHT_GUITARIST on.
     for (const char* f : {"LS_ALWAYS", "LS_3_5_PRE", "LS_ENCORE_PRE", "LS_SPOTLIGHT_GUITARIST"}) flags_.insert(K(f));
+    // GD10 in-the-round bug (The Unforgiven): "in the round" songs place extra
+    // Forum geometry -- James's static guitar on its stand
+    // (Z_Forum_GTR65_Var_stand, levelgeometry createdfromvariable=ls_perf_round_v)
+    // -- that only draws while the ls_perf_round node flags are up.
+    // Progression_SetProgressionNodeFlags (all_dis.txt ~89185-89210) sets
+    // ls_perf_standard=1 / ls_perf_round*=0 by default and, when
+    // gh_songlist_props.<current_song>.in_the_round == 1, flips
+    // ls_perf_round + ls_perf_round_m1..m8 (and, via the per-zone
+    // z_forum_SetupNodeflags, ls_perf_round_v) on and ls_perf_standard off. The
+    // port set none of these, so every in-the-round prop was culled at
+    // venue_view.cpp. Port the flag block here; raise ls_perf_round_v too (the
+    // flag the stand's createdfromvariable names) so the stand is no longer
+    // culled. GD10_INROUND_LEGACY=1: skip it (no round flags, as before).
+    static const bool inRoundLegacy = SDL_getenv("GD10_INROUND_LEGACY") != nullptr;
+    bool inRound = false;
+    if (!inRoundLegacy) {
+        // Prefer the song actually being loaded (songKey, the chart's song =
+        // the original script's `<arg> song`) over the current_song global,
+        // which at lights-init time is still the stale default (e.g. battery),
+        // so the lookup used the wrong song and never set the round flags.
+        // gh_songlist_props is only a container of three KeyPtr references --
+        // { <download_songlist_props> <permanent_songlist_props>
+        // <jamsession_songlist_props> } -- which the port keeps unexpanded, so
+        // find(song) on it never reaches a song. Look the song up in the three
+        // real sub-lists directly (the main setlist lives in
+        // permanent_songlist_props).
+        const uint32_t cs = keyOf(g.find(K("current_song")));
+        const uint32_t song = songKey ? songKey : cs;
+        auto irOf = [&](const char* listName) -> int {  // -1 song not in this list, else its in_the_round (0/1)
+            if (const qb::Struct* list = structOf(g.find(K(listName))))
+                if (const qb::Struct* sp = structOf(list->find(song)))
+                    if (const qb::Value* ir = sp->find(K("in_the_round"))) return ir->number() != 0 ? 1 : 0;
+            return -1;
+        };
+        int r = -1;
+        if (song)
+            for (const char* list : {"permanent_songlist_props", "download_songlist_props", "jamsession_songlist_props"})
+                if ((r = irOf(list)) >= 0) break;
+        inRound = r == 1;
+    }
+    if (!inRoundLegacy) {
+        if (inRound)
+            for (const char* f : {"ls_perf_round", "ls_perf_round_m1", "ls_perf_round_m2", "ls_perf_round_m3", "ls_perf_round_m4",
+                                  "ls_perf_round_m5", "ls_perf_round_m6", "ls_perf_round_m7", "ls_perf_round_m8", "ls_perf_round_v"})
+                flags_.insert(K(f));
+        else
+            flags_.insert(K("ls_perf_standard"));
+        if (SDL_getenv("GD10_GTRLOG")) {
+            const uint32_t cs = keyOf(g.find(K("current_song")));
+            SDL_Log("GTRLOG lights init: current_song=%s songKey=%s inRound=%d round_v_flag=%d", cs ? qbkey::name(cs).c_str() : "-",
+                    songKey ? qbkey::name(songKey).c_str() : "-", int(inRound), int(flags_.count(K("ls_perf_round_v")) > 0));
+        }
+    }
     // LightShow_InitEventMappings: LightShow_SetParams performance=medium mood=intro [C].
     perf_ = Performance::Medium;
     setStateFlags();
@@ -117,7 +173,7 @@ LightState LightShow::at(size_t i, double t) const {
     return r;
 }
 
-void LightShow::play(uint32_t snapshot, double t) {
+void LightShow::play(uint32_t snapshot, double t, bool setCurrent) {
     // LightShow_PlaySnapshot: each entry sets one light (lightchecksum) to
     // light_setparams (821B4950): r g b / 255, intensity, specularintensity,
     // shadowintensity; FarAttenStart / End are not applied (the scripts'
@@ -126,7 +182,10 @@ void LightShow::play(uint32_t snapshot, double t) {
     if (!snapshots_) return;
     const qb::Value* list = snapshots_->find(snapshot);
     if (!list || list->type != qb::Type::Array || !list->arr) return;
-    snapshot_ = snapshot;
+    // A spotlight snapshot touches only the follow-spot lights; it must not
+    // become the mood's current snapshot (which cycle/strobe track), so the
+    // caller passes setCurrent=false and the mood snapshot is left in place.
+    if (setCurrent) snapshot_ = snapshot;
     ++changes_;
     for (const qb::Value& ev : list->arr->values) {
         const qb::Struct* e = structOf(&ev);
@@ -174,6 +233,14 @@ void LightShow::play(uint32_t snapshot, double t) {
             tg.blend = timeEnabled_ ? blend_ : 0.0;
         }
     }
+}
+
+void LightShow::playSpotlight(uint32_t color, double t) {
+    // mapping.spotlight_snapshots.<colour> -> a snapshot of just the follow-spot
+    // lights; applied without disturbing the mood snapshot [C lightshow.qb].
+    const qb::Struct* snaps = mapping_ ? structOf(mapping_->find(K("spotlight_snapshots"))) : nullptr;
+    const qb::Value* snap = snaps && color ? snaps->find(color) : nullptr;
+    if (snap) play(keyOf(snap), t, false);
 }
 
 void LightShow::cycle(double t, bool save) {
@@ -247,6 +314,16 @@ void LightShow::applyNote(const ChartEvent& e, double t) {
                 if (strobeOn_ && savedSnapshot_) play(savedSnapshot_, t);
                 else cycle(t, false);
             }
+        } else if (scr == K("LightShow_SpotlightColor")) {
+            // The follow-spots take the colour's spotlight snapshot (keyed
+            // red..white/off in mapping.spotlight_snapshots), applied to the
+            // spot lights only -- not the mood snapshot [C scripts\fx\lightshow.qb].
+            spotColor_ = params ? keyOf(params->find(K("color"))) : 0;
+            playSpotlight(spotColor_, t);
+        } else if (scr == K("LightShow_EnableSpotlights")) {
+            spotOn_ = params && keyOf(params->find(K("enabled"))) == K("true");
+            // Enabling with no colour set yet defaults to white [I: spotlights_White].
+            playSpotlight(spotOn_ ? (spotColor_ ? spotColor_ : K("white")) : K("off"), t);
         }
         return;
     }

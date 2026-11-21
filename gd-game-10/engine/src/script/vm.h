@@ -92,6 +92,9 @@ class Vm {
 public:
     // Enhanced > Enable Cut Content (StructureContains ... debug_only reads false; set by the app).
     static inline bool cutContent = false;
+    // GD10_UI_SLOW diagnostic: armed once the first main menu is reached, so the
+    // slow-motion applies to menu transitions but never to boot (front_end.cpp).
+    static inline bool slowArmed = false;
     explicit Vm(Globals& globals);
 
     Globals& globals() { return g_; }

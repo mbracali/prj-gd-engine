@@ -29,6 +29,13 @@ class Player;
 // intro (the gem container rising from y 720, the buttons popping up).
 class Highway2D {
 public:
+    // Enhanced > CHEATS > Hyperspeed (issue #94; set by the app): the gems'
+    // travel time is scaled by kHyperspeedFactor, so they scroll faster and
+    // reach the play line sooner (GH3's Hyperspeed cheat).
+    static inline bool hyperspeed = false;
+    static constexpr float kHyperspeedFactor = 0.6f;
+    // The gems' top-to-play-line travel time, scaled by Hyperspeed when on.
+    static float applyHyperspeed(float travelMs) { return hyperspeed ? travelMs * kHyperspeedFactor : travelMs; }
     // Reads the tweaks and builds the row tables; false if data is missing.
     // `players` 1 or 2 (two highways side by side; `player` 0 left, 1 right).
     bool init(const Globals& g, int difficulty, int players = 1, int player = 0);

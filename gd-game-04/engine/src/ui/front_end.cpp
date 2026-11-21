@@ -185,8 +185,13 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     // The Glitches, once the boot has loaded or created the save (the first main menu).
     if (!glitchesDone_) {
         const qb::Value* a = vm_->global(qbkey::key("ui_flow_manager_state"));
-        if (a && a->arr && !a->arr->values.empty() && a->arr->values[0].key == qbkey::key("main_menu_fs"))
+        if (a && a->arr && !a->arr->values.empty() && a->arr->values[0].key == qbkey::key("main_menu_fs")) {
             glitchesDone_ = true, (SDL_getenv("GD04_NO_GLITCHES") ? false : ensureGlitches(*vm_));  // (development aid: off)
+            // Enhanced > CHEATS > Unlock Everything (issue #94): when on, run
+            // GH3's unlock-everything cheat once the save is in place. A later
+            // toggle is handled live by App::applyEnhanced.
+            if (qs::Vm::unlockAllCheat) unlockEverything(*vm_);
+        }
     }
     // During a song GH3's scripts keep running (the attract mode's input
     // check, the end-of-song events) and their elements draw over it [C: one VM].

@@ -64,6 +64,7 @@ public:
     // gh4's HUD (GD10-063): built by setup_band_hud, its widgets driven here.
     bool gh4Hud() const { return gh4Hud_; }
     const HudWidgets& hudWidgets() const { return hud_; }
+    int hudMessages() const { return messages_; }
 
     struct Counters {
         std::map<std::string, uint64_t> events;    // gameplay events raised, by name
@@ -158,6 +159,16 @@ private:
     void frameHud(SongScreen& s, double now);
     HudWidgets hud_;
     bool gh4Hud_ = false, hudShown_ = false;
-    std::vector<double> basePrefix_;   // base score of notes [0, i) (projected_song_stars)
-    bool streakOn_ = false, bulbsOn_ = false;  // player1_streak_started / starpower_bulbs_unhide raised
+    std::array<std::vector<double>, 2> basePrefix_;  // each player's base score of notes [0, i) (projected_song_stars)
+    std::array<bool, 2> streakOn_{};                  // player<n>_streak_started raised
+    bool bulbsOn_ = false;                            // starpower_bulbs_unhide raised
+    int hudPlayers_ = 1;                              // the gh4 HUD's players (GD10-067: 2 in face-off)
+    // gh4's in-song messages (GD10-068): each player's last streak, Star
+    // Power and whether a note was missed yet (hot start).
+    bool gh4Messages_ = false;
+    int messages_ = 0;  // the message scripts spawned (walk checks)
+    std::array<int, 2> msgRun_{};
+    std::array<float, 2> msgSp_{};
+    std::array<bool, 2> msgMissed_{};
+    void frameMessages(SongScreen& s, const std::array<HudWidgets::Values, 4>& v, double now);
 };

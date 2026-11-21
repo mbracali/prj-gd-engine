@@ -39,11 +39,12 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         // Enhanced > Performance > Graphics / Audio backend (GDCORE-008,
         // engine-backend-guidelines.md 4): read once at start-up
         // (startupGraphicsBackend / startupAudioBackend in app.h); no mode
-        // changes them. gd05 runs only on gd-engine-core (D71): Vulkan and
-        // miniaudio by default, no "local". Only what this build offers (no
-        // OpenGL on macOS, rule 7).
+        // changes them. gd05 runs only on gd-engine-core (D71): no "local".
+        // Wave 20261118 §4 (owner): Vulkan on Windows / Linux / Steam Deck /
+        // Android, sdl3 on macOS; miniaudio audio. Only what this build offers
+        // (no OpenGL on macOS, rule 7).
 #ifdef __APPLE__
-        {"graphics_backend", {"vulkan", "sdl3"}},
+        {"graphics_backend", {"sdl3", "vulkan"}},
 #else
         {"graphics_backend", {"vulkan", "sdl3", "opengl3"}},
 #endif
@@ -192,30 +193,33 @@ std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck) {
     // differ only in the window, frame rate, resolution and touch.
     Values d = originalLook();
     d.erase("no_effects");
-    for (const auto& [k, v] : Values{{"no_shaky_cam", "off"}, {"fps_counter", "off"},
-                                     // Desktop: Linux, Windows, macOS.
-                                     {"screen_mode", "windowed"}, {"max_fps", "120"}, {"internal_res", "1080"}, {"touch", "off"}})
+    // Fleet defaults (wave 20261118 §4, owner), every OS: FPS counter on,
+    // full-screen no border, 1080p, sharp UI on, bloom off; controls off on
+    // desktop (touch and shake=whammy on handhelds below).
+    for (const auto& [k, v] : Values{{"no_shaky_cam", "off"}, {"fps_counter", "on"},
+                                     {"screen_mode", "borderless"}, {"internal_res", "1080"},
+                                     {"sharp_ui", "on"}, {"bloom", "none"},
+                                     {"touch", "off"}, {"shake_whammy", "off"}})
         d[k] = v;
-    auto set = [&](std::initializer_list<std::pair<const char*, const char*>> kv) {
-        for (const auto& [k, v] : kv) d[k] = v;
+    // Max FPS: 120 on Windows and macOS, 60 on Linux.
+#if defined(_WIN32) || defined(__APPLE__)
+    d["max_fps"] = "120";
+#else
+    d["max_fps"] = "60";
+#endif
+    auto handheld = [&] {
+        d["touch"] = "on";  // touch + whammy shake on the Steam Deck and Android only
+        d["shake_whammy"] = "on";
+        d["max_fps"] = "60";
     };
-    auto handheld = [&] { set({{"screen_mode", "fullscreen"}, {"max_fps", "60"}}); };
 #if defined(__ANDROID__)
     (void)deck;
     handheld();
-    set({{"internal_res", "900"}, {"touch", "on"}});
 #else
 #if defined(GD05_STEAM_DECK)
     deck = true;
 #endif
-#if defined(_WIN32) || defined(__APPLE__)
-    d["internal_res"] = "1440";
-#endif
-    if (deck) {
-        handheld();
-        d["internal_res"] = "800";
-        d["touch"] = "on";  // touch is on by default on the Steam Deck and Android only (universal_mechanisms.md 1.2.2)
-    }
+    if (deck) handheld();
 #endif
     return {d.begin(), d.end()};
 }

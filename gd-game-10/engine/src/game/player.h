@@ -96,6 +96,12 @@ public:
     bool phraseLost(int phrase) const { return phrase >= 0 && size_t(phrase) < missedPhrase_.size() && missedPhrase_[size_t(phrase)]; }
     // The note index whose sustain is held, or -1.
     int sustaining() const { return sus_.note; }
+    // The base (1x) sustain points of the held sustain not yet awarded. The
+    // projected-stars base (song_hooks.cpp) must leave these out: the base
+    // prefix counts a note's full sustain the instant its head is judged,
+    // while the score accrues the sustain gradually as it is held, so without
+    // this the projection ratio dips through every long sustain. 0 if none.
+    int sustainUnawarded() const;
     // A mid-song start: the notes before `ms` are passed over (not judged;
     // their Star Power phrases cannot be completed).
     void startAt(double ms);
@@ -170,4 +176,9 @@ private:
         int awarded = 0;
         double lastMs = 0;
     } sus_;
+    // Base (1x) sustain points of ended hit-sustains that could not be
+    // awarded (the next note forced the release) -- left out of the
+    // projected-stars base (sustainUnawarded()) so a cut-short hold never
+    // reads as under-performing.
+    int sustainForfeited_ = 0;
 };

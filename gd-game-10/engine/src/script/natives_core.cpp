@@ -271,6 +271,45 @@ void addCoreNatives(Vm& vm) {
             if (!it.name && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr) && it.value.key == n->key) return true;
         return false;
     });
+    // RemoveComponent {structure_name = <struct variable> name = <field>}:
+    // remove a component from a local or global structure [C uses: CAS's
+    // queue removes pending_appearance / requested_frame before scheduling
+    // the next request; I: missing fields are a no-op].
+    vm.addNative("RemoveComponent", [](Vm& v, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* owner = Vm::param(p, K("structure_name"));
+        const qb::Value* name = Vm::param(p, K("name"));
+        if (!owner || !name || (name->type != qb::Type::Key && name->type != qb::Type::KeyPtr)) return false;
+
+        qb::Struct* target = nullptr;
+        uint32_t ownerKey = 0;
+        if (owner->type == qb::Type::Key || owner->type == qb::Type::KeyPtr) {
+            ownerKey = owner->key;
+            if (!run.frames.empty() && run.frames.back().locals) {
+                const qb::Value* local = Vm::param(*run.frames.back().locals, ownerKey);
+                if (local && local->type == qb::Type::Struct && local->st) {
+                    qb::Value updated = *local;
+                    updated.st = std::make_shared<qb::Struct>(*local->st);
+                    auto& items = updated.st->items;
+                    items.erase(std::remove_if(items.begin(), items.end(), [name](const qb::Item& it) { return it.name == name->key; }), items.end());
+                    Vm::set(*run.frames.back().locals, ownerKey, std::move(updated));
+                    return true;
+                }
+            }
+            const qb::Value* global = v.global(ownerKey);
+            if (!global || global->type != qb::Type::Struct || !global->st) return false;
+            qb::Value updated = *global;
+            updated.st = std::make_shared<qb::Struct>(*global->st);
+            auto& items = updated.st->items;
+            items.erase(std::remove_if(items.begin(), items.end(), [name](const qb::Item& it) { return it.name == name->key; }), items.end());
+            v.setGlobal(ownerKey, std::move(updated));
+            return true;
+        }
+        if (owner->type != qb::Type::Struct || !owner->st) return false;
+        target = owner->st.get();
+        auto& items = target->items;
+        items.erase(std::remove_if(items.begin(), items.end(), [name](const qb::Item& it) { return it.name == name->key; }), items.end());
+        return true;
+    });
     // GetArraySize <array> -> array_size.
     // GetArraySize <array> | <name> globalarray (a global array by its name,
     // `{ $musician_instrument $globalarray }`) -> array_size [C use].

@@ -61,6 +61,14 @@ float clamp01(float t) { return std::clamp(t, 0.0f, 1.0f); }
 void segment(const std::vector<float>& vr, float v, size_t& k, float& t) {
     k = 0, t = 0;
     if (vr.size() < 2) return;
+    // A falling value_range (face-off's needle: [1 -1] -> [-51.5 51.5],
+    // GD10-067) read mirrored: v from the first point to the last.
+    if (vr.back() < vr.front()) {
+        std::vector<float> m(vr.size());
+        for (size_t i = 0; i < vr.size(); ++i) m[i] = -vr[i];
+        segment(m, -v, k, t);
+        return;
+    }
     if (v <= vr.front()) return;
     for (k = 0; k + 2 < vr.size() && v > vr[k + 1]; ++k) {
     }
@@ -107,6 +115,11 @@ void HudWidgets::addNatives(qs::Vm& vm, ui::UiSystem& ui) {
         if (!in || !in->st) return false;
         Widget w;
         w.value = keyOf(field(*in->st, "value"));
+        {
+            const std::string vn = qbkey::name(w.value);
+            if (vn.rfind("band2_", 0) == 0) w.team = 1;
+            else if (vn.rfind("band", 0) == 0 || vn == "faceoff_ratio") w.team = 0;
+        }
         if (const uint32_t obj = keyOf(field(*in->st, "object")))
             for (int n = 1; n <= 4; ++n)
                 if (obj == qbkey::key("player" + std::to_string(n) + "_status")) w.player = n - 1;
@@ -123,6 +136,11 @@ void HudWidgets::addNatives(qs::Vm& vm, ui::UiSystem& ui) {
             w.outs.push_back(std::move(out));
         }
         w.id = nextId_++;
+        // GD10_HUDLOG=1 (development aid): each widget as it is attached.
+        static const bool log = SDL_getenv("GD10_HUDLOG") != nullptr;
+        if (log)
+            SDL_Log("hud widget %d: player %d team %d value %s, %zu outputs (first %s)", w.id, w.player + 1, w.team, qbkey::name(w.value).c_str(), w.outs.size(),
+                    w.outs.empty() ? "-" : qbkey::name(w.outs[0].type).c_str());
         if (!run.frames.empty()) {
             if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
             Vm::set(*run.frames.back().locals, K("observer_id"), Vm::makeInt(w.id));
@@ -130,11 +148,49 @@ void HudWidgets::addNatives(qs::Vm& vm, ui::UiSystem& ui) {
         widgets_.push_back(std::move(w));
         return true;
     });
+    // GetHUDMessageParent player = <n>: player n's message container ->
+    // message_parent (its HUD parent's `message` child: hud_1g's g1 600x50
+    // at (50, -140), hud_2g's g1 / g2); false without one
+    // (hud_create_message then returns) [C scripts hud_messages.qb; I: the
+    // container the C returns].
+    // GD10_HUD_MESSAGES_LEGACY=1: unhandled as before (GD10-068).
+    if (!SDL_getenv("GD10_HUD_MESSAGES_LEGACY"))
+        vm.addNative("GetHUDMessageParent", [this](Vm& v, qs::ScriptRun& run, qb::Struct& p) {
+            const qb::Value* pl = Vm::param(p, K("player"));
+            const int n = pl ? int(pl->number()) : 1;
+            const qb::Value* ps = v.global(qbkey::key("player" + std::to_string(n) + "_status"));
+            const qb::Value* hp = ps && ps->st ? ps->st->find(K("hud_parent")) : nullptr;
+            ui::Element* root = ui_ ? ui_->find(K("hud_root")) : nullptr;
+            ui::Element* parent = root && hp && hp->key ? ui_->descAlias(*root, hp->key) : nullptr;
+            if (!parent) return false;
+            for (const auto& c : parent->children)
+                if (c->localId == K("message")) {
+                    if (!run.frames.empty()) {
+                        if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
+                        Vm::set(*run.frames.back().locals, K("message_parent"), Vm::makeKey(c->id));
+                    }
+                    return true;
+                }
+            return false;
+        });
 }
 
-double HudWidgets::input(const Widget& w, const std::array<Values, 4>& players, double nowMs) const {
-    const Values& pl = players[size_t(std::clamp(w.player, 0, 3))];
+double HudWidgets::input(const Widget& w, const std::array<Values, 4>& players, double nowMs, const Band& band) const {
     const uint32_t v = w.value;
+    if (band.on && w.team >= 0) {
+        // Two or more players: the band's values (GD10-067) [I: the C's band values not decoded].
+        const Values& t = band.team[size_t(w.team)];
+        if (v == K("faceoff_ratio")) return band.faceoffRatio;
+        if (v == K("band1_score") || v == K("band2_score")) return t.score;
+        if (v == K("band1_streak") || v == K("band2_streak")) return t.streak;
+        if (v == K("band1_multiplier") || v == K("band2_multiplier")) return t.multiplier;
+        if (v == K("band1_starpower") || v == K("band2_starpower")) return t.starPower;
+        if (v == K("band_projected_song_stars")) return t.stars;
+        if (v == K("band_has_missed_note")) return t.missedNote ? 1 : 0;
+        if (v == K("band_health")) return t.health;
+        return 0;
+    }
+    const Values& pl = players[size_t(std::clamp(w.player, 0, 3))];
     if (v == K("score") || v == K("band1_score")) return pl.score;
     if (v == K("note_streak") || v == K("band1_streak")) return pl.streak;
     if (v == K("starpower_amount")) return pl.starPower;
@@ -224,7 +280,20 @@ void HudWidgets::apply(Widget& w, Output& o, double value, const Values& pl, dou
     } else if (type == K("sestarmeter")) {
         // projected_song_stars: the whole stars as the number, the rest of a
         // star as the filler's x scale (full_scale at a whole star; full at 5) [I].
-        const float full = field(p, "full_scale") ? field(p, "full_scale")->number() : 1.0f;
+        // The authored star_filler is an untextured gold quad (215 x 30, left
+        // justified) scaled to 0.7 on its x axis in uidesc_solo_play_rock_meter
+        // (star_filler_scale = (0.7, 1.0), rgba [249,193,34]); the widget drives
+        // its x scale with progress. The one-player widget passes full_scale =
+        // 0.7 but the band HUD widget passes full_scale = 1.0 (all_dis ~93285),
+        // which as the five-star extent stretched the gold the full 215 px
+        // behind the white number so the whole star read yellow (GM-001). The
+        // gold must never exceed the authored 0.7 width, leaving the dark track
+        // visible behind the number; cap the extent at that authored width for
+        // both widgets. GD10_STARFILLER_LEGACY=1: use full_scale unclamped.
+        static const bool starFillerLegacy = SDL_getenv("GD10_STARFILLER_LEGACY") != nullptr;
+        constexpr float kAuthoredFillerX = 0.699999988079071f;
+        float full = field(p, "full_scale") ? field(p, "full_scale")->number() : kAuthoredFillerX;
+        if (!starFillerLegacy) full = std::min(full, kAuthoredFillerX);
         const float s = std::clamp(v, 0.0f, 5.0f);
         const int whole = int(std::floor(s));
         const float frac = s >= 5 ? 1.0f : s - float(whole);
@@ -234,7 +303,18 @@ void HudWidgets::apply(Widget& w, Output& o, double value, const Values& pl, dou
         // has_missed_note: 1 while no note was missed, then 0 [I].
         setProp(id, prop, Vm::makeFloat(value != 0 ? 0.0f : 1.0f), o);
     } else if (type == K("screenelementrgbaswitch")) {
-        setProp(id, prop, rgbaValue(field(p, value != 0 ? "color2" : "color1")), o);
+        // color1 / color2 are the element's rgba for value 0 / non-zero (the
+        // star meter's has_missed_note flash). The band / solo star widgets
+        // pass color1 == color2 (= [238,204,120]), so the "switch" never flips
+        // and in the original the element keeps its authored rgba (the gold
+        // star_filler [249,193,34] and the white star_meter_num [255,255,255]);
+        // the port wrote [238,204,120] every frame, turning the star count
+        // yellow (GM-001). When the two colours are equal there is nothing to
+        // switch: leave the authored colour. GD10_RGBASWITCH_LEGACY=1: always write.
+        static const bool rgbaSwitchLegacy = SDL_getenv("GD10_RGBASWITCH_LEGACY") != nullptr;
+        const std::vector<float> c1 = numbers(field(p, "color1")), c2 = numbers(field(p, "color2"));
+        if (rgbaSwitchLegacy || c1 != c2)
+            setProp(id, prop, rgbaValue(field(p, value != 0 ? "color2" : "color1")), o);
     } else if (type == K("senotestreaklights")) {
         // The note-streak bulbs: bulb_textures' row by the multiplier (x1 /
         // x2, x3, x4, Star Power), each bulb two notes of the ten to the next
@@ -284,11 +364,11 @@ void HudWidgets::apply(Widget& w, Output& o, double value, const Values& pl, dou
     }
 }
 
-void HudWidgets::update(const std::array<Values, 4>& players, int count, double nowMs) {
+void HudWidgets::update(const std::array<Values, 4>& players, int count, double nowMs, const Band& band) {
     (void)count;
     for (Widget& w : widgets_) {
-        const double v = input(w, players, nowMs);
-        const Values& pl = players[size_t(std::clamp(w.player, 0, 3))];
+        const double v = input(w, players, nowMs, band);
+        const Values& pl = band.on && w.team >= 0 ? band.team[size_t(w.team)] : players[size_t(std::clamp(w.player, 0, 3))];
         for (Output& o : w.outs) apply(w, o, v, pl, nowMs);
     }
 }

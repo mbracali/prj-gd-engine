@@ -123,6 +123,7 @@ void RbTrackView::load(const GameData& data, scene::MiloLibrary& library, const 
     barW_ = get<scene::TrackWidget>("bar_measure.wid");
     beatW_ = get<scene::TrackWidget>("bar_beat.wid");
     halfBeatW_ = get<scene::TrackWidget>("bar_half_beat.wid");
+    soloMaskW_ = get<scene::TrackWidget>("guitar_solo_mask.wid");
 
     // The smasher plate (the now bar's frets / pads): the inline directory
     // smasher_plate_guitar / _drum, its draw_order.grp [C data].
@@ -1179,6 +1180,7 @@ void RbTrackView::drawBeatLines(gfx::MaterialRenderer& mr, gfx::SceneCache& cach
     const long half = division / 2;
     const double fromMs = nowMs + (bottomY_ - 1) / (yPerSecond_ * speed_) * 1000.0f;
     const double toMs = nowMs + topY_ / (yPerSecond_ * speed_) * 1000.0f;
+    drawSoloMasks(mr, cache, nowMs);
     long tick = std::max(0L, long(song.tempo.msToTick(std::max(0.0, fromMs))) / half * half);
     for (int guard = 0; guard < 4096; ++guard, tick += half) {
         const double ms = song.tempo.tickToMs(double(tick));
@@ -1191,6 +1193,47 @@ void RbTrackView::drawBeatLines(gfx::MaterialRenderer& mr, gfx::SceneCache& cach
             w = std::abs(m - std::round(m)) < 1e-6 ? barW_ : beatW_;
         }
         drawWidget(mr, cache, w, 0, y);
+    }
+}
+
+// A solo section's blue track (GD05-129): beat_markers.grp's
+// guitar_solo_mask.wid (guitar_solo_mask.mesh, surface_w_norm.mat), one
+// instance a solo, at the solo's start, its y scaled to the solo's length
+// (the instance matrix's row 1 y) [C RB 0x828122D0: the bar builder adds it
+// at the measure a solo starts in, the span from RB 0x8242A888 (the track's
+// solo list)]. guitar_solo_cap.wid (the brackets) is never instanced by the
+// executable (no reference) [C]. GD05_SOLOMASK_LEGACY=1: no mask.
+void RbTrackView::drawSoloMasks(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, float nowMs) {
+    static const bool legacy = SDL_getenv("GD05_SOLOMASK_LEGACY") != nullptr;
+    if (legacy || !soloMaskW_ || !soloMaskW_->dir || !curPlayer_ || !curPlayer_->chart) return;
+    static const bool log = SDL_getenv("GD05_SOLOMASK_LOG") != nullptr;
+    for (const Span& s : curPlayer_->chart->solos) {
+        const float y0 = yOf(s.startMs - nowMs), len = yOf(s.endMs - s.startMs);
+        if (y0 > topY_ || y0 + len < bottomY_ - 1 || len <= 0) continue;
+        scene::Xfm inst;
+        inst.rot = {1, 0, 0, 0, len, 0, 0, 0, 1};
+        inst.pos = {0, y0, 0};
+        for (const std::string& n : soloMaskW_->meshes) {
+            const scene::Mesh* m = soloMaskW_->dir->resolve<scene::Mesh>(n);
+            if (!m) continue;
+            scene::Xfm x0;
+            if (soloMaskW_->allowRotation) x0.rot = pose_.local(m).rot;
+            x0 = scene::compose(x0, inst);
+            if (log) {
+                static int logged = 0;
+                if (logged++ < 3) {
+                    const scene::Mesh* g = gfx::meshGeometry(m);
+                    float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+                    if (g)
+                        for (const auto& v : g->verts)
+                            for (int k = 0; k < 3; ++k) lo[k] = std::min(lo[k], v.pos[k]), hi[k] = std::max(hi[k], v.pos[k]);
+                    SDL_Log("RB track: solo mask %s at y %.1f len %.1f (solo %.0f..%.0f ms), mesh %s mat %s showing %d, verts %zu box %.2f %.2f %.2f .. %.2f %.2f %.2f",
+                            part_.c_str(), double(y0), double(len), double(s.startMs), double(s.endMs), n.c_str(), m->mat.c_str(), int(pose_.showing(m)),
+                            g ? g->verts.size() : size_t(0), double(lo[0]), double(lo[1]), double(lo[2]), double(hi[0]), double(hi[1]), double(hi[2]));
+                }
+            }
+            gfx::drawMesh(mr, cache, *m, gfx::toMat4(x0), &pose_);
+        }
     }
 }
 
@@ -1321,6 +1364,20 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
             const scene::Mat* starMat = star && gfx::highwayLegacy() ? tails_->find<scene::Mat>("tail_star.mat") : nullptr;
             const float* col = starMat ? starMat->color.data() : mat->color.data();
             const float x = slotX(f) + c.offsetX;
+            // GD05-133: the tail on its slot's curve as the gem (the slot's
+            // smasher x / z and roll, RB 0x828167F0 / MakeSecondsXfm [C]; the
+            // tail builder's use of that xfm is I): a row's point (px, y, pz)
+            // goes to (cx, 0, cz) + px * row0 + y * row1 + pz * row2.
+            // GD05_TAILCURVE_LEGACY=1: flat at the data's slot x, z 0.
+            static const bool tailCurveLegacy = SDL_getenv("GD05_TAILCURVE_LEGACY") != nullptr;
+            const SlotCurve* sc = !tailCurveLegacy && !gemCurveLegacy() && slotCurve_[size_t(f)].set ? &slotCurve_[size_t(f)] : nullptr;
+            std::array<float, 9> R{1, 0, 0, 0, 1, 0, 0, 0, 1};
+            float ox = x, oz = 0;
+            if (sc) {
+                R = sc->rot;
+                if (lefty_) R[2] = -R[2], R[6] = -R[6];
+                ox = (lefty_ ? -sc->x : sc->x) + c.offsetX * R[0], oz = sc->z + c.offsetX * R[2];
+            }
             const uint16_t base = uint16_t(tailVerts_.size() / 16);
             const size_t n = row.size();
             int rows = 0;
@@ -1335,11 +1392,30 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
                 const float shift = held ? ts.ring[size_t(((ts.head - int(d * 0.5f)) % 300 + 300) % 300)] : 0.0f;
                 float a = alpha;
                 if (len - d < c.fadeDistance) a *= std::max(0.0f, (len - d) / c.fadeDistance);
-                for (const auto& p : row)
-                    tailVerts_.insert(tailVerts_.end(),
-                                      {x + (lastRow ? 0.0f : p[0]) + shift, y, p[1], 0, 0, 1, col[0], col[1], col[2], col[3] * a, p[2], p[3], 1, 0, 0, 1});
+                for (const auto& p : row) {
+                    if (!sc) {
+                        tailVerts_.insert(tailVerts_.end(),
+                                          {x + (lastRow ? 0.0f : p[0]) + shift, y, p[1], 0, 0, 1, col[0], col[1], col[2], col[3] * a, p[2], p[3], 1, 0, 0, 1});
+                        continue;
+                    }
+                    const float px = (lastRow ? 0.0f : p[0]) + shift, pz = p[1];
+                    const float wx = ox + px * R[0] + y * R[3] + pz * R[6], wy = px * R[1] + y * R[4] + pz * R[7], wz = oz + px * R[2] + y * R[5] + pz * R[8];
+                    tailVerts_.insert(tailVerts_.end(), {wx, wy, wz, R[6], R[7], R[8], col[0], col[1], col[2], col[3] * a, p[2], p[3], 1, 0, 0, 1});
+                }
                 ++rows;
                 if (lastRow) break;
+            }
+            // GD05_TAILCURVE_LOG=1: the tail's first row's middle against its
+            // slot's smasher (x, z), and its roll against the smasher's: the
+            // tail sits on the curve when both are ~0 on every lane.
+            if (static unsigned tl = 0; SDL_getenv("GD05_TAILCURVE_LOG") && !(tl & (1u << f)) && rows > 0 && slotCurve_[size_t(f)].set) {
+                tl |= 1u << f;
+                const size_t mid = (base + n / 2) * size_t(16);
+                const SlotCurve& k = slotCurve_[size_t(f)];
+                const float d[3] = {tailVerts_[mid] - (lefty_ ? -k.x : k.x), tailVerts_[mid + 1] - y0, tailVerts_[mid + 2] - k.z};
+                float o[3];  // in the smasher's frame (rows are its axes)
+                for (int i = 0; i < 3; ++i) o[i] = d[0] * k.rot[i * 3] + d[1] * k.rot[i * 3 + 1] + d[2] * k.rot[i * 3 + 2];
+                SDL_Log("RB track: tail curve lane %d: tail middle - smasher (smasher frame) x %+.3f z %+.3f%s", f, double(o[0]), double(o[2]), sc ? "" : " (flat)");
             }
             if (base + rows * n > 65000) break;
             const int first = int(tailIndices_.size());
