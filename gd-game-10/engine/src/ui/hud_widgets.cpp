@@ -280,7 +280,20 @@ void HudWidgets::apply(Widget& w, Output& o, double value, const Values& pl, dou
     } else if (type == K("sestarmeter")) {
         // projected_song_stars: the whole stars as the number, the rest of a
         // star as the filler's x scale (full_scale at a whole star; full at 5) [I].
-        const float full = field(p, "full_scale") ? field(p, "full_scale")->number() : 1.0f;
+        // The authored star_filler is an untextured gold quad (215 x 30, left
+        // justified) scaled to 0.7 on its x axis in uidesc_solo_play_rock_meter
+        // (star_filler_scale = (0.7, 1.0), rgba [249,193,34]); the widget drives
+        // its x scale with progress. The one-player widget passes full_scale =
+        // 0.7 but the band HUD widget passes full_scale = 1.0 (all_dis ~93285),
+        // which as the five-star extent stretched the gold the full 215 px
+        // behind the white number so the whole star read yellow (GM-001). The
+        // gold must never exceed the authored 0.7 width, leaving the dark track
+        // visible behind the number; cap the extent at that authored width for
+        // both widgets. GD10_STARFILLER_LEGACY=1: use full_scale unclamped.
+        static const bool starFillerLegacy = SDL_getenv("GD10_STARFILLER_LEGACY") != nullptr;
+        constexpr float kAuthoredFillerX = 0.699999988079071f;
+        float full = field(p, "full_scale") ? field(p, "full_scale")->number() : kAuthoredFillerX;
+        if (!starFillerLegacy) full = std::min(full, kAuthoredFillerX);
         const float s = std::clamp(v, 0.0f, 5.0f);
         const int whole = int(std::floor(s));
         const float frac = s >= 5 ? 1.0f : s - float(whole);
@@ -290,7 +303,18 @@ void HudWidgets::apply(Widget& w, Output& o, double value, const Values& pl, dou
         // has_missed_note: 1 while no note was missed, then 0 [I].
         setProp(id, prop, Vm::makeFloat(value != 0 ? 0.0f : 1.0f), o);
     } else if (type == K("screenelementrgbaswitch")) {
-        setProp(id, prop, rgbaValue(field(p, value != 0 ? "color2" : "color1")), o);
+        // color1 / color2 are the element's rgba for value 0 / non-zero (the
+        // star meter's has_missed_note flash). The band / solo star widgets
+        // pass color1 == color2 (= [238,204,120]), so the "switch" never flips
+        // and in the original the element keeps its authored rgba (the gold
+        // star_filler [249,193,34] and the white star_meter_num [255,255,255]);
+        // the port wrote [238,204,120] every frame, turning the star count
+        // yellow (GM-001). When the two colours are equal there is nothing to
+        // switch: leave the authored colour. GD10_RGBASWITCH_LEGACY=1: always write.
+        static const bool rgbaSwitchLegacy = SDL_getenv("GD10_RGBASWITCH_LEGACY") != nullptr;
+        const std::vector<float> c1 = numbers(field(p, "color1")), c2 = numbers(field(p, "color2"));
+        if (rgbaSwitchLegacy || c1 != c2)
+            setProp(id, prop, rgbaValue(field(p, value != 0 ? "color2" : "color1")), o);
     } else if (type == K("senotestreaklights")) {
         // The note-streak bulbs: bulb_textures' row by the multiplier (x1 /
         // x2, x3, x4, Star Power), each bulb two notes of the ten to the next

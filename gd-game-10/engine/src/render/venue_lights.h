@@ -41,7 +41,9 @@ struct HousingState {
 
 class LightShow {
 public:
-    void init(const Venue& v, const Globals& g, const Chart& chart);
+    // `songKey`: the current song (for the in-the-round node flags); 0 when
+    // there is no song (the menu backdrop). current_song in `g` takes priority.
+    void init(const Venue& v, const Globals& g, const Chart& chart, uint32_t songKey = 0);
     // Advances to song time `ms`: the lightshow notes and the performance's
     // changes in time order.
     void update(double ms, const PerfTimeline& perf);
@@ -64,7 +66,10 @@ private:
     void applyNote(const ChartEvent& e, double t);
     void enterMood(uint32_t mood, double t);
     void cycle(double t, bool save);
-    void play(uint32_t snapshot, double t);
+    void play(uint32_t snapshot, double t, bool setCurrent = true);
+    void playSpotlight(uint32_t color, double t);
+    uint32_t spotColor_ = 0;  // last LightShow_SpotlightColor
+    bool spotOn_ = false;     // LightShow_EnableSpotlights state
     const qb::Value* modeEntry() const;
     void setStateFlags();
     LightState at(size_t i, double t) const;

@@ -198,7 +198,7 @@ public:
 
 private:
     enum class Ev : uint8_t {
-        Strum, Fret, Chord, Perf, DrumArm, Cymbal,                                       // from the song
+        Strum, Fret, Chord, Perf, DrumArm, Cymbal, DrumKit,                              // from the song
         Mocap,                                                                         // gh4 Band_PlayClip
         BodyDone, TransitionDone, StrumDone, FaceDone, ChordRelease, ArmDone, Twist,  // scheduled
         ClipEvent,                                                                    // ped_animevents
@@ -295,7 +295,7 @@ private:
     float bodyBlend_ = 0.2f;  // the next body clip's blend in (play_special_anim blendduration)
     float slowTempo_ = 75, medTempo_ = 115, fastTempo_ = 145;
     int shortStrum_ = 150, medStrum_ = 600;
-    float fingerPress_ = 0.07f, fingerRelease_ = 0.2f, fretBlend_ = 0.1f, drumBlend_ = 0.1f;
+    float fingerPress_ = 0.07f, fingerRelease_ = 0.2f, fretBlend_ = 0.1f, drumBlend_ = 0.1f, drumKitBlend_ = 0.05f;
     float armBlendOutDelay_ = 0.25f, twistRate_ = 0.05f;
     int lastArmNote_[2] = {0, 0};
     bool missed_ = false;     // playing_missed_note
@@ -304,6 +304,9 @@ private:
 
     // The tree's nodes.
     Node body_, face_, rightArm_, leftArm_, leftHand_, drumArm_[2], cymbal_[4];
+    // gh4: the DrumKit's additive "difference" anims (drumkit_anims[0..13]), one
+    // node per index so simultaneous hits on different kit pieces compose.
+    Node drumKit_[14];
     // GH3: the arms' strengths (deltas and IK). gh4: the IK chains'
     // strengths only (hero_toggle_arms: ik_setchainstrength) [C script].
     Ramp leftStrength_, rightStrength_;

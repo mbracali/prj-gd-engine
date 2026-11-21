@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "data/havok.h"
 
+#include <algorithm>
 #include <cstring>
 #include <map>
 #include <set>
@@ -488,9 +489,7 @@ public:
                 b.linearDamping = f32(mo + 0xB4), b.angularDamping = f32(mo + 0xB8);
                 // maxLinear / maxAngularVelocity are hkUFloat8 bytes (+0xBC, +0xBD): left 0 (the simulation's default) [I].
                 b.friction = f32(rb + 0x84), b.restitution = f32(rb + 0x88);
-                const uint32_t shape = ptr(rb + 0x10);
-                b.shape.className = shape ? clsAt(shape) : "";
-                b.shape.kind = Shape::Other;
+                b.shape = readShape(ptr(rb + 0x10));
                 bodyIndex[rb] = int(ph.bodies.size());
                 ph.bodies.push_back(std::move(b));
             }
@@ -580,6 +579,52 @@ private:
     std::string str(uint32_t a) const {
         const uint32_t t = ptr(a);
         return t ? cstr(dataAt(t, 1), start_[2] + off_[2][0]) : std::string();
+    }
+    // The collidable's shape, decoded at fixed offsets (no reflection in the
+    // 5.5 .rag). hkpCapsuleShape: m_radius at +0x10, vertexA at +0x20, vertexB
+    // at +0x30 (each an hkVector4, the capsule radius repeated in w). The gh4
+    // accessory (hair) bones wrap a box in an hkpConvexTranslateShape:
+    // m_translation at +0x20, the child at +0x18. hkpBoxShape: convex radius at
+    // +0x10, half-extents at +0x20. AccessorySim's solver collides capsules, so
+    // the accessory boxes (thin, anchored along the bone) become a capsule along
+    // their longest local axis -- enough to keep hair off the body capsules.
+    // [I: offsets inferred from the values across the Metallica band's .rag.]
+    Shape readShape(uint32_t a) const {
+        Shape out;
+        if (!a) return out;
+        out.className = clsAt(a);
+        std::string cn = out.className;
+        uint32_t cur = a;
+        if (cn == "hkpConvexTranslateShape") {
+            out.translation = {f32(a + 0x20), f32(a + 0x24), f32(a + 0x28)};
+            cur = ptr(a + 0x18);
+            cn = cur ? clsAt(cur) : "";
+        }
+        if (cn == "hkpCapsuleShape") {
+            out.kind = Shape::Capsule;
+            out.radius = f32(cur + 0x10);
+            out.a = {f32(cur + 0x20), f32(cur + 0x24), f32(cur + 0x28)};
+            out.b = {f32(cur + 0x30), f32(cur + 0x34), f32(cur + 0x38)};
+        } else if (cn == "hkpBoxShape") {
+            const float cr = f32(cur + 0x10), hx = f32(cur + 0x20), hy = f32(cur + 0x24), hz = f32(cur + 0x28);
+            out.kind = Shape::Capsule;
+            if (hx >= hy && hx >= hz) {
+                out.radius = std::max(hy, hz) + cr;
+                const float L = std::max(0.0f, hx - out.radius);
+                out.a = {-L, 0, 0}, out.b = {L, 0, 0};
+            } else if (hy >= hz) {
+                out.radius = std::max(hx, hz) + cr;
+                const float L = std::max(0.0f, hy - out.radius);
+                out.a = {0, -L, 0}, out.b = {0, L, 0};
+            } else {
+                out.radius = std::max(hx, hy) + cr;
+                const float L = std::max(0.0f, hz - out.radius);
+                out.a = {0, 0, -L}, out.b = {0, 0, L};
+            }
+        } else {
+            out.kind = Shape::Other;
+        }
+        return out;
     }
     // An hkArray of object pointers: data pointer, size, capacity and flags.
     std::vector<uint32_t> array(uint32_t a) const {

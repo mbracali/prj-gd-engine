@@ -76,3 +76,26 @@ private:
     std::unique_ptr<State> state_;
     const GdExplorer* api_ = nullptr;
 };
+
+// A module's song previews (gd_game_songs), open while the launcher shows the
+// "Hear the songs" screen: the library stays loaded until close(). No window
+// or GL work (the launcher plays the decoded PCM itself).
+class SongSession {
+public:
+    SongSession();
+    ~SongSession();
+    SongSession(const SongSession&) = delete;
+    SongSession& operator=(const SongSession&) = delete;
+
+    // Loads the module and opens its song list; false with `error` set when
+    // the module cannot, or has no song previews (gd_game_songs).
+    bool open(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& launcherVersion, ActionLog& log,
+              std::string& error);
+    const GdSongs* api() const { return api_; }
+    bool close();
+
+private:
+    struct State;
+    std::unique_ptr<State> state_;
+    const GdSongs* api_ = nullptr;
+};

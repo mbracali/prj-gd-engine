@@ -1067,6 +1067,21 @@ void SongHooks::beginHud(SongScreen& s) {
     }
     vm.run(K("setup_band_hud"), qb::Struct{});
     gh4Hud_ = fe_.ui().find(K("hud_root")) != nullptr;
+    // GD10 score-widget bug: in single player the original HUD shows only the
+    // thin score/star plaque -- no separate boxed note-streak counter below it
+    // (reference frames t485/t600/t715 at every streak level). setup_band_hud
+    // builds the solo meter (uidesc_solo_play_rock_meter) with the band streak
+    // plaque element present; hide that `streak` subtree in solo so the port
+    // matches the original. GD10_SCOREFRAME_LEGACY=1: leave the streak box drawn.
+    static const bool scoreFrameLegacy = SDL_getenv("GD10_SCOREFRAME_LEGACY") != nullptr;
+    if (gh4Hud_ && players_ == 1 && !scoreFrameLegacy)
+        if (ui::Element* root = fe_.ui().find(K("hud_root"))) {
+            std::vector<ui::Element*> q{root};
+            for (size_t i = 0; i < q.size(); ++i) {
+                if (q[i]->localId == K("streak")) q[i]->hidden = true;
+                for (auto& ch : q[i]->children) q.push_back(ch.get());
+            }
+        }
     // projected_song_stars: the base score of the notes judged so far [I].
     for (int p = 0; p < 2; ++p) {
         basePrefix_[size_t(p)].clear();
@@ -1107,7 +1122,11 @@ void SongHooks::frameHud(SongScreen& s, double now) {
         // inputs, the C's other term under the base].
         const std::vector<double>& bp = basePrefix_[size_t(p)];
         const size_t cur = std::min(pl.current(), bp.empty() ? 0 : bp.size() - 1);
-        const double base = bp.empty() ? 0 : bp[cur];
+        // bp[cur] already counts the full sustain of a note whose head was
+        // judged; the score only accrues that sustain as it is held, so leave
+        // the not-yet-held portion out to keep the ratio steady through long
+        // sustains (GD10: The Unforgiven's bar dipped on every held note).
+        const double base = (bp.empty() ? 0 : bp[cur]) - pl.sustainUnawarded();
         const float x = base > 0 ? float(st.score / base) : 0.0f;
         const float b = Vm::number(vm.global(K("star_count_projection_base_mult")), 1);
         float s4 = 2.0f, s5 = 2.8f;
@@ -1295,6 +1314,16 @@ void SongHooks::draw(Canvas& c, double nowMs) {
 void SongHooks::setPaused(bool paused) {
     if (!active_ || paused == paused_) return;
     paused_ = paused;
+    // GD10 pause-HUD bug: a blocking full-screen menu (the pause menu) must
+    // hide the whole gameplay HUD. For gh4 the rock meter, score/star widget,
+    // multiplier and Star Power tubes all live under hud_root (drawn by the UI
+    // system over the frozen song); the port left them drawn, so they poked out
+    // around the pause overlay. Hide the hud_root subtree while paused and
+    // restore it on resume. (SongHooks::draw already gates its bolts/fx on
+    // paused_.) GD10_HUD_PAUSE_LEGACY=1: keep the HUD drawn while paused.
+    static const bool hudPauseLegacy = SDL_getenv("GD10_HUD_PAUSE_LEGACY") != nullptr;
+    if (!hudPauseLegacy && gh4Hud_)
+        if (ui::Element* r = fe_.ui().find(K("hud_root"))) r->hidden = paused;
     for (auto& r : fe_.vm().runs())
         if (runs_.count(r->id)) r->paused = paused;
 }
@@ -1468,36 +1497,51 @@ void SongHooks::addNatives() {
         song_->highwayOf(pl).setAllWhammyValues(Vm::number(Vm::param(p, K("value")), 1));
         return true;
     });
-    // setsoundbusseffects effect = {effect name params} | effect = $<global>
-    // [time = s]: the guitar buss's GuitarEcho1 / GuitarReverb1 drive
-    // audio/guitar_fx; the crowd buss's CrowdEcho1 / InGameReverb1 are kept
-    // (the port's sound effects are not on busses) [C scripts GH_Star_Power_Verb_On, GuitarEvent_EnterVenue].
+    // setsoundbusseffects effect = {name params} | effect = $<global> |
+    //   effects = [ {name params} ... ]  [time = s]: the guitar buss's
+    // Guitar1/2PitchShift drives the whammy pitch (audio/mixer), GuitarEcho1 /
+    // GuitarReverb1 drive audio/guitar_fx; the crowd buss's CrowdEcho1 /
+    // InGameReverb1 are kept (the port's sound effects are not on busses).
+    // GM-010 fix: the whammy passes the PLURAL `effects` array form
+    // (set_whammy_pitchshift: effects = [ { effect = whammy name =
+    // Guitar1PitchShift pitch = (1.0 - pitchtweak) } ]); the old code read only
+    // the singular `effect`, so whammy never changed the sound [C scripts
+    // GH_Star_Power_Verb_On, GuitarEvent_EnterVenue, set_whammy_pitchshift].
     vm.addNative("setsoundbusseffects", [this](Vm& v, ScriptRun&, qb::Struct& p) {
-        const qb::Value* e = Vm::param(p, K("effect"));
-        if (e && (e->type == qb::Type::Key || e->type == qb::Type::KeyPtr)) e = v.global(e->key);
-        if (!e || !e->st) return true;
-        ++k_.bussEffects;
-        const qb::Struct& es = *e->st;
-        const uint32_t name = keyOf(v.globals().field(es, K("name")));
-        GuitarFx::Params gp = mixer_.guitarFx().params();
-        auto num = [&](const char* n, float& out) {
-            if (const qb::Value* x = v.globals().field(es, K(n)); x && (x->type == qb::Type::Int || x->type == qb::Type::Float)) out = x->number();
+        const float time = Vm::number(Vm::param(p, K("time")), 0);
+        auto apply = [&](const qb::Struct& es) {
+            ++k_.bussEffects;
+            const uint32_t name = keyOf(v.globals().field(es, K("name")));
+            auto num = [&](const char* n, float& out) {
+                if (const qb::Value* x = v.globals().field(es, K(n)); x && (x->type == qb::Type::Int || x->type == qb::Type::Float)) out = x->number();
+            };
+            if (name == K("Guitar1PitchShift") || name == K("Guitar2PitchShift")) {
+                float pitch = 1;
+                num("pitch", pitch);
+                mixer_.setGuitarPitch(name == K("Guitar1PitchShift") ? 0 : 1, pitch);
+                return;
+            }
+            GuitarFx::Params gp = mixer_.guitarFx().params();
+            if (name == K("GuitarEcho1")) {
+                num("delay", gp.echoDelayMs), num("DecayRatio", gp.echoDecay), num("Drymix", gp.echoDry), num("Wetmix", gp.echoWet);
+            } else if (name == K("GuitarReverb1")) {
+                num("ReverbLevel", gp.reverbLevelMb), num("ReflectionsLevel", gp.reflectionsLevelMb), num("DecayTime", gp.decayTime);
+                num("ReflectionsDelay", gp.reflectionsDelay), num("ReverbDelay", gp.reverbDelay);
+            } else {
+                return;
+            }
+            mixer_.guitarFx().set(gp, time);
         };
-        if (name == K("Guitar1PitchShift") || name == K("Guitar2PitchShift")) {
-            float pitch = 1;
-            num("pitch", pitch);
-            mixer_.setGuitarPitch(name == K("Guitar1PitchShift") ? 0 : 1, pitch);
-            return true;
-        }
-        if (name == K("GuitarEcho1")) {
-            num("delay", gp.echoDelayMs), num("DecayRatio", gp.echoDecay), num("Drymix", gp.echoDry), num("Wetmix", gp.echoWet);
-        } else if (name == K("GuitarReverb1")) {
-            num("ReverbLevel", gp.reverbLevelMb), num("ReflectionsLevel", gp.reflectionsLevelMb), num("DecayTime", gp.decayTime);
-            num("ReflectionsDelay", gp.reflectionsDelay), num("ReverbDelay", gp.reverbDelay);
-        } else {
-            return true;
-        }
-        mixer_.guitarFx().set(gp, Vm::number(Vm::param(p, K("time")), 0));
+        auto resolve = [&](const qb::Value* x) -> const qb::Struct* {
+            if (x && (x->type == qb::Type::Key || x->type == qb::Type::KeyPtr)) x = v.global(x->key);
+            return x ? x->st.get() : nullptr;
+        };
+        // Singular form: effect = {..} | effect = $<global>.
+        if (const qb::Struct* es = resolve(Vm::param(p, K("effect")))) apply(*es);
+        // Plural form (the whammy): effects = [ {..} ... ].
+        if (const qb::Value* arr = Vm::param(p, K("effects")); arr && arr->type == qb::Type::Array && arr->arr)
+            for (const qb::Value& item : arr->arr->values)
+                if (const qb::Struct* es = resolve(&item)) apply(*es);
         return true;
     });
     // SetSoundBussParams {<BussSet> time = s}: Right_Notes_Player1's vol (dB)

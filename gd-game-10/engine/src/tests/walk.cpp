@@ -40,7 +40,7 @@ std::string flowState(FrontEnd& fe) { return fe.flowState(); }  // gh4: the UI s
 Walk::Walk(const std::string& name) : name_(name) {
     const Action C = Action::Confirm, D = Action::Down, B = Action::Back;
     // Boot -> press any button -> save -> main menu -> Quickplay ->
-    // difficulty -> setlist -> song -> results [C: flow_path.md].
+    // game mode -> instrument -> setlist -> difficulty -> song -> results.
     // gh4's boot states (ui/ui_states.h): the movies skipped with A, press
     // start, the drum tip pop-up (only without a save), the main menu [C
     // scripts RegisterUIStates_Boot, ui_boot_* ; docs/ui.md].
@@ -68,7 +68,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000, true});
         steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, "wait", C}, 20000});
         steps_.push_back({"song", {Op("wait", 3000), "key:Escape"}, 30000});
-        steps_.push_back({"uistate_pausemenu", {"wait", "wait", "wait", "shot:pause_menu@", B}, 20000});
+        steps_.push_back({"uistate_pausemenu", {"wait", "wait", "wait", "check:menuclickable", "shot:pause_menu@", B}, 20000});
         steps_.push_back({"song", {Op("wait", 2000), "key:Escape"}, 20000});
         steps_.push_back({"uistate_pausemenu", {"wait", "wait", "wait", D, "wait", "shot:pause_1@", D, "wait", "shot:pause_2@", D, "wait",
                                                 "shot:pause_3@", D, "wait", "shot:pause_4@", D, "wait", "shot:pause_5@", "wait"}, 20000});
@@ -196,17 +196,88 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"uistate_song_breakdown", {"wait", "wait", "wait", "wait", "wait", "wait", C}, 30000});
         steps_.push_back({"uistate_cash_rewards_3", {"wait", "wait", "wait", "wait", "wait", "wait", C}, 30000, true});
         steps_.push_back({"uistate_setlist", {"wait"}, 30000});
+    } else if (name == "qptrans") {
+        // GD10 menu-transition artifact: the owner sees "something behind it
+        // on the top part when I select something in quickplay". Each menu
+        // change runs the zoom anim (menu_transition_in_spawned, scale 1.4 ->
+        // 1.0). This walk presses Confirm on a screen and then bursts shots
+        // through the ~250 ms zoom into the next screen (ops in one step run
+        // regardless of the flow state changing under them), so the transition
+        // frames are captured, not the settled screen.
+        steps_ = boot;
+        const Op W12("wait", 1200);
+        // Main menu -> QUICKPLAY (second item): select, then burst from the
+        // very first frame (delay 0) through the zoom-in, densely, to catch any
+        // one-frame gap before the new backdrop is drawn.
+        steps_.push_back({"main_menu_fs",
+                          {W12, D, Op("wait", 400), C, Op("shot:t_qp_1@", 0), Op("shot:t_qp_2@", 16), Op("shot:t_qp_3@", 16),
+                           Op("shot:t_qp_4@", 16), Op("shot:t_qp_5@", 24), Op("shot:t_qp_6@", 40), Op("shot:t_qp_7@", 80),
+                           Op("shot:t_qp_8@", 120)},
+                          15000});
+        // Game mode -> (single player): select, burst the zoom into instrument.
+        steps_.push_back({"uistate_game_mode",
+                          {W12, C, Op("shot:t_gm_1@", 0), Op("shot:t_gm_2@", 16), Op("shot:t_gm_3@", 16), Op("shot:t_gm_4@", 16),
+                           Op("shot:t_gm_5@", 24), Op("shot:t_gm_6@", 40), Op("shot:t_gm_7@", 80), Op("shot:t_gm_8@", 120)},
+                          20000});
+        // Instrument -> (guitar): select, burst the zoom into the next screen.
+        steps_.push_back({"uistate_select_instrument",
+                          {W12, C, Op("shot:t_in_1@", 0), Op("shot:t_in_2@", 16), Op("shot:t_in_3@", 16), Op("shot:t_in_4@", 16),
+                           Op("shot:t_in_5@", 24), Op("shot:t_in_6@", 40), Op("shot:t_in_7@", 80), Op("shot:t_in_8@", 120)},
+                          20000});
+        // The setlist's prompt / double-bass pop-ups, then the setlist proper.
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+        // Setlist: add a song (C), then Start -> the difficulty screen; burst
+        // the zoom into difficulty, the screen the owner reaches by "selecting".
+        steps_.push_back({"uistate_setlist",
+                          {W12, D, "wait", C, "wait", Op("key:Return", 400), Op("shot:t_sl_1@", 0), Op("shot:t_sl_2@", 16),
+                           Op("shot:t_sl_3@", 16), Op("shot:t_sl_4@", 16), Op("shot:t_sl_5@", 24), Op("shot:t_sl_6@", 40),
+                           Op("shot:t_sl_7@", 80), Op("shot:t_sl_8@", 120)},
+                          20000});
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"uistate_setlist",
+                          {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C, "wait", "wait", "key:Return"}, 20000,
+                          true});
+        // Difficulty: settled shot, then back out and in once more for its own
+        // zoom (select difficulty -> leads into the song).
+        steps_.push_back({"uistate_select_difficulty",
+                          {W12, Op("shot:t_df_settled@", 0), D, Op("shot:t_df_1@", 0), Op("shot:t_df_2@", 16), Op("shot:t_df_3@", 16),
+                           Op("shot:t_df_4@", 24), Op("shot:t_df_5@", 40)},
+                          20000});
+    } else if (name == "fdump") {
+        // Minimal path to the first menu change, arming the every-frame dump
+        // just before pressing Confirm so the whole transition is captured
+        // (GD10_FRAMEDUMP=<dir>, GD10_FRAMEDUMP_MAX frames).
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs",
+                          {Op("wait", 1200), D, Op("wait", 500), "fdump:on", C, Op("wait", 500), "fdump:off"},
+                          15000});
+        steps_.push_back({"uistate_game_mode", {Op("wait", 1200), "fdump:on", C, Op("wait", 500), "fdump:off"}, 20000});
     } else if (name == "quickplay" || name == "lose") {
         steps_ = boot;
-        steps_.push_back({"main_menu_fs", {D, D, C}, 10000});  // career, co-op career, QUICKPLAY
-        // The keyboard's Enter selects in the menus (the owner's rule: Enter is Start).
-        steps_.push_back({"quickplay_select_difficulty_fs", {"key:Return"}, 20000});
-        steps_.push_back({"quickplay_setlist_fs", {"clear:topscores", C}, 20000});
-        steps_.push_back({"song", {}, 30000});
+        // Attach before the boot flow reaches the controller picker; attaching
+        // on the main menu interrupts that state before its Quickplay inputs.
+        steps_.front().keys = {"xpad_attach", "keyboard_p1", "wait", C};
+        steps_.push_back({"main_menu_fs", {D, C}, 10000});  // Career -> Quickplay (GH: Metallica menu order)
+        steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
+        steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C,
+                                               "wait", "wait", "key:Return"},
+                          30000});
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"uistate_setlist", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", D, "wait", C,
+                                               "wait", "wait", "key:Return"},
+                          30000, true});
+        steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, "wait", C}, 20000});
+        steps_.push_back({"song", name == "lose" ? std::vector<Op>{Op("wait", 8000), "probe:black"} : std::vector<Op>{}, 30000});
         steps_.push_back({"song_over", {}, 600000});
         if (name == "lose") {
             // A few steps on the fail menu, over the paused song (screenshots).
-            steps_.push_back({"quickplay_fail_song_fs", {"wait", "wait", "wait"}, 30000});
+            steps_.push_back({"uistate_fail_song", {Op("check:no_black", 1000), "shot:fail_menu@"}, 30000});
         } else {
             // CONTINUE -> Top Rockers: the autoplayed score beats the scores
             // (cleared: the walk's song is cut short), so GH3 asks for
@@ -227,7 +298,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         const char* who = SDL_getenv("GD10_WALK_CHARACTER");
         const std::string setChar = std::string("set:character:") + (who && *who ? who : "Morello");
         steps_ = boot;
-        steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
+        steps_.push_back({"main_menu_fs", {"xpad_attach", "keyboard_p1", D, D, C}, 10000});
         steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
         steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
         steps_.push_back({"song", {setChar.c_str()}, 30000});
@@ -239,6 +310,13 @@ Walk::Walk(const std::string& name) : name_(name) {
         // flow states GH3's own scripts walk, GD10_FLOWLOG].
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {C}, 10000});  // CAREER
+        steps_.push_back({"uistate_game_mode", {C}, 20000});  // SINGLE career
+        steps_.push_back({"uistate_select_instrument", {C}, 20000});
+        // Beginner opens two first-play guitar instruction movies before the
+        // career setup. Pick Expert here so the walk exercises the career
+        // handoff rather than replaying that tutorial loop.
+        steps_.push_back({"uistate_select_difficulty", {D, D, D, D, C, Op("wait", 5000), C}, 20000});
+        steps_.push_back({"uistate_character_selection", {C}, 20000});
         steps_.push_back({"career_choose_band_fs", {C}, 20000, true});  // not on the first play
         // The name: three letters (NEXT) then ACCEPT (Start) [C script menu_ebn
         // handlers], by the keyboard's Enter (Start on a text entry).
@@ -628,15 +706,10 @@ Walk::Walk(const std::string& name) : name_(name) {
         // dropdown clicked open, 120 clicked -> right click -> Options -> the
         // help bar's BACK clicked -> main (docs/guidelines/universal_launcher.md).
         steps_ = boot;
-        // ONLINE is greyed and skipped (GH3's demo_mode_disable, GD10-101):
-        // Up from CAREER wraps to OPTIONS, the pad's Down and the keyboard's
-        // back to CAREER, and the mouse over ONLINE focuses nothing.
-        steps_.push_back({"main_menu_fs",
-                          {Action::Up, "check:selected:main_menu_options_text", "key:Down", "check:selected:main_menu_career_text", Action::Up, D,
-                           "check:selected:main_menu_career_text", "hover:menu:main_menu_leaderboards_text", "check:selected:main_menu_career_text",
-                           "hover:menu:main_menu_options_text", "check:selected:main_menu_options_text", "click:menu:main_menu_options_text"},
-                          10000});
-        steps_.push_back({"options_select_option_fs", {"click:item"}, 20000});
+        // Metallica calls the legacy Options destination SETTINGS and its
+        // menu labels have generated ids; drawnBounds resolves that alias.
+        steps_.push_back({"main_menu_fs", {"check:menuclickable", "hover:menu:main_menu_options_text", "click:menu:main_menu_options_text"}, 10000});
+        steps_.push_back({"options_select_option_fs", {"check:menuclickable", "click:item"}, 20000});
         steps_.push_back({"port_enhanced",
                           {"hover:row:max_fps", "click:row:max_fps", "click:option:1", "check:enhanced:max_fps=120",
                            // Audio Backend (GDCORE-010): local, the one running, chosen again asks nothing.
@@ -660,10 +733,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         // port's screens' three pills too (click:porthelp).
         const Op W("wait"), P("check:pills");
         steps_ = boot;
-        steps_.push_back({"main_menu_fs",
-                          {W, W, P, "click:helpend:UP/DOWN", "check:selected:main_menu_options_text", "click:helplow:UP/DOWN",
-                           "check:selected:main_menu_career_text", "click:helpend:GAMEPADS"},
-                          10000});
+        steps_.push_back({"main_menu_fs", {W, W, P, "click:helpend:GAMEPADS"}, 10000});
         steps_.push_back({"port_gamepads", {Op("click:porthelp:2low", 700), "click:porthelp:2top", "click:porthelp:1"}, 10000});
         steps_.push_back({"main_menu_fs", {W, "click:menu:main_menu_options_text"}, 10000});
         steps_.push_back({"options_select_option_fs", {W, W, P, "click:helpend:ENHANCED"}, 20000});
@@ -800,23 +870,19 @@ Walk::Walk(const std::string& name) : name_(name) {
             steps_.push_back({"practice_newspaper_fs", next, 60000});
         }
     } else if (name == "options") {
-        // Options' screens no other walk opens (GD10-043): AUDIO SETTINGS,
-        // CALIBRATE LAG, CONTROLLER SETTINGS, DATA SETTINGS, BONUS VIDEOS,
-        // TOP ROCKERS, each opened and backed out of (the menu comes back
-        // with the top item focused) [C data options_select_option_fs].
+        // Metallica's Settings screen is its own six-item menu (Cheats,
+        // Band Info, Save/Load, Calibrate Lag, Audio Settings, Functional
+        // Options), with Enhanced as a separate helper-bar destination. The
+        // old GH3 walk assumed a different list and immediately opened Cheats
+        // while claiming it had opened Audio Settings.
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {"click:menu:main_menu_options_text"}, 10000});
-        const std::pair<int, const char*> screens[] = {{0, "options_audio_settings_fs"},   {1, "options_calibrate_lag_fs"},
-                                                       {2, "options_controller_settings_fs"}, {4, "options_data_settings_fs"},
-                                                       {5, "options_bonus_videos_fs"},        {7, "options_top_rockers_difficulty_select_fs"}};
-        for (const auto& [downs, state] : screens) {
-            std::vector<Op> go(size_t(downs), D);
-            go.push_back(C);
-            steps_.push_back({"options_select_option_fs", go, 20000});
-            if (downs == 0) steps_.push_back({state, {C, Op(Action::Up, 300), Op(Action::Up, 300), B, B}, 20000});
-            else steps_.push_back({state, {B}, 20000});
-        }
-        steps_.push_back({"options_select_option_fs", {}, 20000});
+        steps_.push_back({"options_select_option_fs", {C}, 20000});  // CHEATS is the first Metallica row
+        steps_.push_back({"uistate_options_cheats", {B}, 20000});
+        steps_.push_back({"options_select_option_fs", {"wait", "wait", "click:helpend:ENHANCED"}, 20000});
+        steps_.push_back({"port_enhanced", {B}, 20000});
+        steps_.push_back({"options_select_option_fs", {B}, 20000});
+        steps_.push_back({"main_menu_fs", {}, 20000});
     } else if (name == "touch") {
         // Enhanced > Enable Touch Controls on; a finger taps OPTIONS on the
         // main menu (SDL finger events, as a touch screen sends them) ->
@@ -894,20 +960,18 @@ Walk::Walk(const std::string& name) : name_(name) {
         const Op P2D = Op::p2(D), P2C = Op::p2(C);
         const int modeIdx = name == "faceoff" ? 0 : name == "proface" ? 1 : 2;
         steps_ = boot;
-        steps_.push_back({"main_menu_fs", {D, D, D, C}, 10000});
-        steps_.push_back({"mp_select_controller_fs", {Op(C, 1500), P2D, P2C}, 20000});
+        // Online is unavailable in the offline headless walk, so the menu
+        // skips that item and Multiplayer is two moves below Career.
+        steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
+        steps_.push_back({"uistate_select_controller", {Op(Action::Up, 1500), C, P2D, P2C}, 20000});
         std::vector<Op> mode;
         for (int i = 0; i < modeIdx; ++i) mode.push_back(D);
         mode.push_back(C);
-        steps_.push_back({"mp_select_mode_fs", mode, 20000});
-        // Each player scrolls the characters before picking (player 1 down
-        // three and up one: Izzy; player 2 down one: Casey): the results art
-        // shows a player's character (check:mag_photo), and GD10_FRAMELOG
-        // times the scrolls.
-        steps_.push_back({"mp_faceoff_character_select_fs", {Op(D, 300), Op(D, 300), Op(D, 300), Op(Action::Up, 300), Op::p2(D, 300), Op(C, 300), P2C}, 20000});
-        steps_.push_back({"mp_faceoff_character_hub_fs", {C, P2C}, 20000});
-        steps_.push_back({"mp_faceoff_select_venue_fs", {C}, 20000});
-        steps_.push_back({"mp_faceoff_setlist_fs", {C}, 20000});
+        steps_.push_back({"uistate_select_mp_mode", mode, 20000});
+        // Selecting a local multiplayer mode enters the character hub
+        // directly. Both players must ready before it proceeds to setlist.
+        steps_.push_back({"uistate_character_hub", {Action::Start, Op::p2(Action::Start)}, 20000});
+        steps_.push_back({"uistate_setlist", {}, 20000});
         steps_.push_back({"mp_faceoff_battle_help_fs", {C}, 20000, true});  // battle: GH3's battle help
         if (name == "proface") steps_.push_back({"mp_faceoff_select_difficulty_fs", {C}, 20000});
         else steps_.push_back({"mp_faceoff_select_difficulty_fs", {C, P2C}, 20000});
@@ -1248,15 +1312,21 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         bool found = false;
         if (target.rfind("menu:", 0) == 0) {
             float x0, y0, x1, y1;
-            found = fe.ui().drawnBounds(qbkey::key(target.substr(5).c_str()), x0, y0, x1, y1);
+            const std::string id = target.substr(5);
+            if (id.rfind("main_menu_", 0) == 0 && id.size() > 16 && id.ends_with("_text")) {
+                std::string label = id.substr(10, id.size() - 15);
+                if (label == "options") label = "settings";
+                std::transform(label.begin(), label.end(), label.begin(), [](unsigned char c) { return char(std::toupper(c == '_' ? ' ' : c)); });
+                found = fe.ui().drawnTextBounds(label, x0, y0, x1, y1);
+            } else found = fe.ui().drawnBounds(qbkey::key(id.c_str()), x0, y0, x1, y1);
             x = (x0 + x1) * 0.5f, y = (y0 + y1) * 0.5f;
         } else if (target.rfind("help:", 0) == 0 || target.rfind("helplow:", 0) == 0) {
             // A help bar pill's text; helplow: its bottom edge (the strum bar's down half).
-            const bool low = target[4] == 'l';
-            if (const ui::Element* box = fe.ui().find(qbkey::key("user_control_container")))
-                for (const auto& c : box->children)
-                    if (c->text == target.substr(low ? 8 : 5) && c->drawnIn == fe.ui().drawCount())
-                        x = (c->bx0 + c->bx1) * 0.5f, y = low ? c->by1 + 4 : (c->by0 + c->by1) * 0.5f, found = true;
+            const bool low = target.rfind("helplow:", 0) == 0;
+            std::string label = target.substr(low ? 8 : 5);
+            std::transform(label.begin(), label.end(), label.begin(), [](unsigned char c) { return char(std::toupper(c)); });
+            for (const auto& p : fe.ui().helperPills())
+                if (p.text == label) x = (p.x0 + p.x1) * 0.5f, y = low ? p.y1 - 2 : (p.y0 + p.y1) * 0.5f, found = true;
         } else if (target.rfind("menuitem:", 0) == 0) {
             // The focused menu's item N (popups' items have no names), at its drawn bounds.
             const ui::Element* menu = nullptr;
@@ -1295,7 +1365,15 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
     }
     if (starts("tap:menu:")) {  // a finger down and up on an element (window-normalised, the walk's 1280 x 720 window)
         float x0, y0, x1, y1;
-        if (!fe.ui().drawnBounds(qbkey::key(what.substr(9).c_str()), x0, y0, x1, y1)) return fail("the finger: " + what + " is not on the screen");
+        const std::string id = what.substr(9);
+        bool found = false;
+        if (id.rfind("main_menu_", 0) == 0 && id.size() > 16 && id.ends_with("_text")) {
+            std::string label = id.substr(10, id.size() - 15);
+            if (label == "options") label = "settings";
+            std::transform(label.begin(), label.end(), label.begin(), [](unsigned char c) { return char(std::toupper(c == '_' ? ' ' : c)); });
+            found = fe.ui().drawnTextBounds(label, x0, y0, x1, y1);
+        } else found = fe.ui().drawnBounds(qbkey::key(id.c_str()), x0, y0, x1, y1);
+        if (!found) return fail("the finger: " + what + " is not on the screen");
         const float nx = (x0 + x1) * 0.5f / 1280.0f, ny = (y0 + y1) * 0.5f / 720.0f;
         for (SDL_EventType t : {SDL_EVENT_FINGER_DOWN, SDL_EVENT_FINGER_UP}) {
             SDL_Event e{};
@@ -1434,6 +1512,29 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         if (nPlayers == 1 && have != want) return fail("HUD elements " + std::to_string(have) + " of the desc's " + std::to_string(want));
         if (nPlayers > 1 && (have <= 0 || have > want)) return fail("HUD elements " + std::to_string(have) + " of the desc's " + std::to_string(want));
         if (visible == 0 || drawn != visible || offscreen) return fail("HUD drawn " + std::to_string(drawn) + " of " + std::to_string(visible));
+        // GM-001: the gold star_filler (an untextured quad) must never be wider
+        // than the authored star_filler_scale.x = 0.7; the band HUD's widget
+        // passes full_scale = 1.0, which stretched the gold the full 215 px
+        // behind the white star_meter_num so the star read yellow. Every
+        // star_filler's x scale must be <= 0.7, and every star_meter_num must
+        // stay white. (projected_song_stars may be 0 early, so this bounds the
+        // width rather than requiring a non-zero fill.)
+        {
+            std::vector<const ui::Element*> q{root};
+            int fillers = 0;
+            for (size_t i = 0; i < q.size(); ++i) {
+                const ui::Element* e = q[i];
+                if (e->localId == qbkey::key("star_filler")) {
+                    ++fillers;
+                    std::printf("  hud: star_filler sx %.3f sy %.3f rgba [%d,%d,%d]\n", double(e->sx), double(e->sy), e->rgba[0], e->rgba[1], e->rgba[2]);
+                    if (e->sx > 0.7005f) return fail("star_filler x scale " + std::to_string(e->sx) + " exceeds the authored 0.7 (GM-001)");
+                }
+                if (e->localId == qbkey::key("star_meter_num"))
+                    std::printf("  hud: star_meter_num rgba [%d,%d,%d] text '%s'\n", e->rgba[0], e->rgba[1], e->rgba[2], e->text.c_str());
+                for (const auto& c : e->children) q.push_back(c.get());
+            }
+            std::printf("  hud: %d star_filler element(s)\n", fillers);
+        }
         auto findLocal = [&](const char* lid) -> const ui::Element* {
             std::vector<const ui::Element*> q{root};
             for (size_t i = 0; i < q.size(); ++i) {
@@ -1738,6 +1839,45 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
             if (!e->children.empty() && e->selected >= 0) sel = e->selected;
         return sel == std::atoi(rest("check:menusel:").c_str()) ? true : fail("the focused menu's item is " + std::to_string(sel) + ", not " + rest("check:menusel:"));
     }
+    if (what == "check:menuclickable") {
+        // GM-006: with the mouse enabled, every option of the current focused
+        // menu must have a working hit rect - menuAt returns it at the item's
+        // drawn centre (the help bar is checked separately by check:pills).
+        ui::UiSystem& ui = fe.ui();
+        const ui::Element* menu = nullptr;
+        for (const ui::Element* e : ui.focusedElements())
+            if (!e->children.empty() && e->selected >= 0) menu = e;
+        if (!menu) return fail("no focused menu to mouse-test");
+        auto itemBounds = [&](const ui::Element& ch, float& x0, float& y0, float& x1, float& y1) -> bool {
+            if (ui.drawnBounds(ch.id, x0, y0, x1, y1)) return true;
+            for (const ui::Element::Handler& h : ch.handlers) {
+                if (h.event != qbkey::key("focus")) continue;
+                for (const char* name : {"id", "text_id"})
+                    if (const qb::Value* v = qs::Vm::param(h.params, qbkey::key(name)); v && v->type == qb::Type::Key)
+                        if (ui.drawnBounds(v->key, x0, y0, x1, y1)) return true;
+            }
+            return false;
+        };
+        int tested = 0, bad = 0;
+        for (size_t i = 0; i < menu->children.size(); ++i) {
+            const ui::Element& ch = *menu->children[i];
+            if (ch.hidden || ch.notFocusable) continue;
+            float x0, y0, x1, y1;
+            if (!itemBounds(ch, x0, y0, x1, y1)) {
+                std::printf("  menuclickable: item %zu (%s) has no hit rect\n", i, qbkey::name(ch.id).c_str());
+                ++bad;
+                continue;
+            }
+            ++tested;
+            const float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f;
+            if (!ui.menuAt(cx, cy, false)) {
+                std::printf("  menuclickable: item %zu (%s) not hit at %.0f,%.0f\n", i, qbkey::name(ch.id).c_str(), double(cx), double(cy));
+                ++bad;
+            }
+        }
+        std::printf("  menuclickable: %d option(s) hittable, %d not\n", tested, bad);
+        return bad == 0 && tested > 0 ? true : fail(std::to_string(bad) + " option(s) of the focused menu are not mouse-clickable (GM-006)");
+    }
     if (what == "log:focus") {  // the focused menu item's id and text (development aid)
         for (const ui::Element* e : fe.ui().focusedElements())
             std::printf("  focus: %s \"%s\"\n", qbkey::name(e->id).c_str(), e->text.c_str());
@@ -1900,6 +2040,14 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         const float got = v ? v->number() : -1;
         std::printf("  global: %s = %g\n", kv.substr(0, eq).c_str(), double(got));
         return got == std::atof(kv.c_str() + eq + 1) ? true : fail("global " + kv);
+    }
+    if (what == "fdump:on") {  // arm the every-frame dump (GD10_FRAMEDUMP=<dir>)
+        Canvas::frameDumpArmed = true;
+        return true;
+    }
+    if (what == "fdump:off") {
+        Canvas::frameDumpArmed = false;
+        return true;
     }
     if (starts("shot:")) {  // shot:<name>: the next frame saved as <GD10_WALK_SHOTS>/<name>.bmp
         // "shot:<name>@": the name followed by the screen's state (gh4's UI stack top).

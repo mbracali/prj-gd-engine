@@ -63,6 +63,7 @@ private:
         float invMass = 0, invInertia = 0;  // keyframed: 0
         bandanim::Vec com;                  // centre of mass in the body frame
         float maxLin = 0, maxAng = 0, linDamp = 0, angDamp = 0;
+        havok::Shape shape;               // the .rag collision proxy, in the body frame
         Rt boneFromBody;                    // bone = body * boneFromBody (the bind poses)
     };
     struct Con {

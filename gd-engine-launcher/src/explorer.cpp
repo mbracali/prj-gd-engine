@@ -11,11 +11,13 @@
 #include <cmath>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 
 #include "launcher.h"
 #include "module_host.h"
 #include "palette.h"
 #include "platform.h"
+#include "songs.h"  // so ~Launcher (defined here) sees the complete Songs type
 
 using gfx::Color;
 using gfx::FontId;
@@ -78,6 +80,12 @@ struct Launcher::Explore {
     bool hasInstrument = false, showInstrument = true;
     Rect instrumentBox;  // the checkbox, inside the viewer (window pixels; empty: not shown)
     double shownAt = 0;
+    // Instrument variants (Guitar Hero / Rock Band / World Tour-era): the
+    // module offers them (GdExplorer::instrument_variant_*); 0/1 means none.
+    int variantCount = 0, variant = 0;
+    // Fullscreen (the model alone, no list or chrome) and the shortcut legend.
+    bool fullscreen = false, showLegend = false;
+    double captureAt = -100;  // a shot was just taken: flash the viewer
 
     // The camera: targets and the smoothed values drawn.
     float yaw = 0, pitch = 0.22f, zoom = 1, panX = 0, panY = 0;
@@ -288,6 +296,9 @@ void Launcher::explorePress(Fret f) {
             ex.searching = false;
             SDL_StopTextInput(window_);
             if (!ex.search.empty()) ex.search.clear(), exploreFilter();
+        } else if (ex.fullscreen) {  // then leave fullscreen
+            ex.fullscreen = false;
+            toast("Windowed");
         } else {
             exploreClose();
         }
@@ -300,14 +311,7 @@ void Launcher::explorePress(Fret f) {
         ex.cYaw = std::remainder(ex.cYaw, 2 * kPi);
         break;
     case Fret::Blue:  // the next animation: the rest pose, then each clip, then the rest pose again
-        if (!ex.clips.empty()) {
-            ex.clip = ex.clip + 1 >= int(ex.clips.size()) ? -1 : ex.clip + 1;
-            ex.shownAt = now_;
-            sounds_.play(UiSound::Select);
-        } else {
-            sounds_.play(UiSound::Error);
-            toast("This model has no animations.");
-        }
+        exploreAnim(1);
         break;
     case Fret::Orange:
         sounds_.play(UiSound::Select);
@@ -332,7 +336,167 @@ void Launcher::exploreToggleInstrument() {
     log_.add("explore " + ex.gameId + ": instrument " + (ex.showInstrument ? "shown" : "hidden"));
 }
 
-Rect Launcher::exploreViewRect() const { return R(kMargin + kPanelW + 16, kTop, W_ - 2 * kMargin - kPanelW - 16, H_ - kFooterH - 14 - kTop); }
+// A high-resolution, transparent PNG of the model, for wikis: the module
+// draws it twice, over black and over white, into the whole window's back
+// buffer (no present), and the two tell the per-pixel coverage apart so the
+// background drops out cleanly at the edges. Gate (GDUL_EXPLORE_SHOT_OPAQUE=1):
+// a single opaque pass on the viewer backdrop, for anything the matte upsets.
+void Launcher::exploreCapture() {
+    Explore& ex = *explore_;
+    if (ex.shown < 0 || !ex.ok) {
+        sounds_.play(UiSound::Error);
+        toast("Pick a model to capture first.");
+        return;
+    }
+    const GdExplorer* api = ex.session.api();
+    if (!api) return;
+    const int w = pw_, h = ph_;
+    if (w <= 0 || h <= 0) return;
+    const bool opaque = SDL_getenv("GDUL_EXPLORE_SHOT_OPAQUE") != nullptr;
+
+    auto render = [&](float r, float g, float b, std::vector<uint8_t>& out) -> bool {
+        GdExploreView view{};
+        view.x = 0, view.y = 0, view.w = w, view.h = h;  // the model fills the whole frame
+        view.yaw = ex.cYaw, view.pitch = ex.cPitch, view.zoom = ex.cZoom, view.pan_x = ex.cPanX, view.pan_y = ex.cPanY;
+        view.seconds = float(now_ - ex.shownAt);  // the pose is frozen: both passes match
+        view.clip = ex.clip;
+        view.background[0] = r, view.background[1] = g, view.background[2] = b;
+        api->draw(api->self, &view);
+        SDL_GLContext drawn = SDL_GL_GetCurrentContext();
+        bool ok = false;
+        if (drawn && drawn != context_) ok = gfx::readBackBuffer(0, 0, w, h, out, true);
+        SDL_GL_MakeCurrent(window_, context_);
+        return ok;
+    };
+
+    std::vector<uint8_t> blk, wht;
+    if (!render(0, 0, 0, blk) || (!opaque && !render(1, 1, 1, wht))) {
+        sounds_.play(UiSound::Error);
+        toast("This model could not be captured.");
+        return;
+    }
+    // readBackBuffer rows are bottom-first: flip to top-first RGBA, resolving
+    // the matte. Over black a pixel reads C*a; over white C*a + (1-a); their
+    // per-channel difference is (1-a), so a = 1 - mean(white - black), and the
+    // straight colour is (over-black) / a.
+    std::vector<uint8_t> rgba(size_t(w) * size_t(h) * 4);
+    int minX = w, minY = h, maxX = -1, maxY = -1;
+    for (int y = 0; y < h; ++y) {
+        const uint8_t* rb = &blk[size_t(h - 1 - y) * size_t(w) * 4];
+        const uint8_t* rw = opaque ? rb : &wht[size_t(h - 1 - y) * size_t(w) * 4];
+        uint8_t* o = &rgba[size_t(y) * size_t(w) * 4];
+        for (int x = 0; x < w; ++x) {
+            const uint8_t* pb = rb + x * 4;
+            uint8_t a8 = 255;
+            float R = pb[0], G = pb[1], B = pb[2];
+            if (!opaque) {
+                const uint8_t* pw = rw + x * 4;
+                const float diff = ((float(pw[0]) - pb[0]) + (float(pw[1]) - pb[1]) + (float(pw[2]) - pb[2])) / 3.f;
+                float a = 1.f - diff / 255.f;
+                a = std::clamp(a, 0.f, 1.f);
+                a8 = uint8_t(std::lround(a * 255.f));
+                if (a > 0.004f) {  // un-premultiply the over-black colour
+                    R = std::clamp(pb[0] / a, 0.f, 255.f);
+                    G = std::clamp(pb[1] / a, 0.f, 255.f);
+                    B = std::clamp(pb[2] / a, 0.f, 255.f);
+                } else {
+                    R = G = B = 0;
+                }
+            }
+            o[x * 4 + 0] = uint8_t(std::lround(R));
+            o[x * 4 + 1] = uint8_t(std::lround(G));
+            o[x * 4 + 2] = uint8_t(std::lround(B));
+            o[x * 4 + 3] = a8;
+            if (a8 > 8) {
+                minX = std::min(minX, x), maxX = std::max(maxX, x);
+                minY = std::min(minY, y), maxY = std::max(maxY, y);
+            }
+        }
+    }
+    // Crop tight to the model (a small margin), for wiki use.
+    int cx = 0, cy = 0, cw = w, ch = h;
+    if (maxX >= minX && maxY >= minY) {
+        const int pad = std::max(4, std::min(w, h) / 64);
+        cx = std::max(0, minX - pad), cy = std::max(0, minY - pad);
+        cw = std::min(w, maxX + pad + 1) - cx, ch = std::min(h, maxY + pad + 1) - cy;
+    }
+    std::vector<uint8_t> crop(size_t(cw) * size_t(ch) * 4);
+    for (int y = 0; y < ch; ++y)
+        std::memcpy(&crop[size_t(y) * size_t(cw) * 4], &rgba[(size_t(cy + y) * size_t(w) + size_t(cx)) * 4], size_t(cw) * 4);
+
+    const std::string dir = platform::join(platform::saveDir(), "shots");
+    SDL_CreateDirectory(dir.c_str());
+    std::string base = ex.gameId + "-" + ex.items[size_t(ex.shown)].name;
+    for (char& c : base)
+        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-') c = '_';
+    char stamp[32];
+    SDL_snprintf(stamp, sizeof stamp, "%llu", (unsigned long long)SDL_GetTicks());
+    const std::string path = platform::join(dir, base + "-" + stamp + ".png");
+    if (gfx::writePng(path, cw, ch, crop.data())) {
+        sounds_.play(UiSound::Select);
+        ex.captureAt = now_;
+        toast("Saved " + std::to_string(cw) + "\xC3\x97" + std::to_string(ch) + " PNG \xC2\xB7 " + path);
+        log_.add("explore " + ex.gameId + ": captured " + path + " (" + std::to_string(cw) + "x" + std::to_string(ch) + ")");
+    } else {
+        sounds_.play(UiSound::Error);
+        toast("Could not write the screenshot.");
+        log_.add("explore " + ex.gameId + ": screenshot failed (" + path + ")");
+    }
+}
+
+Rect Launcher::exploreViewRect() const {
+    // Fullscreen: the whole window is the viewer (the list and chrome are hidden).
+    if (explore_ && explore_->fullscreen) return R(0, 0, W_, H_);
+    return R(kMargin + kPanelW + 16, kTop, W_ - 2 * kMargin - kPanelW - 16, H_ - kFooterH - 14 - kTop);
+}
+
+// Fullscreen view: the model fills the window, the list and chrome gone.
+void Launcher::exploreToggleFullscreen() {
+    Explore& ex = *explore_;
+    ex.fullscreen = !ex.fullscreen;
+    if (ex.searching) {
+        ex.searching = false;
+        SDL_StopTextInput(window_);
+    }
+    sounds_.play(UiSound::Select);
+    toast(ex.fullscreen ? "Fullscreen \xC2\xB7 V or Esc to exit" : "Windowed");
+}
+
+// Next (+1) or previous (-1) animation: the rest pose, then each clip, wrapping.
+void Launcher::exploreAnim(int dir) {
+    Explore& ex = *explore_;
+    if (ex.clips.empty()) {
+        sounds_.play(UiSound::Error);
+        toast("This model has no animations.");
+        return;
+    }
+    const int n = int(ex.clips.size());
+    int next = ex.clip + dir;
+    if (next >= n) next = -1;
+    if (next < -1) next = n - 1;
+    ex.clip = next;
+    ex.shownAt = now_;
+    sounds_.play(UiSound::Select);
+}
+
+// Cycles the instrument variant (Guitar Hero / Rock Band / World Tour-era):
+// only when the module offers them (GdExplorer::instrument_variant_*).
+void Launcher::exploreCycleInstrumentVariant() {
+    Explore& ex = *explore_;
+    const GdExplorer* api = ex.session.api();
+    if (ex.variantCount < 2 || !api || !GD_EXPLORER_HAS(api, set_instrument_variant)) {
+        sounds_.play(UiSound::Error);
+        toast("This game has only its own instruments.");
+        return;
+    }
+    ex.variant = (ex.variant + 1) % ex.variantCount;
+    sounds_.play(UiSound::Select);
+    api->set_instrument_variant(api->self, ex.variant);
+    SDL_GL_MakeCurrent(window_, context_);
+    const char* name = GD_EXPLORER_HAS(api, instrument_variant_name) ? api->instrument_variant_name(api->self, ex.variant) : nullptr;
+    toast(std::string("Instrument: ") + (name && *name ? name : std::to_string(ex.variant + 1).c_str()));
+    log_.add("explore " + ex.gameId + ": instrument variant " + std::to_string(ex.variant));
+}
 
 // ---- Input ----
 
@@ -380,14 +544,23 @@ bool Launcher::exploreHandle(const SDL_Event& e) {
         case SDLK_EQUALS: case SDLK_PLUS: case SDLK_KP_PLUS: ex.zoom = std::max(0.08f, ex.zoom * 0.85f); return true;
         case SDLK_MINUS: case SDLK_KP_MINUS: ex.zoom = std::min(6.f, ex.zoom / 0.85f); return true;
         case SDLK_R: explorePress(Fret::Yellow); return true;
-        case SDLK_N: case SDLK_TAB: explorePress(Fret::Blue); return true;
-        case SDLK_T: case SDLK_O: explorePress(Fret::Orange); return true;
+        case SDLK_N: case SDLK_TAB: exploreAnim(1); return true;
+        case SDLK_B: exploreAnim(-1); return true;  // previous animation
+        case SDLK_T: case SDLK_O: case SDLK_SPACE: explorePress(Fret::Orange); return true;  // pause / resume the rotation
         case SDLK_I: exploreToggleInstrument(); return true;
+        case SDLK_K: exploreCycleInstrumentVariant(); return true;  // Rock Band / World Tour-era instruments
+        case SDLK_V: case SDLK_F11: exploreToggleFullscreen(); return true;
+        case SDLK_P: case SDLK_F12: exploreCapture(); return true;  // transparent, high-res PNG for wikis
+        case SDLK_H: ex.showLegend = !ex.showLegend; sounds_.play(UiSound::Select); return true;
+        case SDLK_M: {  // Hear the songs
+            for (Game& g : catalog_.games())
+                if (g.id == ex.gameId) { songsOpen(g); break; }
+            return true;
+        }
         case SDLK_LEFT: case SDLK_A: exploreMove(0, -1); return true;  // also on key repeat
         case SDLK_RIGHT: case SDLK_D: exploreMove(0, 1); return true;
         case SDLK_UP: case SDLK_W: exploreMove(-1, 0); return true;
         case SDLK_DOWN: case SDLK_S: exploreMove(1, 0); return true;
-        case SDLK_P: return true;  // no Play here
         default: return false;
         }
     }
@@ -535,6 +708,17 @@ bool Launcher::exploreScript(const std::string& cmd, const std::string& arg) {
         explorePress(Fret::Yellow);
     } else if (cmd == "instrument") {
         if ((arg != "0") != ex.showInstrument) exploreToggleInstrument();
+    } else if (cmd == "variant") {
+        exploreCycleInstrumentVariant();
+    } else if (cmd == "fullscreen") {
+        if ((arg != "0") != ex.fullscreen) exploreToggleFullscreen();
+    } else if (cmd == "legend") {
+        ex.showLegend = arg != "0";
+    } else if (cmd == "shotpng") {
+        exploreCapture();
+    } else if (cmd == "songs") {
+        for (Game& g : catalog_.games())
+            if (g.id == ex.gameId) { songsOpen(g); break; }
     } else if (cmd == "turntable") {
         ex.turntable = arg != "0";
     } else if (cmd == "collapse" || cmd == "expand") {  // a group (its name has <arg>), or "all"
@@ -558,6 +742,10 @@ void Launcher::exploreLoad() {
     const GdExplorer* api = ex.session.api();
     const int item = ex.pending;
     ex.pending = -1;
+    // The animation under the cursor before the switch: kept across a change
+    // of character (by name), so two characters can be compared in the same
+    // pose. The rest pose (clip -1) stays the rest pose.
+    const std::string keepClip = ex.clip >= 0 && ex.clip < int(ex.clips.size()) ? ex.clips[size_t(ex.clip)] : std::string();
     char info[512] = {};
     const Uint64 t0 = SDL_GetTicksNS();
     ex.ok = api->select(api->self, item, info, int(sizeof info)) == 0;
@@ -572,9 +760,21 @@ void Launcher::exploreLoad() {
             ex.clips.push_back(c ? c : "");
         }
     }
-    ex.clip = -1;  // the rest pose first: arms out, nothing through the body (Next animation plays the clips)
+    // Keep the same animation if the new model has it, else the rest pose. (On
+    // a fresh select the module starts from the rest pose, so when we keep a
+    // clip it plays it from its start, in step with the model it is compared to.)
+    ex.clip = -1;
+    if (!keepClip.empty())
+        for (size_t i = 0; i < ex.clips.size(); ++i)
+            if (ex.clips[i] == keepClip) {
+                ex.clip = int(i);
+                break;
+            }
     ex.hasInstrument = ex.ok && GD_EXPLORER_HAS(api, has_instrument) && GD_EXPLORER_HAS(api, show_instrument) &&
                        api->has_instrument(api->self) != 0;
+    // How many instrument variants this model offers (Guitar Hero / Rock Band / World Tour-era).
+    ex.variantCount = ex.ok && GD_EXPLORER_HAS(api, instrument_variant_count) ? api->instrument_variant_count(api->self) : 0;
+    ex.variant = 0;
     ex.shownAt = double(SDL_GetTicksNS() - startNs_) / 1e9;
     const Explore::Item& it = ex.items[size_t(item)];
     char secs[32];
@@ -665,6 +865,13 @@ void Launcher::exploreFrame() {
 
 void Launcher::exploreDraw() {
     Explore& ex = *explore_;
+    // Fullscreen: the model alone (its card and animation pill), and the legend.
+    if (ex.fullscreen) {
+        exploreDrawViewer(exploreViewRect());
+        if (now_ - ex.captureAt < 0.22) gfx_.rect(R(0, 0, W_, H_), withAlpha(kCream, float(0.5 * (1 - (now_ - ex.captureAt) / 0.22))));
+        exploreDrawLegend();
+        return;
+    }
     // The header: a dark fade over the 3D view, the badge, the title and the game.
     gfx_.rect(R(0, 0, W_, kTop + 10), rgb(0x0b0a0d, 0.92f), rgb(0x0b0a0d, 0));
     gfx_.glow(R(34, 22, 48, 48), withAlpha(kOxblood, 0.35f), 24 * s_, 60 * s_);
@@ -679,7 +886,56 @@ void Launcher::exploreDraw() {
 
     exploreDrawList(R(kMargin, kTop, kPanelW, H_ - kFooterH - 14 - kTop));
     exploreDrawViewer(exploreViewRect());
+    if (now_ - ex.captureAt < 0.22) {
+        const Rect v = exploreViewRect();
+        gfx_.rect(v, withAlpha(kCream, float(0.5 * (1 - (now_ - ex.captureAt) / 0.22))), 16 * s_);
+    }
     exploreDrawFooter();
+    exploreDrawLegend();
+}
+
+// The keyboard shortcuts, in the top-right of the viewer. H shows the full
+// list; otherwise a one-line hint. Drawn in windowed and fullscreen view.
+void Launcher::exploreDrawLegend() {
+    Explore& ex = *explore_;
+    const Rect v = exploreViewRect();
+    const float vx = v.x / s_, vy = v.y / s_, vw = v.w / s_;
+    if (!ex.showLegend) {
+        const std::string hint = "H \xE2\x80\xA2 shortcuts";
+        const float hw = measure(FontId::SemiBold, 13, hint) + 20;
+        const Rect pill = R(vx + vw - hw - 12, vy + 12, hw, 26);
+        gfx_.rect(pill, rgb(0x0e0d10, 0.72f), 13 * s_);
+        gfx_.ring(pill, withAlpha(kCream, 0.12f), 13 * s_, 1 * s_);
+        text(FontId::SemiBold, 13, vx + vw - hw - 12 + 10, vy + 12 + 6, hint, kSand);
+        return;
+    }
+    struct Row { const char* key; const char* what; };
+    const Row rows[] = {
+        {"V / F11", "Fullscreen"}, {"Space", "Pause / resume turning"}, {"R", "Reset view & pose"},
+        {"N / B", "Next / previous animation"}, {"I", "Instrument on / off"}, {"K", "Instrument variant"},
+        {"P / F12", "Save transparent PNG"}, {"M", "Hear the songs"}, {"/", "Search"}, {"H", "Hide this"},
+    };
+    const int n = int(sizeof rows / sizeof rows[0]);
+    float keyW = 0, whatW = 0;
+    for (const Row& r : rows) {
+        keyW = std::max(keyW, measure(FontId::SemiBold, 14, r.key));
+        whatW = std::max(whatW, measure(FontId::Regular, 14, r.what));
+    }
+    const float padX = 16, gap = 14, lineH = 22;
+    const float cardW = padX * 2 + keyW + gap + whatW;
+    const float cardH = 34 + float(n) * lineH;
+    const Rect card = R(vx + vw - cardW - 12, vy + 12, cardW, cardH);
+    gfx_.glow(card, rgb(0x000000, 0.5f), 14 * s_, 22 * s_);
+    gfx_.rect(card, rgb(0x1d1a20, 0.96f), rgb(0x141115, 0.97f), 14 * s_);
+    gfx_.ring(card, withAlpha(kCream, 0.1f), 14 * s_, 1 * s_);
+    const float cx = vx + vw - cardW - 12;
+    text(FontId::SemiBold, 13, cx + padX, vy + 12 + 10, "SHORTCUTS", kSand, 2.2f);
+    float y = vy + 12 + 34;
+    for (const Row& r : rows) {
+        text(FontId::SemiBold, 14, cx + padX, y, r.key, kCream);
+        text(FontId::Regular, 14, cx + padX + keyW + gap, y, r.what, kDim);
+        y += lineH;
+    }
 }
 
 void Launcher::exploreDrawList(const Rect& panelPx) {

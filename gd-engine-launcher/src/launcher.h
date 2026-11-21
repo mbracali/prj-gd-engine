@@ -84,15 +84,32 @@ private:
     void exploreGroup(int group, int state);  // state: 1 collapse, 0 expand, -1 toggle; group -2: all
     bool exploreScript(const std::string& cmd, const std::string& arg);  // true: a command of the explorer
     void exploreToggleInstrument();
+    void exploreCycleInstrumentVariant();  // Rock Band / World Tour-era instruments (needs module hooks)
+    void exploreToggleFullscreen();        // hide the list and chrome, the model alone
+    void exploreAnim(int dir);             // +1 next animation, -1 previous
+    void exploreCapture();                 // a high-res, no-background PNG of the model, for wikis
     void exploreFrame();
     void exploreDraw();
     void exploreDrawList(const gfx::Rect& panel);
     void exploreDrawViewer(const gfx::Rect& view);
     void exploreDrawFooter();
+    void exploreDrawLegend();  // the keyboard shortcuts, in a corner (H toggles it)
     void exploreFilter();
     void exploreCursor(int row);
     void exploreLoad();
     gfx::Rect exploreViewRect() const;
+
+    // The "Hear the songs" screen (songs.cpp): a module's songs listed, one
+    // played as a short preview through the launcher's audio device.
+    struct Songs;
+    std::unique_ptr<Songs> songs_;
+    void songsOpen(Game& g);
+    void songsClose();
+    bool songsHandle(const SDL_Event& e);  // true: used
+    void songsFrame();
+    void songsDraw();
+    void songsPlay(int row);
+    void songsStop();
     void askQuit();
     void openWebsite();
     void showDiscFolders(const std::string& title);
@@ -108,6 +125,7 @@ private:
     bool startGl(std::string& error);
     void stopGl();
     void leaveFullscreen();
+    void toggleFullscreen();  // the header's full-screen / windowed button (and F11)
     bool duplicatePress(const SDL_Event& e);  // true: drop it
     void openGamepads();
     void closeGamepads();
@@ -171,6 +189,7 @@ private:
         bool valid = false, maximized = false;
         int x = 0, y = 0, w = 1280, h = 720;
     } saved_;
+    bool userFullscreen_ = false;  // the header's full-screen toggle (desktop; not Big Picture / Android)
     int heldDir_ = 0;  // gamepad direction held: 1 up, 2 down, 3 left, 4 right
     double repeatAt_ = 0;
 

@@ -203,6 +203,13 @@ void Player::hit(size_t i, double now, bool tap) {
     cur_ = i + 1;
 }
 
+int Player::sustainUnawarded() const {
+    const int held = sus_.note >= 0 && size_t(sus_.note) < t_.notes.size()
+                         ? std::max(0, t_.notes[size_t(sus_.note)].maxSustainPoints - sus_.awarded)
+                         : 0;
+    return sustainForfeited_ + held;
+}
+
 void Player::updateSustain(double now, double dt, const FrameInput& in) {
     (void)dt;
     if (sus_.note < 0) return;
@@ -243,6 +250,11 @@ void Player::updateSustain(double now, double dt, const FrameInput& in) {
     if (left <= hold * tu_.whammyMinHoldPct / 100.0 || (shortHold && left <= hold * tu_.whammyMinHoldPctShort / 100.0))
         changeHealth(true, now);
     events_.push_back({PlayerEvent::Kind::SustainLost, sus_.note, now});
+    // A hit sustain that ends with points unawarded (the next note forced its
+    // release, or its charted length slightly over-runs what is holdable):
+    // those points are not achievable, so keep leaving them out of the
+    // projected-stars base for the rest of the song (not just while held).
+    sustainForfeited_ += std::max(0, n.maxSustainPoints - sus_.awarded);
     sus_ = Sustain{};
 }
 
@@ -392,6 +404,7 @@ void Player::frame(double now, double dt, const FrameInput& raw) {
 }
 
 void Player::startAt(double ms) {
+    sustainForfeited_ = 0;
     while (cur_ < t_.notes.size() && double(t_.notes[cur_].time) < ms) {
         const TrackNote& n = t_.notes[cur_];
         if (n.phrase >= 0 && size_t(n.phrase) < missedPhrase_.size()) missedPhrase_[size_t(n.phrase)] = true;

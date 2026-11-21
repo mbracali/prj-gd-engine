@@ -452,7 +452,7 @@ void Renderer::release(Texture& t) {
     t = {};
 }
 
-bool readBackBuffer(int x, int y, int w, int h, std::vector<uint8_t>& out) {
+bool readBackBuffer(int x, int y, int w, int h, std::vector<uint8_t>& out, bool keepAlpha) {
     if (w <= 0 || h <= 0 || !gl.glReadPixels) return false;
     // Whatever context is current (a game module's): only read state is
     // touched, and put back as it was.
@@ -471,9 +471,90 @@ bool readBackBuffer(int x, int y, int w, int h, std::vector<uint8_t>& out) {
     gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, GLuint(packBuffer));
     gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(readFb));
     if (readFb == 0) gl.glReadBuffer(GLenum(readBuf));
-    // Opaque: the module's alpha is not meant for blending.
-    for (size_t i = 3; i < out.size(); i += 4) out[i] = 255;
+    // Opaque: the module's alpha is not meant for blending (unless the caller
+    // wants it, for a transparent capture).
+    if (!keepAlpha)
+        for (size_t i = 3; i < out.size(); i += 4) out[i] = 255;
     return true;
+}
+
+namespace {
+
+uint32_t crc32Of(const uint8_t* p, size_t n, uint32_t crc) {
+    static uint32_t table[256];
+    static bool ready = false;
+    if (!ready) {
+        for (uint32_t i = 0; i < 256; ++i) {
+            uint32_t c = i;
+            for (int k = 0; k < 8; ++k) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+            table[i] = c;
+        }
+        ready = true;
+    }
+    crc = ~crc;
+    for (size_t i = 0; i < n; ++i) crc = table[(crc ^ p[i]) & 0xFF] ^ (crc >> 8);
+    return ~crc;
+}
+
+void be32(std::vector<uint8_t>& v, uint32_t x) {
+    v.push_back(uint8_t(x >> 24)), v.push_back(uint8_t(x >> 16)), v.push_back(uint8_t(x >> 8)), v.push_back(uint8_t(x));
+}
+
+void pngChunk(std::vector<uint8_t>& out, const char* type, const std::vector<uint8_t>& data) {
+    be32(out, uint32_t(data.size()));
+    const size_t start = out.size();
+    out.insert(out.end(), type, type + 4);
+    out.insert(out.end(), data.begin(), data.end());
+    be32(out, crc32Of(out.data() + start, 4 + data.size(), 0));
+}
+
+}  // namespace
+
+bool writePng(const std::string& path, int w, int h, const uint8_t* rgba) {
+    if (w <= 0 || h <= 0 || !rgba) return false;
+    // Each row with a leading filter byte (0: none).
+    std::vector<uint8_t> raw;
+    raw.reserve(size_t(h) * (1 + size_t(w) * 4));
+    for (int y = 0; y < h; ++y) {
+        raw.push_back(0);
+        const uint8_t* row = rgba + size_t(y) * size_t(w) * 4;
+        raw.insert(raw.end(), row, row + size_t(w) * 4);
+    }
+    // zlib stream, stored (uncompressed) deflate blocks: always correct, no
+    // compressor needed for a one-off screenshot.
+    std::vector<uint8_t> z;
+    z.push_back(0x78), z.push_back(0x01);
+    for (size_t pos = 0; pos < raw.size() || raw.empty();) {
+        const size_t n = std::min<size_t>(65535, raw.size() - pos);
+        const bool last = pos + n >= raw.size();
+        z.push_back(last ? 1 : 0);
+        z.push_back(uint8_t(n & 0xFF)), z.push_back(uint8_t((n >> 8) & 0xFF));
+        const uint16_t nlen = uint16_t(~n);
+        z.push_back(uint8_t(nlen & 0xFF)), z.push_back(uint8_t((nlen >> 8) & 0xFF));
+        z.insert(z.end(), raw.begin() + ptrdiff_t(pos), raw.begin() + ptrdiff_t(pos + n));
+        pos += n;
+        if (last) break;
+    }
+    uint32_t a = 1, b = 0;
+    for (size_t i = 0; i < raw.size(); ++i) {  // Adler-32 of the raw data
+        a = (a + raw[i]) % 65521;
+        b = (b + a) % 65521;
+    }
+    be32(z, (b << 16) | a);
+
+    std::vector<uint8_t> out = {137, 80, 78, 71, 13, 10, 26, 10};
+    std::vector<uint8_t> ihdr;
+    be32(ihdr, uint32_t(w)), be32(ihdr, uint32_t(h));
+    ihdr.push_back(8), ihdr.push_back(6), ihdr.push_back(0), ihdr.push_back(0), ihdr.push_back(0);  // 8-bit, RGBA
+    pngChunk(out, "IHDR", ihdr);
+    pngChunk(out, "IDAT", z);
+    pngChunk(out, "IEND", {});
+
+    SDL_IOStream* io = SDL_IOFromFile(path.c_str(), "wb");
+    if (!io) return false;
+    const bool ok = SDL_WriteIO(io, out.data(), out.size()) == out.size();
+    SDL_CloseIO(io);
+    return ok;
 }
 
 float Renderer::lineHeight(FontId f, float px) { return atlas(f, px)->lineHeight; }

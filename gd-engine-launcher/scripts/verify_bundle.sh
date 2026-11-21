@@ -257,6 +257,16 @@ for gi in "${game_infos[@]}"; do
         esac
       done
       nonempty "$d/licenses/FFmpeg-LICENSE.LGPL-2.1.txt" ;;
+    06|07)  # Guitar Hero: Aerosmith / World Tour — FFmpeg (XMA audio, Bink videos) and its LGPL notice
+      for lib in avformat avcodec avutil; do
+        case "$os" in
+          windows) one_of "$id: $lib-*.dll" "$libs/$lib"-*.dll ;;
+          linux) one_of "$id: lib$lib.so.N" "$libs/lib$lib".so.[0-9]* ;;
+          macos) one_of "$id: lib$lib.N.dylib" "$libs/lib$lib".[0-9]*.dylib ;;
+          android) one_of "$id: lib$lib.so" "$libs/lib$lib.so" ;;
+        esac
+      done
+      nonempty "$d/licenses/FFmpeg-LICENSE.LGPL-2.1.txt" ;;
     05)  # FFmpeg with the build suffix _gd05 (Bink videos, XMA sound effects) and its LGPL notice
       for lib in avformat avcodec avutil; do
         case "$os" in

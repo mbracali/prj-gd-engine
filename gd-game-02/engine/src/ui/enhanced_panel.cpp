@@ -41,16 +41,19 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         // engine-backend-guidelines.md 4): read once at start-up
         // (startupGraphicsBackend / startupAudioBackend in app.h); no mode
         // changes them. Only what this build offers (no OpenGL on macOS, rule 7).
-        // The first value is the default (GDALL-050, owner 11-13): Vulkan on
-        // Windows and Linux (Steam Deck too), local on macOS and Android.
+        // The first value is the default. Wave 20261118 §4 (owner): the shared
+        // core backend everywhere — Vulkan on Windows, Linux, Steam Deck and
+        // Android; sdl3 on macOS. "local" stays selectable for now (removed in
+        // the later per-game step). (Supersedes GDALL-050's macOS/Android=local.)
 #if defined(__APPLE__)
-        {"graphics_backend", {"local", "sdl3", "vulkan"}},
+        {"graphics_backend", {"sdl3", "vulkan", "local"}},
 #elif defined(__ANDROID__)
-        {"graphics_backend", {"local", "sdl3", "vulkan", "opengl3"}},
+        {"graphics_backend", {"vulkan", "sdl3", "local", "opengl3"}},
 #else
         {"graphics_backend", {"vulkan", "local", "sdl3", "opengl3"}},
 #endif
-        {"audio_backend", {"local", "miniaudio", "openal", "faudio"}},
+        // Audio: miniaudio everywhere (wave 20261118 §4). "local" kept for now.
+        {"audio_backend", {"miniaudio", "local", "openal", "faudio"}},
         {"internal_res", {"1080", "0", "448", "480", "720", "800", "900", "1440", "2160"}},
         {"sharp_ui", {"off", "on"}},
         {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
@@ -184,12 +187,19 @@ void migrateEnhanced(Json& e) {
         const EnhancedSetting* s = enhancedSetting(k);
         return v.type == Json::Type::String && s && enhancedValid(*s, v.str());
     };
-    // GDALL-050: a file older than settings_version 2 kept "local" as the old
-    // default; it takes the new default (Vulkan on Windows / Linux) once. A
-    // player who picks local afterwards keeps it (the file is version 2 then).
+    // Wave 20261118 §4 (supersedes GDALL-050): an older file's old-default
+    // "local" backends take the new core defaults once — graphics to Vulkan /
+    // sdl3, audio to miniaudio; a non-local choice the player made stays. The
+    // new fleet defaults themselves (FPS counter on, full-screen no border,
+    // 1080p, sharp UI, bloom off, per-OS max-fps/touch/shake) apply to a fresh
+    // enhanced.json (enhancedProfile); an existing file keeps its other values.
     const bool older = !e.has("settings_version") || e["settings_version"].num() < kEnhancedVersion;
-    if (older && e.has("graphics_backend") && e["graphics_backend"].str() == "local")
-        e.set("graphics_backend", Json::string(defaultGraphicsBackend()));
+    if (older) {
+        if (e.has("graphics_backend") && e["graphics_backend"].str() == "local")
+            e.set("graphics_backend", Json::string(defaultGraphicsBackend()));
+        if (e.has("audio_backend") && e["audio_backend"].str() == "local")
+            e.set("audio_backend", Json::string("miniaudio"));
+    }
     Json kept = Json::object();
     for (const auto& [k, v] : e.o)
         if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks" && backendKept(k, v)) kept.set(k, v);
@@ -210,30 +220,33 @@ std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck) {
     // differ only in the window, frame rate, resolution and touch.
     Values d = originalLook();
     d.erase("no_effects");
-    for (const auto& [k, v] : Values{{"no_shaky_cam", "off"}, {"fps_counter", "off"},
-                                     // Desktop: Linux, Windows, macOS.
-                                     {"screen_mode", "windowed"}, {"max_fps", "120"}, {"internal_res", "1080"}, {"touch", "off"}})
+    // Fleet defaults (wave 20261118 §4, owner), every OS: FPS counter on,
+    // full-screen no border, 1080p, sharp UI on, bloom off; controls off on
+    // desktop (touch and shake=whammy on handhelds below).
+    for (const auto& [k, v] : Values{{"no_shaky_cam", "off"}, {"fps_counter", "on"},
+                                     {"screen_mode", "borderless"}, {"internal_res", "1080"},
+                                     {"sharp_ui", "on"}, {"bloom", "none"},
+                                     {"touch", "off"}, {"shake_whammy", "off"}})
         d[k] = v;
-    auto set = [&](std::initializer_list<std::pair<const char*, const char*>> kv) {
-        for (const auto& [k, v] : kv) d[k] = v;
+    // Max FPS: 120 on Windows and macOS, 60 on Linux.
+#if defined(_WIN32) || defined(__APPLE__)
+    d["max_fps"] = "120";
+#else
+    d["max_fps"] = "60";
+#endif
+    auto handheld = [&] {
+        d["touch"] = "on";  // touch + whammy shake on the Steam Deck and Android only
+        d["shake_whammy"] = "on";
+        d["max_fps"] = "60";
     };
-    auto handheld = [&] { set({{"screen_mode", "fullscreen"}, {"max_fps", "60"}}); };
 #if defined(__ANDROID__)
     (void)deck;
     handheld();
-    set({{"internal_res", "900"}, {"touch", "on"}});
 #else
 #if defined(GD02_STEAM_DECK)
     deck = true;
 #endif
-#if defined(_WIN32) || defined(__APPLE__)
-    d["internal_res"] = "1440";
-#endif
-    if (deck) {
-        handheld();
-        d["internal_res"] = "800";
-        d["touch"] = "on";  // touch is on by default on the Steam Deck and Android only (universal_mechanisms.md 1.2.2)
-    }
+    if (deck) handheld();
 #endif
     return {d.begin(), d.end()};
 }

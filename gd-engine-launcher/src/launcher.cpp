@@ -27,7 +27,7 @@ namespace {
 constexpr const char* kTitle = "Guitar Dream Universal Launcher";
 constexpr const char* kWebsite = "https://guitardreamengine.com";
 // Hits that are not a row's buttons or a dialog's.
-constexpr int kHitWebsite = -10, kHitDiscs = -11, kHitUpdates = -12;
+constexpr int kHitWebsite = -10, kHitDiscs = -11, kHitUpdates = -12, kHitFullscreen = -13;
 const std::string kDot = " \xC2\xB7 ";  // " · "
 
 using namespace palette;
@@ -403,6 +403,34 @@ void Launcher::leaveFullscreen() {
              ((SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) ? " (the system did not confirm it)" : ""));
 }
 
+// The header's full-screen / windowed button (and F11): desktop only. Big
+// Picture is always full screen; Android has no window mode.
+void Launcher::toggleFullscreen() {
+#if !defined(__ANDROID__)
+    if (platform::bigPicture()) return;
+    userFullscreen_ = !userFullscreen_;
+    if (userFullscreen_) {
+        rememberWindow();  // capture the windowed size / position to come back to
+        SDL_SetWindowFullscreenMode(window_, nullptr);  // borderless desktop full screen, not a video mode
+        SDL_SetWindowFullscreen(window_, true);
+        SDL_SyncWindow(window_);
+        log_.add("window: full screen (toggle)");
+    } else {
+        leaveFullscreen();
+        if (saved_.valid) {  // restore the windowed size / position
+            if (saved_.maximized) {
+                SDL_MaximizeWindow(window_);
+            } else {
+                SDL_SetWindowSize(window_, saved_.w, saved_.h);
+                SDL_SetWindowPosition(window_, saved_.x, saved_.y);
+            }
+            SDL_SyncWindow(window_);
+        }
+    }
+    SDL_GetWindowSizeInPixels(window_, &pw_, &ph_);
+#endif
+}
+
 void Launcher::openGamepads() {
     int n = 0;
     if (SDL_JoystickID* ids = SDL_GetGamepads(&n)) {
@@ -564,6 +592,10 @@ void Launcher::frame() {
         running_ = false;
         return;
     }
+    if (songs_) {
+        songsFrame();
+        return;
+    }
     if (explore_) {
         exploreFrame();
         return;
@@ -623,14 +655,15 @@ void Launcher::screenshot(const std::string& path) {
 
 void Launcher::handle(const SDL_Event& e) {
     if (duplicatePress(e)) return;
+    if (songs_ && songsHandle(e)) return;
     if (explore_ && exploreHandle(e)) return;
     switch (e.type) {
     case SDL_EVENT_QUIT:
         running_ = false;
         break;
-    case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:  // the launcher is always a window (desktops; Android has no window mode)
+    case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:  // the launcher is a window unless Big Picture or the user's toggle (desktops; Android has no window mode)
 #if !defined(__ANDROID__)
-        if (!platform::bigPicture()) SDL_SetWindowFullscreen(window_, false);  // Big Picture: full screen
+        if (!platform::bigPicture() && !userFullscreen_) SDL_SetWindowFullscreen(window_, false);  // Big Picture / toggle: stay full screen
 #endif
         break;
     case SDL_EVENT_DROP_BEGIN:
@@ -666,6 +699,7 @@ void Launcher::handle(const SDL_Event& e) {
         case SDLK_E: if (!e.key.repeat) press(Fret::Blue); break;
         case SDLK_P: if (!e.key.repeat && !dialog_.open) activate(focusRow_, kPlay); break;
         case SDLK_U: if (!e.key.repeat && !dialog_.open) updateMenu(); break;
+        case SDLK_F11: if (!e.key.repeat) toggleFullscreen(); break;
         default: break;
         }
         break;
@@ -730,10 +764,11 @@ void Launcher::handle(const SDL_Event& e) {
         for (auto it = hits_.rbegin(); it != hits_.rend(); ++it) {
             if (!it->r.contains(mx, my)) continue;
             mouseUsed_ = true;
-            if (it->row == kHitWebsite || it->row == kHitDiscs || it->row == kHitUpdates) {
+            if (it->row == kHitWebsite || it->row == kHitDiscs || it->row == kHitUpdates || it->row == kHitFullscreen) {
                 if (click && !dialog_.open) {
                     if (it->row == kHitWebsite) openWebsite();
                     else if (it->row == kHitUpdates) updateMenu();
+                    else if (it->row == kHitFullscreen) toggleFullscreen();
                     else showDiscFolders("Where we look for discs");
                 }
             } else if (it->row < 0) {
@@ -1205,6 +1240,27 @@ void Launcher::drawHeader() {
     tx += text(FontId::SemiBold, 17, tx, py + 7, url, kCream) + 8;
     text(FontId::SemiBold, 17, tx + (hover ? 3.f : 0.f), py + 7, arrow, hover ? kCream : kSand);
     hits_.push_back({pill, kHitWebsite, -1});
+
+    // Full-screen / windowed toggle: a small square button left of the site
+    // pill (desktop only; Big Picture is always full screen, Android has no
+    // window mode).
+#if !defined(__ANDROID__)
+    if (!platform::bigPicture()) {
+        const float fs = 36, fx = px - 12 - fs, fy = py, cx = fx + fs / 2, cy = fy + fs / 2;
+        const Rect fb = R(fx, fy, fs, fs);
+        const bool fhover = !modal && fb.contains(mx, my);
+        gfx_.rect(fb, fhover ? rgb(0x3a3a44) : rgb(0x2a2a30, 0.95f), fhover ? rgb(0x202026) : rgb(0x161619, 0.95f), 10 * s_);
+        gfx_.ring(fb, withAlpha(fhover ? kCream : kSand, fhover ? 0.85f : 0.45f), 10 * s_, 1.2f * s_);
+        const Color ic = fhover ? kCream : kSand;
+        if (userFullscreen_) {  // in full screen now: the icon is a window (go windowed)
+            gfx_.ring(R(cx - 7, cy - 5, 14, 10), ic, 3 * s_, 1.4f * s_);
+            gfx_.rect(R(cx - 7, cy - 5, 14, 3), ic, ic, 1.5f * s_);  // its title bar
+        } else {  // windowed now: the icon is a full frame (go full screen)
+            gfx_.ring(R(cx - 8, cy - 6, 16, 12), ic, 3 * s_, 1.4f * s_);
+        }
+        hits_.push_back({fb, kHitFullscreen, -1});
+    }
+#endif
 
     int highlighted = 0;
     for (const Game& g : games) highlighted += g.playable() ? 1 : 0;

@@ -92,6 +92,9 @@ class Vm {
 public:
     // Enhanced > Enable Cut Content (StructureContains ... debug_only reads false; set by the app).
     static inline bool cutContent = false;
+    // Enhanced > CHEATS > Unlock Everything (issue #94; set by the app): run
+    // GH3's own unlock-everything cheat once the main menu is reached.
+    static inline bool unlockAllCheat = false;
     explicit Vm(Globals& globals);
 
     Globals& globals() { return g_; }

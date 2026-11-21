@@ -14,9 +14,11 @@
 
 const std::vector<EnhancedSetting>& enhancedSettings() {
     // The doc's ranges (universal_mechanisms.md 1.2.2, gd03's): the first
-    // value is the default, the original game's look (GD10-029): windowed, 60
-    // FPS, the window's resolution, every effect off (Bokeh Medium and
-    // Particles Original are GH3's own). The controls start on.
+    // value is a setting's base, but the actual start-up defaults are the
+    // per-OS profile in enhancedProfile() (wave 20261118 §4): full-screen no
+    // border, 1080p, FPS counter on, sharp UI on, the shared core backends,
+    // every added effect off (Bokeh Medium and Particles Original are GH3's
+    // own look, kept). The controls start on.
     static const std::vector<EnhancedSetting> k = {
         {"mouse", {"on", "off"}},
         {"touch", {"off", "on"}},
@@ -30,16 +32,21 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         // (startupGraphicsBackend / startupAudioBackend in app.h); no mode
         // changes them. Only what this build offers (no OpenGL on macOS, rule
         // 7): another saved value is dropped on load, a set refused.
-        // The first value is the default (GDALL-050, owner 11-13): Vulkan on
-        // Windows and Linux (Steam Deck too), local on macOS and Android.
+        // The first value is the default. Wave 20261118 §4 (owner): the shared
+        // core backend everywhere — Vulkan on Windows, Linux, Steam Deck and
+        // Android; sdl3 on macOS. "local" stays as a selectable option for now
+        // (it is removed outright in the later per-game step), just no longer
+        // the default. (Supersedes GDALL-050's macOS/Android = local.)
 #if defined(__APPLE__)
-        {"graphics_backend", {"local", "sdl3", "vulkan"}},
+        {"graphics_backend", {"sdl3", "vulkan", "local"}},
 #elif defined(__ANDROID__)
-        {"graphics_backend", {"local", "sdl3", "vulkan", "opengl3"}},
+        {"graphics_backend", {"vulkan", "sdl3", "local", "opengl3"}},
 #else
         {"graphics_backend", {"vulkan", "local", "sdl3", "opengl3"}},
 #endif
-        {"audio_backend", {"local", "miniaudio", "openal", "faudio"}},
+        // Audio: miniaudio everywhere (wave 20261118 §4). "local" kept as an
+        // option for now, removed in the per-game step.
+        {"audio_backend", {"miniaudio", "local", "openal", "faudio"}},
         {"internal_res", {"0", "720", "800", "900", "1080", "1440", "2160"}},
         {"sharp_ui", {"off", "on"}},
         {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
@@ -92,17 +99,40 @@ bool enhancedValid(const EnhancedSetting& s, const std::string& value) {
 }
 
 std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck) {
-    // The defaults (the first values: the original look) with the platform's
-    // window and touch rows: a handheld starts full screen at 800p.
+    // Wave 20261118 §4 (owner): the new per-OS start-up defaults. Start from
+    // each setting's list front, then apply the fleet policy and the per-OS
+    // rows. Backends come from the per-OS list fronts above (Vulkan / sdl3,
+    // miniaudio).
     std::map<std::string, std::string> d;
     for (const EnhancedSetting& e : enhancedSettings())
         if (!e.values.empty()) d[e.key] = e.values.front();
+    // Fleet defaults, every OS: FPS counter on, full-screen no border, 1080p,
+    // sharp UI on, bloom off. Controls: mouse on (list front), touch and
+    // shake=whammy off on desktop.
+    d["fps_counter"] = "on";
+    d["screen_mode"] = "borderless";  // Full Screen (No Border)
+    d["internal_res"] = "1080";
+    d["sharp_ui"] = "on";
+    d["bloom"] = "none";
+    d["touch"] = "off";
+    d["shake_whammy"] = "off";
+    // Max FPS: 120 on Windows and macOS, 60 on Linux, Steam Deck and Android.
+    bool apple = false, android = false, win = false;
 #if defined(__ANDROID__)
-    (void)deck;
-    d["screen_mode"] = "fullscreen", d["internal_res"] = "900", d["touch"] = "on";
-#else
-    if (deck) d["screen_mode"] = "fullscreen", d["internal_res"] = "800", d["touch"] = "on";
+    android = true;
+#elif defined(__APPLE__)
+    apple = true;
+#elif defined(_WIN32)
+    win = true;
 #endif
+    d["max_fps"] = (win || apple) ? "120" : "60";
+    // Handhelds (Android always, or a Steam Deck build at runtime): touch and
+    // shake=whammy on, 60 FPS.
+    if (android || deck) {
+        d["touch"] = "on";
+        d["shake_whammy"] = "on";
+        d["max_fps"] = "60";
+    }
     return {d.begin(), d.end()};
 }
 
@@ -138,9 +168,9 @@ std::vector<std::pair<std::string, std::string>> with(Values base, std::initiali
 
 std::vector<std::pair<std::string, std::string>> enhancedPreset(const std::string& mode) {
     if (mode == "steam_deck")
-        return with(originalLook(), {{"screen_mode", "fullscreen"}, {"max_fps", "60"}, {"internal_res", "800"}, {"bloom", "original"},
+        return with(originalLook(), {{"screen_mode", "borderless"}, {"max_fps", "60"}, {"internal_res", "1080"}, {"bloom", "none"},
                                      {"cinematic_color", "on"}, {"star_blur", "light"}, {"antialiasing", "fxaa"}, {"sharp_ui", "on"},
-                                     {"fps_counter", "off"}});
+                                     {"fps_counter", "on"}});
     if (mode == "original") return with(originalLook(), {{"max_fps", "60"}});
     if (mode == "clean")
         return with(lowest(), {{"internal_res", "1080"}, {"max_fps", "120"}, {"particles", "original"}, {"antialiasing", "fxaa"}, {"sharp_ui", "on"}});
@@ -203,6 +233,12 @@ void EnhancedStore::load(const std::string& dir) {
             // (the old default) takes the new default once. Local picked
             // afterwards stays (the file is version 3 then).
             if (k == "graphics_backend" && version < 3 && value == "local") value = enhancedDefault(k);
+            // Version 4 (wave 20261118 §4): audio "local" (the old default)
+            // takes the new default (miniaudio) once; a non-local audio choice
+            // the player made is kept. The new fleet defaults themselves apply
+            // to a fresh enhanced.json (enhancedProfile); an existing file keeps
+            // the player's other choices.
+            if (k == "audio_backend" && version < 4 && value == "local") value = enhancedDefault(k);
             if (s && enhancedValid(*s, value)) values_[k] = value;
         }
     } catch (const std::exception& e) {
@@ -225,7 +261,7 @@ void EnhancedStore::set(const std::string& key, const std::string& value) {
 void EnhancedStore::save() const {
     if (dir_.empty()) return;
     Json root = Json::object(), settings = Json::object();
-    root.set("version", Json::number(3));  // 3: Vulkan the default graphics backend (GDALL-050)
+    root.set("version", Json::number(4));  // 4: wave 20261118 §4 fleet defaults (3: GDALL-050 Vulkan default)
     for (const auto& [k, v] : values_) settings.set(k, Json::string(v));
     root.set("settings", settings);
     std::error_code ec;

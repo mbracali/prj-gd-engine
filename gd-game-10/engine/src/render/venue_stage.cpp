@@ -121,7 +121,7 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
     cameras_ = {};
     lights_ = {};
     cameras_.init(*venue_, g, chart, songKey ^ venue_->zoneKey, leadInMs, songStartMs);
-    lights_.init(*venue_, g, chart);
+    lights_.init(*venue_, g, chart, songKey);
     // The band (create_band, at the song's start: the gem scroller's lead-in) [C script].
     band_.reset();
     if (!SDL_getenv("GD10_NO_BAND")) {

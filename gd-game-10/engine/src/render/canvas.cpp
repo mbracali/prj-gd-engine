@@ -109,6 +109,23 @@ bool Canvas::end(bool holdIfEmpty) {
         }
         shotPath.clear();
     }
+    // GD10_FRAMEDUMP=<dir> (development aid): save every presented frame as
+    // <dir>/d_<n>.bmp, up to GD10_FRAMEDUMP_MAX (default 200) frames, so a
+    // whole menu transition can be inspected frame by frame.
+    static const char* fdDir = SDL_getenv("GD10_FRAMEDUMP");
+    if (fdDir && *fdDir && frameDumpArmed) {
+        static int fdMax = [] { const char* m = SDL_getenv("GD10_FRAMEDUMP_MAX"); return m && *m ? std::atoi(m) : 200; }();
+        static int fdN = 0;
+        if (fdN < fdMax) {
+            if (SDL_Surface* s = renderer_.readPixels()) {
+                char p[1024];
+                std::snprintf(p, sizeof p, "%s/d_%04d.bmp", fdDir, fdN);
+                SDL_SaveBMP(s, p);
+                SDL_DestroySurface(s);
+            }
+            ++fdN;
+        }
+    }
     // GD10_FRAMEPROBE=1 (development aid): every presented frame's mean
     // brightness (0..255) and the time since the last one, so black or
     // stalled frames between screens can be counted (the transitions).
@@ -157,8 +174,9 @@ void Canvas::flush() {
     c.vertexOffset = bufferUsed_;
     c.count = int(batch_.size());
     c.state.blend = batchBlend_ != Blend::Opaque;
-    c.state.src = gfx::BlendFactor::SrcAlpha;
-    c.state.dst = batchBlend_ == Blend::Add || batchBlend_ == Blend::Sub ? gfx::BlendFactor::One : gfx::BlendFactor::InvSrcAlpha;
+    c.state.src = batchBlend_ == Blend::Brighten ? gfx::BlendFactor::DstColor : gfx::BlendFactor::SrcAlpha;
+    c.state.dst = batchBlend_ == Blend::Add || batchBlend_ == Blend::Sub || batchBlend_ == Blend::Brighten ? gfx::BlendFactor::One
+                                                                                                           : gfx::BlendFactor::InvSrcAlpha;
     c.state.op = batchBlend_ == Blend::Sub ? gfx::BlendOp::ReverseSubtract : gfx::BlendOp::Add;
     c.textures[0] = gfx::TextureId{batchTexture_ ? batchTexture_ : atlas_.id};
     c.samplers[0] = {batchTexture_ ? gfx::Filter::Linear : gfx::Filter::Nearest, batchRepeat_ ? gfx::Wrap::Repeat : gfx::Wrap::Clamp, 0};

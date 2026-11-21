@@ -47,16 +47,19 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         // engine-backend-guidelines.md 4): read once at start-up
         // (startupGraphicsBackend / startupAudioBackend in app.h); no mode
         // changes them. Only what this build offers (no OpenGL on macOS, rule 7).
-        // The first value is the default (GDALL-050, owner 11-13): Vulkan on
-        // Windows and Linux (Steam Deck too), local on macOS and Android.
+        // The first value is the default. Wave 20261118 §4 (owner): the shared
+        // core backend everywhere — Vulkan on Windows, Linux, Steam Deck and
+        // Android; sdl3 on macOS. "local" stays selectable for now (removed in
+        // the later per-game step). (Supersedes GDALL-050's macOS/Android=local.)
 #if defined(__APPLE__)
-        {"graphics_backend", {"local", "sdl3", "vulkan"}},
+        {"graphics_backend", {"sdl3", "vulkan", "local"}},
 #elif defined(__ANDROID__)
-        {"graphics_backend", {"local", "sdl3", "vulkan", "opengl3"}},
+        {"graphics_backend", {"vulkan", "sdl3", "local", "opengl3"}},
 #else
         {"graphics_backend", {"vulkan", "local", "sdl3", "opengl3"}},
 #endif
-        {"audio_backend", {"local", "miniaudio", "openal", "faudio"}},
+        // Audio: miniaudio everywhere (wave 20261118 §4). "local" kept for now.
+        {"audio_backend", {"miniaudio", "local", "openal", "faudio"}},
         {"internal_res", {"0", "448", "480", "720", "800", "900", "1080", "1440", "2160"}},
         {"widescreen", {"off", "on"}},
         {"sharp_ui", {"off", "on"}},
@@ -101,14 +104,26 @@ const EnhancedSetting* enhancedSetting(const std::string& key) {
 }
 
 const char* platformDefault(const std::string& key, bool deck, bool android) {
-    if (deck) {
-        if (key == "screen_mode") return "fullscreen";
-        if (key == "max_fps") return "60";
-        if (key == "fps_counter") return "off";
-        if (key == "internal_res") return "800";
+    // Wave 20261118 §4 (owner): the per-OS start-up defaults. These win over
+    // each setting's list front; keys not here fall to the list front (the
+    // original look). Fleet defaults for every platform, plus the handheld
+    // (Steam Deck / Android) rows.
+    const bool handheld = deck || android;
+    if (key == "touch" || key == "shake_whammy") return handheld ? "on" : "off";
+    if (key == "max_fps") {
+        if (handheld) return "60";
+#if defined(_WIN32) || defined(__APPLE__)
+        return "120";  // Windows and macOS
+#else
+        return "60";   // Linux
+#endif
     }
-    if (key == "touch" && (deck || android)) return "on";  // on by default on the Steam Deck and Android (universal_mechanisms.md 1.2.2)
-    if (key == "internal_res" && android) return "900";      // gd01's Android default (GD03-108, #105)
+    if (key == "fps_counter") return "on";
+    if (key == "screen_mode") return "borderless";  // Full Screen (No Border)
+    if (key == "internal_res") return "1080";
+    if (key == "sharp_ui") return "on";
+    if (key == "widescreen") return "on";
+    if (key == "bloom") return "none";
     return nullptr;
 }
 
@@ -204,12 +219,20 @@ void migrateEnhanced(Json& e) {
         const EnhancedSetting* s = enhancedSetting(k);
         return v.type == Json::Type::String && s && enhancedValid(*s, v.str());
     };
-    // GDALL-050: a file older than settings_version 2 kept "local" as the old
-    // default; it takes the new default (Vulkan on Windows / Linux) once. A
-    // player who picks local afterwards keeps it (the file is version 2 then).
+    // Wave 20261118 §4 (supersedes GDALL-050): an older file's old-default
+    // "local" backends take the new core defaults once — graphics to Vulkan /
+    // sdl3, audio to miniaudio; a non-local choice the player made stays. The
+    // new fleet defaults themselves (FPS counter on, full-screen no border,
+    // 1080p, sharp UI, bloom off, widescreen on, per-OS max-fps/touch/shake)
+    // apply to a fresh enhanced.json (App::enhancedValue / platformDefault); an
+    // existing file keeps its other values.
     const bool older = !e.has("settings_version") || e["settings_version"].num() < kEnhancedVersion;
-    if (older && e.has("graphics_backend") && e["graphics_backend"].str() == "local")
-        e.set("graphics_backend", Json::string(defaultGraphicsBackend()));
+    if (older) {
+        if (e.has("graphics_backend") && e["graphics_backend"].str() == "local")
+            e.set("graphics_backend", Json::string(defaultGraphicsBackend()));
+        if (e.has("audio_backend") && e["audio_backend"].str() == "local")
+            e.set("audio_backend", Json::string("miniaudio"));
+    }
     Json kept = Json::object();
     for (const auto& [k, v] : e.o)
         if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks" && backendKept(k, v)) kept.set(k, v);

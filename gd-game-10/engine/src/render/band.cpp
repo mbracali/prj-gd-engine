@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 
 #include "data/disc.h"
@@ -24,6 +25,8 @@
 namespace {
 
 constexpr uint32_t K(const char* s) { return qbkey::key(s); }
+
+uint32_t keyOfValue(const qb::Value* v) { return v && (v->type == qb::Type::Key || v->type == qb::Type::KeyPtr) ? v->key : 0u; }
 
 // get_start_node_id: <zone>_TRG_Waypoint_<member>_start (one player:
 // guitarist, bassist, drummer, vocalist) [C script].
@@ -60,10 +63,11 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
     // The song's performance events (<song>_performance in songs\<song>.mid.qb).
     std::vector<const qb::Struct*> perfEvents;
     const std::string songPak = "DATA/COMPRESSED/SONGS/" + chart.song + "_song.pak.xen";
+    std::shared_ptr<const Pak> songArchive;
     if (!chart.song.empty() && disc.exists(songPak)) {
         try {
-            const auto pakShared = Pak::shared(disc, songPak);
-            const Pak& pak = *pakShared;
+            songArchive = Pak::shared(disc, songPak);
+            const Pak& pak = *songArchive;
             for (const PakEntry& e : pak.entries()) {
                 if (e.type != K(".qb")) continue;
                 auto [p, size] = pak.data(e);
@@ -85,7 +89,49 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
     // The song's anim struct (car_male_anim_struct_<song>[_alt]) lives in
     // the song pak, not yet in the globals at this point [C data].
     std::vector<band::Member> picked = chosen;
-    for (band::Member& m : picked) band::songAnimPart(g, songFiles_, qbkey::key(chart.song), m);
+    for (band::Member& m : picked) {
+        band::songAnimPart(g, songFiles_, qbkey::key(chart.song), m);
+        // Some song performance clips live in <song>_song.pak, alongside the
+        // performance QB, while the body / mocap clips live in
+        // <song>_anims.pak. Load that bank for members whose performance
+        // events actually reference its SKAs (Fade to Black's GHM singer
+        // lip-sync clips and KirkSolo_KN guitar clips are examples) [C data].
+        bool needsSongArchive = false;
+        if (songArchive) {
+            auto songClip = [&](uint32_t key) { return key && songArchive->findType(key, K(".ska")); };
+            auto structOf = [](const qb::Value* value) -> const qb::Struct* {
+                return value && value->type == qb::Type::Struct && value->st ? value->st.get() : nullptr;
+            };
+            for (const qb::Struct* event : perfEvents) {
+                const uint32_t script = keyOfValue(event->find(K("scr")));
+                const qb::Struct* params = structOf(event->find(K("params")));
+                if (!params) continue;
+                if (script == K("band_playfacialanim")) {
+                    if (keyOfValue(params->find(K("name"))) == m.object && songClip(keyOfValue(params->find(K("anim"))))) {
+                        needsSongArchive = true;
+                        break;
+                    }
+                } else if (script == K("band_playclip")) {
+                    const uint32_t clipKey = keyOfValue(params->find(K("clip")));
+                    const qb::Struct* clip = structOf(g.find(clipKey));
+                    if (!clip)
+                        for (const qb::File& file : songFiles_)
+                            if ((clip = structOf(file.find(clipKey)))) break;
+                    const qb::Struct* anims = clip ? structOf(clip->find(K("anims"))) : nullptr;
+                    const uint32_t anim = anims ? keyOfValue(anims->find(m.object)) : 0;
+                    if (anim && anim != K("none") && songClip(anim)) {
+                        needsSongArchive = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (needsSongArchive && std::find(m.animPaks.begin(), m.animPaks.end(), songPak) == m.animPaks.end()) {
+            m.animPaks.push_back(songPak);
+            if (std::getenv("GD10_ANIMLOG"))
+                SDL_Log("band: loading %s animation clips for %s", songPak.c_str(), m.profileName.c_str());
+        }
+    }
     members_.reserve(picked.size());
     for (const band::Member& m : picked) {
         Entry e;
@@ -128,10 +174,6 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
 // The ragdoll: the profile's ragdoll (ragdoll2 for outfit 2) from
 // global.pak, its accessory bodies simulated (ragdoll_setaccessorybones
 // accessory_bones = $Guitarist_accessory_bones) [C scripts].
-namespace {
-uint32_t keyOfValue(const qb::Value* v) { return v && (v->type == qb::Type::Key || v->type == qb::Type::KeyPtr) ? v->key : 0u; }
-}  // namespace
-
 std::unique_ptr<AccessorySim> Band::accessorySim(const Disc& disc, const Globals& g, const band::Member& m, const bandanim::Rig& rig,
                                                  std::shared_ptr<const Pak>& globalPak) {
     if (SDL_getenv("GD10_NO_RAGDOLL")) return nullptr;

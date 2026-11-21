@@ -386,4 +386,63 @@ bool ExploreSession::close() {
     return unloaded;
 }
 
+// ---- Song previews ----
+
+struct SongSession::State {
+    SDL_Window* window;
+    SDL_GLContext context;
+    std::string modulePath;
+    void* lib = nullptr;
+    std::unique_ptr<HostSetup> setup;
+};
+
+SongSession::SongSession() = default;
+SongSession::~SongSession() { close(); }
+
+bool SongSession::open(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& launcherVersion,
+                       ActionLog& log, std::string& error) {
+    close();
+    void* lib = platform::openLibrary(game.modulePath, error);
+    if (!lib) {
+        error = "cannot load " + platform::fileName(game.modulePath) + ": " + error;
+        return false;
+    }
+    auto entry = reinterpret_cast<GdGameSongsFn>(platform::librarySymbol(lib, GD_GAME_SONGS_SYMBOL));
+    if (!entry) {
+        error = "this " + game.id + " module has no song previews yet";
+        platform::closeLibrary(lib, game.modulePath);
+        return false;
+    }
+    state_ = std::make_unique<State>();
+    state_->window = window, state_->context = context, state_->modulePath = game.modulePath, state_->lib = lib;
+    state_->setup = std::make_unique<HostSetup>(window, context, game, launcherVersion, log);
+    if (!state_->setup->discError.empty()) {
+        error = "its disc image cannot be read: " + state_->setup->discError + ". Choose it again with Load ISO.";
+        state_.reset();
+        platform::closeLibrary(lib, game.modulePath);
+        return false;
+    }
+    state_->setup->captureLog(game.id + "-songs.log");
+    const GdSongs* api = entry(&state_->setup->host);
+    SDL_GL_MakeCurrent(window, context);
+    if (!api || api->size < sizeof(GdSongs) || !api->song_count || !api->song || !api->decode_preview || !api->close) {
+        error = "the " + game.id + " song previews did not open (see logs/" + game.id + "-songs.log in the save folder)";
+        close();
+        return false;
+    }
+    api_ = api;
+    return true;
+}
+
+bool SongSession::close() {
+    if (!state_) return true;
+    if (api_) api_->close(api_->self);
+    api_ = nullptr;
+    state_->setup->releaseLog();
+    SDL_GL_MakeCurrent(state_->window, state_->context);
+    const bool unloaded = platform::closeLibrary(state_->lib, state_->modulePath);
+    state_.reset();
+    return unloaded;
+}
+
 void setExtraGameArgs(const std::vector<std::string>& args) { extraGameArgs() = args; }
