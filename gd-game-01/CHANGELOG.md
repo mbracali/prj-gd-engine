@@ -6,6 +6,11 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.15] - 2026-11-21
+
+### Added
+- Hear the Songs: listen to Guitar Hero's soundtrack previews from the launcher.
+
 ## [1.1.14] - 2026-11-16
 
 ### Added
