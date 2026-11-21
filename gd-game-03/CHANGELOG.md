@@ -5,6 +5,14 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [1.1.10] - 2026-11-21
+
+### Changed
+- The shared graphics and audio backend is now the default on every platform (Vulkan on Windows, Linux, Steam Deck and Android; miniaudio for audio). You can still pick the others in Enhanced options.
+
+### Added
+- Hear the Songs: listen to the soundtrack previews from the launcher.
+
 ## [1.1.9] - 2026-11-16
 
 ### Added

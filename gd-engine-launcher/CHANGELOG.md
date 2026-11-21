@@ -2,8 +2,26 @@
 
 ## Unreleased
 
+## 1.1.17
+
 Highlights
+- Two new games join the launcher: Guitar Hero: Aerosmith and Guitar Hero World Tour — early previews, built on the Guitar Hero III and World Tour engines and read from your own discs.
+- Hear the Songs: listen to any game's soundtrack previews right from the launcher.
+- Explore Models is better: full screen, keyboard shortcuts with an on-screen legend, it keeps the animation when you switch characters, and it exports high-resolution PNGs with a transparent background (#95).
 - Update from inside the launcher (#114): it checks GitHub for a new version at start (or from the version badge), shows what is new and, only when you say Update now, downloads, checks and installs it, keeping your discs, saves and settings. Android opens the new APK in the browser; the AppImage keeps its own updates.
+- Guitar Hero: Metallica looks more like the real thing: hair that no longer clips through the band, a drum kit that animates per hit, its own two-player HUD and in-song messages, and no more freeze on a song's first frame.
+- Extra Enhanced cheats (Unlock Everything, Star Power Always Full, Always Max Multiplier, Hyperspeed) now in Guitar Hero III, Aerosmith and World Tour (#94).
+
+Details
+- gd01 1.1.15: soundtrack previews in Hear the Songs.
+- gd02 1.1.17: Enhanced HDR and Cinematic Color no longer darken the stage during songs (#115).
+- gd03 1.1.10: the shared graphics and audio backend is the default on every platform (Vulkan on Windows, Linux, Steam Deck and Android); the others stay selectable.
+- gd04 1.1.9: four new Enhanced cheats (#94); soundtrack previews.
+- gd05 0.0.9: solo sections turn the highway blue, readable band and profile backgrounds, sustain tails that follow the curve, Rock Band idle poses, and the fail/save camera in band games.
+- gd06 0.0.1 (new): Guitar Hero: Aerosmith debuts as an early preview, with the new Enhanced cheats.
+- gd07 0.0.1 (new): Guitar Hero World Tour debuts as an early preview.
+- gd10 0.0.3: realistic hair, an animated drum kit, the two-player HUD, in-song messages, and the first-frame freeze gone.
+- gd24 0.0.1: Rock Band Unplugged first boot (songs on the original highway) — in development, not in the launcher bundle yet.
 
 ## 1.1.16
 

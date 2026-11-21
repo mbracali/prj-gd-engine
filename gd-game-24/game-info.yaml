@@ -7,7 +7,7 @@ nick_name: "Rock Band Unplugged"
 launch: 2009-06-09
 platforms: [PlayStation Portable]
 based_on: PlayStation Portable
-guitar_dream_version: "0.0.0"
+guitar_dream_version: "0.0.1"
 ready_to_play: false
 completeness: 0
 # How the launcher recognises this game's disc image (by content, not name),

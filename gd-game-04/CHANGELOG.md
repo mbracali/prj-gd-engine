@@ -5,6 +5,12 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [1.1.9] - 2026-11-21
+
+### Added
+- Four new Enhanced cheats, off by default: Unlock Everything, Star Power Always Full, Always Max Multiplier and Hyperspeed (#94).
+- Hear the Songs: listen to the soundtrack previews from the launcher.
+
 ## [1.1.8] - 2026-11-16
 
 ### Added

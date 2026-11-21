@@ -5,7 +5,14 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-11-21
+
+### Added
+- The drum kit animates per hit — cymbals, toms and snare react as they are played.
+
 ### Fixed
+- The band members' hair no longer clips through their bodies (ragdoll collision).
+- The song-progress star meter no longer dips while you hold a sustained note.
 - Face-off and Pro Face-off use Guitar Hero: Metallica's own two-player HUD (the face-off meter with both scores, multipliers, streaks and Star Power).
 - In-song messages in Guitar Hero: Metallica's own style: Hot Start!, note streaks and Star Power Ready.
 - A band member leaves its set piece when the next one does not include it, as in the original (e.g. Kirk in Sad But True).
