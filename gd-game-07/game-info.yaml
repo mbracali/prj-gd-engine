@@ -8,5 +8,8 @@ launch: 2008-10-26
 platforms: [Xbox 360, PlayStation 3, Wii, PlayStation 2, Windows, macOS]
 based_on: Xbox 360
 guitar_dream_version: "0.0.0"
-ready_to_play: false
-completeness: 0
+ready_to_play: true
+completeness: 0.30
+iso_signatures:
+  - format: xdvdfs            # USA / Europe (read from default.xex's execution info)
+    xex_title_id: "4156081A"

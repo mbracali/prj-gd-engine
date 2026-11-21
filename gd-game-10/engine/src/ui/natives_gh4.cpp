@@ -316,6 +316,11 @@ void addGh4Natives(qs::Vm& vm) {
     vm.addNative("CasCancelLoading", [](Vm&, ScriptRun&, qb::Struct&) { return true; });
     vm.addNative("CASBlockForLoading", [](Vm&, ScriptRun&, qb::Struct&) { return true; });
     vm.addNative("CasBlockForComposite", [](Vm&, ScriptRun&, qb::Struct&) { return true; });
+    // The port does not enqueue CAS composition work (modelbuilder_build is
+    // not implemented), so the game's CASWaitForComposite polling script
+    // would otherwise spin until the VM's 10 s condition-call timeout. There
+    // is no composition job to wait for here [C scripts; I].
+    vm.addNative("CASWaitForComposite", [](Vm&, ScriptRun&, qb::Struct&) { return true; });
     // obj_getid: the element (object) the script runs on, as objid [C scripts].
     vm.addNative("obj_getid", [setLocal](Vm&, ScriptRun& run, qb::Struct&) {
         if (!run.object) return false;

@@ -21,6 +21,13 @@ class Vm;
 // returns whether anything changed.
 bool ensureGlitches(qs::Vm& vm);
 
+// Enhanced > CHEATS > Unlock Everything (issue #94): run GH3's own debug
+// unlock-all (playday_unlockall -> GlobalTags_UnlockAll) so every song, venue,
+// guitar, character, outfit, style and bonus video is unlocked. Returns
+// whether the script was found and run. Faithful to the original: the unlock
+// is permanent in the save.
+bool unlockEverything(qs::Vm& vm);
+
 // The Vault: GH3 keeps its purchases (guitars, finishes, characters,
 // outfits, styles, videos, bonus songs) save-wide; the port scopes "all
 // bought" to The Glitches' band only (owner 2026-10-29, GD04-026). While the

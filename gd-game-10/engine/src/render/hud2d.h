@@ -139,7 +139,7 @@ private:
     HudAnim comboText_, glowburst_, readyText_;
     double lightningStart_ = -1e18;
     double startMs_ = 0;
-    void drawAlert(Canvas& c, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align) const;
+    void drawAlert(Canvas& c, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align, bool outline = false) const;
     // Star Power look.
     bool ready_ = false, active_ = false;
     double readyStart_ = -1e18, activeStart_ = -1e18, offStart_ = -1e18;
@@ -160,7 +160,7 @@ void combo(HudAnim& text, HudAnim& glow, double at, float x, float y, float base
 // "Star Power Ready" at (x, y), base scale, the big scale's multiplier.
 void ready(HudAnim& text, double at, float x, float y, float base, float mult);
 // Draws an alert's text (shadow (2,2) black).
-void draw(Canvas& c, const Hud2D::TextFn& text, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align);
+void draw(Canvas& c, const Hud2D::TextFn& text, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align, bool outline = false);
 }  // namespace hudalert
 
 // The song's intro texts (setup_sprites' intro_song_info_text,

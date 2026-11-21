@@ -56,7 +56,11 @@ qb.pak: 472 QB files (GH3: 448), 372 of them in both games; 3,417 scripts
 Same sections as GH3 plus one more part: `<song>_song_aux_{Easy..Expert}`,
 `<song>_aux_<diff>_Star` and `<song>_aux_<diff>_StarBattleMode` [C: one song
 compared section by section; to check on every song in M1]. What the
-aux part is used for is open (OPEN_QUESTIONS).
+aux part is used for is open (OPEN_QUESTIONS). M1: the chart reader
+(`engine/src/game/chart.cpp`) reads only the sections it names, so the aux
+sections parse as ordinary QB arrays and are **skipped cleanly** (no new `Part`
+infix yet); wiring the aux part to a `Part` is M3 (GD06-003). `--formattest`
+parses every chart's QB in full regardless.
 
 ## Textures, scenes, Havok, fonts, sounds
 
@@ -66,16 +70,37 @@ DXN, 8_8_8_8, cubes, one volume), 0 problems; `scn.py check` 159 `.scn`, 11
 bodies, 949 constraints, 0 problems; `.fnt`, `.wav`, `.table`, `.nqb`, `.pfx`,
 `.rag` parse with GH3's layouts.
 
-## Animations (`.ska`): the one decoder gap
+## Animations (`.ska`): the two decoder differences (resolved, M1 / GD06-002)
 
-`anim.py check` (GH3's) rejects 30,333 of Aerosmith's 33,213 `.ska` (GH3: 0):
-compressed rotation keys decode to quaternion parts up to 2.0 long (GH3's never
-exceed 1.0). The header, flags and section layout are the same (the flag
-values seen are GH3's, plus a few new combinations: 0x06834000, 0x06835100,
-0x16011040, ...). The XEX's rotation-key decoder is unchanged
-(Aerosmith 0x82426528 and GH3 0x824213B8 have the same 1,160-byte body [C]),
-so the data uses a path of the decoder or its caller that GH3's anims never
-took and our parser does not model yet [I]. To be read in M1 (GD06-002).
+GH3's `anim.py check` rejected 30,333 of Aerosmith's 33,213 `.ska` (GH3: 0).
+Two independent differences, both now handled; the header, flags and section
+layout are otherwise GH3's, and the XEX's rotation-key decoder is byte-identical
+(Aerosmith 0x82426528 and GH3 0x824213B8, same 1,160-byte body [C]).
+
+1. **Compressed rotation-key scale.** The decoder emits a raw `s16` per xyz
+   component; the float scale is the only difference the data takes. Aerosmith
+   uses **1/32768** (full range `[-1, 1)`); GH3 used 1/16384. Objective check
+   over the whole disc: at 1/32768, 0 of 8,164,872 keys have `|xyz| > 1` and the
+   maximum `|xyz|` is exactly 1.0 (w = 0, the full range is used); at 1/16384,
+   48% fail with `|xyz|` up to 2.0. Fixed in `engine/src/data/anim.cpp` `s16f`
+   and `tools/anim.py` `Q_SCALE`. This is the 30,333 the kickoff flagged.
+
+2. **Multi-key uncompressed-float track** (7 clips, all in `perm_anims.pak`).
+   `flags & 0x10000000` (the GH3 "single pose", 16-byte float keys) **and
+   `flags & 0x4000`**, with `duration > 0` and more than one key per bone (GH3
+   always had exactly one). Each 16-byte entry is `(0, x, y, z)`: for Q the xyz
+   with w derived (`|xyz| <= 1` across all 7 clips, max exactly 1.0); for T the
+   xyz as the translation; the leading float is always 0 [C]. GH3's pose layout
+   is `(x, y, z, w)` / `(x, y, z, 1)`. The discriminator is clean: `0x4000` set
+   (clips `0x16034080`, `0x16035080`, `0x16434080`) is multi-key float; clear
+   (`0x16091240`, `0x16011040`) is a true single pose, unchanged. Parsed in
+   `anim.cpp` / `anim.py`; **frame times are assigned by index (provisional)**
+   and w's sign is taken positive -> real timing / sign is M3/M4.
+
+New clip-flag combinations seen (all now parse): `0x06834000`, `0x06835100`,
+`0x068b4000`, `0x068b0200`, `0x16091240`, `0x16011040`, `0x16034080`, ... The
+`0x10000` bit (per-component path) and `0x4000` bit are the ones GH3's anims
+never set.
 
 ## Audio
 

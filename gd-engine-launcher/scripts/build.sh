@@ -6,7 +6,7 @@
 #   gd-engine-launcher/local_builds/gdul-<version>-<os>-<arch>/   (git-ignored)
 #
 # Usage: gd-engine-launcher/scripts/build.sh [linux] [appimage] [steamdeck] [windows] [macos] [android] [all]
-#                                            [--force] [--previous <folder>]
+#                                            [--force] [--only <NN,...>] [--previous <folder>]
 #   (no build)  the one for the system you are on
 #   linux       Linux x86-64, with this machine's compiler and SDL3 (cmake,
 #               ninja, a C++20 compiler, SDL3 development files)
@@ -38,9 +38,20 @@
 #               previous build, is the same: the game's sources, gd-engine-core,
 #               the module SDK, the recipes and the toolchain; see
 #               module_build_key)
+#   --only <NN,...>  local-dev speed-up: (re)build only these games' modules
+#               (06, gd06 or gd-game-06; comma/space lists) for the chosen
+#               system; every OTHER game's module is reused as-is from the
+#               previous build so the bundle stays complete (it stops rather
+#               than ship a missing module if a previous one isn't there). Use
+#               it to iterate on one game fast. Not for releases.
 #   --previous <folder>  where the previous build is (also GDUL_PREVIOUS_BUILD):
 #               a build folder, or unpacked release downloads (an .apk is
 #               unpacked too); default: the newest build in local_builds/
+#
+# Build speed: install ccache (dnf/brew/apt) and repeated builds reuse compiled
+# objects automatically (CMAKE_<LANG>_COMPILER_LAUNCHER); GDUL_NO_CCACHE=1 off.
+# A module whose sources, core, SDK, recipes and toolchain are unchanged is
+# reused from the previous build, so only what changed is recompiled.
 #
 # Every build carries the module of EVERY game with ready_to_play true in
 # games.yaml (a build_module_NN recipe for each, for every system): a game
@@ -63,15 +74,24 @@ case "$(uname -s)" in
   Darwin) host=macos ;;
   *) host=unknown ;;
 esac
-targets=() force=0 previous="${GDUL_PREVIOUS_BUILD:-}"
+targets=() force=0 previous="${GDUL_PREVIOUS_BUILD:-}" only_games=""
+add_only() {  # normalise gdNN / NN / comma-or-space lists into " NN NN " tokens
+  local tok; for tok in ${1//,/ }; do
+    tok="${tok##*-}"; tok="${tok#gd}"; tok="${tok#game}"; tok="${tok#-}"
+    case "$tok" in [0-9][0-9]) only_games="$only_games $tok" ;;
+      *) echo "build.sh: --only: '$tok' is not a game number (NN, gdNN or gd-game-NN)" >&2; exit 2 ;; esac
+  done
+}
 while [ $# -gt 0 ]; do
   case "$1" in
     linux|appimage|steamdeck|windows|macos|android) targets+=("$1") ;;
     all) targets+=(linux appimage steamdeck windows macos android) ;;
     --force) force=1 ;;
+    --only) [ $# -ge 2 ] || { echo "build.sh: --only needs a game list (e.g. --only 06,07)" >&2; exit 2; }; add_only "$2"; shift ;;
+    --only=*) add_only "${1#--only=}" ;;
     --previous) [ $# -ge 2 ] || { echo "build.sh: --previous needs a folder" >&2; exit 2; }; previous="$2"; shift ;;
     --previous=*) previous="${1#--previous=}" ;;
-    -h|--help) sed -n '4,50p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '4,61p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build.sh: unknown build or option $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
@@ -80,6 +100,18 @@ done
 if [ -n "$previous" ]; then
   [ -d "$previous" ] || { echo "build.sh: --previous $previous: no such folder" >&2; exit 2; }
   previous="$(cd "$previous" && pwd)"
+fi
+only_games="${only_games# }"  # trim leading space
+
+# ccache (GDUL build-speed, 2026-11-18): the single biggest win for repeated
+# local builds. CMake reads CMAKE_<LANG>_COMPILER_LAUNCHER from the environment
+# at configure time and bakes it into every module (and the deps it
+# add_subdirectory's: glslang, SDL3-on-Android, SDL3_image, KTX, FAudio). No
+# ccache on the machine (dnf/brew/apt install ccache) => a full build as before;
+# GDUL_NO_CCACHE=1 forces that. FFmpeg (autotools, ~13 s, stamp-cached) is left
+# alone. Mirrors what gdul-release.yml already does for the GitHub release jobs.
+if [ -z "${GDUL_NO_CCACHE:-}" ] && [ -z "${CMAKE_CXX_COMPILER_LAUNCHER:-}" ] && command -v ccache >/dev/null; then
+  export CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache
 fi
 
 if [ -t 1 ]; then B=$'\e[1m' G=$'\e[32m' Y=$'\e[33m' R=$'\e[31m' C=$'\e[36m' N=$'\e[0m'; else B="" G="" Y="" R="" C="" N=""; fi
@@ -130,6 +162,8 @@ module_systems_02="linux steamdeck windows macos android"
 module_systems_03="linux steamdeck windows macos android"
 module_systems_04="linux steamdeck windows macos android"
 module_systems_05="linux steamdeck windows macos android"
+module_systems_06="linux steamdeck windows macos android"
+module_systems_07="linux steamdeck windows macos android"
 module_systems_10="linux steamdeck windows macos android"
 
 # module_inputs_hash <NN>: what a module takes from the launcher besides its
@@ -688,6 +722,140 @@ build_module_10() {
   cp "$engine/README.md" "$dest/README.md"
 }
 
+# gd-game-07 (Guitar Hero World Tour, Xbox 360): gd10's engine (copied as gd07),
+# with World Tour's data; FFmpeg for the XMA audio and Bink videos, same recipe as gd10.
+build_module_07() {
+  local os="$1" work="$2" dest="$3" engine="$repo/gd-game-07/engine" ffmpeg
+  ffmpeg="$engine/build/ffmpeg/$os/ffmpeg-prefix"
+  (
+    cd "$engine"
+    # shellcheck source=/dev/null
+    . ./build_common.sh
+    if [ "$os" = windows ] && [ "$host" != windows ]; then
+      build_ffmpeg build/ffmpeg/windows Windows --disable-x86asm --enable-cross-compile --target-os=mingw32 --arch=x86_64 \
+        --cross-prefix=x86_64-w64-mingw32- --pkg-config=false
+    elif [ "$os" = windows ] || [ "$os" = macos ]; then
+      build_ffmpeg "build/ffmpeg/$os" "$os" --disable-x86asm
+    elif [ "$os" = android ]; then
+      local tc="$ANDROID_NDK/toolchains/llvm/prebuilt/$NDK_HOST/bin" arch=aarch64 triple=aarch64-linux-android
+      [ "$android_abi" = x86_64 ] && arch=x86_64 triple=x86_64-linux-android
+      build_ffmpeg "build/ffmpeg/android/$android_abi" "Android $android_abi, NDK $(basename "$ANDROID_NDK")" --enable-cross-compile \
+        --target-os=android --arch="$arch" --cc="$tc/${triple}24-clang" --cxx="$tc/${triple}24-clang++" \
+        --nm="$tc/llvm-nm" --ar="$tc/llvm-ar" --ranlib="$tc/llvm-ranlib" --strip="$tc/llvm-strip" --pkg-config=false \
+        --disable-x86asm --extra-ldflags=-Wl,-z,max-page-size=16384
+    elif [ "$os" = steamdeck ]; then
+      build_ffmpeg build/ffmpeg/steamdeck "Steam Deck" --disable-x86asm --cc="${CC:-gcc}"
+    else
+      build_ffmpeg build/ffmpeg/linux Linux --disable-x86asm
+    fi
+  )
+  local ffmpeg_arg="$ffmpeg" sdl_arg="" deck=""
+  [ "$os" = steamdeck ] && deck="-DGD07_STEAM_DECK=ON"
+  if [ "$os" = android ]; then
+    ffmpeg="$engine/build/ffmpeg/android/$android_abi/ffmpeg-prefix"
+    ffmpeg_arg="$engine/build/ffmpeg/android"
+    sdl_arg="-DGD07_SDL3_SOURCE=$SDL3_SRC"
+  fi
+  # shellcheck disable=SC2046
+  cmake -S "$engine" -B "$work" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGD07_MODULE=ON -DGD07_VIDEO=ON \
+    -DGD07_FFMPEG_DIR="$ffmpeg_arg" $sdl_arg $deck $(cmake_args "$os")
+  cmake --build "$work" --target gd07_module
+  mkdir -p "$dest/licenses"
+  case "$os" in
+    windows)
+      cp "$work/gd-game-07.dll" "$ffmpeg"/bin/av*.dll "$dest/"
+      (. "$engine/build_common.sh"; ship_winpthread "$dest" "$dest/licenses") ;;
+    linux|steamdeck)
+      cp "$work/gd-game-07.so" "$dest/"
+      for lib in avformat avcodec avutil; do
+        cp -L "$(ls "$ffmpeg/lib/lib$lib.so."[0-9]* | grep -E '\.so\.[0-9]+$' | head -1)" "$dest/"
+      done ;;
+    macos)
+      cp "$work/gd-game-07.dylib" "$dest/"
+      for lib in avformat avcodec avutil; do
+        cp -L "$(ls "$ffmpeg/lib/lib$lib".[0-9]*.dylib | grep -E "lib$lib\.[0-9]+\.dylib\$" | head -1)" "$dest/"
+      done
+      macos_fix_module "$dest" ;;
+    android)
+      cp "$work/libgd-game-07.so" "$ffmpeg"/lib/libavformat.so "$ffmpeg"/lib/libavcodec.so "$ffmpeg"/lib/libavutil.so "$dest/"
+      printf '%s\n' libgd-game-07.so libavformat.so libavcodec.so libavutil.so > "$dest/native-libs.txt" ;;
+  esac
+  ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
+  # glslang, linked for the sdl3 / vulkan graphics backends' run-time SPIR-V (GD07_RUNTIME_SPIRV).
+  if [ -f "$work/glslang-LICENSE.txt" ]; then cp "$work/glslang-LICENSE.txt" "$dest/licenses/glslang-LICENSE.txt"; fi
+  (. "$engine/build_common.sh"; ship_ffmpeg_licence "$ffmpeg" "$dest")
+  if [ "$os" != android ]; then cp "$engine/third_party/rtmidi/LICENSE" "$dest/licenses/RtMidi-LICENSE.txt"; fi  # Generic MIDI (none on Android)
+  cp "$engine/README.md" "$dest/README.md"
+}
+
+# gd-game-06 (Guitar Hero: Aerosmith, Xbox 360): GH3's own engine (gd04's),
+# with Aerosmith's venues, band and career; FFmpeg for the XMA audio and the
+# Bink videos, built the same way gd04's / gd10's recipe builds it (its own
+# gd-game-06/engine/build_common.sh: same version and flags).
+build_module_06() {
+  local os="$1" work="$2" dest="$3" engine="$repo/gd-game-06/engine" ffmpeg
+  ffmpeg="$engine/build/ffmpeg/$os/ffmpeg-prefix"
+  (
+    cd "$engine"
+    # shellcheck source=/dev/null
+    . ./build_common.sh
+    if [ "$os" = windows ] && [ "$host" != windows ]; then
+      build_ffmpeg build/ffmpeg/windows Windows --disable-x86asm --enable-cross-compile --target-os=mingw32 --arch=x86_64 \
+        --cross-prefix=x86_64-w64-mingw32- --pkg-config=false
+    elif [ "$os" = windows ] || [ "$os" = macos ]; then
+      build_ffmpeg "build/ffmpeg/$os" "$os" --disable-x86asm
+    elif [ "$os" = android ]; then
+      local tc="$ANDROID_NDK/toolchains/llvm/prebuilt/$NDK_HOST/bin" arch=aarch64 triple=aarch64-linux-android
+      [ "$android_abi" = x86_64 ] && arch=x86_64 triple=x86_64-linux-android
+      build_ffmpeg "build/ffmpeg/android/$android_abi" "Android $android_abi, NDK $(basename "$ANDROID_NDK")" --enable-cross-compile \
+        --target-os=android --arch="$arch" --cc="$tc/${triple}24-clang" --cxx="$tc/${triple}24-clang++" \
+        --nm="$tc/llvm-nm" --ar="$tc/llvm-ar" --ranlib="$tc/llvm-ranlib" --strip="$tc/llvm-strip" --pkg-config=false \
+        --disable-x86asm --extra-ldflags=-Wl,-z,max-page-size=16384
+    elif [ "$os" = steamdeck ]; then
+      build_ffmpeg build/ffmpeg/steamdeck "Steam Deck" --disable-x86asm --cc="${CC:-gcc}"
+    else
+      build_ffmpeg build/ffmpeg/linux Linux --disable-x86asm
+    fi
+  )
+  local ffmpeg_arg="$ffmpeg" sdl_arg="" deck=""
+  [ "$os" = steamdeck ] && deck="-DGD06_STEAM_DECK=ON"
+  if [ "$os" = android ]; then
+    ffmpeg="$engine/build/ffmpeg/android/$android_abi/ffmpeg-prefix"
+    ffmpeg_arg="$engine/build/ffmpeg/android"
+    sdl_arg="-DGD06_SDL3_SOURCE=$SDL3_SRC"
+  fi
+  # shellcheck disable=SC2046
+  cmake -S "$engine" -B "$work" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGD06_MODULE=ON -DGD06_VIDEO=ON \
+    -DGD06_FFMPEG_DIR="$ffmpeg_arg" $sdl_arg $deck $(cmake_args "$os")
+  cmake --build "$work" --target gd06_module
+  mkdir -p "$dest/licenses"
+  case "$os" in
+    windows)
+      cp "$work/gd-game-06.dll" "$ffmpeg"/bin/av*.dll "$dest/"
+      (. "$engine/build_common.sh"; ship_winpthread "$dest" "$dest/licenses") ;;
+    linux|steamdeck)
+      cp "$work/gd-game-06.so" "$dest/"
+      for lib in avformat avcodec avutil; do
+        cp -L "$(ls "$ffmpeg/lib/lib$lib.so."[0-9]* | grep -E '\.so\.[0-9]+$' | head -1)" "$dest/"
+      done ;;
+    macos)
+      cp "$work/gd-game-06.dylib" "$dest/"
+      for lib in avformat avcodec avutil; do
+        cp -L "$(ls "$ffmpeg/lib/lib$lib".[0-9]*.dylib | grep -E "lib$lib\.[0-9]+\.dylib\$" | head -1)" "$dest/"
+      done
+      macos_fix_module "$dest" ;;
+    android)
+      cp "$work/libgd-game-06.so" "$ffmpeg"/lib/libavformat.so "$ffmpeg"/lib/libavcodec.so "$ffmpeg"/lib/libavutil.so "$dest/"
+      printf '%s\n' libgd-game-06.so libavformat.so libavcodec.so libavutil.so > "$dest/native-libs.txt" ;;
+  esac
+  ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
+  # glslang, linked for the sdl3 / vulkan graphics backends' run-time SPIR-V (GD06_RUNTIME_SPIRV).
+  if [ -f "$work/glslang-LICENSE.txt" ]; then cp "$work/glslang-LICENSE.txt" "$dest/licenses/glslang-LICENSE.txt"; fi
+  (. "$engine/build_common.sh"; ship_ffmpeg_licence "$ffmpeg" "$dest")
+  if [ "$os" != android ]; then cp "$engine/third_party/rtmidi/LICENSE" "$dest/licenses/RtMidi-LICENSE.txt"; fi  # Generic MIDI (none on Android)
+  cp "$engine/README.md" "$dest/README.md"
+}
+
 build_module_01() {
   local os="$1" work="$2" dest="$3" engine="$repo/gd-game-01/engine" sdl_arg=""
   [ "$os" = android ] && sdl_arg="-DGD01_SDL3_SOURCE=$SDL3_SRC"
@@ -844,6 +1012,8 @@ build_os() {
     case "$ready" in true|True|yes) ;; *) continue ;; esac
     nn="${id##*-}"
     mod="$modpre$id$modext"
+    local only_skip=0 stale_reuse=0
+    if [ -n "$only_games" ]; then case " $only_games " in *" $nn "*) ;; *) only_skip=1 ;; esac; fi
     # Every ready game, on every system: never a download without one.
     if ! declare -F "build_module_$nn" >/dev/null; then
       say "${R}$id: ready_to_play but the launcher has no module recipe (build_module_$nn): every build must carry it${N}"
@@ -867,8 +1037,20 @@ build_os() {
       prev_ver="$(manifest_get "$prev" "$id" guitar_dream_version)"
     fi
     why="$(module_reuse_why "$prev" "$id" "$mod" "$key")" || why="the reuse check failed"
+    if [ "$only_skip" = 1 ] && [ -n "$why" ]; then
+      # --only (local dev): this game is not under test. Reuse its previous
+      # module as-is instead of rebuilding, to keep the bundle complete. Never
+      # ship a missing module: no reusable previous => stop and say so.
+      if [ -n "$prev" ] && reusable_module "$prev_dir" "$mod" "$prev_root"; then
+        say "${Y}$id $ver: --only skipped its rebuild; previous module reused as-is (may be stale)${N}"
+        why="" stale_reuse=1
+      else
+        say "${R}$id: --only cannot skip it (no reusable previous module). Do a full build once without --only, or add $nn to --only.${N}"
+        return 1
+      fi
+    fi
     if [ -z "$why" ]; then
-      say "${G}$id $ver: unchanged since the previous build ($prev_ver; build key ${key:0:12}), module reused${N}"
+      [ "$stale_reuse" = 1 ] || say "${G}$id $ver: unchanged since the previous build ($prev_ver; build key ${key:0:12}), module reused${N}"
       cp -R "$prev_dir/." "$dest/"
       cp "$repo/$gi" "$dest/game-info.yaml"
       if [ -f "$dest/root-files.txt" ]; then  # its files at the launcher's root, from that build's root
@@ -885,8 +1067,10 @@ build_os() {
       reused="false"
       say "${G}$id $ver: module built ($(warnings_in "$logs/$os-$id.log") compiler warnings)${N}"
     fi
-    rm -f "$dest/buildkey.txt"
-    if [ -n "$key" ]; then printf '%s\n' "$key" > "$dest/buildkey.txt"; fi
+    if [ "$stale_reuse" != 1 ]; then  # a stale --only reuse keeps the previous module's own buildkey.txt
+      rm -f "$dest/buildkey.txt"
+      if [ -n "$key" ]; then printf '%s\n' "$key" > "$dest/buildkey.txt"; fi
+    fi
     entries+=("$id|$ver|$mod|$built_at|$reused|$ihash")
   done
 
@@ -1018,6 +1202,7 @@ build_steamdeck_in_container() {
   local runner image=registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest args=() vols=(-v "$repo":/src:Z)
   runner="$(container_runner)"
   [ "$force" = 1 ] && args+=(--force)
+  [ -n "$only_games" ] && args+=(--only "${only_games// /,}")
   if [ -n "$previous" ]; then vols+=(-v "$previous":/previous:ro,Z); args+=(--previous /previous); fi
   echo "${B}${C}=== gdul-$version-steamdeck-x86_64 (in Valve's Steam Runtime 3 'sniper' SDK, $runner) ===${N}"
   "$runner" run --rm "${vols[@]}" -w /src "$image" gd-engine-launcher/scripts/build_steamdeck.sh "${args[@]}"

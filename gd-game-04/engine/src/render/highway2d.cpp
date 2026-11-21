@@ -110,7 +110,10 @@ bool Highway2D::init(const Globals& g, int difficulty, int players, int player) 
             if (const qb::Value* s = d->st->find(qbkey::key("scroll_time"))) scroll = s->number();
     // Two players: scroll_time x p2_scroll_time_factor [C script difficulty_setup].
     if (two) scroll *= num(g, "p2_scroll_time_factor", 0.8f);
-    travelMs_ = (scroll - num(g, "destroy_time", 1.0f)) * 1000.0f;
+    // Enhanced > CHEATS > Hyperspeed (issue #94): shorten the gems' top-to-play-
+    // line travel time so they scroll faster (GH3's Hyperspeed cheat). Scaling
+    // travelMs_ keeps all the gem geometry proportional; ~1.67x at 0.6.
+    travelMs_ = applyHyperspeed((scroll - num(g, "destroy_time", 1.0f)) * 1000.0f);
     // The perspective rows [C script generate_pos_table].
     const qb::Value* ft = arrayGlobal(g, "heightPerspFactTable");
     const qb::Value* et = arrayGlobal(g, "heightPerspExpTable");

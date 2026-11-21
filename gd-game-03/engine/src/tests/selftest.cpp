@@ -580,24 +580,25 @@ int runRuleChecks(const Rules& rules) {
         check("rock meter: the song fails once the rating drops below lose_level", r2.p->failed() && r2.p->penalties() == expect);
     }
     {
-        // GDALL-050: graphics backend default Vulkan on Windows / Linux, local
-        // elsewhere; an old enhanced.json's local takes it once, a new one's stays.
-#if !defined(__APPLE__) && !defined(__ANDROID__)
-        const std::string want = "vulkan";
+        // Wave 20261118 §4 (supersedes GDALL-050): core backends everywhere —
+        // Vulkan on Windows / Linux / Steam Deck / Android, sdl3 on macOS;
+        // audio miniaudio. An older enhanced.json drops its policy keys so the
+        // new defaults apply on read; a current file's chosen local stays.
+#if defined(__APPLE__)
+        const std::string wantGfx = "sdl3";
 #else
-        const std::string want = "local";
+        const std::string wantGfx = "vulkan";
 #endif
-        check("graphics backend default: vulkan on Windows / Linux, local elsewhere",
-              ui::defaultGraphicsBackend() == want && ui::enhancedSetting("graphics_backend")->values.front() == want &&
-                  ui::enhancedSetting("audio_backend")->values.front() == "local");
+        check("backend defaults: core graphics everywhere, miniaudio audio",
+              ui::defaultGraphicsBackend() == wantGfx && ui::enhancedSetting("graphics_backend")->values.front() == wantGfx &&
+                  std::string(ui::enhancedSetting("audio_backend")->values.front()) == "miniaudio");
         Json old = Json::parse(R"({"graphics_backend":"local","audio_backend":"local"})");
         ui::migrateEnhanced(old);
-        check("an old enhanced.json's local graphics backend takes the new default",
-              old["graphics_backend"].str() == want && old["audio_backend"].str() == "local" && old["settings_version"].num() == ui::kEnhancedVersion);
-        ui::migrateEnhanced(old);
-        Json fresh = Json::parse(R"({"settings_version":2,"graphics_backend":"local"})");
+        check("an old enhanced.json's local backends take the new defaults",
+              old["graphics_backend"].str() == wantGfx && old["audio_backend"].str() == "miniaudio" && old["settings_version"].num() == ui::kEnhancedVersion);
+        Json fresh = Json::parse(R"({"settings_version":3,"graphics_backend":"local"})");
         ui::migrateEnhanced(fresh);
-        check("local picked in a new enhanced.json stays", old["graphics_backend"].str() == want && fresh["graphics_backend"].str() == "local");
+        check("local picked in a current enhanced.json stays", fresh["graphics_backend"].str() == "local");
     }
     {
         // Enhanced > Accessibility > Easy Chords (GDALL-039): off by default, as the original.

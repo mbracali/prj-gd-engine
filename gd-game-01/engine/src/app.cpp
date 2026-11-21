@@ -142,41 +142,53 @@ std::map<std::string, Json> profileValues(bool deck) {
     auto b = [](bool v) { return Json::boolean(v); };
     auto t = [](const char* v) { return Json::string(v); };
     std::map<std::string, Json> d = enhancedPreset("original");
-    // Desktop: Linux, Windows, macOS.
-    for (auto& [k, v] : std::map<std::string, Json>{{"screen_mode", t("windowed")}, {"max_fps", t("120")}, {"fps_counter", b(false)},
-                                                    {"internal_res", t("1080")}, {"touch", b(false)}})
+    // Fleet defaults (wave 20261118 §4, owner), every OS: FPS counter on,
+    // full-screen no border, 1080p, sharp UI on, bloom off; touch and
+    // shake=whammy off on desktop (on for handhelds below).
+    for (auto& [k, v] : std::map<std::string, Json>{{"screen_mode", t("borderless")}, {"fps_counter", b(true)},
+                                                    {"internal_res", t("1080")}, {"sharp_ui", b(true)}, {"bloom", t("none")},
+                                                    {"touch", b(false)}, {"shake_whammy", b(false)}})
         d[k] = v;
+    // Max FPS: 120 on Windows and macOS, 60 on Linux.
+#if defined(_WIN32) || defined(__APPLE__)
+    d["max_fps"] = t("120");
+#else
+    d["max_fps"] = t("60");
+#endif
+    // Handhelds (Android always, or a Steam Deck build): touch and shake=whammy
+    // on, 60 FPS.
+    auto handheld = [&] {
+        for (auto& [k, v] : std::map<std::string, Json>{{"max_fps", t("60")}, {"touch", b(true)}, {"shake_whammy", b(true)}})
+            d[k] = v;
+    };
 #if defined(__ANDROID__)
     (void)deck;
-    for (auto& [k, v] : std::map<std::string, Json>{{"screen_mode", t("fullscreen")}, {"max_fps", t("60")}, {"internal_res", t("900")},
-                                                    {"touch", b(true)}})
-        d[k] = v;
+    handheld();
 #else
 #if defined(GD01_STEAM_DECK)
     deck = true;
 #endif
-#if defined(_WIN32) || defined(__APPLE__)
-    d["internal_res"] = t("1440");
-#endif
-    if (deck) {
-        for (auto& [k, v] : enhancedPreset("steam_deck")) d[k] = v;
-        d["touch"] = b(true);  // touch is on by default on Steam Deck and Android only
-    }
+    if (deck) handheld();
 #endif
     return d;
 }
 
-// The graphics backend a fresh start uses (GDALL-050, owner 11-13): Vulkan on
-// Windows and Linux (Steam Deck too), local on macOS and Android.
-#if !defined(__APPLE__) && !defined(__ANDROID__)
-constexpr const char* kDefaultGraphicsBackend = "vulkan";
+// The graphics backend a fresh start uses. Wave 20261118 §4 (owner): the
+// shared core backend everywhere — Vulkan on Windows / Linux / Steam Deck /
+// Android, sdl3 on macOS. (Supersedes GDALL-050's macOS/Android = local.)
+// NOTE: gd01's Android rendering used GLES ("local"); Vulkan on Android falls
+// back to local if the core Vulkan path can't start (local is kept for now).
+#if defined(__APPLE__)
+constexpr const char* kDefaultGraphicsBackend = "sdl3";
 #else
-constexpr const char* kDefaultGraphicsBackend = "local";
+constexpr const char* kDefaultGraphicsBackend = "vulkan";
 #endif
-// enhanced.json's settings_version: 2 = Vulkan became the default on Windows /
-// Linux (GDALL-050); a file without it (or older) has its "local" graphics
-// backend (the old default) turned into the new default once.
-constexpr int kEnhancedVersion = 2;
+// enhanced.json's settings_version: 2 = Vulkan the default on Windows / Linux
+// (GDALL-050); 3 = wave 20261118 §4 fleet defaults (core backends everywhere,
+// FPS counter on, full-screen no border, 1080p, sharp UI, bloom off, per-OS
+// max-fps/touch/shake). An older file takes the new defaults of the policy
+// keys once.
+constexpr int kEnhancedVersion = 3;
 
 // Enhanced Settings defaults (keys of enhanced.json): the build's profile
 // over the rest. XInput controllers and Rock Band guitars are always on (no
@@ -207,7 +219,7 @@ const std::map<std::string, Json>& enhancedDefaults() {
         // once at start-up (startupGraphicsBackend / startupAudioBackend); no
         // Mode button sets them. Graphics: Vulkan on Windows / Linux (GDALL-050),
         // local elsewhere.
-        {"graphics_backend", Json::string(kDefaultGraphicsBackend)}, {"audio_backend", Json::string("local")},
+        {"graphics_backend", Json::string(kDefaultGraphicsBackend)}, {"audio_backend", Json::string("miniaudio")},
         };
         for (auto& [k, v] : profileValues(false)) m[k] = v;
         return m;
@@ -284,16 +296,29 @@ void migrateEnhanced(Json& e) {
     map("star_blur", {{"high", "strong"}});
     map("more_lights", {{"off", "none"}, {"subtle", "1.5x"}, {"strong", "2x"}});
     map("light_dust", {{"true", "1.5x"}, {"false", "none"}});
-    // GDALL-050: a file older than settings_version 2 kept "local" as the old
-    // default; it takes the new default (Vulkan on Windows / Linux) once. A
-    // player who picks local afterwards keeps it (the file is version 2 then).
+    // Wave 20261118 §4 (supersedes GDALL-050): a file older than the current
+    // settings_version takes the new fleet defaults of the policy keys once
+    // (its stored values for them are dropped so enhancedDefaults wins — core
+    // backends, FPS counter on, full-screen no border, 1080p, sharp UI, bloom
+    // off, per-OS max-fps/touch/shake); a value the player sets afterwards
+    // stays (the file is at the current version then).
+    // Wave 20261118 §4 (supersedes GDALL-050): an older file's old-default
+    // "local" backends take the new core defaults once — graphics to Vulkan /
+    // sdl3, audio to miniaudio; a non-local choice the player made stays. The
+    // new fleet defaults themselves (FPS counter on, full-screen no border,
+    // 1080p, sharp UI, bloom off, per-OS max-fps/touch/shake) apply to a fresh
+    // enhanced.json (enhancedDefaults); an existing file keeps its other values.
     const bool older = !e.has("settings_version") || e["settings_version"].num() < kEnhancedVersion;
-    if (older && e.has("graphics_backend") && e["graphics_backend"].type == Json::Type::String && e["graphics_backend"].s == "local")
-        e.set("graphics_backend", Json::string(kDefaultGraphicsBackend));
+    if (older) {
+        if (e.has("graphics_backend") && e["graphics_backend"].type == Json::Type::String && e["graphics_backend"].s == "local")
+            e.set("graphics_backend", Json::string(kDefaultGraphicsBackend));
+        if (e.has("audio_backend") && e["audio_backend"].type == Json::Type::String && e["audio_backend"].s == "local")
+            e.set("audio_backend", Json::string("miniaudio"));
+    }
     // XInput and Rock Band guitars are always on now; Ground Fog and Light
     // Streaks were removed (1.1.7): their saved values are dropped.
     // A backend this build does not offer (OpenGL3 copied from another OS to
-    // macOS, a typo) is dropped: the game starts on local (GDCORE-006).
+    // macOS, a typo) is dropped: the game starts on the default (GDCORE-006).
     auto offered = [&](const std::string& k, const Json& v) {
         if (k != "graphics_backend" && k != "audio_backend") return true;
         const auto& c = enhancedChoices().at(k);
@@ -3065,33 +3090,35 @@ int inputSelfTest() {
           "1.1.6 enhanced.json migrated");
     for (const auto& [k, v] : old.o)
         if (auto c = enhancedChoices().find(k); c != enhancedChoices().end()) check(v.type == Json::Type::String && c->second.count(v.s), "migrated value valid");
-    // GDCORE-006 / GDALL-050: graphics default Vulkan on Windows / Linux, local
-    // elsewhere; audio default local; no Mode button sets them; a value this
-    // build does not offer is dropped at load.
-#if !defined(__APPLE__) && !defined(__ANDROID__)
-    const std::string wantGraphics = "vulkan";
+    // Wave 20261118 §4 (supersedes GDCORE-006 / GDALL-050): core graphics
+    // everywhere — Vulkan on Win/Linux/Deck/Android, sdl3 on macOS; audio
+    // miniaudio. No Mode button sets them; a value this build does not offer is
+    // dropped at load.
+#if defined(__APPLE__)
+    const std::string wantGraphics = "sdl3";
 #else
-    const std::string wantGraphics = "local";
+    const std::string wantGraphics = "vulkan";
 #endif
-    check(enhancedDefaults().at("graphics_backend").str() == wantGraphics && enhancedDefaults().at("audio_backend").str() == "local",
-          ("backends default: graphics " + wantGraphics + ", audio local").c_str());
+    check(enhancedDefaults().at("graphics_backend").str() == wantGraphics && enhancedDefaults().at("audio_backend").str() == "miniaudio",
+          ("backends default: graphics " + wantGraphics + ", audio miniaudio").c_str());
     {
         StartupBackends saved = startupBackends();
         latchStartupBackends(Json::object());
         check(startupBackends().graphics == wantGraphics, ("no saved backend: graphics " + wantGraphics).c_str());
         startupBackends() = saved;
     }
-    // GDALL-050: an old file's local (the old default) takes the new default once;
-    // local picked in a version 2 file stays.
+    // Wave 20261118 §4: an old file's local backends take the new core defaults
+    // once (graphics -> wantGraphics, audio -> miniaudio); local picked in a
+    // current file stays.
     Json mig = Json::parse(R"({"graphics_backend":"local","audio_backend":"local"})");
     migrateEnhanced(mig);
-    check(mig["graphics_backend"].str() == wantGraphics && mig["audio_backend"].str() == "local" && mig["settings_version"].num() == 2,
-          ("old enhanced.json: local graphics -> " + wantGraphics).c_str());
+    check(mig["graphics_backend"].str() == wantGraphics && mig["audio_backend"].str() == "miniaudio" && mig["settings_version"].num() == kEnhancedVersion,
+          ("old enhanced.json: local backends -> " + wantGraphics + " / miniaudio").c_str());
     migrateEnhanced(mig);
     check(mig["graphics_backend"].str() == wantGraphics, "migrated twice: same");
-    mig = Json::parse(R"({"settings_version":2,"graphics_backend":"local"})");
+    mig = Json::parse(R"({"settings_version":3,"graphics_backend":"local"})");
     migrateEnhanced(mig);
-    check(mig["graphics_backend"].str() == "local", "local picked in a new enhanced.json stays");
+    check(mig["graphics_backend"].str() == "local", "local picked in a current enhanced.json stays");
     for (const char* m : {"steam_deck", "original", "clean", "max_hd", "max_4k", "budget", "good_old_days"}) {
         auto p = enhancedPreset(m);
         check(!p.empty() && !p.count("graphics_backend") && !p.count("audio_backend"), "a mode keeps the backends");

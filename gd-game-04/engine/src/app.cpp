@@ -32,6 +32,7 @@
 #include "script/globals.h"
 #include "tests/walk.h"
 #include "ui/front_end.h"
+#include "ui/glitches.h"
 #include "ui/port_screens.h"
 #include "ui/port_settings.h"
 #include "data/json.h"
@@ -873,6 +874,10 @@ void App::applyEnhanced(const std::string& key) {
     input_.setRockBand(true), input_.setGamepadPlay(true);
     if (is("touch")) input_.setTouch(enhanced_.on("touch"));
     if (is("mouse")) mouseMovedMs_ = -1e9;
+    // Enhanced > CHEATS > Unlock Everything (issue #94): a live toggle to on
+    // runs the unlock at once (the save is already loaded by now); at boot the
+    // save is not ready yet, so front_end runs it when the main menu is reached.
+    if (is("cheat_unlock_all") && !key.empty() && enhanced_.on("cheat_unlock_all") && front_) unlockEverything(front_->vm());
 }
 
 // The on-screen touch buttons (Input::touchButtons, menu units): a
@@ -1998,6 +2003,13 @@ void applyEnhancedGlobals(const EnhancedStore& st) {
     ps.chromatic = idx("chromatic", {"none", "light", "medium", "strong"});
     Player::forgivingHopos = st.get("hopo_mode") == "forgiving";
     Player::easyChords = st.on("easy_chords");
+    // Enhanced > CHEATS (issue #94): the extra cheats, off unless enabled.
+    // cheat_unlock_all is run at the main menu (front_end) / on a live toggle
+    // (App::applyEnhanced); these flags gate the in-song effects per frame.
+    qs::Vm::unlockAllCheat = st.on("cheat_unlock_all");
+    Player::maxMultiplier = st.on("cheat_multiplier");
+    Player::fullStarPower = st.on("cheat_full_sp");
+    Highway2D::hyperspeed = st.on("cheat_hyperspeed");
     VenueStage::extras.shadowsAll = st.on("shadows_all");
     VenueStage::extras.moreLights = idx("more_lights", {"none", "1.5x", "2x", "2.5x"});
     VenueStage::extras.lightDust = idx("light_dust", {"none", "1.5x", "2x", "2.5x"});

@@ -6,8 +6,11 @@ side touches only its own game; shared files (backlog, launcher) only for its ow
 
 ## Rules
 
-- Commit only our files (gd-game-06, this file, our backlog rows) through a private index on top of the newest of
-  local / origin; never stash, pull, rebase or force; a rejected push or diverged branch is reported, not fixed by force.
+- **Do NOT commit or push anything** (owner 11-17: shared branch with the Metallica gd10 and World Tour gd07 lanes;
+  the owner triggers commits/pushes himself). Leave all work uncommitted in the working tree. Touch only gd-game-06
+  (and, at M6, this lane's own launcher lines); never touch gd10 / gd07 or any file another lane wrote.
+- Audio is cleared: Aerosmith's song banks use GH3's container, so gd06 ports gd04's audio handling (reader + key)
+  as-is, read from the player's own disc. Build it like any other subsystem; no carve-outs.
 - Memory: the other agent may build too: build at -j2, `free -g` first, one game binary at a time, Ghidra at most
   6 GB and never during a build. Quick checks only; no long gates.
 - Decrypted executables and extracted data stay in gd-game-06's git-ignored `ghidra/` / `extracted*/`.

@@ -231,6 +231,7 @@ public:
     std::vector<HelpBarPill> helpBarLayout() const;
     // The drawn bounds of an element (false: not drawn in the last frame).
     bool drawnBounds(uint32_t id, float& x0, float& y0, float& x1, float& y1) const;
+    bool drawnTextBounds(const std::string& text, float& x0, float& y0, float& x1, float& y1) const;
     uint64_t drawCount() const { return drawCount_; }
     struct Stats {
         uint64_t created = 0, destroyed = 0, morphs = 0, events = 0, handlersRun = 0, textDrawn = 0, spritesDrawn = 0;

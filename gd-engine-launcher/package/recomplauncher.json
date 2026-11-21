@@ -83,6 +83,34 @@
       ]
     },
     {
+      "id": "gd06",
+      "label": "Your disc image of Guitar Hero: Aerosmith for Xbox 360 (USA, Europe): .iso or .chd",
+      "role": "game",
+      "formats": [
+        {
+          "type": "file",
+          "extensions": [
+            "iso",
+            "chd"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gd07",
+      "label": "Your disc image of Guitar Hero World Tour for Xbox 360 (USA, Europe): .iso or .chd",
+      "role": "game",
+      "formats": [
+        {
+          "type": "file",
+          "extensions": [
+            "iso",
+            "chd"
+          ]
+        }
+      ]
+    },
+    {
       "id": "gd10",
       "label": "Your disc image of Guitar Hero: Metallica for Xbox 360 (USA, Europe): .iso or .chd",
       "role": "game",
@@ -197,6 +225,46 @@
       ]
     },
     {
+      "id": "gd06",
+      "name": "Guitar Hero: Aerosmith",
+      "args": [
+        "--play",
+        "gd06",
+        "--exit-after",
+        "--iso",
+        "{input:gd06}"
+      ],
+      "title_id": "41560819",
+      "inputs": [
+        "gd06"
+      ],
+      "saves": [
+        "{config}/gd-engine/gd06/*.json",
+        "{local}/gd-engine/gd06/*.json",
+        "{home}/Library/Application Support/gd-engine/gd06/*.json"
+      ]
+    },
+    {
+      "id": "gd07",
+      "name": "Guitar Hero World Tour",
+      "args": [
+        "--play",
+        "gd07",
+        "--exit-after",
+        "--iso",
+        "{input:gd07}"
+      ],
+      "title_id": "4156081A",
+      "inputs": [
+        "gd07"
+      ],
+      "saves": [
+        "{config}/gd-engine/gd07/*.json",
+        "{local}/gd-engine/gd07/*.json",
+        "{home}/Library/Application Support/gd-engine/gd07/*.json"
+      ]
+    },
+    {
       "id": "gd10",
       "name": "Guitar Hero: Metallica",
       "args": [
@@ -233,6 +301,12 @@
     "{config}/gd-engine/gd05/*.json",
     "{local}/gd-engine/gd05/*.json",
     "{home}/Library/Application Support/gd-engine/gd05/*.json",
+    "{config}/gd-engine/gd06/*.json",
+    "{local}/gd-engine/gd06/*.json",
+    "{home}/Library/Application Support/gd-engine/gd06/*.json",
+    "{config}/gd-engine/gd07/*.json",
+    "{local}/gd-engine/gd07/*.json",
+    "{home}/Library/Application Support/gd-engine/gd07/*.json",
     "{config}/gd-engine/gd10/*.json",
     "{local}/gd-engine/gd10/*.json",
     "{home}/Library/Application Support/gd-engine/gd10/*.json"

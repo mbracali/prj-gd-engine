@@ -39,6 +39,7 @@ target_sources(gdul PRIVATE
   src/iso_probe.cpp
   src/module_host.cpp
   src/explorer.cpp
+  src/songs.cpp
   src/action_log.cpp
   src/platform.cpp
   src/ui_sounds.cpp

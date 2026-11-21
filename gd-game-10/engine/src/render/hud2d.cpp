@@ -3,6 +3,7 @@
 #include "render/hud2d.h"
 
 #include <SDL3/SDL_log.h>
+#include <SDL3/SDL_stdinc.h>  // SDL_getenv
 
 #include <algorithm>
 #include <cctype>
@@ -459,7 +460,7 @@ void Hud2D::draw(Canvas& c, const TextureCache& tex, double now) const {
         if (comboText_.running(now)) {
             char b[48];
             std::snprintf(b, sizeof b, "%d Note Streak!", combo_);
-            drawAlert(c, comboText_, K("text_a6"), b, now, 0x12);
+            drawAlert(c, comboText_, K("text_a6"), b, now, 0x12, true);
         }
         if (readyText_.running(now) && ready_) drawAlert(c, readyText_, K("text_a6"), "Star Power Ready", now, 0x12);
         return;
@@ -495,13 +496,13 @@ void Hud2D::draw(Canvas& c, const TextureCache& tex, double now) const {
     if (comboText_.running(now)) {
         char b[48];
         std::snprintf(b, sizeof b, "%d Note Streak!", combo_);
-        drawAlert(c, comboText_, K("text_a6"), b, now, 0x12);
+        drawAlert(c, comboText_, K("text_a6"), b, now, 0x12, true);
     }
     if (readyText_.running(now) && ready_) drawAlert(c, readyText_, K("text_a6"), "Star Power Ready", now, 0x12);
 }
 
-void Hud2D::drawAlert(Canvas& c, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align) const {
-    hudalert::draw(c, text_, a, font, s, now, align);
+void Hud2D::drawAlert(Canvas& c, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align, bool outline) const {
+    hudalert::draw(c, text_, a, font, s, now, align, outline);
 }
 
 namespace hudalert {
@@ -576,17 +577,37 @@ void ready(HudAnim& text, double at, float x, float y, float base, float mult) {
     text.then(300, 2, A::Pos | A::Scale | A::Alpha, out);
 }
 
-void draw(Canvas& c, const Hud2D::TextFn& text, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align) {
+void draw(Canvas& c, const Hud2D::TextFn& text, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align, bool outline) {
     if (!text || !a.running(now)) return;
     const HudAnim::Props p = a.at(now);
     if (p.alpha <= 0.002f) return;
     Hud2D::TextStyle ts;
     ts.rot = p.rot, ts.sx = p.sy > 0 ? p.sx / p.sy : 1;
-    // shadow_offs (2,2) black, turning with the text [I].
-    const float r = p.rot * float(M_PI) / 180, ox = 2 * p.sy, oy = 2 * p.sy;
+    const float r = p.rot * float(M_PI) / 180, cs = std::cos(r), sn = std::sin(r);
     const auto al = uint8_t(std::clamp(p.rgba[3] * p.alpha, 0.0f, 255.0f));
-    text(c, font, s, p.x + ox * std::cos(r) - oy * std::sin(r), p.y + ox * std::sin(r) + oy * std::cos(r), p.sy, {0, 0, 0, uint8_t(255 * p.alpha)}, align,
-         ts);
+    const std::array<uint8_t, 4> dark{0, 0, 0, uint8_t(255 * p.alpha)};
+    // The note streak's first keyframe is a big near-white glyph (scale x3,
+    // [223 223 223]); the original's contrast behind it is the procedural fire
+    // material fire_2D_Notestreak_Small (scrolling dual-noise over
+    // Fire_gradient02.dds) the port does not run, so on a bright highway the
+    // flash washes out. A dark 8-offset outline around the glyphs gives that
+    // contrast on any background without the shader; the settled yellow look
+    // is kept, now outlined [owner: readability GM-011 / GW-013].
+    // GD10_NOTESTREAK_LEGACY=1: the single (2,2) drop-shadow only (the exact
+    // fire backing is the match refinement).
+    static const bool legacy = SDL_getenv("GD10_NOTESTREAK_LEGACY") != nullptr;
+    if (outline && !legacy) {
+        const float d = 2.2f * p.sy;
+        for (int i = 0; i < 8; ++i) {
+            const float ang = float(i) * float(M_PI) / 4;
+            const float dx = d * std::cos(ang), dy = d * std::sin(ang);
+            text(c, font, s, p.x + dx * cs - dy * sn, p.y + dx * sn + dy * cs, p.sy, dark, align, ts);
+        }
+    } else {
+        // shadow_offs (2,2) black, turning with the text [I].
+        const float ox = 2 * p.sy, oy = 2 * p.sy;
+        text(c, font, s, p.x + ox * cs - oy * sn, p.y + ox * sn + oy * cs, p.sy, dark, align, ts);
+    }
     text(c, font, s, p.x, p.y, p.sy, {uint8_t(p.rgba[0]), uint8_t(p.rgba[1]), uint8_t(p.rgba[2]), al}, align, ts);
 }
 

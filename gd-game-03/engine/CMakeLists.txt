@@ -305,6 +305,7 @@ if(GD03_MODULE)
   get_target_property(gd03_srcs gd03 SOURCES)
   list(FILTER gd03_srcs EXCLUDE REGEX "\\.(rc|icns)$")
   add_library(gd03_module SHARED ${gd03_srcs} src/platform/module_entry.cpp src/platform/module_explore.cpp
+              src/platform/module_songs.cpp
               ${GD03_HOST_SDK}/gd_module_shim.cpp)
   foreach(prop INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS LINK_LIBRARIES LINK_OPTIONS)
     get_target_property(value gd03 ${prop})

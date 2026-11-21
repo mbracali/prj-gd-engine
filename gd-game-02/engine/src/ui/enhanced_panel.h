@@ -60,9 +60,13 @@ std::vector<std::pair<std::string, std::string>> enhancedPreset(const std::strin
 // validation (they fall back to the default).
 void migrateEnhanced(Json& e);
 // enhanced.json's settings_version (written on every save): 2 = Vulkan became
-// the default graphics backend on Windows / Linux (GDALL-050); migrateEnhanced
-// turns an older file's "local" (the old default) into the new default once.
-constexpr int kEnhancedVersion = 2;
+// the default graphics backend on Windows / Linux (GDALL-050); 3 = wave
+// 20261118 §4 fleet defaults (core backends everywhere, FPS counter on,
+// full-screen no border, 1080p, sharp UI, bloom off, per-OS max-fps/touch/
+// shake). Those new defaults apply to a fresh enhanced.json; migrateEnhanced
+// only takes an older file's old-default "local" backends to the new core
+// defaults (graphics Vulkan/sdl3, audio miniaudio) once.
+constexpr int kEnhancedVersion = 3;
 // The graphics backend a fresh start uses: Vulkan on Windows / Linux, local
 // on macOS / Android (GDALL-050).
 std::string defaultGraphicsBackend();
