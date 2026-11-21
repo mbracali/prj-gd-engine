@@ -385,8 +385,13 @@ android_env() {
   export ANDROID_NDK NDK_HOST SDL3_SRC
 }
 android_cmake_args() {
+  # CMAKE_CXX_SCAN_FOR_MODULES=OFF: the runner's host libstdc++ (GCC 15) ships
+  # std.cc / std.compat.cc "import std" module sources that CMake's scanner
+  # (clang-scan-deps) feeds to the NDK Clang, which can't find GCC's headers
+  # (bits/stdc++.h, stdbit.h) -> fatal error. We use no C++ modules, so turn
+  # the module scan off for Android.
   echo "-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake -DANDROID_ABI=$android_abi" \
-       "-DANDROID_PLATFORM=android-24 -DANDROID_STL=c++_static"
+       "-DANDROID_PLATFORM=android-24 -DANDROID_STL=c++_static -DCMAKE_CXX_SCAN_FOR_MODULES=OFF"
 }
 
 # ---- macOS: a module's libraries find FFmpeg next to them and SDL3 in the app's Frameworks ----

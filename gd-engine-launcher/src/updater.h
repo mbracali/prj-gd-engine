@@ -143,7 +143,7 @@ private:
     std::string whyNot_, skip_, installRoot_, exeRel_;
     std::atomic<State> state_{State::Idle};
     std::atomic<bool> cancel_{false};
-    std::atomic<long long> done_{0}, total_{0};
+    std::atomic<long long> total_{0};
     mutable std::mutex lock_;
     Release release_;
     std::string error_, asset_, archive_, packageRoot_, downloadPath_;
