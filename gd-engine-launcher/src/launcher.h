@@ -39,7 +39,9 @@ public:
 
 private:
     enum class Fret { Green, Red, Yellow, Blue, Orange };
-    enum Column { kPlay = 0, kLoad = 1, kExplore = 2, kColumns = 3 };
+    // Row buttons, left to right as drawn: Play (before the name), then the
+    // right-hand columns. Mod is a disabled "coming soon" placeholder.
+    enum Column { kPlay = 0, kLoad = 1, kAdditive = 2, kMod = 3, kExplore = 4, kColumns = 5 };
     struct Button {
         std::string label;
         Fret fret;
@@ -110,6 +112,27 @@ private:
     void songsDraw();
     void songsPlay(int row);
     void songsStop();
+
+    // The Additive Music management tool (additive.cpp; GDUL-036): a table of
+    // the playable games with per-game "additive" and "custom songs" toggles,
+    // and a folder tree for each game's root custom-songs folder.
+    struct Additive;
+    std::unique_ptr<Additive> additive_;
+    void additiveOpen(Game* focus);  // focus: the row that opened it (may be null)
+    void additiveClose();
+    bool additiveHandle(const SDL_Event& e);  // true: used
+    void additiveFrame();
+    void additiveDraw();
+    void additiveSelect(int row);             // select a game row; count its songs, show its folder
+    void additiveBuildTree();                 // (re)scan the selected game's custom-songs folder
+    void additiveEvaluate(int node);          // quick-validate one song (-1: all)
+    void additiveSave();                      // persist the per-game flags
+    int additiveCountSongs(const Game& g);    // songs on the game's disc (gd_game_songs), or -1
+    void additiveOpenInOs();                  // open the custom-songs folder in the OS file manager
+    void additivePromptNewFolder();           // open the "new folder" text prompt
+    void additivePromptCommit();              // apply the create / rename prompt
+    void additiveContextAction(int item);     // a right-click menu item (0 remove,1 evaluate,2 rename,3 open)
+
     void askQuit();
     void openWebsite();
     void showDiscFolders(const std::string& title);
@@ -139,6 +162,16 @@ private:
     void drawList();
     void drawRow(int index, float y);
     void drawButton(const gfx::Rect& r, const std::string& label, Fret fret, bool focused, bool enabled, int row, int col);
+    // An icon-only button (row columns). `cp` is a gfx::icon:: codepoint;
+    // `tint` its colour when enabled. A disabled button draws grey.
+    void drawIconButton(const gfx::Rect& r, uint32_t cp, gfx::Color tint, bool focused, bool enabled, int row, int col);
+    void icon(uint32_t cp, float cx, float cy, float px, gfx::Color c);  // one icon, centred on (cx, cy)
+    void drawColumnHeaders();
+    void computeLayout();  // fills the column geometry below (design units), once per frame
+    void drawScrollbars(float top, float bottom, float view, float content);
+    void drawDreamForge();  // the header's disabled "Dream forge engine" button
+    void drawTooltip();     // a "Coming soon" hint over a disabled control
+    bool hovering(const gfx::Rect& rPx) const;  // the mouse is over rPx (window pixels), window focused, no modal
     void drawFooter();
     void drawDialog();
     void drawToast();
@@ -170,7 +203,23 @@ private:
     double now_ = 0;           // seconds since start, at the frame's start
     Uint64 startNs_ = 0;
     int focusRow_ = 0, focusCol_ = kPlay;
-    float scroll_ = 0, scrollTarget_ = 0;
+    float scroll_ = 0, scrollTarget_ = 0;         // vertical list scroll (design units)
+    float hscroll_ = 0, hscrollTarget_ = 0;       // horizontal list scroll (design units)
+    float tableW_ = 0;                            // the table's natural width in design units
+    bool vbarDrag_ = false, hbarDrag_ = false;    // dragging a scrollbar thumb
+    float barDragOff_ = 0;                        // grab offset within the thumb (px)
+    // Scrollbar geometry (window pixels), set by drawScrollbars() each frame, read on drag.
+    gfx::Rect vThumb_{}, hThumb_{};
+    float vTrackY_ = 0, vTrackH_ = 0, vThumbH_ = 0, vRange_ = 0;  // vertical: px + design-unit range
+    float hTrackX_ = 0, hTrackW_ = 0, hThumbW_ = 0, hRange_ = 0;  // horizontal
+    std::string tooltip_;                         // a hover tooltip to draw this frame ("" none)
+    gfx::Rect tooltipAt_{};                       // anchored above this rect (px)
+    // Column geometry (design units), set by computeLayout() each frame.
+    float lPlayX_ = 0, lPlayW_ = 0, lNameX_ = 0;  // Play button and the name column
+    float lColCx_[kColumns] = {};                 // centre x of each right column (kPlay unused)
+    float lColW_ = 0;                             // right-column width
+    float lListRight_ = 0;                        // right edge available to rows (left of the scrollbar)
+    float lScrollX_ = 0;                          // vertical scrollbar centre x
     Dialog dialog_;
     std::string toast_;
     double toastAt_ = -100;

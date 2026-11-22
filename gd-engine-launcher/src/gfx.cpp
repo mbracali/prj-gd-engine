@@ -21,6 +21,8 @@ extern const unsigned char kFontBarlowRegular[];
 extern const std::size_t kFontBarlowRegularSize;
 extern const unsigned char kFontBarlowSemiBold[];
 extern const std::size_t kFontBarlowSemiBoldSize;
+extern const unsigned char kFontMaterialIcons[];
+extern const std::size_t kFontMaterialIconsSize;
 
 namespace gfx {
 
@@ -181,11 +183,36 @@ const unsigned char* fontData(FontId f) {
     switch (f) {
     case FontId::Title: return kFontMetalMania;
     case FontId::SemiBold: return kFontBarlowSemiBold;
+    case FontId::Icons: return kFontMaterialIcons;
     default: return kFontBarlowRegular;
     }
 }
 
+// The Material Symbols glyphs packed into the Icons atlas (gfx.h icon::).
+const int kIconCps[] = {int(icon::kPercent),      int(icon::kCircle),    int(icon::kClock10),
+                        int(icon::kClock20),      int(icon::kClock40),   int(icon::kClock60),
+                        int(icon::kClock80),      int(icon::kClock90),   int(icon::kStars),
+                        int(icon::kPlayCircle),   int(icon::kAlbum),     int(icon::kDiscFull),
+                        int(icon::kMusicNoteAdd), int(icon::kAddShoppingCart), int(icon::kDatabaseSearch),
+                        int(icon::kHandyman)};
+const int kIconCount = int(sizeof kIconCps / sizeof kIconCps[0]);
+
 }  // namespace
+
+std::string icon::u8(uint32_t cp) {
+    std::string s;
+    if (cp < 0x80) {
+        s += char(cp);
+    } else if (cp < 0x800) {
+        s += char(0xC0 | (cp >> 6));
+        s += char(0x80 | (cp & 0x3F));
+    } else {
+        s += char(0xE0 | (cp >> 12));
+        s += char(0x80 | ((cp >> 6) & 0x3F));
+        s += char(0x80 | (cp & 0x3F));
+    }
+    return s;
+}
 
 // One font at one pixel size: the glyphs of Latin-1 and some punctuation,
 // packed into a single-channel texture.
@@ -297,7 +324,37 @@ Renderer::Atlas* Renderer::atlas(FontId f, float px) {
     a->ascent = float(asc) * scale;
     a->lineHeight = float(asc - desc + gap) * scale;
 
-    static const int kExtra[] = {0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2026, 0x2190, 0x2191, 0x2192, 0x2193, 0x25B6};
+    if (f == FontId::Icons) {
+        // Only the Material Symbols glyphs; no ASCII ranges.
+        a->chars.resize(size_t(kIconCount));
+        stbtt_pack_range range = {};
+        range.font_size = float(size);
+        range.array_of_unicode_codepoints = const_cast<int*>(kIconCps);
+        range.num_chars = kIconCount;
+        range.chardata_for_range = a->chars.data();
+        std::vector<unsigned char> pixels(size_t(Atlas::kSize) * Atlas::kSize);
+        stbtt_pack_context pc;
+        stbtt_PackBegin(&pc, pixels.data(), Atlas::kSize, Atlas::kSize, 0, 1, nullptr);
+        stbtt_PackSetOversampling(&pc, 2, 2);
+        stbtt_PackFontRanges(&pc, ttf, 0, &range, 1);
+        stbtt_PackEnd(&pc);
+        for (int i = 0; i < kIconCount; ++i) a->index[uint32_t(kIconCps[i])] = i;
+        gl.glGenTextures(1, &a->tex);
+        gl.glBindTexture(GL_TEXTURE_2D, a->tex);
+        gl.glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        gl.glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, Atlas::kSize, Atlas::kSize, 0, GL_RED, GL_UNSIGNED_BYTE, pixels.data());
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        boundTex_ = 0;
+        Atlas* raw = a.get();
+        atlases_[key] = std::move(a);
+        return raw;
+    }
+
+    static const int kExtra[] = {0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022,
+                                 0x2026, 0x2190, 0x2191, 0x2192, 0x2193, 0x25B6, 0x25BC};
     const int nExtra = int(sizeof kExtra / sizeof kExtra[0]);
     a->chars.resize(95 + 96 + size_t(nExtra));
     stbtt_pack_range ranges[3] = {};
@@ -567,6 +624,7 @@ float Renderer::text(FontId f, float px, float x, float y, const std::string& s,
         uint32_t cp = nextCodepoint(s, i);
         auto it = a->index.find(cp);
         if (it == a->index.end()) it = a->index.find('?');
+        if (it == a->index.end()) continue;  // no glyph (e.g. the icon atlas) — skip
         stbtt_aligned_quad q;
         float yy = base;
         stbtt_GetPackedQuad(a->chars.data(), Atlas::kSize, Atlas::kSize, it->second, &pen, &yy, &q, 0);
@@ -583,6 +641,7 @@ float Renderer::measure(FontId f, float px, const std::string& s, float tracking
         uint32_t cp = nextCodepoint(s, i);
         auto it = a->index.find(cp);
         if (it == a->index.end()) it = a->index.find('?');
+        if (it == a->index.end()) continue;
         w += a->chars[size_t(it->second)].xadvance + tracking;
     }
     return w;

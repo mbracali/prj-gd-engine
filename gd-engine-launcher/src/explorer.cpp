@@ -18,6 +18,7 @@
 #include "palette.h"
 #include "platform.h"
 #include "songs.h"  // so ~Launcher (defined here) sees the complete Songs type
+#include "additive.h"  // so ~Launcher sees the complete Additive type
 
 using gfx::Color;
 using gfx::FontId;
