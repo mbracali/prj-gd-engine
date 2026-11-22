@@ -10,8 +10,9 @@ alike. Read every file in [docs/guidelines/](.) before you start.
   [universal_mechanisms.md](universal_mechanisms.md),
   [universal-menus.md](universal-menus.md),
   [universal-behaviors.md](universal-behaviors.md),
-  [engine-backend-guidelines.md](engine-backend-guidelines.md) and
-  [usual-bugs.md](usual-bugs.md).
+  [engine-backend-guidelines.md](engine-backend-guidelines.md),
+  [usual-bugs.md](usual-bugs.md) and, for the additive-songs mod,
+  [additive-and-custom-songs.md](additive-and-custom-songs.md).
 - **System and app.** Understand the project before changing it: read the
   documentation ([README.md](../../README.md), [docs/](../README.md), the
   game folder's `README.md`, `agent-instructions.md` and `docs/`).
