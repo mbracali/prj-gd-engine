@@ -650,12 +650,14 @@ GD_IN(0) vec2 vUv;
 GD_SAMPLER2D(0, uTex);
 GD_UNIFORMS(0, Post) {
     float uWhite;  // paper white in scRGB units
+    float uBlack;  // black floor in scRGB units (#80)
     int uPq;
 };
 GD_FRAG_OUT(0) vec4 fragColor;
 void main() {
     vec3 c = max(texture(uTex, vUv).rgb, 0.0);
     vec3 lin = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)) * uWhite;
+    lin = max(lin, vec3(uBlack));  // lift the darkest output to the black level
     if (uPq != 0) {
         const mat3 toBt2020 = mat3(0.6274, 0.0691, 0.0164, 0.3293, 0.9195, 0.0880, 0.0433, 0.0114, 0.8956);
         vec3 y = clamp(toBt2020 * lin * (80.0 / 10000.0), 0.0, 1.0);
@@ -706,8 +708,8 @@ struct AdaptU {
     float level, blend, pad[2];
 };
 struct HdrOutU {
-    float white;
-    int32_t pq, pad[2];
+    float white, black;  // black floor in scRGB units (#80)
+    int32_t pq, pad;
 };
 static_assert(sizeof(CompositeU) == 32 && sizeof(AoU) == 144 && sizeof(StarBlurU) == 144 && sizeof(FinishU) == 32 && sizeof(TaaU) == 160 &&
                   sizeof(RcasU) == 16 && sizeof(AdaptU) == 16 && sizeof(HdrOutU) == 16 && sizeof(Texel) == 16,
@@ -1155,7 +1157,7 @@ void CorePostFx::autoExposure(Texture color) {
     expoValid_ = true;
 }
 
-bool CorePostFx::hdrOutput(Texture src, Texture dst, int w, int h, float white, bool pq) {
+bool CorePostFx::hdrOutput(Texture src, Texture dst, int w, int h, float white, float black, bool pq) {
     init();
     if (!shaders_[kHdrOut]) return false;
     if (dev_.inPass()) dev_.endPass();
@@ -1170,7 +1172,7 @@ bool CorePostFx::hdrOutput(Texture src, Texture dst, int w, int h, float white, 
     dev_.setScissor({0, 0, w, h});
     dev_.bindPipeline(pipeline(kHdrOut, format, gr::kWriteAll));
     bind(0, src, repeat_);
-    const HdrOutU u{white, pq ? 1 : 0, {0, 0}};
+    const HdrOutU u{white, black, pq ? 1 : 0, 0};
     dev_.pushUniforms(0, &u, sizeof u);
     finishPass();
     return true;

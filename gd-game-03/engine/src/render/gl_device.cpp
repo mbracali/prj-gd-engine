@@ -172,6 +172,11 @@ public:
     void setFrameCap(int fps) override;
     void setInternalHeight(int height) override { internalH_ = std::max(0, height); }
     void setHdrSurface(int surface) override { hdrSurface_ = surface, hdrDirty_ = true; }
+    void setHdrUserLevels(float whiteNits, float blackNits) override {  // Enhanced > HDR White / Black Level (#80)
+        if (whiteNits == hdrUserWhite_ && blackNits == hdrUserBlack_) return;
+        hdrUserWhite_ = whiteNits, hdrUserBlack_ = blackNits, hdrDirty_ = true;
+        if (hdrSurface_) updateHdr();
+    }
     void hdrStateChanged() override { hdrDirty_ = true; }
     float hdrHeadroom() const override { return hdrSurface_ && hdrOn_ ? hdrHeadroom_ : 1.0f; }
     std::string hdrStatus() const override;
@@ -229,6 +234,8 @@ private:
     int hdrSurface_ = 0;
     bool hdrDirty_ = true, hdrOn_ = false;
     float hdrWhite_ = 1, hdrHeadroom_ = 1;  // scRGB units (1 = 80 nits); headroom in paper whites
+    float hdrBlack_ = 0;                     // scRGB units: the black floor the output pass lifts to (#80)
+    float hdrUserWhite_ = 203, hdrUserBlack_ = 0;  // Enhanced HDR White / Black Level, in nits (#80)
     std::string hdrLogged_;
     ProgramId hdrProgram_;
     BufferId hdrTriangle_;
@@ -896,12 +903,13 @@ const char* kHdrFragment = R"(
 in vec2 vUv;
 out vec4 fragColor;
 layout(std140) uniform GdHdr {
-    vec4 uHdr;  // x paper white (scRGB units), y 1: PQ
+    vec4 uHdr;  // x paper white (scRGB units), y 1: PQ, z black floor (scRGB units, #80)
 };
 uniform sampler2D sTex;
 void main() {
     vec3 c = max(texture(sTex, vUv).rgb, 0.0);
     vec3 lin = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)) * uHdr.x;
+    lin = max(lin, vec3(uHdr.z));  // lift the darkest output to the black level
     if (uHdr.y > 0.5) {
         const mat3 toBt2020 = mat3(0.6274, 0.0691, 0.0164, 0.3293, 0.9195, 0.0880, 0.0433, 0.0114, 0.8956);
         vec3 y = clamp(toBt2020 * lin * (80.0 / 10000.0), 0.0, 1.0);
@@ -923,6 +931,11 @@ void GlDevice::updateHdr() {
         hdrOn_ = false, hdrHeadroom_ = 1;
         if (hdrSurface_ == 2) hdrWhite_ = 203.0f / 80.0f;  // a PQ surface is absolute: SDR white at BT.2408's 203 nits
     }
+    // Enhanced > HDR White / Black Level (#80): the user's paper white overrides
+    // the display's auto value; the black floor lifts the darkest output. Both
+    // in scRGB units (1.0 = 80 nits) for the output pass.
+    hdrWhite_ = std::max(1.0f, hdrUserWhite_) / 80.0f;
+    hdrBlack_ = std::max(0.0f, hdrUserBlack_) / 80.0f;
     const std::string st = hdrStatus();
     if (st != hdrLogged_) SDL_Log("hdr: %s", (hdrLogged_ = st).c_str());
 }
@@ -972,7 +985,7 @@ void GlDevice::outputHdr(int ww, int wh) {
         l.attribs[0] = {0, 2, AttribType::Float, 0};
         return l;
     }();
-    const float block[4] = {hdrWhite_, hdrSurface_ == 2 ? 1.0f : 0.0f, 0, 0};
+    const float block[4] = {hdrWhite_, hdrSurface_ == 2 ? 1.0f : 0.0f, hdrBlack_, 0};
     DrawCall c;
     c.program = hdrProgram_;
     c.state.alphaWrite = true;

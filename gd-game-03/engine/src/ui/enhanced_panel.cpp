@@ -93,6 +93,12 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"dev_key_cheats", {"off", "on"}},
         {"audio_offset", {}, -300, 500},
         {"video_offset", {}, -300, 500},
+        // Enhanced > HDR White / Black Level (#80): True HDR's paper white (nits,
+        // a whole number; default 203 via platformDefault) and the black floor
+        // (nits, 0.05 steps as a value list so fractions validate; default 0.00).
+        {"hdr_white", {}, 80, 480},
+        {"hdr_black", {"0.00", "0.05", "0.10", "0.15", "0.20", "0.25", "0.30", "0.35", "0.40", "0.45", "0.50", "0.55",
+                       "0.60", "0.65", "0.70", "0.75", "0.80", "0.85", "0.90", "0.95", "1.00"}},
     };
     return k;
 }
@@ -124,6 +130,7 @@ const char* platformDefault(const std::string& key, bool deck, bool android) {
     if (key == "sharp_ui") return "on";
     if (key == "widescreen") return "on";
     if (key == "bloom") return "none";
+    if (key == "hdr_white") return "203";  // True HDR reference paper white (#80)
     return nullptr;
 }
 
@@ -247,7 +254,7 @@ std::string defaultGraphicsBackend() {
 
 namespace {
 
-enum class Kind { Section, Separator, Check, Choice, Button, Cheat };
+enum class Kind { Section, Separator, Check, Choice, Button, Cheat, Slider };
 struct Option {
     const char* value;
     const char* label;
@@ -261,6 +268,11 @@ struct Item {
     const char* help;
     std::vector<Option> options = {};
     const char* needs = nullptr;  // shown only while this setting is on (a check) or not none / off (a choice)
+    const char* needsValue = nullptr;  // with `needs`: shown only while that setting equals this exact value
+    // A Slider's range (enhanced.json stores the number as a string): smin to
+    // smax in steps of sstep, with `unit` drawn after the value (#80).
+    float smin = 0, smax = 0, sstep = 1;
+    const char* unit = "";
 };
 
 // gd02's list (gd01's), in the doc's sections and order, with its
@@ -386,6 +398,16 @@ const std::vector<Item>& items() {
          "highlights, menus at the screen's paper white; it starts with the game, and where it cannot run Emulated is "
          "used. Menus and the HUD keep their colours.",
          {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR"}}},
+        // True HDR's output levels (#80), shown only while HDR is True HDR.
+        {Kind::Slider, "hdr_white", "HDR White Level", true,
+         "True HDR only. How bright a full-white pixel and the menus are, in nits (cd/m2). The HDR standard's "
+         "reference paper white is 203 nits; raise it for a brighter image, lower it for a softer one. Highlights "
+         "still go above it, up to your screen's peak.",
+         {}, "hdr", "true", 80, 480, 1, " nits"},
+        {Kind::Slider, "hdr_black", "HDR Black Level", true,
+         "True HDR only. Lifts the darkest part of the image to this brightness, in nits (cd/m2). 0 keeps true "
+         "black (best on OLED); raise it only if your screen crushes dark detail.",
+         {}, "hdr", "true", 0, 1, 0.05f, " nits"},
         {Kind::Choice, "bokeh", "Bokeh Effect", true,
          "The depth-of-field blur of the close shots. None: always sharp. Medium: as the original game. Light is softer; "
          "Strong and Stronger start the focus nearer the band and blur wider.",
@@ -587,6 +609,9 @@ public:
                 setValue(it, it.options[size_t(i)].value);
             } else if (it.kind == Kind::Check || it.kind == Kind::Cheat) {
                 if (isOn(it) != (dir > 0)) activate();
+            } else if (it.kind == Kind::Slider) {
+                if (!editable(it)) return ui.playSfx("button_error"), true;
+                setSlider(it, sliderValue(it) + float(dir) * it.sstep);
             }
             return true;
         }
@@ -640,7 +665,11 @@ public:
             if (x < kListX0 - 6 || x > kCtrlX1 + 12 || y < top || y > top + h) continue;
             // Hovering focuses (without scrolling the list) and shows the explanation.
             if (int(r) != focus_) focus_ = int(r), ui.playSfx("button_toggle");
-            if (click) activate();
+            if (click) {
+                const Item& it = item(int(r));
+                if (it.kind == Kind::Slider && editable(it)) sliderClick(it, x);
+                else activate();
+            }
             return true;
         }
         return false;
@@ -711,7 +740,7 @@ private:
             if (it.kind == Kind::Section) hidden = collapsed(it.key);
             if (it.kind == Kind::Separator) hidden = false;
             if (it.kind != Kind::Section && it.kind != Kind::Separator && hidden) continue;
-            if (it.needs && !settingOn(it.needs)) continue;
+            if (it.needs && (it.needsValue ? ui.host().enhancedValue(it.needs) != it.needsValue : !settingOn(it.needs))) continue;
             rows_.push_back(int(i));
         }
         focus_ = 0;
@@ -777,6 +806,36 @@ private:
             if (v == it.options[k].value) return int(k);
         return 0;
     }
+    // -- sliders (#80): a free numeric setting stored as a string in enhanced.json.
+    static constexpr float kSliderValW = 62;  // room on the control's right for the value text
+    static std::string formatSlider(const Item& it, float f) {
+        if (it.sstep >= 1) return std::to_string(int(std::lround(f)));
+        const int h = int(std::lround(f * 100));  // two decimals, e.g. 0.05
+        std::string s = std::to_string(h / 100) + ".";
+        if (h % 100 < 10) s += "0";
+        return s + std::to_string(h % 100);
+    }
+    float sliderValue(const Item& it) const {
+        float f = it.smin;
+        try {
+            f = std::stof(ui.host().enhancedValue(it.key));
+        } catch (...) {
+        }
+        return std::clamp(f, it.smin, it.smax);
+    }
+    void setSlider(const Item& it, float f) {
+        if (it.sstep > 0) f = it.smin + std::round((f - it.smin) / it.sstep) * it.sstep;
+        f = std::clamp(f, it.smin, it.smax);
+        const std::string s = formatSlider(it, f);
+        if (s == ui.host().enhancedValue(it.key)) return;  // no change: no click
+        ui.host().setEnhancedValue(it.key, s);
+        ui.playSfx("button_toggle");
+    }
+    void sliderClick(const Item& it, float x) {  // x in menu units (offset removed)
+        const float x0 = kDdX0, x1 = kCtrlX1 - kSliderValW;
+        const float frac = std::clamp((x - x0) / std::max(1.0f, x1 - x0), 0.0f, 1.0f);
+        setSlider(it, it.smin + frac * (it.smax - it.smin));
+    }
     void setValue(const Item& it, const std::string& v) {
         if (!editable(it)) return ui.playSfx("button_error");
         for (const Option& o : it.options)
@@ -810,6 +869,8 @@ private:
             if (!it.ready) return ui.playSfx("button_error");
             ui.setCheat(it.key, !isOn(it));
             return;
+        case Kind::Slider:
+            return;  // adjusted with D-pad Left / Right or by clicking the track
         case Kind::Choice:
             if (!editable(it)) return ui.playSfx("button_error");
             if (isToggle(it)) return setValue(it, it.options[optionIndex(it) == 1 ? 0 : 1].value);
@@ -903,7 +964,7 @@ private:
         const std::string n = name(it);
         // A long name next to a dropdown is drawn smaller to fit before it.
         float nameH = 23;
-        const float room = (it.kind == Kind::Choice && !isToggle(it) ? kDdX0 : kCtrlX1 - (it.kind == Kind::Button ? 130 : 40)) - kNameX - 14;
+        const float room = ((it.kind == Kind::Choice && !isToggle(it)) || it.kind == Kind::Slider ? kDdX0 : kCtrlX1 - (it.kind == Kind::Button ? 130 : 40)) - kNameX - 14;
         if (const float w = d_.width(n, 23); w > room - (locked ? 30 : 0)) nameH = std::max(15.0f, 23 * (room - (locked ? 30 : 0)) / w);
         d_.text(n, kNameX + o, cy + 1, nameH, nameC, 0x21);
         if (!it.ready) d_.warning(kNameX + o + d_.width(n, nameH) + 10, cy);
@@ -925,6 +986,16 @@ private:
             const float x1 = kCtrlX1 + o, x0 = x1 - 120;
             d_.frame(x0, cy - 13, x1, cy + 13, 2, ctrl);
             d_.text(buttonLabel(it.key), (x0 + x1) * 0.5f, cy + 1, 20, ctrl, 0x22);
+            break;
+        }
+        case Kind::Slider: {
+            const float x1 = kCtrlX1 + o, tx1 = x1 - kSliderValW, x0 = kDdX0 + o;
+            const float frac = it.smax > it.smin ? (sliderValue(it) - it.smin) / (it.smax - it.smin) : 0;
+            const float kx = x0 + frac * (tx1 - x0);
+            d_.quad(x0, cy - 2, tx1, cy + 2, locked ? kDim : Color{0.3f, 0.3f, 0.34f, 1});  // track
+            d_.quad(x0, cy - 2, kx, cy + 2, locked ? kDim : kAccent);                        // filled
+            d_.quad(kx - 3, cy - 9, kx + 3, cy + 9, ctrl);                                   // knob
+            d_.text(formatSlider(it, sliderValue(it)) + it.unit, x1, cy + 1, 19, ctrl, 0x24);
             break;
         }
         default: break;
