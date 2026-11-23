@@ -697,9 +697,26 @@ void App::tryLoadData(const std::string& path) {
         // Additive songs (GDALL-042): append the songs of the discs the launcher
         // shared (other games the player exposed in the Additive Music tool).
         foreignLib_ = {};
+        const size_t nativeCount = songs_.size();
         for (SongInfo& fs : openForeignSongs(opt_.extraDiscs, foreignLib_)) songs_.push_back(std::move(fs));
-        if (!foreignLib_.discs.empty())
+        if (!foreignLib_.discs.empty()) {
+            // A native song plays in a campaign venue with a guitarist archetype
+            // and a backing band; a foreign song is in no campaign, so without a
+            // stage its venue would be empty (the highway on black). Give each one
+            // a real native setup (venue + character + band + anim tempo), rotating
+            // them so foreign songs land in a lit venue with the band performing.
+            std::vector<size_t> stages;
+            for (size_t i = 0; i < nativeCount; ++i)
+                if (!songs_[i].venue.empty() && !songs_[i].character.empty()) stages.push_back(i);
+            for (size_t k = nativeCount, s = 0; k < songs_.size() && !stages.empty(); ++k, ++s) {
+                const SongInfo& src = songs_[stages[s % stages.size()]];
+                songs_[k].venue = src.venue;
+                songs_[k].character = src.character;
+                songs_[k].band = src.band;
+                songs_[k].animTempo = src.animTempo;
+            }
             SDL_Log("additive songs: %zu shared disc(s), %zu songs total", foreignLib_.discs.size(), songs_.size());
+        }
         selected_ = 0;
         screen_ = Screen::Menu;
         message_.clear();
