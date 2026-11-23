@@ -1000,6 +1000,14 @@ void Launcher::play(Game& g) {
     sounds_.close();
     closeGamepads();
     rememberWindow();
+    // Hand the game the discs of other games the player exposed (additive songs).
+    const auto shared = exposedDiscsFor(g);
+    setExtraDiscs(shared);
+    if (!shared.empty()) {
+        std::string names;
+        for (const auto& [id, p] : shared) names += (names.empty() ? "" : ", ") + id;
+        log_.add("additive: " + g.id + " also gets " + std::to_string(shared.size()) + " shared disc(s): " + names);
+    }
     GameRun r = runGameModule(window_, context_, g, catalog_.launcherVersion(), log_,
                               [this](uint32_t api, SDL_Window*& w, SDL_GLContext& c, std::string& error) {
                                   const bool ok = switchWindowApi(api, error);

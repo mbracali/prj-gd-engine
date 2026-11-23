@@ -84,6 +84,13 @@ std::vector<std::string>& extraGameArgs() {
     return a;
 }
 
+// Other games' discs the player exposed (Additive Music tool): (game id, path).
+// Set by the launcher before a Play and read into GdHost.extra_discs.
+std::vector<std::pair<std::string, std::string>>& extraDiscs() {
+    static std::vector<std::pair<std::string, std::string>> d;
+    return d;
+}
+
 // What a module gets: the GdHost and everything it points to.
 struct HostSetup {
     std::vector<std::string> args;
@@ -95,10 +102,17 @@ struct HostSetup {
 
     int discFd = -1;        // Android: the opened document (see below)
     std::string discError;  // why the disc could not be opened, or ""
+    // Extra discs (GdHost.extra_discs): backing storage, kept stable for the host.
+    std::vector<std::string> extraIds, extraPaths;
+    std::vector<GdDisc> extraDiscList;
+    std::vector<int> extraFds;  // Android documents opened for extra discs
 
     HostSetup(const HostSetup&) = delete;
     HostSetup& operator=(const HostSetup&) = delete;
-    ~HostSetup() { platform::closeDocument(discFd); }
+    ~HostSetup() {
+        platform::closeDocument(discFd);
+        for (int fd : extraFds) platform::closeDocument(fd);
+    }
     HostSetup(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& version, ActionLog& log)
         : launcherVersion(version), logUser{&log, game.id} {
         // The game's command line: its program name, then the disc image.
@@ -145,6 +159,31 @@ struct HostSetup {
         host.log = &hostLogLine;
         host.log_user = &logUser;
         host.flags = (platform::isSteamDeck() ? GD_HOST_HANDHELD : 0u) | (platform::bigPicture() ? GD_HOST_FULLSCREEN : 0u);
+
+        // Other games' discs the player exposed (Additive Music tool). Build the
+        // backing strings fully first, then the GdDisc pointer array (so no
+        // reallocation invalidates a c_str()).
+        for (const auto& [id, p] : extraDiscs()) {
+            if (id == game.id) continue;  // never a game's own disc
+            std::string path = p;
+            if (platform::isDocument(path)) {
+                std::string err;
+                const int fd = platform::openDocument(path, err);
+                if (fd < 0) {
+                    log.add("extra disc of " + id + " for " + game.id + " cannot be opened (" + p + "): " + err);
+                    continue;
+                }
+                extraFds.push_back(fd);
+                path = "/proc/self/fd/" + std::to_string(fd);
+            }
+            extraIds.push_back(id);
+            extraPaths.push_back(std::move(path));
+        }
+        extraDiscList.reserve(extraIds.size());
+        for (size_t i = 0; i < extraIds.size(); ++i) extraDiscList.push_back({extraIds[i].c_str(), extraPaths[i].c_str()});
+        host.extra_discs = extraDiscList.empty() ? nullptr : extraDiscList.data();
+        host.extra_disc_count = uint32_t(extraDiscList.size());
+        extraDiscs().clear();  // single-use: the launcher sets it again before the next Play
     }
 
     // The game's SDL_Log lines into logs/<file> in the save folder too.
@@ -446,3 +485,4 @@ bool SongSession::close() {
 }
 
 void setExtraGameArgs(const std::vector<std::string>& args) { extraGameArgs() = args; }
+void setExtraDiscs(const std::vector<std::pair<std::string, std::string>>& discs) { extraDiscs() = discs; }

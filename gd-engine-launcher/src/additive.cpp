@@ -352,6 +352,31 @@ void Launcher::additiveSave() {
     a.statusAt = now_;
 }
 
+// ---- Discs shared with a host when it plays (read by Launcher::play) ----
+
+std::vector<std::pair<std::string, std::string>> Launcher::exposedDiscsFor(const Game& host) const {
+    std::vector<std::pair<std::string, std::string>> out;
+    const std::string path = platform::join(platform::saveDir(), "additive_music.json");
+    std::ifstream f(fs::u8path(path));
+    if (!f) return out;
+    std::stringstream ss;
+    ss << f.rdbuf();
+    const std::string j = ss.str();
+    auto exposed = [&](const std::string& id) {
+        const size_t k = j.find("\"" + id + "\"");
+        if (k == std::string::npos) return false;
+        const size_t end = j.find('}', k);
+        const std::string blk = j.substr(k, end == std::string::npos ? std::string::npos : end - k);
+        return blk.find("\"additive\": true") != std::string::npos || blk.find("\"additive\":true") != std::string::npos;
+    };
+    if (!exposed(host.id)) return out;  // the host must opt in to receive shared songs
+    for (const Game& g : catalog_.games()) {
+        if (g.id == host.id || !g.playable()) continue;
+        if (exposed(g.id)) out.push_back({g.id, g.iso});
+    }
+    return out;
+}
+
 // ---- Input ----
 
 bool Launcher::additiveHandle(const SDL_Event& e) {

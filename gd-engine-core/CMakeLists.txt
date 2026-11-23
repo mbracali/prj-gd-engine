@@ -56,7 +56,7 @@ if(NOT TARGET SDL3::SDL3)
 endif()
 
 # The areas (the contract with the area owners: each defines gdcore_<area>).
-set(GDCORE_AREAS platform inputs audio render image ui)
+set(GDCORE_AREAS platform inputs audio render image ui gh1)
 foreach(a ${GDCORE_AREAS})
   if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${a}/CMakeLists.txt)
     add_subdirectory(${a})

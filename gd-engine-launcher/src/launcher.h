@@ -133,6 +133,9 @@ private:
     void additivePromptNewFolder();           // open the "new folder" text prompt
     void additivePromptCommit();              // apply the create / rename prompt
     void additiveContextAction(int item);     // a right-click menu item (0 remove,1 evaluate,2 rename,3 open)
+    // Other games' discs to hand `host` when it plays, per additive_music.json:
+    // the playable games whose EXPOSE flag is on, when `host`'s is on too.
+    std::vector<std::pair<std::string, std::string>> exposedDiscsFor(const Game& host) const;
 
     void askQuit();
     void openWebsite();

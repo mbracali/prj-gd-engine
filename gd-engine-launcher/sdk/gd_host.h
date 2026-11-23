@@ -46,6 +46,15 @@ extern "C" {
 #define GD_MODULE_EXPORT __attribute__((visibility("default")))
 #endif
 
+// (gdul 1.1.17, additive songs) One other game's disc the player chose to
+// share in the Additive Music tool, handed to a host so it can read that
+// game's songs. `path` is readable the same way as the host's own disc
+// (Android: /proc/self/fd/<n>).
+typedef struct GdDisc {
+    const char* game_id;  // "gd-game-01"
+    const char* path;     // the disc image path
+} GdDisc;
+
 typedef struct GdHost {
     uint32_t abi_version;  // GD_HOST_ABI_VERSION of the launcher
     uint32_t size;         // sizeof(GdHost) of the launcher (fields are only ever appended)
@@ -98,6 +107,14 @@ typedef struct GdHost {
     // game written on gd-engine-core needs no code of its own for it.
     void* (*request_window)(void* user, uint32_t api);
     void* request_window_user;
+
+    // (gdul 1.1.17, additive songs, optional: GD_HOST_HAS(host, extra_disc_count).)
+    // Other games' discs the player exposed in the launcher's Additive Music
+    // tool, so this host can read their songs (the additive-songs mod). Empty
+    // (count 0) when none are shared or the launcher is older. The host's own
+    // disc is never in this list.
+    const GdDisc* extra_discs;
+    uint32_t extra_disc_count;
 } GdHost;
 
 // The graphics APIs of request_window.

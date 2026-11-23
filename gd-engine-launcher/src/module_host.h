@@ -32,6 +32,12 @@ struct GameRun {
 // before the disc image (the launcher's `-- <game args>`, main.cpp).
 void setExtraGameArgs(const std::vector<std::string>& args);
 
+// Other games' discs the player exposed in the Additive Music tool, as
+// (game id, disc path) pairs. The launcher sets this before a Play; the host
+// module receives them in GdHost.extra_discs. Single-use: cleared when the
+// next module host is built, so set it again before each Play.
+void setExtraDiscs(const std::vector<std::pair<std::string, std::string>>& discs);
+
 // Makes the launcher's window again for a graphics API (GD_WINDOW_API_*,
 // sdk/gd_host.h request_window): releases the launcher's OpenGL context and
 // objects for another API, makes them again for OpenGL. Gives the window and
