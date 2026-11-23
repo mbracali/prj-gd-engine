@@ -126,7 +126,8 @@ private:
     void additiveSelect(int row);             // select a game row; count its songs, show its folder
     void additiveBuildTree();                 // (re)scan the selected game's custom-songs folder
     void additiveEvaluate(int node);          // quick-validate one song (-1: all)
-    void additiveSave();                      // persist the per-game flags
+    void additiveSave();                      // persist the per-game flags (with a status message)
+    bool additiveWriteFile();                 // write additive_music.json (flags + cached song counts), silently
     int additiveCountSongs(const Game& g);    // songs on the game's disc (gd_game_songs), or -1
     void additiveOpenInOs();                  // open the custom-songs folder in the OS file manager
     void additivePromptNewFolder();           // open the "new folder" text prompt

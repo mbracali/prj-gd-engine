@@ -130,6 +130,7 @@ void Launcher::additiveOpen(Game* focus) {
         Additive::Row r;
         r.id = g.id;
         r.title = g.title();
+        r.isoName = g.isoName;
         if (focus && g.id == focus->id) focusRow = int(a->rows.size());
         a->rows.push_back(std::move(r));
     }
@@ -147,12 +148,35 @@ void Launcher::additiveOpen(Game* focus) {
             const std::string blk = j.substr(k, end == std::string::npos ? std::string::npos : end - k);
             r.additive = blk.find("\"additive\": true") != std::string::npos || blk.find("\"additive\":true") != std::string::npos;
             r.custom = blk.find("\"custom\": true") != std::string::npos || blk.find("\"custom\":true") != std::string::npos;
+            // Use the cached count only when the disc has not changed.
+            const size_t ik = blk.find("\"iso\":");
+            std::string cachedIso;
+            if (ik != std::string::npos) {
+                const size_t q1 = blk.find('"', ik + 6), q2 = q1 == std::string::npos ? q1 : blk.find('"', q1 + 1);
+                if (q2 != std::string::npos) cachedIso = blk.substr(q1 + 1, q2 - q1 - 1);
+            }
+            const size_t ck = blk.find("\"count\":");
+            if (ck != std::string::npos && cachedIso == r.isoName)
+                r.songCount = std::atoi(blk.c_str() + ck + 8);
         }
     }
     a->gameSel = a->rows.empty() ? -1 : std::min(focusRow, int(a->rows.size()) - 1);
     a->lastFrame = now_;
     additive_ = std::move(a);
+    // Always show every game's song count: count any game not already cached
+    // (one module at a time, with a loading card), then persist the counts.
+    bool counted = false;
+    for (Additive::Row& r : additive_->rows) {
+        if (r.songCount >= 0) continue;
+        for (Game& g : catalog_.games())
+            if (g.id == r.id) {
+                r.songCount = additiveCountSongs(g);
+                counted = true;
+                break;
+            }
+    }
     if (additive_->gameSel >= 0) additiveSelect(additive_->gameSel);
+    if (counted) additiveWriteFile();  // cache the counts for next time
     sounds_.play(UiSound::Select);
 }
 
@@ -289,29 +313,43 @@ void Launcher::additiveEvaluate(int node) {
     a.statusAt = now_;
 }
 
-void Launcher::additiveSave() {
+bool Launcher::additiveWriteFile() {
     Additive& a = *additive_;
     const std::string path = platform::join(platform::saveDir(), "additive_music.json");
+    auto esc = [](const std::string& s) {  // minimal JSON string escaping
+        std::string o;
+        for (char c : s) {
+            if (c == '"' || c == '\\') o += '\\';
+            o += c;
+        }
+        return o;
+    };
     std::ostringstream o;
     o << "{\n";
     for (size_t i = 0; i < a.rows.size(); ++i) {
         const Additive::Row& r = a.rows[i];
         o << "  \"" << r.id << "\": {\"additive\": " << (r.additive ? "true" : "false") << ", \"custom\": "
-          << (r.custom ? "true" : "false") << "}" << (i + 1 < a.rows.size() ? "," : "") << "\n";
+          << (r.custom ? "true" : "false") << ", \"count\": " << r.songCount << ", \"iso\": \"" << esc(r.isoName) << "\"}"
+          << (i + 1 < a.rows.size() ? "," : "") << "\n";
     }
     o << "}\n";
     std::ofstream f(fs::u8path(path), std::ios::trunc);
-    if (f) {
-        f << o.str();
+    if (!f) return false;
+    f << o.str();
+    log_.add("additive music: settings written to " + path);
+    return true;
+}
+
+void Launcher::additiveSave() {
+    Additive& a = *additive_;
+    if (additiveWriteFile()) {
         a.dirty = false;
         a.status = "Saved";
-        a.statusAt = now_;
-        log_.add("additive music: flags saved to " + path);
     } else {
         a.status = "Could not save";
-        a.statusAt = now_;
         sounds_.play(UiSound::Error);
     }
+    a.statusAt = now_;
 }
 
 // ---- Input ----
@@ -597,7 +635,7 @@ void Launcher::additiveDraw() {
     const float colSongs = leftX + leftW - 190, colAdd = leftX + leftW - 120, colCust = leftX + leftW - 46;
     text(FontId::SemiBold, 11, leftX + 16, top + 12, "GAME", kMuted, 1.5f);
     text(FontId::SemiBold, 11, colSongs - measure(FontId::SemiBold, 11, "SONGS") / 2, top + 12, "SONGS", kMuted, 1.0f);
-    text(FontId::SemiBold, 11, colAdd - measure(FontId::SemiBold, 11, "ADD") / 2, top + 12, "ADD", kMuted, 1.0f);
+    text(FontId::SemiBold, 11, colAdd - measure(FontId::SemiBold, 11, "EXPOSE") / 2, top + 12, "EXPOSE", kMuted, 1.0f);
     text(FontId::SemiBold, 11, colCust - measure(FontId::SemiBold, 11, "CUSTOM") / 2, top + 12, "CUSTOM", kMuted, 1.0f);
     gfx_.rect(R(leftX + 12, top + 32, leftW - 24, 1), withAlpha(kCream, 0.1f));
 
@@ -632,9 +670,11 @@ void Launcher::additiveDraw() {
         text(FontId::SemiBold, 17, leftX + 18 + idW, cyr - 18, r.title, sel ? kCream : rgb(0xd6cab3));
         const std::string sc = r.songCount < 0 ? "\xE2\x80\x94" : std::to_string(r.songCount);
         text(FontId::SemiBold, 15, colSongs - measure(FontId::SemiBold, 15, sc) / 2, cyr - 9, sc, kSand);
+        // Push the row-select hit BEFORE the checkboxes so the reverse-order
+        // mouse scan finds the (smaller) checkboxes first.
+        a.hits.push_back({row, int(i), 0});
         checkbox(colAdd, cyr, r.additive, int(i), 1);
         checkbox(colCust, cyr, r.custom, int(i), 2);
-        a.hits.push_back({row, int(i), 0});
     }
     gfx_.clip(nullptr);
     a.hits.erase(std::remove_if(a.hits.begin(), a.hits.end(),
@@ -744,7 +784,7 @@ void Launcher::additiveDraw() {
     footBtn(Fret::Green, a.dirty ? "Save *" : "Save", kHitSave, a.dirty);
     footBtn(Fret::Red, "Back", kHitBack, false);
     footBtn(Fret::Yellow, "Refresh", kHitRefresh, false);
-    const std::string hint = "Tick ADD to share a game's songs \xC2\xB7 CUSTOM to load the custom-songs folder \xC2\xB7 drop songs on the right";
+    const std::string hint = "Tick EXPOSE to share a game's songs \xC2\xB7 CUSTOM to load the custom-songs folder \xC2\xB7 drop songs on the right";
     if (fx + measure(FontId::Regular, 14, hint) + 16 < W_ - kMargin)
         text(FontId::Regular, 14, W_ - kMargin - measure(FontId::Regular, 14, hint), fcy - 9, hint, kDim);
 

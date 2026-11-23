@@ -15,7 +15,7 @@
 struct Launcher::Additive {
     // One playable game, listed on the left with its toggles.
     struct Row {
-        std::string id, title;
+        std::string id, title, isoName;
         int songCount = -1;   // -1: unknown / not counted yet
         bool additive = false;
         bool custom = false;
