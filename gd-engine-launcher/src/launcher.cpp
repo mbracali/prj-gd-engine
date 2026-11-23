@@ -59,7 +59,8 @@ PctIcon pctIcon(double v) {  // the playability % icon and its colour (owner 11-
     if (p <= 40) return {gfx::icon::kClock40, kNeonYellowC};
     if (p <= 60) return {gfx::icon::kClock60, kNeonGreenC};
     if (p <= 80) return {gfx::icon::kClock80, kNeonGreenC};
-    if (p < 100) return {gfx::icon::kClock90, kNeonGreenC};
+    if (p < 95) return {gfx::icon::kClock90, kNeonGreenC};
+    if (p < 100) return {gfx::icon::kStrokeFull, kNeonGreenC};  // 95%+: a full stroke in the same green (owner 11-23)
     return {gfx::icon::kStars, kGoldC};
 }
 
@@ -886,10 +887,9 @@ void Launcher::move(int dRow, int dCol) {
     if (rows == 0) return;
     const int wasRow = focusRow_, wasCol = focusCol_;
     focusRow_ = std::clamp(focusRow_ + dRow, 0, rows - 1);
-    if (dCol) focusCol_ = std::clamp(focusCol_ + dCol, 0, kColumns - 1);
-    if (dCol && focusCol_ == kMod) {  // the Mod column is disabled: skip over it
-        focusCol_ = std::clamp(focusCol_ + (dCol > 0 ? 1 : -1), 0, kColumns - 1);
-        if (focusCol_ == kMod) focusCol_ = kExplore;
+    if (dCol) {
+        focusCol_ = std::clamp(focusCol_ + dCol, 0, kColumns - 1);
+        if (focusCol_ == kMod) focusCol_ = kMod + (dCol > 0 ? 1 : -1);  // skip the disabled Mod column (interior)
     }
     if (focusRow_ != wasRow || focusCol_ != wasCol) sounds_.play(UiSound::Move);
 }
@@ -1295,11 +1295,12 @@ void Launcher::computeLayout() {
     lScrollX_ = W_ - kMargin - 9;      // vertical scrollbar band (~18 wide)
     lListRight_ = lScrollX_ - 12;      // rows end left of the scrollbar
     lPlayX_ = kMargin + 12;
-    lPlayW_ = 44;
-    lNameX_ = lPlayX_ + lPlayW_ + 16;
-    lColW_ = 112;                      // right-column width (5 slots: %, Load, Additive, Mod, Explore)
+    lPlayW_ = 76;                      // a wide, prominent Play button (owner 11-23)
+    lPlayH_ = 52;
+    lNameX_ = lPlayX_ + lPlayW_ + 18;
+    lColW_ = 84;                       // right-column width — the action buttons sit closer together (owner 11-23)
     const float blockRight = lListRight_ - 6;
-    const float blockLeft = blockRight - 5 * lColW_;
+    const float blockLeft = blockRight - kColumns * lColW_;
     for (int i = 0; i < kColumns; ++i) lColCx_[i] = blockLeft + (float(i) + 0.5f) * lColW_;
     tableW_ = blockRight - kMargin;    // natural table width, for the horizontal scrollbar
 }
@@ -1440,7 +1441,7 @@ void Launcher::drawDreamForge() {
 void Launcher::drawColumnHeaders() {
     const float hy = 158;
     text(FontId::SemiBold, 13, lPlayX_, hy, "GAME NAME", kMuted, 2.0f);
-    static const char* kHeads[kColumns] = {"% PLAY", "LOAD ISO", "ADDITIVE MUSICS", "MOD MENU", "EXPLORE FILES"};
+    static const char* kHeads[kColumns] = {"% PLAY", "ADDITIVE MUSICS", "EXPLORE FILES", "MOD MENU", "LOAD ISO"};
     for (int i = 0; i < kColumns; ++i) {
         const float w = measure(FontId::SemiBold, 11, kHeads[i], 1.2f);
         text(FontId::SemiBold, 11, lColCx_[i] - hscroll_ - w / 2, hy + 1, kHeads[i], kMuted, 1.2f);
@@ -1540,8 +1541,8 @@ void Launcher::drawRow(int index, float y) {
     gfx_.ring(row, focused ? withAlpha(kCream, 0.75f) : withAlpha(kCream, lit ? 0.14f : 0.06f), 12 * s_, (focused ? 2.f : 1.f) * s_);
 
     const float cy = y + kRowH / 2;
-    // Play, before the name (owner 11-22 §2).
-    drawIconButton(R(lPlayX_ + dx, cy - lPlayW_ / 2, lPlayW_, lPlayW_), gfx::icon::kPlayCircle, fretColor(Fret::Green),
+    // Play, before the name — a wide, prominent button (owner 11-23).
+    drawIconButton(R(lPlayX_ + dx, cy - lPlayH_ / 2, lPlayW_, lPlayH_), gfx::icon::kPlayCircle, fretColor(Fret::Green),
                    focused && focusCol_ == kPlay, enabled(index, kPlay), index, kPlay);
 
     // Status light + name + details.
@@ -1569,25 +1570,28 @@ void Launcher::drawRow(int index, float y) {
     text(FontId::SemiBold, 12, c0 - measure(FontId::SemiBold, 12, percent(g.completeness)) / 2, cy + 12,
          percent(g.completeness), g.ready ? kSand : kDim);
 
-    // Column 1: Load ISO — album when a disc is set (grey), disc_full when not
-    // (yellow for every not-found game, owner 11-22 §2).
+    // The right-hand action buttons, in the order the enum lists them: Additive,
+    // Explore, Mod, Load ISO (owner 11-23). Each draws at its own column index.
     const bool hasIso = !g.iso.empty();
-    const Rect loadR = R(lColCx_[1] + dx - 23, cy - 23, 46, 46);
-    drawIconButton(loadR, hasIso ? gfx::icon::kAlbum : gfx::icon::kDiscFull, fretColor(Fret::Yellow),
-                   focused && focusCol_ == kLoad, !hasIso /* coloured when no disc */, index, kLoad);
 
-    // Column 2: Additive musics (neon red when the game is playable).
-    drawIconButton(R(lColCx_[2] + dx - 23, cy - 23, 46, 46), gfx::icon::kMusicNoteAdd, kNeonRedC,
+    // Additive musics (neon red when the game is playable).
+    drawIconButton(R(lColCx_[kAdditive] + dx - 23, cy - 23, 46, 46), gfx::icon::kMusicNoteAdd, kNeonRedC,
                    focused && focusCol_ == kAdditive, enabled(index, kAdditive), index, kAdditive);
 
-    // Column 3: Mod menu — disabled placeholder; hovering shows "Coming soon".
-    const Rect modR = R(lColCx_[3] + dx - 23, cy - 23, 46, 46);
+    // Explore files.
+    drawIconButton(R(lColCx_[kExplore] + dx - 23, cy - 23, 46, 46), gfx::icon::kDatabaseSearch, fretColor(Fret::Blue),
+                   focused && focusCol_ == kExplore, enabled(index, kExplore), index, kExplore);
+
+    // Mod menu — disabled placeholder; hovering shows "Coming soon".
+    const Rect modR = R(lColCx_[kMod] + dx - 23, cy - 23, 46, 46);
     drawIconButton(modR, gfx::icon::kAddShoppingCart, kNeonPurpleC, focused && focusCol_ == kMod, false, index, kMod);
     if (hovering(modR)) tooltip_ = "Coming soon", tooltipAt_ = modR;
 
-    // Column 4: Explore files.
-    drawIconButton(R(lColCx_[4] + dx - 23, cy - 23, 46, 46), gfx::icon::kDatabaseSearch, fretColor(Fret::Blue),
-                   focused && focusCol_ == kExplore, enabled(index, kExplore), index, kExplore);
+    // Load ISO — album when a disc is set (grey), disc_full when not (yellow for
+    // every not-found game).
+    const Rect loadR = R(lColCx_[kLoad] + dx - 23, cy - 23, 46, 46);
+    drawIconButton(loadR, hasIso ? gfx::icon::kAlbum : gfx::icon::kDiscFull, fretColor(Fret::Yellow),
+                   focused && focusCol_ == kLoad, !hasIso /* coloured when no disc */, index, kLoad);
 }
 
 // An icon-only button for a row column. `tint` is its colour when enabled.

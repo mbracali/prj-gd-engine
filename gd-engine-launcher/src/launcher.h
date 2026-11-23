@@ -40,8 +40,10 @@ public:
 private:
     enum class Fret { Green, Red, Yellow, Blue, Orange };
     // Row buttons, left to right as drawn: Play (before the name), then the
-    // right-hand columns. Mod is a disabled "coming soon" placeholder.
-    enum Column { kPlay = 0, kLoad = 1, kAdditive = 2, kMod = 3, kExplore = 4, kColumns = 5 };
+    // right-hand columns: % play (col 0, display only), Additive, Explore, Mod,
+    // Load ISO (owner 11-23). Mod is a disabled "coming soon" placeholder. The
+    // enum value is the column index, so this order is the on-screen order.
+    enum Column { kPlay = 0, kAdditive = 1, kExplore = 2, kMod = 3, kLoad = 4, kColumns = 5 };
     struct Button {
         std::string label;
         Fret fret;
@@ -219,7 +221,7 @@ private:
     std::string tooltip_;                         // a hover tooltip to draw this frame ("" none)
     gfx::Rect tooltipAt_{};                       // anchored above this rect (px)
     // Column geometry (design units), set by computeLayout() each frame.
-    float lPlayX_ = 0, lPlayW_ = 0, lNameX_ = 0;  // Play button and the name column
+    float lPlayX_ = 0, lPlayW_ = 0, lPlayH_ = 0, lNameX_ = 0;  // Play button (wide box) and the name column
     float lColCx_[kColumns] = {};                 // centre x of each right column (kPlay unused)
     float lColW_ = 0;                             // right-column width
     float lListRight_ = 0;                        // right edge available to rows (left of the scrollbar)

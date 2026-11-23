@@ -44,7 +44,7 @@ enum class FontId { Title, Regular, SemiBold, Icons, Count };
 namespace icon {
 constexpr uint32_t kPercent = 0xeb58, kCircle = 0xef4a;
 constexpr uint32_t kClock10 = 0xf726, kClock20 = 0xf725, kClock40 = 0xf724, kClock60 = 0xf723, kClock80 = 0xf722,
-                   kClock90 = 0xf721, kStars = 0xe8d0;
+                   kClock90 = 0xf721, kStars = 0xe8d0, kStrokeFull = 0xf749;
 constexpr uint32_t kPlayCircle = 0xe1c4, kAlbum = 0xe019, kDiscFull = 0xe610, kMusicNoteAdd = 0xf391,
                    kAddShoppingCart = 0xe854, kDatabaseSearch = 0xf38e, kHandyman = 0xf10b;
 // UTF-8 for one codepoint (text() takes UTF-8 strings).
