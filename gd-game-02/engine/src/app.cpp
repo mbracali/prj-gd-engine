@@ -2217,6 +2217,9 @@ int App::gameCounter(int player, const std::string& key) const {
     // GD02-164: the song over (won or lost), and the HUD's displays hidden.
     if (key == "song_over") return wonSent_ || lostSent_ ? 1 : 0;
     if (key == "hud_displays_hidden") return hud_ ? int(hud_->displaysHidden()) : -1;
+    // issue #125: the rock-meter drop shadow (meter_extras.grp) drawn last frame;
+    // on_game_over must clear it with the meters (so 0 after "You Rock").
+    if (key == "hud_shadow_shown") return hud_ ? int(hud_->shadowShown()) : -1;
     const int p = std::clamp(player, 0, 1);
     if (key == "sp_phrases") return spPhrases_[p];
     if (key == "sp_started") return spStarted_[p];

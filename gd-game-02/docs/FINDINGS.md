@@ -458,6 +458,62 @@ player and the mode's `competitive` flag), practice and tutorials
 multiplayer game; in GH2 **co-op can fail** [C for the check; which meter
 decides in co-op is [I], see below].
 
+## HUD rock-meter drop shadow at song end (issue #125, 2026-11-23)
+
+Issue #125: at "You Rock" the rock meter leaves the screen but its drop
+shadow lingered in the port. The original removes the shadow together with
+the meters. Traced from the binary.
+
+The in-song HUD is a `HudPanel` driven by `ui/gen/hud_panel.dtb` [C data].
+Its song-end handlers:
+
+```
+(game_won_msg  {$this on_game_over} {$this set_win_showing TRUE} …)   ; "You Rock"
+(game_lost     {$this on_game_over} {$this show_message … song_failed})
+```
+
+`on_game_over`, `set_meters_showing`, `set_win_showing` and `set_showing`
+are native `HudPanel` methods, dispatched by `Function_8268EBD8`
+(`0x8268ebd8`) [C]. Message names resolved from the dispatcher's cached
+symbol hashes: `on_game_over` (string `0x8204501c`) runs
+`set_meters_showing FALSE` then, if the win record exists, `0x82690d98`.
+
+`set_meters_showing` = `FUN_8268e9f8` (`0x8268e9f8`) [C]. It writes the
+`showing` byte (`+0x88`) on every meter display held in the panel's three
+vectors (`HudPanel +0x50`, `+0x5c`, `+0x68`) and the two single displays
+(`+0x74`, `+0x78`), **and** clears the group at `HudPanel +0x90` via its
+`+0x18` byte, and sets the panel flag `+0x80`.
+
+`HudPanel::load` = `Function_82690308` (`0x82690308`) [C]. Its last act:
+
+```
++0x90 = DataFindObj(dir, "meter_extras.grp")     ; Function_82254C00, string 0x820d6740
+```
+
+So `meter_extras.grp` is the object at `+0x90` — i.e. `set_meters_showing`
+hides it with the meters. In `hud_sp.milo_xbox` `meter_extras.grp` holds a
+single mesh, `spraypaint.mesh`: the sprayed drop shadow behind the meters.
+(Same load also hides `youwin.mesh` at `+0x7c` and every `mask*` object at
+load, matching the port's existing note.)
+
+**Conclusion [C]:** in GH2 the rock-meter drop shadow (`meter_extras.grp` →
+`spraypaint.mesh`) is itself a "meter"; `on_game_over` → `set_meters_showing
+FALSE` clears its `showing` flag at the same instant as the dial, so it
+leaves the screen together with the meter at "You Rock" (and at "Song
+Failed").
+
+**Port bug:** `meter_extras.grp` is a top-level `Group` in the HUD root
+`NewPanelDir`, not inside a `Band*` display proxy. `HudView::gameOver()`
+set `displaysHidden_`, but that flag only gated the `DirObj` proxy branch of
+`HudView::drawObject` (`render/hud_view.cpp`), so the root-level shadow kept
+drawing after the meters were gone.
+
+**Fix:** `render/hud_view.cpp` `HudView::drawDir` now skips `meter_extras.grp`
+while `displaysHidden_`, matching `set_meters_showing FALSE`. Instrumented
+with `HudView::shadowShown()` / the `hud_shadow_shown` counter and an
+assertion in the `hud_after_song` walktest (shadow present during play, gone
+once the displays hide).
+
 ## Practice mode
 
 - `update_practice_speed` (`0x822cee60`): speed = `practice_speeds[i]` of the
