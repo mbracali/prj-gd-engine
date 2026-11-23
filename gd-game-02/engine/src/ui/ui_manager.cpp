@@ -926,7 +926,9 @@ void UiManager::updateRepeat(double dtMs) {
 // ---------------------------------------------------------------- input
 
 void UiManager::action(const InputEvent& e) {
-    // The yellow fret on the main menu opens GAMEPADS (gd01's help item).
+    // The yellow fret on the main menu opens GAMEPADS (gd01's help item). The
+    // Quick Play "Custom songs" overlay is opened in buttonDown (so it works
+    // for the keyboard/guitar yellow and the walk tests alike).
     if (e.action == Action::Fret2 && e.down) yellowButton();
     int pad = -1;
     switch (e.action) {
@@ -993,6 +995,9 @@ void UiManager::buttonDown(int button, int player) {
         if (button == kPad_X || button == kPad_Tri || button == kPad_Circle || button == kPad_Start) skipSplashes();
         return;
     }
+    // Yellow on the Quick Play song screen opens the "Custom songs" overlay
+    // (additive songs, §7).
+    if (button == kPad_Circle && openCustomSongs()) return;
     routeButton(button, player);
 }
 
@@ -1075,6 +1080,17 @@ void UiManager::openGamepads() {
     // screen would not take it as its back screen).
     if (ScreenObj* g = screen("gamepads_screen")) g->back = current_;
     gotoScreen("gamepads_screen");
+}
+
+// The yellow fret on the Quick Play song screen opens the "Custom songs"
+// overlay (additive songs, §7). Returns true when it handled the fret.
+bool UiManager::openCustomSongs() {
+    if (splash_ >= 0 || phase_ != Phase::Idle || !pending_.empty()) return false;
+    if (currentScreen() != "qp_selsong_screen") return false;  // Quick Play only (wave 2)
+    playSfx("button_select");
+    if (ScreenObj* g = screen("custom_songs_screen")) g->back = current_;
+    gotoScreen("custom_songs_screen");
+    return true;
 }
 
 bool UiManager::mouse(float x, float y, bool click) {

@@ -164,6 +164,34 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                    "guitar_help_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen",
                    "post_show_screen", "endgame_screen", "highscore_screen", "complete_screen", "meta_loading_screen", "saving_screen",
                    "qp_selsong_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen"};
+    } else if (scenario == "customsongs") {
+        // Additive songs (§7): the "Custom songs" overlay and playing a shared
+        // GH1 song. Run with --extra-disc gd-game-01=<gh1 iso>.
+        endMs_ = 30000;
+        wait(300);
+        press(kX);  // skip splashes
+        at("splash_screen", 30000);
+        press(kX);
+        at("startup_create_save_screen");
+        press(kX);
+        at("saving_screen");
+        at("guitar_help_screen");
+        press(kX);
+        at("main_screen");
+        press(kX);  // QUICK PLAY
+        at("qp_selsong_screen");
+        press(kYellow);  // open the Custom songs overlay
+        at("custom_songs_screen");
+        wait(900);
+        press(kX);        // expand the first folder (Guitar Hero)
+        wait(500);
+        press(kDown);     // the first GH1 song
+        wait(300);
+        press(kX);        // select -> difficulty screen
+        at("qp_diff_screen");
+        press(kX);        // choose the difficulty -> game
+        at("game_screen", 30000);
+        wait(3000);
     } else if (scenario == "dev_cheats") {
         // GD02-045: Enhanced > Developer Keyboard Cheats on, then a real 'l'
         // key (SDL event, through the app's bound-key filter) runs cheats.dta's

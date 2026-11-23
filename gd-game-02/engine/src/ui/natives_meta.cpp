@@ -72,12 +72,7 @@ public:
         footer_ = -1;
         for (int i = 0; i < int(data_.size()); ++i) {
             const std::string& s = data_[size_t(i)];
-            // Additive songs (GDALL-042): a "\x01<label>" group renders its label
-            // directly as the section header (not a localized tier key).
-            std::string group = campaign::isForeign(ui_, s) ? ("\x01" + campaign::foreignLabel(ui_, s))
-                                : campaign::isDownload(ui_, s) ? "download"
-                                : campaign::isStoreSong(ui_, s) ? "store"
-                                                                : campaign::venueOf(ui_, s);
+            std::string group = campaign::isDownload(ui_, s) ? "download" : campaign::isStoreSong(ui_, s) ? "store" : campaign::venueOf(ui_, s);
             if ((group == "store" || group == "download") && footer_ < 0) footer_ = i - 1;
             if (group != last) headers_.push_back({i, group}), last = group;
         }
@@ -143,10 +138,7 @@ public:
             gfx::UiView::ListRow r;
             r.slot = i + numHeaders(i);
             for (const auto& [idx, tier] : headers_)
-                if (idx == i) {
-                    r.header = true;
-                    r.texts["header.txt"] = !tier.empty() && tier[0] == '\x01' ? tier.substr(1) : ui_.localize("song_header_" + tier);
-                }
+                if (idx == i) r.header = true, r.texts["header.txt"] = ui_.localize("song_header_" + tier);
             // 0x822C2080 (Text's list.txt column): the song's name, none on
             // an inactive row (a locked encore: an empty grey row, where the
             // blurb of the row above reads) [C].

@@ -540,9 +540,9 @@ std::vector<std::string> quickplaySongs(UiManager& ui) {
     std::vector<std::string> out;
     for (const std::string& s : allSongs(ui))
         if (ui.session().allAccess || offered.count(s) || isDownload(ui, s)) out.push_back(s);
-    // Additive songs (GDALL-042): the shared games' songs, after GH2's own.
-    for (const SongInfo& s : ui.host().songs())
-        if (s.foreign()) out.push_back(s.id);
+    // Foreign (additive) songs are NOT inline here; they live in the "Custom
+    // songs" overlay (ui/custom_songs_panel.cpp, §7), reached from the yellow
+    // fret on qp_selsong_screen.
     return out;
 }
 
