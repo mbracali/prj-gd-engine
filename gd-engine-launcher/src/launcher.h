@@ -104,8 +104,10 @@ private:
     gfx::Rect exploreViewRect() const;
     // The Songs group of Explore: an in-pane player (play/pause/stop + stems).
     void exploreSongsEnsure();              // open the song session on demand
-    void exploreSongPlay(int songIndex);    // play a song whole (shows the player)
-    void exploreSongStop();                 // stop and hide the player
+    void exploreSongSelect(int songIndex);  // select a song and show the player (does not start it)
+    void exploreSongStart();                // begin playing the selected song (the Play button)
+    void exploreSongStopAudio();            // stop the audio, keep the player (the Stop button)
+    void exploreSongStop();                 // stop and hide the player (click away / close)
     void exploreSongTogglePause();
     void exploreSongTogglePart(int part);
     void exploreSongFeed();                 // keep the audio device fed (each frame)

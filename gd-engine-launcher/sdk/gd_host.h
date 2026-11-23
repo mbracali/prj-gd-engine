@@ -330,6 +330,9 @@ typedef struct GdSongs {
     void (*set_part)(void* self, int part, int enabled);
     // Stops and frees the streaming song (play_song may be called again after).
     void (*stop_song)(void* self);
+    // The total length of the streaming song in frames (after play_song), so the
+    // launcher can show a progress bar. 0 when unknown.
+    int (*song_frames)(void* self);
 } GdSongs;
 
 #define GD_SONGS_HAS(api, field) ((api)->size >= offsetof(GdSongs, field) + sizeof((api)->field) && (api)->field)

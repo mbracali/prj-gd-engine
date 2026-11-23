@@ -267,6 +267,11 @@ void stopSong(void* self) {
     static_cast<SongsImpl*>(self)->pb = Playback{};
 }
 
+int songFrames(void* self) {
+    const Playback& pb = static_cast<SongsImpl*>(self)->pb;
+    return pb.stream ? int(pb.stream->lengthFrames()) : 0;
+}
+
 void closeSongs(void* self) {
     delete static_cast<SongsImpl*>(self);
 }
@@ -311,6 +316,7 @@ extern "C" GD_MODULE_EXPORT const GdSongs* gd_game_songs(const GdHost* host) {
     g_songs.read_song = readSong;
     g_songs.set_part = setPart;
     g_songs.stop_song = stopSong;
+    g_songs.song_frames = songFrames;
     if (host->log) host->log(host->log_user, "gd02: song previews ready");
     return &g_songs;
 }

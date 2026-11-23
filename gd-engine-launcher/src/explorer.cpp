@@ -65,11 +65,15 @@ struct Launcher::Explore {
 
     // The "Songs" group: the disc's songs, played whole in an in-pane player with
     // per-part (stem) checkboxes (gd_game_songs). Opened lazily when first needed.
+    bool hasModels = false;  // a model-explorer module opened (false: songs-only game)
     SongSession songSession;
     bool songsOpened = false, songsOk = false;
-    int songPlaying = -1;  // the songIndex currently playing (-1: none) -> the player shows
+    int songPlaying = -1;   // the selected song index (-1: none) -> the player shows
+    bool songStarted = false;  // the audio is open and playing/paused (false: at Play, stopped)
     bool songPaused = false, songAtEnd = false;
     int songRate = 0;
+    uint64_t songFramesFed = 0;  // frames pushed to the device (for the progress bar)
+    int songTotalFrames = 0;     // the song's length in frames (0: unknown)
     SDL_AudioStream* songStream = nullptr;
     std::vector<float> songChunk;
     struct SongPart {
@@ -139,25 +143,25 @@ void Launcher::exploreOpen(Game& g) {
     ex->gameId = g.id;
     ex->title = g.title();
     std::string error;
-    if (!ex->session.open(window_, context_, g, catalog_.launcherVersion(), log_, error)) {
-        restoreWindow();
-        log_.add("explore models of " + g.id + " failed: " + error);
-        showDialog("We can't rock this! Sorry...", "The models of " + g.title() + " cannot be shown: " + error + ".",
-                   {{"OK", Fret::Green, nullptr}});
-        return;
-    }
+    // The model-explorer module is optional: a game may have songs but no model
+    // viewer yet. Open the models if it has them; the Songs group works regardless.
+    ex->hasModels = ex->session.open(window_, context_, g, catalog_.launcherVersion(), log_, error);
     restoreWindow();
-    const GdExplorer* api = ex->session.api();
-    const int n = api->item_count(api->self);
-    for (int i = 0; i < n; ++i) {
-        GdExploreItem it{};
-        if (api->item(api->self, i, &it) != 0) continue;
-        Explore::Item item;
-        item.group = it.group ? it.group : "Models";
-        item.name = it.name ? it.name : "?";
-        item.detail = it.detail ? it.detail : "";
-        item.key = lower(item.group + " " + item.name + " " + item.detail);
-        ex->items.push_back(std::move(item));
+    if (ex->hasModels) {
+        const GdExplorer* api = ex->session.api();
+        const int n = api->item_count(api->self);
+        for (int i = 0; i < n; ++i) {
+            GdExploreItem it{};
+            if (api->item(api->self, i, &it) != 0) continue;
+            Explore::Item item;
+            item.group = it.group ? it.group : "Models";
+            item.name = it.name ? it.name : "?";
+            item.detail = it.detail ? it.detail : "";
+            item.key = lower(item.group + " " + item.name + " " + item.detail);
+            ex->items.push_back(std::move(item));
+        }
+    } else {
+        log_.add("explore models of " + g.id + ": no model explorer (" + error + ")");
     }
     explore_ = std::move(ex);
     exploreSongsEnsure();  // add the disc's songs as a "Songs" group (its own session)
@@ -167,6 +171,12 @@ void Launcher::exploreOpen(Game& g) {
     bool hasSongs = false;
     for (const Explore::Item& it : e.items)
         if (it.song) { hasSongs = true; break; }
+    if (!e.hasModels && !hasSongs) {  // nothing to show: say so and close
+        showDialog("We can't rock this! Sorry...",
+                   "The models and songs of " + g.title() + " cannot be shown: " + error + ".", {{"OK", Fret::Green, nullptr}});
+        explore_.reset();
+        return;
+    }
     if (hasSongs) e.groups.push_back("Songs");
     for (const Explore::Item& it : e.items)
         if (std::find(e.groups.begin(), e.groups.end(), it.group) == e.groups.end()) e.groups.push_back(it.group);
@@ -184,7 +194,7 @@ void Launcher::exploreClose() {
     if (explore_->songsOpened) explore_->songSession.close();
     const std::string id = explore_->gameId;
     gfx_.release(explore_->frameTex);
-    const bool unloaded = explore_->session.close();
+    const bool unloaded = explore_->hasModels ? explore_->session.close() : true;
     explore_.reset();
     restoreWindow();
     SDL_StopTextInput(window_);
@@ -225,34 +235,42 @@ void Launcher::exploreSongsEnsure() {
     log_.add("explore songs of " + ex.gameId + ": " + std::to_string(n) + " songs");
 }
 
-void Launcher::exploreSongStop() {
+void Launcher::exploreSongStopAudio() {  // stop playback but keep the song selected (the player stays)
     Explore& ex = *explore_;
     if (ex.songStream) {
         SDL_DestroyAudioStream(ex.songStream);
         ex.songStream = nullptr;
     }
-    if (ex.songPlaying >= 0 && ex.songsOk) {
+    if (ex.songStarted && ex.songsOk) {
         const GdSongs* api = ex.songSession.api();
         if (api && GD_SONGS_HAS(api, stop_song)) api->stop_song(api->self);
     }
-    ex.songPlaying = -1;
+    ex.songStarted = false;
     ex.songPaused = false;
     ex.songAtEnd = false;
-    ex.songParts.clear();
+    ex.songFramesFed = 0;
 }
 
-void Launcher::exploreSongPlay(int songIndex) {
+void Launcher::exploreSongStop() {  // stop and close the player (click away / leave Explore)
+    Explore& ex = *explore_;
+    exploreSongStopAudio();
+    ex.songPlaying = -1;
+    ex.songParts.clear();
+    ex.songTotalFrames = 0;
+}
+
+void Launcher::exploreSongSelect(int songIndex) {  // click a song: show the player, do not start it
     Explore& ex = *explore_;
     if (!ex.songsOk) return;
     const GdSongs* api = ex.songSession.api();
-    if (!api || !GD_SONGS_HAS(api, play_song) || !GD_SONGS_HAS(api, read_song)) return;
-    if (ex.songPlaying == songIndex) { exploreSongStop(); return; }  // a second click stops it
-    exploreSongStop();
-    if (api->play_song(api->self, songIndex) != 0) {
-        sounds_.play(UiSound::Error);
-        toast("This song could not be played.");
+    if (!api || !GD_SONGS_HAS(api, play_song) || !GD_SONGS_HAS(api, read_song)) {
+        toast("This game's songs can't be played here yet.");
         return;
     }
+    if (ex.songPlaying == songIndex) return;  // already selected
+    exploreSongStopAudio();
+    ex.songPlaying = songIndex;
+    ex.songTotalFrames = 0;
     ex.songParts.clear();
     const int np = GD_SONGS_HAS(api, part_count) ? api->part_count(api->self, songIndex) : 0;
     for (int i = 0; i < np; ++i) {
@@ -261,9 +279,25 @@ void Launcher::exploreSongPlay(int songIndex) {
         Explore::SongPart part;
         part.name = p.name ? p.name : "Part";
         part.on = p.default_on != 0;
-        if (!part.on && GD_SONGS_HAS(api, set_part)) api->set_part(api->self, i, 0);
         ex.songParts.push_back(std::move(part));
     }
+    for (const Explore::Item& it : ex.items)
+        if (it.song && it.songIndex == songIndex) { ex.songTitle = it.name; ex.songArtist = it.detail; break; }
+    sounds_.play(UiSound::Select);
+}
+
+void Launcher::exploreSongStart() {  // the Play button: begin playing the selected song
+    Explore& ex = *explore_;
+    if (ex.songPlaying < 0 || ex.songStarted || !ex.songsOk) return;
+    const GdSongs* api = ex.songSession.api();
+    if (!api || !GD_SONGS_HAS(api, play_song) || !GD_SONGS_HAS(api, read_song)) return;
+    if (api->play_song(api->self, ex.songPlaying) != 0) {
+        sounds_.play(UiSound::Error);
+        toast("This song could not be played.");
+        return;
+    }
+    if (GD_SONGS_HAS(api, set_part))  // apply the parts the user set before pressing Play
+        for (size_t i = 0; i < ex.songParts.size(); ++i) api->set_part(api->self, int(i), ex.songParts[i].on ? 1 : 0);
     ex.songChunk.assign(size_t(48000) * 2, 0.f);
     int rate = 0;
     const int frames = api->read_song(api->self, ex.songChunk.data(), 48000, &rate);
@@ -287,19 +321,18 @@ void Launcher::exploreSongPlay(int songIndex) {
     SDL_PutAudioStreamData(ex.songStream, ex.songChunk.data(), frames * 2 * int(sizeof(float)));
     SDL_ResumeAudioStreamDevice(ex.songStream);
     ex.songRate = rate;
-    ex.songPlaying = songIndex;
+    ex.songStarted = true;
     ex.songPaused = false;
     ex.songAtEnd = false;
-    // Remember the title shown in the player.
-    for (const Explore::Item& it : ex.items)
-        if (it.song && it.songIndex == songIndex) { ex.songTitle = it.name; ex.songArtist = it.detail; break; }
+    ex.songFramesFed = uint64_t(frames);
+    ex.songTotalFrames = GD_SONGS_HAS(api, song_frames) ? api->song_frames(api->self) : 0;
     sounds_.play(UiSound::Select);
-    log_.add("explore songs: playing " + ex.songTitle + " (" + std::to_string(ex.songParts.size()) + " parts)");
+    log_.add("explore songs: playing " + ex.songTitle);
 }
 
 void Launcher::exploreSongTogglePause() {
     Explore& ex = *explore_;
-    if (ex.songPlaying < 0 || !ex.songStream) return;
+    if (!ex.songStarted || !ex.songStream) return;
     ex.songPaused = !ex.songPaused;
     if (ex.songPaused) SDL_PauseAudioStreamDevice(ex.songStream);
     else SDL_ResumeAudioStreamDevice(ex.songStream);
@@ -310,14 +343,16 @@ void Launcher::exploreSongTogglePart(int part) {
     Explore& ex = *explore_;
     if (part < 0 || part >= int(ex.songParts.size())) return;
     ex.songParts[size_t(part)].on = !ex.songParts[size_t(part)].on;
-    const GdSongs* api = ex.songSession.api();
-    if (api && GD_SONGS_HAS(api, set_part)) api->set_part(api->self, part, ex.songParts[size_t(part)].on ? 1 : 0);
+    if (ex.songStarted) {  // live while playing; otherwise applied when Play starts
+        const GdSongs* api = ex.songSession.api();
+        if (api && GD_SONGS_HAS(api, set_part)) api->set_part(api->self, part, ex.songParts[size_t(part)].on ? 1 : 0);
+    }
     sounds_.play(UiSound::Move);
 }
 
 void Launcher::exploreSongFeed() {
     Explore& ex = *explore_;
-    if (ex.songPlaying < 0 || !ex.songStream || !ex.songsOk) return;
+    if (!ex.songStarted || !ex.songStream || !ex.songsOk) return;
     const GdSongs* api = ex.songSession.api();
     if (!api) return;
     const int bytesPerFrame = 2 * int(sizeof(float));
@@ -327,8 +362,9 @@ void Launcher::exploreSongFeed() {
         const int frames = api->read_song(api->self, ex.songChunk.data(), int(ex.songChunk.size() / 2), &rate);
         if (frames <= 0) { ex.songAtEnd = true; break; }
         SDL_PutAudioStreamData(ex.songStream, ex.songChunk.data(), frames * bytesPerFrame);
+        ex.songFramesFed += uint64_t(frames);
     }
-    if (ex.songAtEnd && SDL_GetAudioStreamQueued(ex.songStream) <= 0) exploreSongStop();
+    if (ex.songAtEnd && SDL_GetAudioStreamQueued(ex.songStream) <= 0) exploreSongStopAudio();  // ended: back to Play
 }
 
 // ---- The list ----
@@ -455,7 +491,7 @@ void Launcher::explorePress(Fret f) {
             exploreGroup(-1 - ex.rows[size_t(ex.cursor)], -1);
         } else if (ex.cursor >= 0 && ex.cursor < int(ex.rows.size()) && ex.rows[size_t(ex.cursor)] >= 0 &&
                    ex.items[size_t(ex.rows[size_t(ex.cursor)])].song) {
-            exploreSongPlay(ex.items[size_t(ex.rows[size_t(ex.cursor)])].songIndex);  // play the song
+            exploreSongSelect(ex.items[size_t(ex.rows[size_t(ex.cursor)])].songIndex);  // select it; Play starts it
         } else if (ex.pending >= 0) {
             ex.pendingAt = now_;
             sounds_.play(UiSound::Select);
@@ -738,7 +774,10 @@ bool Launcher::exploreHandle(const SDL_Event& e) {
         if (ex.songPlaying >= 0) {
             for (const Hit& h : ex.songHits) {
                 if (!h.r.contains(mx, my)) continue;
-                if (h.row == -6) { if (h.col == 0) exploreSongTogglePause(); else exploreSongStop(); }
+                if (h.row == -6) {
+                    if (h.col == 0) { if (!ex.songStarted) exploreSongStart(); else exploreSongTogglePause(); }
+                    else exploreSongStopAudio();  // Stop: back to the Play state, player stays
+                }
                 else if (h.row == -7) exploreSongTogglePart(h.col);
                 return true;
             }
@@ -774,7 +813,7 @@ bool Launcher::exploreHandle(const SDL_Event& e) {
                 exploreGroup(-1 - ex.rows[size_t(h.row)], -1);
             } else if (ex.items[size_t(ex.rows[size_t(h.row)])].song) {  // a song row: play it in the pane
                 exploreCursor(h.row);
-                exploreSongPlay(ex.items[size_t(ex.rows[size_t(h.row)])].songIndex);
+                exploreSongSelect(ex.items[size_t(ex.rows[size_t(h.row)])].songIndex);
             } else {  // a model row: stop any song, show the model
                 exploreSongStop();
                 exploreCursor(h.row);
@@ -907,7 +946,7 @@ bool Launcher::exploreScript(const std::string& cmd, const std::string& arg) {
         if (songs_) songsTogglePart(std::atoi(arg.c_str()));
     } else if (cmd == "exsongplay") {  // dev aid: play the Songs-group song whose name has <arg>, in the pane
         for (const Explore::Item& it : ex.items)
-            if (it.song && lower(it.name).find(lower(arg)) != std::string::npos) { exploreSongPlay(it.songIndex); break; }
+            if (it.song && lower(it.name).find(lower(arg)) != std::string::npos) { exploreSongSelect(it.songIndex); exploreSongStart(); break; }
     } else if (cmd == "exsongpart") {  // dev aid: toggle stem <arg> of the pane player
         exploreSongTogglePart(std::atoi(arg.c_str()));
     } else if (cmd == "turntable") {
@@ -1276,18 +1315,19 @@ void Launcher::exploreDrawPlayer(const Rect& viewPx) {
         text(FontId::SemiBold, 16, cx - measure(FontId::SemiBold, 16, ashown) / 2, vy + vh * 0.12f + 42, ashown, kSand);
     }
 
-    // Transport: a large Play/Pause and a Stop, centred.
-    const float by = vy + vh * 0.40f;
+    // Transport: a large Play/Pause and a Stop, centred. The icon is Play when
+    // stopped or paused, Pause while playing.
+    const bool showPlay = !ex.songStarted || ex.songPaused;
+    const float by = vy + vh * 0.34f;
     const float r1 = 34, r2 = 27, gap = 30;
-    const float totalW = 2 * r1 + gap + 2 * r2;
-    float bx = cx - totalW / 2;
+    float bx = cx - (2 * r1 + gap + 2 * r2) / 2;
     {  // Play / Pause
         const float bcx = bx + r1;
         const Rect hit = R(bcx - r1, by - r1, 2 * r1, 2 * r1);
         const bool hover = hit.contains(mx, my);
         const Color fc = fretColor(Fret::Green);
         if (hover) gfx_.glow(hit, withAlpha(fc, 0.35f), r1 * s_, 12 * s_);
-        icon(ex.songPaused ? gfx::icon::kPlayCircle : gfx::icon::kPauseCircle, bcx, by, r1 * 1.9f, hover ? kCream : fc);
+        icon(showPlay ? gfx::icon::kPlayCircle : gfx::icon::kPauseCircle, bcx, by, r1 * 1.9f, hover ? kCream : fc);
         ex.songHits.push_back({hit, -6, 0});
         bx += 2 * r1 + gap;
     }
@@ -1301,31 +1341,57 @@ void Launcher::exploreDrawPlayer(const Rect& viewPx) {
         ex.songHits.push_back({hit, -6, 1});
     }
 
-    // PARTS: a centred checkbox per stem.
-    const float py0 = by + r1 + 34;
+    // The progress bar sits at the bottom of the player; the parts fill the space
+    // between the transport and it (the rows shrink to fit however many there are).
+    const float barY = vy + vh - 48;
+    const float py0 = by + r1 + 24;
     text(FontId::SemiBold, 12, cx - measure(FontId::SemiBold, 12, "PARTS", 1.5f) / 2, py0, "PARTS", kMuted, 1.5f);
-    float py = py0 + 26;
-    const float rowW = std::min(vw - 60, 280.f);
+    const float partTop = py0 + 24, partBottom = barY - 18;
+    const int n = int(ex.songParts.size());
+    const float rowH = n > 0 ? std::clamp((partBottom - partTop) / float(n), 28.f, 42.f) : 0;
+    const float rowW = std::min(vw - 60, 300.f);
+    float py = partTop;
     for (size_t i = 0; i < ex.songParts.size(); ++i) {
         const Explore::SongPart& p = ex.songParts[i];
-        const Rect r = R(cx - rowW / 2, py, rowW, 34);
+        const Rect r = R(cx - rowW / 2, py, rowW, rowH - 5);
         const bool hover = r.contains(mx, my);
+        const float rc = py + (rowH - 5) / 2;  // vertical centre of the row
         const Color fc = p.on ? fretColor(Fret::Green) : kMuted;
-        gfx_.rect(r, rgb(0x1f1b23, p.on ? 0.92f : 0.5f), rgb(0x18151b, p.on ? 0.92f : 0.5f), 10 * s_);
-        gfx_.ring(r, withAlpha(fc, p.on ? (hover ? 0.95f : 0.6f) : (hover ? 0.5f : 0.22f)), 10 * s_, 1.2f * s_);
-        const Rect box = R(cx - rowW / 2 + 12, py + 8, 18, 18);
+        gfx_.rect(r, rgb(0x1f1b23, p.on ? 0.92f : 0.5f), rgb(0x18151b, p.on ? 0.92f : 0.5f), 9 * s_);
+        gfx_.ring(r, withAlpha(fc, p.on ? (hover ? 0.95f : 0.6f) : (hover ? 0.5f : 0.22f)), 9 * s_, 1.2f * s_);
+        const Rect box = R(cx - rowW / 2 + 12, rc - 9, 18, 18);
         if (p.on)
             gfx_.rect(box, fc, gfx::mix(fc, kInk, 0.2f), 5 * s_);
         else {
             gfx_.rect(box, rgb(0x16141a), 5 * s_);
             gfx_.ring(box, withAlpha(kMuted, 0.6f), 5 * s_, 1.2f * s_);
         }
-        text(FontId::SemiBold, 15, cx - rowW / 2 + 40, py + 9, p.name, p.on ? (hover ? kCream : kSand) : kMuted);
+        text(FontId::SemiBold, 15, cx - rowW / 2 + 40, rc - 9, p.name, p.on ? (hover ? kCream : kSand) : kMuted);
         ex.songHits.push_back({r, -7, int(i)});
-        py += 42;
+        py += rowH;
     }
-    const std::string hint = "Click a part to mute it";
-    text(FontId::Regular, 13, cx - measure(FontId::Regular, 13, hint) / 2, vy + vh - 28, hint, kDim);
+
+    // Progress bar + time, at the bottom.
+    double posFrames = 0;
+    if (ex.songStarted && ex.songStream) {
+        const double queuedFrames = double(SDL_GetAudioStreamQueued(ex.songStream)) / double(2 * sizeof(float));
+        posFrames = std::max(0.0, double(ex.songFramesFed) - queuedFrames);
+    }
+    const double tot = double(ex.songTotalFrames);
+    const double frac = tot > 0 ? std::clamp(posFrames / tot, 0.0, 1.0) : 0.0;
+    const float barW = std::min(vw - 90, 440.f);
+    gfx_.rect(R(cx - barW / 2, barY, barW, 6), rgb(0x2a2630), 3 * s_);
+    if (frac > 0) gfx_.rect(R(cx - barW / 2, barY, barW * float(frac), 6), fretColor(Fret::Green), 3 * s_);
+    const int rate = ex.songRate > 0 ? ex.songRate : 48000;
+    auto mmss = [](double sec) {
+        const int t = int(sec);
+        char b[16];
+        SDL_snprintf(b, sizeof b, "%d:%02d", t / 60, t % 60);
+        return std::string(b);
+    };
+    text(FontId::Regular, 12, cx - barW / 2, barY + 12, mmss(posFrames / rate), kDim);
+    const std::string tt = tot > 0 ? mmss(tot / rate) : "--:--";
+    text(FontId::Regular, 12, cx + barW / 2 - measure(FontId::Regular, 12, tt), barY + 12, tt, kDim);
 }
 
 void Launcher::exploreDrawViewer(const Rect& viewPx) {
@@ -1389,7 +1455,7 @@ void Launcher::exploreDrawViewer(const Rect& viewPx) {
         for (const std::string& l : lines) text(FontId::Regular, 17, vx + (vw - cw) / 2 + 24, ly, l, rgb(0xd9cfbd)), ly += 24;
     }
     if (ex.shown < 0 && !loading) {
-        const std::string t = ex.rows.empty() ? "Nothing to show" : "Pick a model";
+        const std::string t = ex.rows.empty() ? "Nothing to show" : !ex.hasModels ? "Pick a song" : "Pick a song or model";
         text(FontId::Title, 44, vx + (vw - measure(FontId::Title, 44, t)) / 2, vy + vh / 2 - 40, t, withAlpha(kCream, 0.85f));
     }
     if (loading) {
