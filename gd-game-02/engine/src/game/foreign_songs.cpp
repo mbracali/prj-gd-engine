@@ -58,6 +58,11 @@ std::vector<SongInfo> openForeignSongs(const std::vector<std::pair<std::string, 
             info.foreignDisc = discIdx;
             info.foreignSong = j;
             info.foreignLabel = "Guitar Hero";
+            // A real performance venue (a foreign song is in no campaign tier, so
+            // venues::forSong would fall back to "battle" — the two-player battle
+            // stage, which frames no band). Rotate the normal stages for variety.
+            static const char* const kVenues[] = {"small1", "small2", "theatre", "fest", "big", "arena", "stone"};
+            info.venue = kVenues[size_t(j) % (sizeof(kVenues) / sizeof(kVenues[0]))];
             // Audio channel layout (the chart and audio come from the reader).
             info.audio.pans = m.pans;
             info.audio.vols = m.vols;   // dB, as GH2's own songs
@@ -74,11 +79,18 @@ Song loadForeignChart(const ForeignLibrary& lib, const SongInfo& info) {
     if (info.foreignDisc < 0 || info.foreignDisc >= int(lib.discs.size())) return song;
     const gd::core::gh1::Disc& disc = *lib.discs[size_t(info.foreignDisc)];
     const gd::core::gh1::NeutralChart nc = disc.loadChart(info.foreignSong);
-    // A tempo map from the GH1 MIDI, with GH2's own parser (gems already carry
-    // absolute ms; this is for beat lines and measures). Best effort.
+    // The GH1 MIDI, parsed with GH2's own parser (gems already carry absolute
+    // ms; this is for beat lines, the on-stage band and the camera/lighting).
+    // GH1 and GH2 share the band/venue track layout, so the band performs and
+    // the director cuts for a foreign song exactly as for a native one. Best
+    // effort — a song with no readable MIDI still plays, just without the band.
     try {
-        const std::vector<uint8_t> midi = disc.rawMidi(info.foreignSong);
-        if (!midi.empty()) song.tempo.build(parseMidi(midi));
+        const std::vector<uint8_t> midiBytes = disc.rawMidi(info.foreignSong);
+        if (!midiBytes.empty()) {
+            const MidiFile midi = parseMidi(midiBytes);
+            song.tempo.build(midi);
+            parseBandAndEvents(midi, song);  // BAND DRUMS/BASS, TRIGGERS, EVENTS -> venueNotes + sections
+        }
     } catch (...) {
     }
     const size_t gp = size_t(Part::Guitar);
@@ -101,4 +113,13 @@ std::unique_ptr<AudioSource> loadForeignAudio(const ForeignLibrary& lib, const S
     auto stream = lib.discs[size_t(info.foreignDisc)]->openAudio(info.foreignSong);
     if (!stream) return nullptr;
     return std::make_unique<ForeignAudioSource>(std::move(stream));
+}
+
+std::vector<uint8_t> loadForeignMidi(const ForeignLibrary& lib, const SongInfo& info) {
+    if (info.foreignDisc < 0 || info.foreignDisc >= int(lib.discs.size())) return {};
+    try {
+        return lib.discs[size_t(info.foreignDisc)]->rawMidi(info.foreignSong);
+    } catch (...) {
+        return {};
+    }
 }

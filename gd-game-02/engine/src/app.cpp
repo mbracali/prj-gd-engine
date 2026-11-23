@@ -2471,7 +2471,12 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
                 };
             }
         }
-        band_->loadSong(parseMidi(data_->read(info.audio.midiPath)), &song);
+        // The band's performance MIDI: a foreign song's lives on its own disc
+        // (data_ can't read it), so take its bytes from the shared reader. The
+        // GH1 and GH2 chart MIDIs share the band/venue track layout, so the
+        // on-stage band animates for a foreign song as for a native one.
+        const std::vector<uint8_t> perfMidi = info.foreign() ? loadForeignMidi(foreignLib_, info) : data_->read(info.audio.midiPath);
+        band_->loadSong(parseMidi(perfMidi), &song);
         // The characters enter with the world (World::start); a world already
         // started (the menus' world_panel) gets them at once.
         if (world_->started()) band_->enter();

@@ -37,3 +37,8 @@ Song loadForeignChart(const ForeignLibrary& lib, const SongInfo& info);
 
 // A GH2 AudioSource over a foreign song's audio.
 std::unique_ptr<AudioSource> loadForeignAudio(const ForeignLibrary& lib, const SongInfo& info);
+
+// A foreign song's raw performance MIDI (the band/venue animation tracks), so
+// the on-stage band animates during a foreign song exactly as for a native one.
+// Empty if unavailable.
+std::vector<uint8_t> loadForeignMidi(const ForeignLibrary& lib, const SongInfo& info);
