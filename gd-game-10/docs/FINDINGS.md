@@ -182,3 +182,49 @@ data] unless marked [I].
   CAREER choose. The original `main_menu_select_career` already sets it; the
   C++ sets it before the game_mode screen's Single/Band choices are built
   (timing), so it is belt-and-suspenders, not required for correctness.
+## Venue lighting (2026-11-23)
+
+The venue lighting model (group lights -> stage/band/crowd shader registers,
+blend modes, spotlights, light volumes, the dark-venue question GD10-040) is
+audited faithful; `render.md` is the reference. The core selection/SH helpers
+Function_824D7220 / 8240F560 / the SH weights are VMX128 and do not decompile
+(`halt_baddata` / decompile-failed), so the port follows the reconstruction
+there. Ruled out as non-bugs: group intensity (`groupScale` = 1 -- the
+`SetLightGroupIntensity` command is only in the dev `lighttool.qb`, never the
+runtime; no zone defines a per-group intensity, default 1) [C]; `Venue_Pulse*`
+(the note-reactive housing-scale pulse) -- vestigial, wired to no Metallica
+housing [C].
+
+Fixed -- the light-show mood processors (`render/venue_lights.cpp`
+`enterMood` / `applyNote` / new `cyclesOnSnapshotChange`). The processor of a
+mood/performance entry resolves through `LightShow_SharedProcessors` (the only
+table `LightShow_SetProcessors` registers; no zone has a per-venue
+`<zone>_lightshow_processors`) [C qb.pak; all_dis.txt ~44584]. Per processor
+`screnter`/`screvent`: default_generic = GenericMood_Enter / _Event, Poor =
+Poor_Enter / _Event (no cycle on event), Blackout/Flare = *_Enter (save=false)
+/ empty, Strobe_Generic = **GenericMood**_Enter / _Event (NOT the orphaned
+`LightShow_Strobe_*`, which nothing references), Proc_*Intro = GenericMood_Enter
+/ nullscript. A mode entry with no inline `processor` defaults to
+default_generic [C].
+- Bug A: the port read `processor` inline and did nothing when absent, so the
+  medium/good generic moods (intro, wash, prelude, exposition, verse, chorus,
+  ...; ~40% of every zone's entries carry snapshots but no processor) never
+  played or cycled. Original: default_generic cycles on enter and on
+  snapshotchange (notes 57/58).
+- Bug B: the port modelled Strobe_Generic as a special strobe (SetTime
+  disabled, driven by note 60 `strobetoggle`, intensity forced to 1.0) from the
+  orphaned scripts; the shared table maps it to GenericMood, so strobe cycles
+  through its snapshots on snapshotchange and `strobetoggle` is ignored (no
+  processor consumes it) [C].
+- Bug C: the port cycled Proc_*Intro (z_donnington's "One") on snapshotchange;
+  their screvent is nullscript, so they cycle on enter only.
+  Objective (venuetest, swings the rock meter through poor/medium/good; counts
+  snapshot changes; identical at 60/240 fps): z_forum/entersandman 158 -> 751,
+  z_mop/MasterOfPuppets 574 -> 1534. `GD10_LIGHTSHOW_LEGACY=1` restores the old
+  behaviour.
+
+Open (grounded, not fixed): Blackout_Enter / Flare_Enter append
+intensity=0.25 specularintensity=0.25 only in z_soundcheck(_practice) /
+z_training / z_viewer (non-quickplay venues) [C lightshow.qb]; the port does
+not, so those venues go fully dark on those moods. `resetcycleonmoodchange`
+(notes 87/88) is not modelled.
