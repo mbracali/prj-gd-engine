@@ -1,0 +1,60 @@
+# Keeps `main` contained in `develop` after every release.
+#
+# Why: releases merge `develop -> main`, which creates a merge commit on `main`
+# that is never merged back, so `main` collects commits `develop` lacks. This
+# opens (and, if auto-merge is enabled, merges) a back-merge PR each time `main`
+# moves, so the two branches never silently diverge again.
+#
+# Runs only on a push to `main` (release time), so it costs almost no Actions
+# minutes. A normal merge is used, so any future direct hotfix on `main` is
+# preserved in `develop` (not discarded); a conflict fails the job loudly.
+name: Back-merge main into develop
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: backmerge-main-into-develop
+  cancel-in-progress: false
+
+jobs:
+  backmerge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Open (and auto-merge) a back-merge PR main -> develop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git merge-base --is-ancestor origin/main origin/develop; then
+            echo "develop already contains main; nothing to do."
+            exit 0
+          fi
+
+          BR="backmerge/main-${GITHUB_SHA::7}"
+          git checkout -B "$BR" origin/develop
+          # develop is normally strictly ahead, so this is a no-content merge;
+          # a real conflict (e.g. a direct hotfix on main) fails the job on purpose.
+          git merge --no-edit origin/main
+          git push -f origin "$BR"
+
+          gh pr create --base develop --head "$BR" \
+            --title "Back-merge main into develop" \
+            --body "Automated guard: keeps every \`main\` commit contained in \`develop\` after a release. No content change when develop is ahead." \
+            || gh pr edit "$BR" --title "Back-merge main into develop" >/dev/null
+
+          # Merges by itself if repo auto-merge is on; otherwise stays open for a click.
+          gh pr merge "$BR" --merge --auto || echo "Auto-merge unavailable; merge the PR manually."
