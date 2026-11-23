@@ -231,7 +231,7 @@ private:
             d_.frame(bx0 + 24, searchY_, bx1 - 24, searchY_ + 30, 1.2f, PortDraw::kEdge);
         } else if (p1) {
             d_.text("CUSTOM SONGS", (bx0 + bx1) / 2, boxY0_ + 30, 32, PortDraw::kTitle, 0x22);
-            d_.text("Search  (coming soon)", bx0 + 36, searchY_ + 15, 16, PortDraw::kDim, 0x12);
+            d_.text("Search  (coming soon)", bx0 + 36, searchY_ + 15, 16, PortDraw::kDim, 0x21);
         }
         // View tabs below the search bar.
         static const char* kTabs[3] = {"GAME + FOLDERS", "ALPHABETICAL", "ARTIST"};
@@ -257,24 +257,24 @@ private:
             if (p0 && cur) d_.quad(bx0 + 10, ry + 1, scrollX_ - 6 + o, ry + kRowH - 1, PortDraw::kFocusBar);
             if (!p1) continue;
             if (row.folder) {
-                d_.text(expanded_[row.label] ? "\xE2\x96\xBC" : "\xE2\x96\xB6", bx0 + 30, midY, 16, PortDraw::kGold, 0x12);
-                d_.text(row.label, bx0 + 54, midY, 22, cur ? PortDraw::kFocused : PortDraw::kGold, 0x12);
-                d_.text(std::to_string(folderCount(row.label)) + " songs", markRight, midY, 15, PortDraw::kDim, 0x42);
+                d_.text(expanded_[row.label] ? "v" : ">", bx0 + 30, midY, 16, PortDraw::kGold, 0x21);
+                d_.text(row.label, bx0 + 54, midY, 22, cur ? PortDraw::kFocused : PortDraw::kGold, 0x21);
+                d_.text(std::to_string(folderCount(row.label)) + " songs", markRight, midY, 15, PortDraw::kDim, 0x24);
             } else {
                 const SongInfo& s = songs[size_t(row.song)];
                 // Instrument markers on the right (drawn right to left).
                 float ix = markRight;
                 auto inst = instrumentsOf(s);
                 for (auto it = inst.rbegin(); it != inst.rend(); ++it) {
-                    d_.text(std::string(1, it->first), ix, midY, 15, it->second, 0x42);
+                    d_.text(std::string(1, it->first), ix, midY, 15, it->second, 0x24);
                     ix -= 18;
                 }
                 const float artX = ix - 12;  // artist, right-aligned, left of the markers
                 const float nameRight = artX - 220;
                 const std::string name = d_.fit(s.name, 19, nameRight - nameX);
-                d_.text(name, nameX, midY, 19, cur ? PortDraw::kFocused : PortDraw::kNormal, 0x12);
+                d_.text(name, nameX, midY, 19, cur ? PortDraw::kFocused : PortDraw::kNormal, 0x21);
                 if (!s.artist.empty())
-                    d_.text(d_.fit(s.artist, 15, 210), artX, midY, 15, PortDraw::kDim, 0x42);
+                    d_.text(d_.fit(s.artist, 15, 210), artX, midY, 15, PortDraw::kDim, 0x24);
             }
         }
         // Vertical scrollbar.

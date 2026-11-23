@@ -81,7 +81,12 @@ public:
 
     void drawBefore() override {
         updateTransition();
-        host_.renderer().fillRect(offset_, 0, kScreenW, kScreenH, {0, 0, 0, uint8_t(255 * 0.55f * fade_)});
+        Renderer& r = host_.renderer();
+        float fx = 0, fy = 0;
+        if (!host_.drawMenuBackdrop(fx, fy))  // the still venue + band behind the overlay (black when none)
+            r.fillRect(offset_, 0, kScreenW, kScreenH, {0, 0, 0, uint8_t(255 * fade_)});
+        else
+            r.fillRect(0, 0, kScreenW, kScreenH, {0, 0, 0, uint8_t(255 * (1 - fade_))});  // the transition fade only
     }
     void drawAfter() override { drawAll(); }
 
@@ -179,17 +184,17 @@ private:
         quad(bx0, boxY0_, bx1, boxY1_, kBox);
         frame(bx0, boxY0_, bx1, boxY1_, 1.5f, kEdge);
         quad(bx0, boxY0_, bx1, boxY0_ + 5, kAccent);
-        text("rokk.font", "CUSTOM SONGS", (bx0 + bx1) / 2, boxY0_ + 14, 30, kTitle, 0x22);
+        text("rokk.font", "CUSTOM SONGS", (bx0 + bx1) / 2, boxY0_ + 28, 30, kTitle, 0x22);
         quad(bx0 + 24, searchY_, bx1 - 24, searchY_ + 30, {0.02f, 0.02f, 0.03f, 0.9f});
         frame(bx0 + 24, searchY_, bx1 - 24, searchY_ + 30, 1.2f, kEdge);
-        text("impactor.font", "Search  (coming soon)", bx0 + 36, searchY_ + 7, 16, kDim, 0x12);
+        text("impactor.font", "Search  (coming soon)", bx0 + 36, searchY_ + 15, 16, kDim, 0x21);
         static const char* kTabs[3] = {"GAME + FOLDERS", "ALPHABETICAL", "ARTIST"};
         for (int v = 0; v < 3; ++v) {
             const float tx0 = tabX_[v] + o, tx1 = tabX_[v + 1] - 8 + o;
             const bool on = int(view_) == v;
             quad(tx0, tabsY_, tx1, tabsY_ + 28, on ? kBar : Color{0.04f, 0.04f, 0.05f, 0.8f});
             frame(tx0, tabsY_, tx1, tabsY_ + 28, 1.2f, on ? kAccent : kEdge);
-            text("impactor.font", kTabs[v], (tx0 + tx1) / 2, tabsY_ + 6, 15, on ? kFocused : kDim, 0x22);
+            text("impactor.font", kTabs[v], (tx0 + tx1) / 2, tabsY_ + 14, 15, on ? kFocused : kDim, 0x22);
         }
         const float nameX = boxX0_ + 54 + o;
         const float markRight = scrollX_ - 16 + o;
@@ -199,18 +204,18 @@ private:
             const Row& row = rows_[size_t(r)];
             const bool cur = r == cursor_;
             if (cur) quad(bx0 + 10, ry + 1, scrollX_ - 6 + o, ry + kRowH - 1, kBar);
-            const float midY = ry + kRowH / 2 - 10;  // drawText y is the top of the line
+            const float midY = ry + kRowH / 2;  // middle-aligned text (0x21/0x24)
             if (row.folder) {
-                text("impactor.font", expanded_[row.label] ? "v" : ">", bx0 + 30, midY, 18, kGold, 0x12);
-                text("impactor.font", row.label, bx0 + 54, midY, 22, cur ? kFocused : kGold, 0x12);
-                text("impactor.font", std::to_string(folderCount(row.label)) + " songs", markRight, midY, 15, kDim, 0x42);
+                text("impactor.font", expanded_[row.label] ? "v" : ">", bx0 + 30, midY, 18, kGold, 0x21);
+                text("impactor.font", row.label, bx0 + 54, midY, 22, cur ? kFocused : kGold, 0x21);
+                text("impactor.font", std::to_string(folderCount(row.label)) + " songs", markRight, midY, 15, kDim, 0x24);
             } else {
                 const SongInfo& s = songs[size_t(row.song)];
-                text("impactor.font", "G", markRight, midY, 15, {0.3f, 1.f, 0.45f, 1}, 0x42);
+                text("impactor.font", "G", markRight, midY, 15, {0.3f, 1.f, 0.45f, 1}, 0x24);
                 const float artX = markRight - 30;
                 const std::string name = fit("impactor.font", s.name, 19, artX - 220 - nameX);
-                text("impactor.font", name, nameX, midY, 19, cur ? kFocused : kNormal, 0x12);
-                if (!s.artist.empty()) text("impactor.font", fit("impactor.font", s.artist, 15, 210), artX, midY, 15, kDim, 0x42);
+                text("impactor.font", name, nameX, midY, 19, cur ? kFocused : kNormal, 0x21);
+                if (!s.artist.empty()) text("impactor.font", fit("impactor.font", s.artist, 15, 210), artX, midY, 15, kDim, 0x24);
             }
         }
         // Scrollbar.
