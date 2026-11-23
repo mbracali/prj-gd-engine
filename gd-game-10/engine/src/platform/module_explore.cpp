@@ -65,10 +65,10 @@ Quat quatFor(const Vec3& right, const Vec3& up, const Vec3& fwd) {
     return {x, y, z, w};
 }
 
-std::string label(const band::Member& m) {
-    std::string s = m.profileName.empty() ? band::roleName(m.role) : m.profileName;
-    if (m.outfit > 1 || m.style > 1) s += " #" + std::to_string(m.outfit) + "-" + std::to_string(m.style);
-    return s;
+std::string label(const band::Member& m) { return m.profileName.empty() ? std::string(band::roleName(m.role)) : m.profileName; }
+
+const char* roleGroup(band::Role r) {
+    return r == band::Role::Bassist ? "Bass" : r == band::Role::Drummer ? "Drums" : r == band::Role::Vocalist ? "Mics" : "Guitars";
 }
 
 struct Item {
@@ -132,16 +132,32 @@ bool Explorer::open(const GdHost* host) {
         SDL_Log("explore: cannot start the renderer: %s", error.c_str());
         return false;
     }
+    // Chars = the preset roster only: one Member per named profile, not every
+    // outfit/style appearance variant everyBody() returns (owner 11-23).
     try {
-        bodies_ = band::everyBody(*globals_);
+        std::vector<std::string> seen;
+        for (const band::Member& m : band::everyTalentGh4(*globals_, 0)) {
+            if (std::find(seen.begin(), seen.end(), m.profileName) != seen.end()) continue;
+            seen.push_back(m.profileName);
+            bodies_.push_back(m);
+        }
         instruments_ = band::everyInstrument(*globals_);
     } catch (const std::exception& e) {
         SDL_Log("explore: %s", e.what());
     }
+    // Instruments, split into Guitars / Bass / Drums / Mics by role (one per
+    // character per role), in that group order; then the character presets.
+    for (band::Role role : {band::Role::Guitarist, band::Role::Bassist, band::Role::Drummer, band::Role::Vocalist}) {
+        std::vector<std::string> seen;
+        for (size_t i = 0; i < instruments_.size(); ++i) {
+            const band::Member& m = instruments_[i];
+            if (m.role != role || std::find(seen.begin(), seen.end(), m.profileName) != seen.end()) continue;
+            seen.push_back(m.profileName);
+            items_.push_back({roleGroup(role), label(m), band::roleName(role), true, i});
+        }
+    }
     for (size_t i = 0; i < bodies_.size(); ++i)
-        items_.push_back({"Characters", label(bodies_[i]), band::roleName(bodies_[i].role), false, i});
-    for (size_t i = 0; i < instruments_.size(); ++i)
-        items_.push_back({"Instruments", label(instruments_[i]), band::roleName(instruments_[i].role), true, i});
+        items_.push_back({"Chars", label(bodies_[i]), band::roleName(bodies_[i].role), false, i});
     SDL_Log("explore: %s: %d models (%zu bodies, %zu instruments)", disc.c_str(), count(), bodies_.size(), instruments_.size());
     if (items_.empty()) return false;  // no enumerable models: the launcher falls back to songs-only
     return true;
