@@ -70,10 +70,41 @@ void Launcher::songsOpen(Game& g) {
 }
 
 void Launcher::songsStop() {
-    if (!songs_ || !songs_->stream) return;
-    SDL_DestroyAudioStream(songs_->stream);  // closes the device it opened too
-    songs_->stream = nullptr;
-    songs_->playing = -1;
+    if (!songs_) return;
+    Songs& so = *songs_;
+    if (so.stream) {
+        SDL_DestroyAudioStream(so.stream);  // closes the device it opened too
+        so.stream = nullptr;
+    }
+    if (so.streaming) {
+        const GdSongs* api = so.session.api();
+        if (api && GD_SONGS_HAS(api, stop_song)) api->stop_song(api->self);
+    }
+    so.streaming = false;
+    so.paused = false;
+    so.atEnd = false;
+    so.playing = -1;
+    so.parts.clear();
+}
+
+void Launcher::songsTogglePart(int part) {
+    if (!songs_) return;
+    Songs& so = *songs_;
+    if (part < 0 || part >= int(so.parts.size())) return;
+    so.parts[size_t(part)].on = !so.parts[size_t(part)].on;
+    const GdSongs* api = so.session.api();
+    if (api && GD_SONGS_HAS(api, set_part)) api->set_part(api->self, part, so.parts[size_t(part)].on ? 1 : 0);
+    sounds_.play(UiSound::Move);
+}
+
+void Launcher::songsTogglePause() {
+    if (!songs_) return;
+    Songs& so = *songs_;
+    if (!so.streaming || !so.stream) return;
+    so.paused = !so.paused;
+    if (so.paused) SDL_PauseAudioStreamDevice(so.stream);
+    else SDL_ResumeAudioStreamDevice(so.stream);
+    sounds_.play(UiSound::Move);
 }
 
 void Launcher::songsClose() {
@@ -98,6 +129,63 @@ void Launcher::songsPlay(int row) {
         return;
     }
     songsStop();
+
+    // The whole song, with live per-part (stem) control, when the module offers
+    // it (play_song/read_song). The launcher streams it chunk by chunk.
+    if (GD_SONGS_HAS(api, play_song) && GD_SONGS_HAS(api, read_song)) {
+        for (Game& g : catalog_.games())
+            if (g.id == so.gameId) { drawLoading(g, "Opening"); break; }
+        const int rc = api->play_song(api->self, row);
+        SDL_GL_MakeCurrent(window_, context_);
+        if (rc != 0) {
+            sounds_.play(UiSound::Error);
+            toast("This song could not be played.");
+            return;
+        }
+        so.parts.clear();
+        const int np = GD_SONGS_HAS(api, part_count) ? api->part_count(api->self, row) : 0;
+        for (int i = 0; i < np; ++i) {
+            GdSongPart p{};
+            if (api->part(api->self, row, i, &p) != 0) continue;
+            Songs::Part part;
+            part.name = p.name ? p.name : "Part";
+            part.on = p.default_on != 0;
+            if (!part.on && GD_SONGS_HAS(api, set_part)) api->set_part(api->self, i, 0);
+            so.parts.push_back(std::move(part));
+        }
+        so.chunk.assign(size_t(48000) * 2, 0.f);  // up to ~1 s per read (fewer at lower rates)
+        int rate = 0;
+        const int frames = api->read_song(api->self, so.chunk.data(), 48000, &rate);
+        if (frames <= 0 || rate <= 0) {
+            if (GD_SONGS_HAS(api, stop_song)) api->stop_song(api->self);
+            sounds_.play(UiSound::Error);
+            toast("This song could not be decoded.");
+            return;
+        }
+        SDL_AudioSpec spec{};
+        spec.format = SDL_AUDIO_F32;
+        spec.channels = 2;
+        spec.freq = rate;
+        so.stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+        if (!so.stream) {
+            if (GD_SONGS_HAS(api, stop_song)) api->stop_song(api->self);
+            sounds_.play(UiSound::Error);
+            toast("No audio device for the song.");
+            return;
+        }
+        SDL_PutAudioStreamData(so.stream, so.chunk.data(), frames * 2 * int(sizeof(float)));
+        SDL_ResumeAudioStreamDevice(so.stream);
+        so.playRate = rate;
+        so.streaming = true;
+        so.paused = false;
+        so.atEnd = false;
+        so.playing = row;
+        sounds_.play(UiSound::Select);
+        log_.add("songs: playing " + so.items[size_t(row)].title + " (" + std::to_string(so.parts.size()) + " parts)");
+        return;
+    }
+
+    // Fallback: a one-shot preview (older module without play_song).
     for (Game& g : catalog_.games())
         if (g.id == so.gameId) { drawLoading(g, "Decoding a preview of"); break; }
     // The module decodes into the launcher's buffer (interleaved stereo floats).
@@ -156,7 +244,10 @@ bool Launcher::songsHandle(const SDL_Event& e) {
         case SDLK_PAGEDOWN: so.cursor = std::min(int(so.items.size()) - 1, so.cursor + 6); return true;
         case SDLK_HOME: so.cursor = 0; return true;
         case SDLK_END: so.cursor = int(so.items.size()) - 1; return true;
-        case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: if (!e.key.repeat) songsPlay(so.cursor); return true;
+        case SDLK_RETURN: case SDLK_KP_ENTER: if (!e.key.repeat) songsPlay(so.cursor); return true;
+        case SDLK_SPACE:
+            if (!e.key.repeat) { if (so.streaming) songsTogglePause(); else songsPlay(so.cursor); }
+            return true;
         case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_M:
             if (!e.key.repeat) { sounds_.play(UiSound::Back); songsClose(); }
             return true;
@@ -168,6 +259,7 @@ bool Launcher::songsHandle(const SDL_Event& e) {
         case SDL_GAMEPAD_BUTTON_DPAD_UP: so.cursor = std::max(0, so.cursor - 1); sounds_.play(UiSound::Move); return true;
         case SDL_GAMEPAD_BUTTON_DPAD_DOWN: so.cursor = std::min(int(so.items.size()) - 1, so.cursor + 1); sounds_.play(UiSound::Move); return true;
         case SDL_GAMEPAD_BUTTON_SOUTH: case SDL_GAMEPAD_BUTTON_START: songsPlay(so.cursor); return true;
+        case SDL_GAMEPAD_BUTTON_NORTH: songsTogglePause(); return true;
         case SDL_GAMEPAD_BUTTON_EAST: case SDL_GAMEPAD_BUTTON_BACK: sounds_.play(UiSound::Back); songsClose(); return true;
         default: return true;
         }
@@ -180,7 +272,10 @@ bool Launcher::songsHandle(const SDL_Event& e) {
             if (h.row == -3) {  // a footer fret button
                 if (Fret(h.col) == Fret::Red) { sounds_.play(UiSound::Back); songsClose(); }
                 else if (Fret(h.col) == Fret::Green) songsPlay(so.cursor);
+                else if (Fret(h.col) == Fret::Blue) songsTogglePause();
                 else if (Fret(h.col) == Fret::Orange) songsStop();
+            } else if (h.row == -4) {  // a stem checkbox
+                songsTogglePart(h.col);
             } else if (h.row >= 0) {
                 so.cursor = h.row;
                 songsPlay(h.row);
@@ -202,10 +297,22 @@ bool Launcher::songsHandle(const SDL_Event& e) {
 void Launcher::songsFrame() {
     Songs& so = *songs_;
     so.lastFrame = now_;
-    // The preview finished? (nothing queued and the device drained.)
-    if (so.stream && so.playing >= 0) {
-        const int queued = SDL_GetAudioStreamQueued(so.stream);
-        if (queued <= 0) songsStop();
+    const GdSongs* api = so.session.api();
+    if (so.streaming && so.stream && api) {
+        // Keep ~0.5 s queued so the song plays without gaps. Each read decodes
+        // the next chunk with the current part mask (a muted stem drops out live).
+        const int bytesPerFrame = 2 * int(sizeof(float));
+        const int target = std::max(1, so.playRate / 2) * bytesPerFrame;
+        for (int guard = 0; !so.atEnd && !so.paused && SDL_GetAudioStreamQueued(so.stream) < target && guard < 8; ++guard) {
+            int rate = 0;
+            const int frames = api->read_song(api->self, so.chunk.data(), int(so.chunk.size() / 2), &rate);
+            if (frames <= 0) { so.atEnd = true; break; }
+            SDL_PutAudioStreamData(so.stream, so.chunk.data(), frames * bytesPerFrame);
+        }
+        if (so.atEnd && SDL_GetAudioStreamQueued(so.stream) <= 0) songsStop();  // reached the end, device drained
+    } else if (so.stream && so.playing >= 0) {
+        // A one-shot preview finished? (nothing queued and the device drained.)
+        if (SDL_GetAudioStreamQueued(so.stream) <= 0) songsStop();
     }
     SDL_GetWindowSizeInPixels(window_, &pw_, &ph_);
     s_ = std::max(0.25f, std::min(float(pw_) / 1280.f, float(ph_) / 720.f));
@@ -215,6 +322,10 @@ void Launcher::songsFrame() {
     songsDraw();
     drawToast();
     gfx_.end();
+    if (!pendingShot_.empty()) {
+        screenshot(pendingShot_);
+        pendingShot_.clear();
+    }
     SDL_GL_SwapWindow(window_);
 }
 
@@ -231,9 +342,12 @@ void Launcher::songsDraw() {
     const std::string from = "straight from your disc image";
     text(FontId::Regular, 15, W_ - kMargin - measure(FontId::Regular, 15, from), 48, from, kDim);
 
-    // The list, centred.
+    // The list, centred. A strip of stem checkboxes sits above the footer while
+    // a song plays (the parts the module reports, each a mute/unmute toggle).
+    const bool showStems = so.playing >= 0 && !so.parts.empty();
+    const float stemH = showStems ? 64 : 0;
     const float listX = kMargin, listW = W_ - 2 * kMargin;
-    const float listTop = kTopS, listBottom = H_ - kFooterHs - 14;
+    const float listTop = kTopS, listBottom = H_ - kFooterHs - 14 - stemH;
     const float view = listBottom - listTop;
     const float content = float(so.items.size()) * kItemHs;
     if (so.cursor >= 0) {
@@ -282,6 +396,40 @@ void Launcher::songsDraw() {
     if (so.items.empty())
         text(FontId::Regular, 18, listX + 24, listTop + 20, "This disc has no songs the module can list.", kDim);
 
+    // The stem checkboxes: one per part of the playing song, a live mute toggle.
+    // The whole mix starts on; click a part to drop it out.
+    if (showStems) {
+        float mx = -1, my = -1;
+        SDL_GetMouseState(&mx, &my);
+        const float density = SDL_GetWindowPixelDensity(window_);
+        mx *= density, my *= density;
+        const float sy = H_ - kFooterHs - stemH;
+        gfx_.rect(R(0, sy, W_, stemH), rgb(0x100e12, 0.92f), rgb(0x0b0a0d, 0.96f));
+        gfx_.rect(R(0, sy, W_, 1), withAlpha(kCream, 0.08f));
+        const float cyp = sy + stemH / 2;
+        text(FontId::SemiBold, 12, kMargin, cyp - 7, "PARTS", kMuted, 1.5f);
+        float sx = kMargin + 70;
+        for (size_t i = 0; i < so.parts.size(); ++i) {
+            const Songs::Part& p = so.parts[i];
+            const float bw = measure(FontId::SemiBold, 15, p.name) + 50;
+            const Rect r = R(sx, cyp - 17, bw, 34);
+            const bool hover = r.contains(mx, my);
+            const Color fc = p.on ? fretColor(Fret::Green) : kMuted;
+            gfx_.rect(r, rgb(0x1f1b23, p.on ? 0.95f : 0.55f), rgb(0x18151b, p.on ? 0.95f : 0.55f), 17 * s_);
+            gfx_.ring(r, withAlpha(fc, p.on ? (hover ? 0.95f : 0.65f) : (hover ? 0.5f : 0.22f)), 17 * s_, 1.3f * s_);
+            const Rect box = R(sx + 12, cyp - 9, 18, 18);
+            if (p.on)
+                gfx_.rect(box, fc, gfx::mix(fc, kInk, 0.2f), 5 * s_);
+            else {
+                gfx_.rect(box, rgb(0x16141a), rgb(0x16141a), 5 * s_);
+                gfx_.ring(box, withAlpha(kMuted, 0.6f), 5 * s_, 1.2f * s_);
+            }
+            text(FontId::SemiBold, 15, sx + 40, cyp - 9, p.name, p.on ? (hover ? kCream : kSand) : kMuted);
+            so.hits.push_back({r, -4, int(i)});
+            sx += bw + 8;
+        }
+    }
+
     // Footer.
     const float y = H_ - kFooterHs;
     gfx_.rect(R(0, y, W_, kFooterHs), rgb(0x0d0b0f, 0.92f), rgb(0x080709, 0.98f));
@@ -303,10 +451,12 @@ void Launcher::songsDraw() {
         if (on) so.hits.push_back({r, -3, int(f)});
         x += bw + 10;
     };
-    button(Fret::Green, so.playing == so.cursor ? "Stop" : "Play preview", !so.items.empty());
+    button(Fret::Green, so.playing == so.cursor ? "Stop" : "Play", !so.items.empty());
+    if (so.streaming) button(Fret::Blue, so.paused ? "Resume" : "Pause", true);
     button(Fret::Orange, "Stop", so.playing >= 0);
     button(Fret::Red, "Back", true);
-    const std::string hint = "Up / Down to choose" + kDot + "Enter to hear" + kDot + "Esc to go back";
+    const std::string hint = so.streaming ? "Click a part to mute it" + kDot + "Space pauses" + kDot + "Esc to go back"
+                                          : "Up / Down to choose" + kDot + "Enter to play" + kDot + "Esc to go back";
     if (x + measure(FontId::Regular, 15, hint) + 20 < W_ - kMargin)
         text(FontId::Regular, 15, W_ - kMargin - measure(FontId::Regular, 15, hint), cy - 10, hint, kDim);
 }

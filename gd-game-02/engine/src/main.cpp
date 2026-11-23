@@ -192,6 +192,11 @@ int run(int argc, char** argv) {
         else if (a == "--sfxtest") sfxtest = true;
         else if (a == "--facefxtest") facefxtest = true;
         else if (a == "--walktest") opt.walk = value();
+        else if (a == "--extra-disc") {  // additive songs: "<game-id>=<disc path>"
+            const std::string v = value();
+            const size_t eq = v.find('=');
+            if (eq != std::string::npos) opt.extraDiscs.emplace_back(v.substr(0, eq), v.substr(eq + 1));
+        }
         else if (a == "--view") viewPath = value();
         else if (a == "--playmovie") movie = value();
         else if (a == "--help" || a == "-h") { usage(); return 0; }

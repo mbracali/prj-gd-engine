@@ -84,6 +84,9 @@ const std::vector<std::string>& songsOf(UiManager& ui, const std::string& venue)
 std::string encoreOf(UiManager& ui, const std::string& venue);  // 0x822A96A0
 bool isStoreSong(UiManager& ui, const std::string& song);       // 0x822A3240
 bool isDownload(UiManager& ui, const std::string& song);        // 0x822A33C0
+// Additive songs (GDALL-042): shared from another game's disc, and its header.
+bool isForeign(UiManager& ui, const std::string& song);
+std::string foreignLabel(UiManager& ui, const std::string& song);
 bool isEncore(UiManager& ui, const std::string& song);          // 0x822A8BB8 (the record's flag)
 int requiredSongs(UiManager& ui, int d, const std::string& venue);
 // Every song: the tiers', the store's, the downloads (0x822A3650).

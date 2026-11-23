@@ -38,6 +38,7 @@ target_sources(gd01 PRIVATE
   src/data/midi.cpp
   src/data/vgs.cpp
   src/game/chart.cpp
+  src/game/foreign_songs.cpp
   src/game/player.cpp
   src/game/rules.cpp
   src/game/song_db.cpp
@@ -76,6 +77,7 @@ target_sources(gd01 PRIVATE
   src/ui/ui_resources.cpp
   src/ui/pc_strings.cpp
   src/ui/gamepad_panel.cpp
+  src/ui/custom_songs_panel.cpp
   src/ui/ui_system.cpp
   src/platform/gpu_select.cpp
   src/platform/paths.cpp

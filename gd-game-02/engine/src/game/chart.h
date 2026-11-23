@@ -101,3 +101,9 @@ struct Song {
 // ticks (songs.dtb's hopo_threshold, else beatmatcher.dtb's; 0x823341d0).
 // Throws on malformed input.
 Song buildSong(const MidiFile& midi, int hopoThresholdTicks);
+
+// Fills song.venueNotes and song.events from a performance MIDI's band/venue
+// tracks (BAND DRUMS / BAND BASS / TRIGGERS / EVENTS). song.tempo must already
+// be built. Shared by buildSong and the additive-songs path so a foreign song's
+// on-stage band and camera cuts run from its own MIDI, like a native song's.
+void parseBandAndEvents(const MidiFile& midi, Song& song);

@@ -93,6 +93,7 @@ void UiManager::logOnce(const std::string& what) {
 
 std::string UiManager::localize(const std::string& token) const {
     if (token == "port_gamepads") return "GAMEPADS";  // the port's main-menu help item
+    if (token == "port_custom_songs") return "CUSTOM SONGS";  // the Quick Play additive-songs overlay (§7)
     if (token == "gd_uab_start") return "START";      // the help bar's START access button (universal_mechanisms.md 1.1.3)
     return locale_ ? locale_->text(token) : token;
 }
@@ -788,6 +789,16 @@ void UiManager::updateHelpbar() {
         items.insert(strum, Value::list({Value::symbol("fret3"), Value::symbol("port_gamepads")}));
         display = Value::list(std::move(items));
     }
+    // The Quick Play song screen offers the "Custom songs" overlay on the
+    // yellow fret (additive songs, §7).
+    if (current_->name() == "qp_selsong_screen" && display.type == Value::Type::Array && display.array) {
+        std::vector<Value> items = *display.array;
+        auto strum = std::find_if(items.begin(), items.end(), [](const Value& e) {
+            return e.type == Value::Type::Array && e.array && !e.array->empty() && (*e.array)[0].str() == "strum";
+        });
+        items.insert(strum, Value::list({Value::symbol("fret3"), Value::symbol("port_custom_songs")}));
+        display = Value::list(std::move(items));
+    }
     setHelpbarDisplay(*this, display);
 }
 
@@ -926,7 +937,9 @@ void UiManager::updateRepeat(double dtMs) {
 // ---------------------------------------------------------------- input
 
 void UiManager::action(const InputEvent& e) {
-    // The yellow fret on the main menu opens GAMEPADS (gd01's help item).
+    // The yellow fret on the main menu opens GAMEPADS (gd01's help item). The
+    // Quick Play "Custom songs" overlay is opened in buttonDown (so it works
+    // for the keyboard/guitar yellow and the walk tests alike).
     if (e.action == Action::Fret2 && e.down) yellowButton();
     int pad = -1;
     switch (e.action) {
@@ -993,6 +1006,9 @@ void UiManager::buttonDown(int button, int player) {
         if (button == kPad_X || button == kPad_Tri || button == kPad_Circle || button == kPad_Start) skipSplashes();
         return;
     }
+    // Yellow on the Quick Play song screen opens the "Custom songs" overlay
+    // (additive songs, §7).
+    if (button == kPad_Circle && openCustomSongs()) return;
     routeButton(button, player);
 }
 
@@ -1075,6 +1091,17 @@ void UiManager::openGamepads() {
     // screen would not take it as its back screen).
     if (ScreenObj* g = screen("gamepads_screen")) g->back = current_;
     gotoScreen("gamepads_screen");
+}
+
+// The yellow fret on the Quick Play song screen opens the "Custom songs"
+// overlay (additive songs, §7). Returns true when it handled the fret.
+bool UiManager::openCustomSongs() {
+    if (splash_ >= 0 || phase_ != Phase::Idle || !pending_.empty()) return false;
+    if (currentScreen() != "qp_selsong_screen") return false;  // Quick Play only (wave 2)
+    playSfx("button_select");
+    if (ScreenObj* g = screen("custom_songs_screen")) g->back = current_;
+    gotoScreen("custom_songs_screen");
+    return true;
 }
 
 bool UiManager::mouse(float x, float y, bool click) {

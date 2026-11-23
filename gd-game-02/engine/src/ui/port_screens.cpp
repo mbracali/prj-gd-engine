@@ -29,6 +29,15 @@ const char* const kPortScreens = R"DTA(
    (focus enhanced_panel)
    (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))
 }
+{new CustomSongsPanel custom_songs_panel (file "")}
+{new
+   GHScreen
+   custom_songs_screen
+   (animate_transition FALSE)
+   (panels custom_songs_panel helpbar)
+   (focus custom_songs_panel)
+   (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))
+}
 (port_patches
    (main_not_logged_in_screen
       (enter

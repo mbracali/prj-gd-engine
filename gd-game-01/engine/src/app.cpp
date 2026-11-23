@@ -27,6 +27,7 @@
 #include "game/chart.h"
 #include "game/player.h"
 #include "game/rules.h"
+#include "game/foreign_songs.h"
 #include "game/song_db.h"
 #include "input/input.h"
 #include "gd/core/render/device.h"
@@ -508,6 +509,7 @@ private:
         return gd::core::speed::scrollSpeed(rules_.trackSpeed[size_t(difficulty_)], trackFactor_, songSpeed_);
     }
     std::vector<SongInfo> songs_;
+    ForeignLibrary foreignLib_;  // additive songs: discs the launcher shared (GDALL-042)
     size_t selected_ = 0;
     int difficulty_;
 
@@ -617,6 +619,8 @@ private:
     void playerEvent(const PlayerEvent& ev, int player = 0);
     void pollMenuMusic();
     bool menuMusicOn_ = false, previewing_ = false;
+    std::string previewCacheId_;  // additive songs: the last foreign preview transcoded (cached so re-hover is instant)
+    Bytes previewCacheVgs_;
     std::string menuLoop_;  // the metamusic loop picked when the meta panel loaded
     // meta play_movie (FUN_0024edf8): one picture per NTSC frame, 48 kHz PCM on its
     // own stream, everything else frozen and silent; Green / X / Start skip.
@@ -692,6 +696,29 @@ void App::tryLoadData(const std::string& path) {
         data_ = std::move(data);
         rules_ = rules;
         songs_ = std::move(songs);
+        // Additive songs (GDALL-042): append the songs of the discs the launcher
+        // shared (other games the player exposed in the Additive Music tool).
+        foreignLib_ = {};
+        const size_t nativeCount = songs_.size();
+        for (SongInfo& fs : openForeignSongs(opt_.extraDiscs, foreignLib_)) songs_.push_back(std::move(fs));
+        if (!foreignLib_.discs.empty()) {
+            // A native song plays in a campaign venue with a guitarist archetype
+            // and a backing band; a foreign song is in no campaign, so without a
+            // stage its venue would be empty (the highway on black). Give each one
+            // a real native setup (venue + character + band + anim tempo), rotating
+            // them so foreign songs land in a lit venue with the band performing.
+            std::vector<size_t> stages;
+            for (size_t i = 0; i < nativeCount; ++i)
+                if (!songs_[i].venue.empty() && !songs_[i].character.empty()) stages.push_back(i);
+            for (size_t k = nativeCount, s = 0; k < songs_.size() && !stages.empty(); ++k, ++s) {
+                const SongInfo& src = songs_[stages[s % stages.size()]];
+                songs_[k].venue = src.venue;
+                songs_[k].character = src.character;
+                songs_[k].band = src.band;
+                songs_[k].animTempo = src.animTempo;
+            }
+            SDL_Log("additive songs: %zu shared disc(s), %zu songs total", foreignLib_.discs.size(), songs_.size());
+        }
         selected_ = 0;
         screen_ = Screen::Menu;
         message_.clear();
@@ -959,8 +986,12 @@ void App::startSong(size_t index, ControllerMode mode) {
         if (!careerGuitar_.empty()) info.guitar = careerGuitar_;
     }
     try {
-        auto song = std::make_unique<Song>(buildSong(parseMidi(data_->read(info.midiPath))));
-        auto vgs = std::make_unique<VgsStream>(data_->read(info.audioPath));
+        // Additive songs (GDALL-042): a foreign song's chart and audio come from
+        // its own game's reader, transcoded to GH1's formats.
+        auto song = info.foreign() ? std::make_unique<Song>(loadForeignChart(foreignLib_, info))
+                                   : std::make_unique<Song>(buildSong(parseMidi(data_->read(info.midiPath))));
+        auto vgs = info.foreign() ? std::make_unique<VgsStream>(loadForeignVgs(foreignLib_, info))
+                                  : std::make_unique<VgsStream>(data_->read(info.audioPath));
         std::vector<Mixer::Track> tracks(vgs->channels());
         for (size_t c = 0; c < tracks.size(); ++c) {
             if (c < info.vols.size()) tracks[c].volume = info.vols[c];
@@ -1603,13 +1634,30 @@ void App::songPreview(const std::string& id) {
         return;
     }
     try {
-        auto vgs = std::make_unique<VgsStream>(data_->read(it->audioPath));
+        std::unique_ptr<VgsStream> vgs;
+        double loopStart = it->previewStartMs, loopEnd = it->previewEndMs;
+        if (it->foreign()) {
+            // GH1's mixer only plays VGS, so transcode the foreign song's preview
+            // window (a few seconds) to VGS. Cache the last one so looping it and
+            // re-hovering the same song never re-transcodes; the window becomes
+            // the whole stream, so loop it from 0.
+            if (previewCacheId_ != id) {
+                previewCacheVgs_ = loadForeignVgsWindow(foreignLib_, *it, it->previewStartMs, it->previewEndMs);
+                previewCacheId_ = id;
+            }
+            if (previewCacheVgs_.empty()) return;
+            vgs = std::make_unique<VgsStream>(previewCacheVgs_);
+            loopStart = 0;
+            loopEnd = it->previewEndMs - it->previewStartMs;
+        } else {
+            vgs = std::make_unique<VgsStream>(data_->read(it->audioPath));
+        }
         std::vector<Mixer::Track> tracks(vgs->channels());
         for (size_t c = 0; c < tracks.size(); ++c) {
             if (c < it->vols.size()) tracks[c].volume = it->vols[c];
             if (c < it->pans.size()) tracks[c].pan = it->pans[c];
         }
-        mixer_.playMusic(std::move(vgs), std::move(tracks), it->previewStartMs, it->previewEndMs, true, 1000, 1.0f);
+        mixer_.playMusic(std::move(vgs), std::move(tracks), loopStart, loopEnd, true, 1000, 1.0f);
         previewing_ = true;
     } catch (const std::exception& ex) {
         SDL_Log("preview %s: %s", id.c_str(), ex.what());
@@ -1766,6 +1814,9 @@ void App::uiButton(const InputEvent& e) {
     bool guitar = e.mode == ControllerMode::Guitar;
     // The main menu's GAMEPADS help item: the yellow fret opens the Gamepads screen (as in every game).
     if (e.action == Action::Fret2 && e.down && ui_->currentScreen() == "main") return ui_->gotoScreen("gamepads");
+    // The yellow fret on the Quick Play song screen opens the "Custom songs"
+    // overlay (additive songs, §7).
+    if (e.action == Action::Fret2 && e.down && ui_->currentScreen() == "qp_selsong") return ui_->gotoScreen("custom_songs");
     if (e.player == 1) mode2_ = e.mode;
     else uiMode_ = e.mode;
     int b = -1;

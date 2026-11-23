@@ -40,6 +40,7 @@ target_sources(gdul PRIVATE
   src/module_host.cpp
   src/explorer.cpp
   src/songs.cpp
+  src/additive.cpp
   src/action_log.cpp
   src/platform.cpp
   src/ui_sounds.cpp
@@ -117,6 +118,7 @@ gdul_embed(res/gdul_backdrop.jpg kGdulBackdropJpg)
 gdul_embed(res/fonts/MetalMania-Regular.ttf kFontMetalMania)
 gdul_embed(res/fonts/BarlowCondensed-Regular.ttf kFontBarlowRegular)
 gdul_embed(res/fonts/BarlowCondensed-SemiBold.ttf kFontBarlowSemiBold)
+gdul_embed(res/fonts/MaterialSymbols-subset.ttf kFontMaterialIcons)
 
 if(WIN32)
   enable_language(RC)

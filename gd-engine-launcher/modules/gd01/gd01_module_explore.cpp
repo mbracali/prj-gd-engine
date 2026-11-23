@@ -190,7 +190,10 @@ void Explorer::list() {
     }
     std::vector<std::string> paths = data_->paths();
     std::sort(paths.begin(), paths.end());
-    std::vector<Item> chars, band, crowd, guitars, venues;
+    // Standard groups (owner 11-23): Venues, Guitars, Chars (GH1 has no separate
+    // bass/drum/mic models). The crowd and the per-song bands are not standard
+    // groups and are dropped; Chars is the preset character roster only.
+    std::vector<Item> chars, guitars, venues;
     for (const std::string& p : paths) {
         if (!endsWith(p, ".rnd_ps2")) continue;
         const std::string s = stem(p);
@@ -201,11 +204,11 @@ void Explorer::list() {
                 it.guitar = true;
                 guitars.push_back(it);
             } else if (folder == "crowd") {
-                if (s.rfind("crowd_", 0) == 0) crowd.push_back(makeItem("Crowd", pretty(s.substr(6)), p));
-            } else if (s == folder) {
-                Item it = makeItem(bandSpecs_.count(folder) ? "Band" : "Guitarists", pretty(s), p);
+                continue;  // the crowd is not a standard group
+            } else if (s == folder && !bandSpecs_.count(folder)) {
+                Item it = makeItem("Chars", pretty(s), p);  // a preset character, not a per-song band
                 it.character = true, it.folder = folder;
-                (bandSpecs_.count(folder) ? band : chars).push_back(it);
+                chars.push_back(it);
             }
         } else if (p.rfind("venues/", 0) == 0) {
             const std::string venue = p.substr(7, p.find('/', 7) - 7);
@@ -216,7 +219,7 @@ void Explorer::list() {
             }
         }
     }
-    for (auto* g : {&chars, &band, &crowd, &guitars, &venues}) items_.insert(items_.end(), g->begin(), g->end());
+    for (auto* g : {&venues, &guitars, &chars}) items_.insert(items_.end(), g->begin(), g->end());
 }
 
 const SceneObject* Explorer::lookup(const std::string& name) const {

@@ -61,6 +61,8 @@ target_sources(gd02 PRIVATE
   src/game/band.cpp
   src/game/band_performer.cpp
   src/game/chart.cpp
+  src/game/foreign_songs.cpp
+  src/ui/custom_songs_panel.cpp
   src/game/crowd.cpp
   src/game/player.cpp
   src/game/light_presets.cpp

@@ -209,6 +209,7 @@ public:
     // waits out the cheat codes; openGamepads opens it now).
     void yellowButton();
     void openGamepads();
+    bool openCustomSongs();  // additive songs: the "Custom songs" overlay (§7)
     // Mouse support (gd01's UiSystem::mouse): at (x, y) in menu units,
     // hovering focuses the component under it (a list takes clicks only), a
     // click selects it; the help bar's items act as their buttons; the

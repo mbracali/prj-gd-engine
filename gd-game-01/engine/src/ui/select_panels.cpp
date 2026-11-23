@@ -13,6 +13,7 @@
 #include "render/renderer.h"
 #include "render/scene_renderer.h"
 #include "scene/character.h"
+#include "ui/custom_songs_panel.h"
 #include "ui/panel.h"
 
 namespace {
@@ -1800,6 +1801,7 @@ std::unique_ptr<NativePanel> makeNativePanel(const std::string& verb, const std:
     if (verb == "new_guitar_select_panel") return std::make_unique<GuitarSelectPanel>(host, props);
     if (verb == "new_multi_char_sel_panel") return std::make_unique<MultiCharSelPanel>(host, props);
     if (verb == "new_enhanced_panel") return std::make_unique<EnhancedPanel>(host);
+    if (verb == "new_custom_songs_panel") return makeCustomSongsPanel(host);
     if (verb == "new_tutorial_panel") return makeTutorialPanel(host);
     if (verb == "new_credits_panel") return std::make_unique<CreditsPanel>(host);
     return makeGamePanel(verb, host, props);

@@ -170,39 +170,45 @@ bool Explorer::open(const GdHost* host) {
 void Explorer::list() {
     std::vector<std::string> paths = data_->paths();
     std::sort(paths.begin(), paths.end());
-    std::vector<Item> chars, crowd, guitars, drums, venues, props;
+    // Standard groups (owner 11-23): Venues, Guitars, Bass, Drums, Mics, Chars.
+    // The crowd and venue props are not standard groups and are dropped.
+    std::vector<Item> chars, guitars, bass, drums, mics, venues;
     for (const std::string& p : paths) {
         if (!endsWith(p, ".milo_xbox")) continue;
         const std::string s = stem(p);
         // char/<c>/ng/gen/<c>.milo_xbox: a band member (not the menus' _ui copies).
         if (p.rfind("char/", 0) == 0 && p.find("/ng/gen/") != std::string::npos && p.find("/anims/") == std::string::npos) {
             const std::string folder = p.substr(5, p.find('/', 5) - 5);
-            if (folder == "crowd") {
-                if (s.rfind("crowd_", 0) == 0) crowd.push_back({"Crowd", pretty(s.substr(6)), p, Kind::Character});
-            } else if (folder != "ng" && folder != "shared" && s == folder) {
-                chars.push_back({"Characters", pretty(s), p, Kind::Character});
-            }
+            if (folder == "crowd") continue;  // the crowd is not a standard group
+            if (folder != "ng" && folder != "shared" && s == folder)
+                chars.push_back({"Chars", pretty(s), p, Kind::Character});  // the preset roster, one per character
         } else if (p.rfind("char/ng/guitars/gen/", 0) == 0) {
-            Item it{"Guitars & basses", pretty(s), p, Kind::Static};
+            const bool isBass = s.find("bass") != std::string::npos;
+            Item it{isBass ? "Bass" : "Guitars", pretty(s), p, Kind::Static};
             it.guitar = true;
-            guitars.push_back(it);
+            (isBass ? bass : guitars).push_back(it);
+        } else if (p.rfind("char/ng/mics/gen/", 0) == 0) {
+            mics.push_back({"Mics", pretty(s), p, Kind::Static});
         } else if (p.rfind("char/ng/drums/gen/", 0) == 0) {
-            drums.push_back({"Drum kits", pretty(s.rfind("dw_", 0) == 0 ? s.substr(3) : s), p, Kind::Static});
-        } else if (p.rfind("world/", 0) == 0 && p.find("/ng/") != std::string::npos) {
-            const std::string venue = p.substr(6, p.find('/', 6) - 6);
-            if (endsWith(s, "_lighting")) continue;
-            if (s.rfind(venue + "_geom", 0) == 0 && s.find("proxy") == std::string::npos && s.find("flashpot") == std::string::npos) {
-                const std::string extra = s.substr(venue.size() + 5);
-                Item it{"Venues", pretty(venue) + (extra == "_mp" ? " (face-off)" : extra.empty() ? "" : " (" + pretty(extra.substr(1)) + ")"), p,
-                        Kind::Static};
-                it.venue = true;
-                venues.push_back(it);
-            } else {
-                props.push_back({"Venue props", pretty(venue) + ": " + pretty(s), p, Kind::Static});
+            drums.push_back({"Drums", pretty(s.rfind("dw_", 0) == 0 ? s.substr(3) : s), p, Kind::Static});
+        } else if (p.rfind("world/", 0) == 0) {
+            // Rock Band venue geometry: world/<venue>/gen/<venue>_geom.milo_xbox
+            // (the base stage). world/shared/... is props; the per-song numbered
+            // variants live in world/<venue>/<venue>_NN/gen/... (not .../gen/
+            // straight after the venue), and the empty "blank" stage has no
+            // _geom, so both drop out naturally.
+            const size_t v0 = 6, v1 = p.find('/', v0);
+            if (v1 != std::string::npos && p.compare(v1 + 1, 4, "gen/") == 0) {
+                const std::string venue = p.substr(v0, v1 - v0);
+                if (venue != "shared" && s == venue + "_geom") {
+                    Item it{"Venues", pretty(venue), p, Kind::Static};
+                    it.venue = true;
+                    venues.push_back(it);
+                }
             }
         }
     }
-    for (auto* g : {&chars, &crowd, &guitars, &drums, &venues, &props}) items_.insert(items_.end(), g->begin(), g->end());
+    for (auto* g : {&venues, &guitars, &bass, &drums, &mics, &chars}) items_.insert(items_.end(), g->begin(), g->end());
 }
 
 void Explorer::unload() {

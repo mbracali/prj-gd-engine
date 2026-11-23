@@ -27,17 +27,42 @@ namespace {
 constexpr const char* kTitle = "Guitar Dream Universal Launcher";
 constexpr const char* kWebsite = "https://guitardreamengine.com";
 // Hits that are not a row's buttons or a dialog's.
-constexpr int kHitWebsite = -10, kHitDiscs = -11, kHitUpdates = -12, kHitFullscreen = -13;
+constexpr int kHitWebsite = -10, kHitDiscs = -11, kHitUpdates = -12, kHitFullscreen = -13, kHitDreamForge = -14;
 const std::string kDot = " \xC2\xB7 ";  // " · "
 
 using namespace palette;
 
 // Design layout (1280 x 720 units).
 constexpr float kMargin = 40;
-constexpr float kListTop = 160;
-constexpr float kRowH = 64;
+constexpr float kListTop = 184;
+constexpr float kRowH = 68;
 constexpr float kRowGap = 8;
 constexpr float kFooterH = 58;
+
+// Icon accent colours (owner 11-22 §2).
+const gfx::Color kWhiteIcon = gfx::rgb(0xf4f0e6);
+const gfx::Color kNeonYellowC = gfx::rgb(0xe9e21f);
+const gfx::Color kNeonGreenC = gfx::rgb(0x45e66b);
+const gfx::Color kGoldC = gfx::rgb(0xffcf4d);
+const gfx::Color kNeonRedC = gfx::rgb(0xff4b57);
+const gfx::Color kNeonPurpleC = gfx::rgb(0xb463ff);
+
+struct PctIcon {
+    uint32_t cp;
+    gfx::Color c;
+};
+PctIcon pctIcon(double v) {  // the playability % icon and its colour (owner 11-22 §2)
+    const int p = int(std::lround(v * 100));
+    if (p <= 0) return {gfx::icon::kCircle, kWhiteIcon};
+    if (p <= 10) return {gfx::icon::kClock10, kNeonYellowC};
+    if (p <= 20) return {gfx::icon::kClock20, kNeonYellowC};
+    if (p <= 40) return {gfx::icon::kClock40, kNeonYellowC};
+    if (p <= 60) return {gfx::icon::kClock60, kNeonGreenC};
+    if (p <= 80) return {gfx::icon::kClock80, kNeonGreenC};
+    if (p < 95) return {gfx::icon::kClock90, kNeonGreenC};
+    if (p < 100) return {gfx::icon::kStrokeFull, kNeonGreenC};  // 95%+: a full stroke in the same green (owner 11-23)
+    return {gfx::icon::kStars, kGoldC};
+}
 
 std::string percent(double v) { return std::to_string(int(std::lround(v * 100))) + "%"; }
 
@@ -74,7 +99,7 @@ bool Launcher::init() {
     // The Deck's own controls when Steam does not own them (Desktop Mode
     // without Steam, a terminal): SDL's Steam Deck HIDAPI driver.
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK, "1");
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_EVENTS)) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_EVENTS | SDL_INIT_AUDIO)) {
         SDL_Log("gdul: cannot start SDL: %s", SDL_GetError());
         return false;
     }
@@ -592,6 +617,10 @@ void Launcher::frame() {
         running_ = false;
         return;
     }
+    if (additive_) {
+        additiveFrame();
+        return;
+    }
     if (songs_) {
         songsFrame();
         return;
@@ -640,6 +669,13 @@ void Launcher::runScript() {
         auto& games = catalog_.games();
         for (size_t i = 0; i < games.size(); ++i)
             if (games[i].id == st.arg) focusRow_ = int(i), focusCol_ = kPlay, activate(int(i), kPlay);
+    } else if (st.cmd == "songs") {  // dev aid: open the song player for a game (no explorer needed)
+        for (Game& g : catalog_.games())
+            if (g.id == st.arg) { songsOpen(g); break; }
+    } else if (st.cmd == "songplay") {  // dev aid: play row <arg> in the open song player
+        if (songs_) songsPlay(std::atoi(st.arg.c_str()));
+    } else if (st.cmd == "songpart") {  // dev aid: toggle stem <arg> of the playing song
+        if (songs_) songsTogglePart(std::atoi(st.arg.c_str()));
     }
 }
 
@@ -657,6 +693,7 @@ void Launcher::handle(const SDL_Event& e) {
     if (duplicatePress(e)) return;
     if (songs_ && songsHandle(e)) return;
     if (explore_ && exploreHandle(e)) return;
+    if (additive_ && additiveHandle(e)) return;
     switch (e.type) {
     case SDL_EVENT_QUIT:
         running_ = false;
@@ -761,15 +798,38 @@ void Launcher::handle(const SDL_Event& e) {
             press(Fret::Red);
             break;
         }
+        // Scrollbar thumbs: start a drag, or follow one in progress.
+        if (vbarDrag_ || hbarDrag_) {
+            if (e.type == SDL_EVENT_MOUSE_MOTION) {
+                if (vbarDrag_ && vTrackH_ > vThumbH_)
+                    scrollTarget_ = vRange_ * std::clamp((my - barDragOff_ - vTrackY_) / (vTrackH_ - vThumbH_), 0.f, 1.f);
+                if (hbarDrag_ && hTrackW_ > hThumbW_)
+                    hscrollTarget_ = hRange_ * std::clamp((mx - barDragOff_ - hTrackX_) / (hTrackW_ - hThumbW_), 0.f, 1.f);
+                mouseUsed_ = true;
+            }
+            break;
+        }
+        if (click && !dialog_.open) {
+            if (vThumb_.w > 0 && vThumb_.contains(mx, my)) {
+                vbarDrag_ = true, barDragOff_ = my - vThumb_.y, mouseUsed_ = true;
+                break;
+            }
+            if (hThumb_.w > 0 && hThumb_.contains(mx, my)) {
+                hbarDrag_ = true, barDragOff_ = mx - hThumb_.x, mouseUsed_ = true;
+                break;
+            }
+        }
         for (auto it = hits_.rbegin(); it != hits_.rend(); ++it) {
             if (!it->r.contains(mx, my)) continue;
             mouseUsed_ = true;
-            if (it->row == kHitWebsite || it->row == kHitDiscs || it->row == kHitUpdates || it->row == kHitFullscreen) {
+            if (it->row == kHitWebsite || it->row == kHitDiscs || it->row == kHitUpdates || it->row == kHitFullscreen ||
+                it->row == kHitDreamForge) {
                 if (click && !dialog_.open) {
                     if (it->row == kHitWebsite) openWebsite();
                     else if (it->row == kHitUpdates) updateMenu();
                     else if (it->row == kHitFullscreen) toggleFullscreen();
-                    else showDiscFolders("Where we look for discs");
+                    else if (it->row == kHitDiscs) showDiscFolders("Where we look for discs");
+                    // kHitDreamForge: disabled, no action (tooltip "Coming soon!")
                 }
             } else if (it->row < 0) {
                 dialog_.focus = it->col;
@@ -783,11 +843,20 @@ void Launcher::handle(const SDL_Event& e) {
         }
         break;
     }
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        vbarDrag_ = hbarDrag_ = false;
+        break;
     case SDL_EVENT_MOUSE_WHEEL:
         if (!dialog_.open) {
             const float content = float(catalog_.games().size()) * (kRowH + kRowGap);
             const float view = H_ - kFooterH - 12 - kListTop;
-            scrollTarget_ = std::clamp(scrollTarget_ - e.wheel.y * 72, 0.f, std::max(0.f, content - view));
+            const bool shift = SDL_GetModState() & SDL_KMOD_SHIFT;
+            if (shift || e.wheel.x != 0) {  // horizontal scroll (shift+wheel, or a horizontal wheel)
+                const float d = (e.wheel.x != 0 ? e.wheel.x : e.wheel.y) * 72;
+                hscrollTarget_ = std::clamp(hscrollTarget_ - d, 0.f, std::max(0.f, tableW_ - (lListRight_ - kMargin)));
+            } else {
+                scrollTarget_ = std::clamp(scrollTarget_ - e.wheel.y * 72, 0.f, std::max(0.f, content - view));
+            }
         }
         break;
     default:
@@ -800,8 +869,11 @@ bool Launcher::enabled(int row, int col) const {
     const Game& g = catalog_.games()[size_t(row)];
     switch (col) {
     case kPlay: return g.playable();
-    case kLoad: return true;
-    default: return !g.iso.empty() && g.hasModule;  // Explore models: the module shows the disc's models
+    case kLoad: return true;  // always usable; its colour is handled in drawRow (yellow when no disc)
+    case kAdditive: return g.playable();           // the additive-music tool opens when the game is ready
+    case kMod: return false;                        // coming soon (disabled placeholder)
+    case kExplore: return !g.iso.empty() && g.hasModule;  // the module shows the disc's models
+    default: return false;
     }
 }
 
@@ -822,7 +894,10 @@ void Launcher::move(int dRow, int dCol) {
     if (rows == 0) return;
     const int wasRow = focusRow_, wasCol = focusCol_;
     focusRow_ = std::clamp(focusRow_ + dRow, 0, rows - 1);
-    if (dCol) focusCol_ = std::clamp(focusCol_ + dCol, 0, kColumns - 1);
+    if (dCol) {
+        focusCol_ = std::clamp(focusCol_ + dCol, 0, kColumns - 1);
+        if (focusCol_ == kMod) focusCol_ = kMod + (dCol > 0 ? 1 : -1);  // skip the disabled Mod column (interior)
+    }
     if (focusRow_ != wasRow || focusCol_ != wasCol) sounds_.play(UiSound::Move);
 }
 
@@ -882,11 +957,30 @@ void Launcher::activate(int row, int col) {
         if (g.playable()) play(g);
         else if (!g.ready) sounds_.play(UiSound::Error), toast(g.title() + " is not playable yet. Coming soon!");
         else if (!g.hasModule) sounds_.play(UiSound::Error), toast(noModuleText(g));
-        else sounds_.play(UiSound::Error), toast("Load a " + g.title() + " disc image first (Load ISO).");
+        else {  // ready, module built, but no disc yet: open Load ISO (owner 11-22)
+            sounds_.play(UiSound::Select);
+            pickDisc(g);
+        }
         break;
     case kLoad:
         sounds_.play(UiSound::Select);
         pickDisc(g);
+        break;
+    case kAdditive:
+        if (g.playable()) {
+            sounds_.play(UiSound::Select);
+            additiveOpen(&g);
+        } else if (!g.ready) {
+            sounds_.play(UiSound::Error), toast(g.title() + " is not playable yet. Coming soon!");
+        } else if (!g.hasModule) {
+            sounds_.play(UiSound::Error), toast(noModuleText(g));
+        } else {
+            sounds_.play(UiSound::Error), toast("Load a " + g.title() + " disc image to manage its additive music.");
+        }
+        break;
+    case kMod:
+        sounds_.play(UiSound::Error);
+        toast("The Mod menu is coming soon.");
         break;
     case kExplore:
         if (g.iso.empty()) sounds_.play(UiSound::Error), toast("Load a " + g.title() + " disc image to explore its models.");
@@ -913,6 +1007,14 @@ void Launcher::play(Game& g) {
     sounds_.close();
     closeGamepads();
     rememberWindow();
+    // Hand the game the discs of other games the player exposed (additive songs).
+    const auto shared = exposedDiscsFor(g);
+    setExtraDiscs(shared);
+    if (!shared.empty()) {
+        std::string names;
+        for (const auto& [id, p] : shared) names += (names.empty() ? "" : ", ") + id;
+        log_.add("additive: " + g.id + " also gets " + std::to_string(shared.size()) + " shared disc(s): " + names);
+    }
     GameRun r = runGameModule(window_, context_, g, catalog_.launcherVersion(), log_,
                               [this](uint32_t api, SDL_Window*& w, SDL_GLContext& c, std::string& error) {
                                   const bool ok = switchWindowApi(api, error);
@@ -1182,6 +1284,8 @@ void Launcher::draw() {
     s_ = std::max(0.25f, std::min(float(pw_) / 1280.f, float(ph_) / 720.f));
     W_ = float(pw_) / s_, H_ = float(ph_) / s_;
     hits_.clear();
+    tooltip_.clear();
+    computeLayout();
     gfx_.begin(pw_, ph_);
     drawBackground();
     drawList();
@@ -1190,7 +1294,46 @@ void Launcher::draw() {
     drawToast();
     if (dialog_.open) drawDialog();
     if (dragging_) drawDropOverlay();
+    if (!tooltip_.empty() && !dialog_.open) drawTooltip();
     gfx_.end();
+}
+
+void Launcher::computeLayout() {
+    lScrollX_ = W_ - kMargin - 9;      // vertical scrollbar band (~18 wide)
+    lListRight_ = lScrollX_ - 12;      // rows end left of the scrollbar
+    lPlayX_ = kMargin + 12;
+    lPlayW_ = 76;                      // a wide, prominent Play button (owner 11-23)
+    lPlayH_ = 52;
+    lNameX_ = lPlayX_ + lPlayW_ + 18;
+    lColW_ = 84;                       // right-column width — the action buttons sit closer together (owner 11-23)
+    const float blockRight = lListRight_ - 6;
+    const float blockLeft = blockRight - kColumns * lColW_;
+    for (int i = 0; i < kColumns; ++i) lColCx_[i] = blockLeft + (float(i) + 0.5f) * lColW_;
+    tableW_ = blockRight - kMargin;    // natural table width, for the horizontal scrollbar
+}
+
+// One Material icon, centred on (cx, cy) in design units. `px` is the glyph
+// pixel size; the Icons atlas is separate from the text fonts.
+void Launcher::icon(uint32_t cp, float cx, float cy, float px, gfx::Color c) {
+    const std::string s = gfx::icon::u8(cp);
+    const float spx = px * s_;
+    const float w = gfx_.measure(gfx::FontId::Icons, spx, s);
+    const float lh = gfx_.lineHeight(gfx::FontId::Icons, spx);
+    gfx_.text(gfx::FontId::Icons, spx, cx * s_ - w / 2, cy * s_ - lh / 2, s, c);
+}
+
+void Launcher::drawTooltip() {
+    const float pad = 12, h = 30;
+    const float w = measure(FontId::SemiBold, 15, tooltip_) + 2 * pad;
+    float x = (tooltipAt_.x + tooltipAt_.w / 2) / s_ - w / 2;
+    float y = tooltipAt_.y / s_ - h - 8;
+    x = std::clamp(x, kMargin, W_ - kMargin - w);
+    if (y < kListTop) y = tooltipAt_.y / s_ + tooltipAt_.h / s_ + 8;
+    const Rect r = R(x, y, w, h);
+    gfx_.glow(r, withAlpha(kInk, 0.7f), 10 * s_, 16 * s_);
+    gfx_.rect(r, rgb(0x2b2530, 0.98f), rgb(0x1f1b23, 0.98f), 8 * s_);
+    gfx_.ring(r, withAlpha(kSand, 0.5f), 8 * s_, 1.2f * s_);
+    text(FontId::SemiBold, 15, x + pad, y + (h - gfx_.lineHeight(FontId::SemiBold, 15 * s_) / s_) / 2, tooltip_, kCream);
 }
 
 void Launcher::drawBackground() {
@@ -1279,13 +1422,39 @@ void Launcher::drawHeader() {
     gfx_.rect(R(lx + fw, 110, ww, 1.2f), withAlpha(hl ? kCream : kSand, hl ? 0.9f : 0.5f));
     hits_.push_back({link, kHitDiscs, -1});
 
-    // Column titles and the rule under the header.
-    const float right = W_ - kMargin - 16;
-    const float buttonsW = 104 + 10 + 120 + 10 + 160;
-    text(FontId::SemiBold, 13, 66, 136, "GAME", kMuted, 2.5f);
-    text(FontId::SemiBold, 13, right - buttonsW - 24 - 132, 136, "COMPLETE", kMuted, 2.5f);
-    gfx_.rect(R(kMargin, 126, W_ - 2 * kMargin, 1), withAlpha(kCream, 0.12f));
-    gfx_.rect(R(kMargin, 125, 140, 3), kOxblood, 1.5f * s_);
+    drawDreamForge();
+    drawColumnHeaders();
+}
+
+// The disabled "Dream forge engine" button (header, right-aligned). Hovering it
+// shows a "Coming soon!" tooltip; it is never selectable.
+void Launcher::drawDreamForge() {
+    const std::string label = "DREAM FORGE ENGINE";
+    const float px = 14, lw = measure(FontId::SemiBold, px, label, 1.5f);
+    const float w = 18 + 22 + 10 + lw + 18, x = W_ - kMargin - w, y = 118, h = 34;
+    const Rect r = R(x, y, w, h);
+    const bool hov = hovering(r);
+    gfx_.rect(r, rgb(0x1c1a20, 0.9f), rgb(0x161418, 0.9f), 10 * s_);
+    gfx_.ring(r, withAlpha(kMuted, hov ? 0.6f : 0.4f), 10 * s_, 1.2f * s_);
+    const Color ic = withAlpha(fretColor(Fret::Yellow), hov ? 0.75f : 0.5f);  // yellow(handyman), dimmed (disabled)
+    icon(gfx::icon::kHandyman, x + 18 + 11, y + h / 2, 22, ic);
+    text(FontId::SemiBold, px, x + 18 + 22 + 10, y + (h - gfx_.lineHeight(FontId::SemiBold, px * s_) / s_) / 2, label,
+         withAlpha(kSand, hov ? 0.8f : 0.55f), 1.5f);
+    if (hov) tooltip_ = "Coming soon!", tooltipAt_ = r;
+    hits_.push_back({r, kHitDreamForge, -1});
+}
+
+// The table's column headers and the rule under the header (owner 11-22 §2).
+void Launcher::drawColumnHeaders() {
+    const float hy = 158;
+    text(FontId::SemiBold, 13, lPlayX_, hy, "GAME NAME", kMuted, 2.0f);
+    static const char* kHeads[kColumns] = {"% PLAY", "ADDITIVE MUSICS", "EXPLORE FILES", "MOD MENU", "LOAD ISO"};
+    for (int i = 0; i < kColumns; ++i) {
+        const float w = measure(FontId::SemiBold, 11, kHeads[i], 1.2f);
+        text(FontId::SemiBold, 11, lColCx_[i] - hscroll_ - w / 2, hy + 1, kHeads[i], kMuted, 1.2f);
+    }
+    gfx_.rect(R(kMargin, 176, lListRight_ - kMargin, 1), withAlpha(kCream, 0.12f));
+    gfx_.rect(R(kMargin, 175, 140, 3), kOxblood, 1.5f * s_);
 }
 
 void Launcher::drawList() {
@@ -1302,8 +1471,13 @@ void Launcher::drawList() {
     scrollTarget_ = std::clamp(scrollTarget_, 0.f, std::max(0.f, content - view));
     scroll_ += (scrollTarget_ - scroll_) * 0.25f;
     if (std::abs(scrollTarget_ - scroll_) < 0.5f) scroll_ = scrollTarget_;
+    // Horizontal scroll (engages only when the table is wider than its viewport).
+    const float hView = lListRight_ - kMargin;
+    hscrollTarget_ = std::clamp(hscrollTarget_, 0.f, std::max(0.f, tableW_ - hView));
+    hscroll_ += (hscrollTarget_ - hscroll_) * 0.25f;
+    if (std::abs(hscrollTarget_ - hscroll_) < 0.5f) hscroll_ = hscrollTarget_;
 
-    const Rect clip = R(0, top - 10, W_, view + 20);
+    const Rect clip = R(kMargin - 2, top - 10, lListRight_ - kMargin + 4, view + 20);
     gfx_.clip(&clip);
     for (size_t i = 0; i < games.size(); ++i) {
         const float y = top + float(i) * (kRowH + kRowGap) - scroll_;
@@ -1313,18 +1487,57 @@ void Launcher::drawList() {
     gfx_.clip(nullptr);
     // Hits outside the list's view do not count.
     hits_.erase(std::remove_if(hits_.begin(), hits_.end(),
-                               [&](const Hit& h) { return h.r.y + h.r.h < top * s_ || h.r.y > bottom * s_; }),
+                               [&](const Hit& h) {
+                                   return h.row >= 0 && (h.r.y + h.r.h < top * s_ || h.r.y > bottom * s_);
+                               }),
                 hits_.end());
     // Scroll hints: soft fades where rows continue.
-    if (scroll_ > 1) gfx_.rect(R(0, top - 10, W_, 22), rgb(0x100d12, 0.9f), rgb(0x100d12, 0));
-    if (scroll_ < content - view - 1) gfx_.rect(R(0, bottom - 12, W_, 22), rgb(0x0a090b, 0), rgb(0x0a090b, 0.9f));
+    if (scroll_ > 1) gfx_.rect(R(kMargin, top - 10, lListRight_ - kMargin, 22), rgb(0x100d12, 0.9f), rgb(0x100d12, 0));
+    if (scroll_ < content - view - 1) gfx_.rect(R(kMargin, bottom - 12, lListRight_ - kMargin, 22), rgb(0x0a090b, 0), rgb(0x0a090b, 0.9f));
+    drawScrollbars(top, bottom, view, content);
+}
+
+// Sticky vertical and horizontal scrollbars (owner 11-22 §2). The vertical one
+// shows whenever the list overflows; the horizontal one only when the table is
+// wider than its viewport.
+void Launcher::drawScrollbars(float top, float bottom, float view, float content) {
+    vRange_ = std::max(0.f, content - view);
+    if (vRange_ > 1) {
+        const float trackTop = top, trackH = bottom - top;
+        const float thumbH = std::max(40.f, trackH * view / content);
+        const float thumbY = trackTop + (trackH - thumbH) * (content > view ? scroll_ / (content - view) : 0);
+        const Rect track = R(lScrollX_ - 5, trackTop, 10, trackH);
+        gfx_.rect(track, withAlpha(kCream, 0.05f), 5 * s_);
+        vThumb_ = R(lScrollX_ - 5, thumbY, 10, thumbH);
+        const bool hov = hovering(vThumb_) || vbarDrag_;
+        gfx_.rect(vThumb_, withAlpha(kSand, hov ? 0.85f : 0.5f), 5 * s_);
+        vTrackY_ = trackTop * s_, vTrackH_ = trackH * s_, vThumbH_ = thumbH * s_;
+    } else {
+        vThumb_ = {};
+    }
+    const float hView = lListRight_ - kMargin;
+    hRange_ = std::max(0.f, tableW_ - hView);
+    const float barY = bottom + 2;
+    if (hRange_ > 1) {
+        const float trackW = hView, trackX = kMargin;
+        const float thumbW = std::max(40.f, trackW * hView / tableW_);
+        const float thumbX = trackX + (trackW - thumbW) * (hscroll_ / hRange_);
+        gfx_.rect(R(trackX, barY, trackW, 8), withAlpha(kCream, 0.05f), 4 * s_);
+        hThumb_ = R(thumbX, barY, thumbW, 8);
+        const bool hov = hovering(hThumb_) || hbarDrag_;
+        gfx_.rect(hThumb_, withAlpha(kSand, hov ? 0.85f : 0.5f), 4 * s_);
+        hTrackX_ = trackX * s_, hTrackW_ = trackW * s_, hThumbW_ = thumbW * s_;
+    } else {
+        hThumb_ = {};
+    }
 }
 
 void Launcher::drawRow(int index, float y) {
     const Game& g = catalog_.games()[size_t(index)];
     const bool focused = index == focusRow_ && !dialog_.open;
     const bool lit = g.highlighted();
-    const Rect row = R(kMargin, y, W_ - 2 * kMargin, kRowH);
+    const float dx = -hscroll_;  // horizontal scroll offset (usually 0)
+    const Rect row = R(kMargin, y, lListRight_ - kMargin, kRowH);
     hits_.push_back({row, index, -1});
 
     // The card.
@@ -1333,16 +1546,19 @@ void Launcher::drawRow(int index, float y) {
     else if (g.ready) gfx_.rect(row, rgb(0x1d1a20, 0.94f), rgb(0x151318, 0.94f), 12 * s_);
     else gfx_.rect(row, rgb(0x141216, 0.9f), rgb(0x100e12, 0.9f), 12 * s_);
     gfx_.ring(row, focused ? withAlpha(kCream, 0.75f) : withAlpha(kCream, lit ? 0.14f : 0.06f), 12 * s_, (focused ? 2.f : 1.f) * s_);
-    // The status light: green ready to rock, yellow needs a disc, grey coming soon.
-    const Color led = lit && g.hasModule ? fretColor(Fret::Green) : g.ready ? fretColor(Fret::Yellow) : kMuted;
-    if (g.ready) gfx_.glow(R(kMargin + 16, y + 26, 12, 12), withAlpha(led, 0.5f), 6 * s_, 10 * s_);
-    gfx_.circle((kMargin + 22) * s_, (y + 32) * s_, 5.5f * s_, led);
 
-    // Name and details.
-    const float x = kMargin + 40;
+    const float cy = y + kRowH / 2;
+    // Play, before the name — a wide, prominent button (owner 11-23).
+    drawIconButton(R(lPlayX_ + dx, cy - lPlayH_ / 2, lPlayW_, lPlayH_), gfx::icon::kPlayCircle, fretColor(Fret::Green),
+                   focused && focusCol_ == kPlay, enabled(index, kPlay), index, kPlay);
+
+    // Status light + name + details.
+    const float nx = lNameX_ + dx;
+    const Color led = lit && g.hasModule ? fretColor(Fret::Green) : g.ready ? fretColor(Fret::Yellow) : kMuted;
+    gfx_.circle((nx + 4) * s_, (y + 24) * s_, 4.5f * s_, led);
     const Color nameColor = lit ? kCream : g.ready ? rgb(0xd6cab3) : rgb(0x8a8174);
-    const float idW = text(FontId::SemiBold, 17, x, y + 11, g.id + "/", lit ? kSand : kDim);
-    text(FontId::SemiBold, 25, x + idW, y + 4, g.title(), nameColor);
+    const float idW = text(FontId::SemiBold, 16, nx + 14, y + 13, g.id + "/", lit ? kSand : kDim);
+    text(FontId::SemiBold, 23, nx + 14 + idW, y + 7, g.title(), nameColor);
     std::string details = g.basedOn.empty() ? g.platforms : g.basedOn;
     details += kDot + year(g.launch) + kDot + "v" + g.version;
     if (!g.iso.empty())
@@ -1350,30 +1566,69 @@ void Launcher::drawRow(int index, float y) {
     else if (g.ready) details += kDot + "no disc yet: load one or drop it here";
     else details += kDot + "coming soon";
     if (g.ready && !g.hasModule) details += kDot + "module not built";
+    const float nameMax = lColCx_[0] - lColW_ / 2 - (nx + 14) - 12;  // up to the first column
+    const std::string shown = gfx_.elide(FontId::Regular, 14 * s_, details, nameMax * s_);
+    text(FontId::Regular, 14, nx + 14, y + 40, shown, lit ? rgb(0xa9b8a6) : kDim);
 
-    const float right = W_ - kMargin - 16;
-    const float buttonsW = 104 + 10 + 120 + 10 + 160;
-    const float compX = right - buttonsW - 24 - 132;
-    const std::string shown = gfx_.elide(FontId::Regular, 15 * s_, details, (compX - x - 20) * s_);
-    text(FontId::Regular, 15, x, y + 37, shown, lit ? rgb(0xa9b8a6) : kDim);
+    // Column 0: the playability % icon (owner 11-22 §2), with the number below.
+    const PctIcon pi = pctIcon(g.completeness);
+    const float c0 = lColCx_[0] + dx;
+    icon(pi.cp, c0, cy - 7, 30, g.ready ? pi.c : withAlpha(pi.c, 0.4f));
+    text(FontId::SemiBold, 12, c0 - measure(FontId::SemiBold, 12, percent(g.completeness)) / 2, cy + 12,
+         percent(g.completeness), g.ready ? kSand : kDim);
 
-    // Completeness: the percentage over a bar.
-    const std::string pc = percent(g.completeness);
-    text(FontId::SemiBold, 20, compX + 120 - measure(FontId::SemiBold, 20, pc), y + 10, pc, g.ready ? kCream : kDim);
-    gfx_.rect(R(compX, y + 40, 120, 6), withAlpha(kCream, 0.08f), 3 * s_);
-    const Color barA = g.completeness >= 0.9 ? fretColor(Fret::Green) : g.completeness >= 0.5 ? fretColor(Fret::Yellow) : fretColor(Fret::Orange);
-    if (g.completeness > 0) gfx_.rect(R(compX, y + 40, float(120 * g.completeness), 6), barA, withAlpha(barA, 0.8f), 3 * s_);
+    // The right-hand action buttons, in the order the enum lists them: Additive,
+    // Explore, Mod, Load ISO (owner 11-23). Each draws at its own column index.
+    const bool hasIso = !g.iso.empty();
 
-    // The buttons: Play, Load ISO, Explore models.
-    float bx = right - buttonsW;
-    const float by = y + (kRowH - 38) / 2;
-    drawButton(R(bx, by, 104, 38), "Play", Fret::Green, focused && focusCol_ == kPlay, enabled(index, kPlay), index, kPlay);
-    bx += 114;
-    drawButton(R(bx, by, 120, 38), g.iso.empty() ? "Load ISO" : "Change ISO", Fret::Yellow, focused && focusCol_ == kLoad,
-               enabled(index, kLoad), index, kLoad);
-    bx += 130;
-    drawButton(R(bx, by, 160, 38), "Explore models", Fret::Blue, focused && focusCol_ == kExplore, enabled(index, kExplore),
-               index, kExplore);
+    // Additive musics (neon red when the game is playable).
+    drawIconButton(R(lColCx_[kAdditive] + dx - 23, cy - 23, 46, 46), gfx::icon::kMusicNoteAdd, kNeonRedC,
+                   focused && focusCol_ == kAdditive, enabled(index, kAdditive), index, kAdditive);
+
+    // Explore files.
+    drawIconButton(R(lColCx_[kExplore] + dx - 23, cy - 23, 46, 46), gfx::icon::kDatabaseSearch, fretColor(Fret::Blue),
+                   focused && focusCol_ == kExplore, enabled(index, kExplore), index, kExplore);
+
+    // Mod menu — disabled placeholder; hovering shows "Coming soon".
+    const Rect modR = R(lColCx_[kMod] + dx - 23, cy - 23, 46, 46);
+    drawIconButton(modR, gfx::icon::kAddShoppingCart, kNeonPurpleC, focused && focusCol_ == kMod, false, index, kMod);
+    if (hovering(modR)) tooltip_ = "Coming soon", tooltipAt_ = modR;
+
+    // Load ISO — album when a disc is set (grey), disc_full when not (yellow for
+    // every not-found game).
+    const Rect loadR = R(lColCx_[kLoad] + dx - 23, cy - 23, 46, 46);
+    drawIconButton(loadR, hasIso ? gfx::icon::kAlbum : gfx::icon::kDiscFull, fretColor(Fret::Yellow),
+                   focused && focusCol_ == kLoad, !hasIso /* coloured when no disc */, index, kLoad);
+}
+
+// An icon-only button for a row column. `tint` is its colour when enabled.
+void Launcher::drawIconButton(const Rect& r, uint32_t cp, Color tint, bool focused, bool on, int row, int col) {
+    const float rad = 11 * s_;
+    Color bg1, bg2, ring, ic;
+    if (focused && on) {
+        gfx_.glow(r, withAlpha(tint, 0.4f), rad, 12 * s_);
+        bg1 = gfx::mix(tint, kCream, 0.2f), bg2 = gfx::mix(tint, kInk, 0.2f);
+        ring = withAlpha(kCream, 0.7f), ic = kInk;
+    } else if (focused) {
+        bg1 = rgb(0x2a262d), bg2 = rgb(0x211e24), ring = withAlpha(kCream, 0.5f), ic = withAlpha(kCream, 0.85f);
+    } else if (on) {
+        bg1 = rgb(0x26222a, 0.95f), bg2 = rgb(0x1c191f, 0.95f), ring = withAlpha(tint, 0.5f), ic = tint;
+    } else {
+        bg1 = rgb(0x1a171d, 0.75f), bg2 = rgb(0x161418, 0.75f), ring = withAlpha(kCream, 0.07f), ic = withAlpha(kMuted, 0.6f);
+    }
+    gfx_.rect(r, bg1, bg2, rad);
+    gfx_.ring(r, ring, rad, (focused ? 1.6f : 1.2f) * s_);
+    icon(cp, (r.x + r.w / 2) / s_, (r.y + r.h / 2) / s_, 26, ic);
+    hits_.push_back({r, row, col});
+}
+
+bool Launcher::hovering(const Rect& rPx) const {
+    if (dialog_.open || dragging_) return false;
+    if (!(SDL_GetWindowFlags(window_) & SDL_WINDOW_MOUSE_FOCUS)) return false;
+    float mx = -1, my = -1;
+    SDL_GetMouseState(&mx, &my);
+    const float d = SDL_GetWindowPixelDensity(window_);
+    return rPx.contains(mx * d, my * d);
 }
 
 void Launcher::drawButton(const Rect& r, const std::string& label, Fret fret, bool focused, bool on, int row, int col) {

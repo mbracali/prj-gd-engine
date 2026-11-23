@@ -340,7 +340,7 @@ if(GD06_MODULE)
   get_target_property(gd06_srcs gd06 SOURCES)
   list(FILTER gd06_srcs EXCLUDE REGEX "\\.(rc|icns)$")
   add_library(gd06_module SHARED ${gd06_srcs} src/platform/module_entry.cpp src/platform/module_sounds.cpp
-              src/platform/module_songs.cpp
+              src/platform/module_songs.cpp src/platform/module_explore.cpp
               ${GD06_HOST_SDK}/gd_module_shim.cpp)
   foreach(prop INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS LINK_LIBRARIES LINK_OPTIONS)
     get_target_property(value gd06 ${prop})

@@ -18,6 +18,7 @@
 #include "scene/ui_styles.h"
 #include "script/tasks.h"
 #include "ui/char_select.h"
+#include "ui/custom_songs_panel.h"
 #include "ui/enhanced_panel.h"
 #include "ui/gamepad_panel.h"
 #include "ui/multi_select.h"
@@ -110,6 +111,7 @@ public:
             const int b = kind == "fret1" ? kPad_X : kind == "fret2" ? kPad_Tri : kind == "start" ? kPad_Start
                           : kind == "strum" ? (y < (h.y0 + h.y1) * 0.5f ? kPad_DUp : kPad_DDown) : -1;
             if (kind == "fret3" && ui.currentScreen() == "main_screen") ui.openGamepads();
+            else if (kind == "fret3" && ui.currentScreen() == "qp_selsong_screen") ui.openCustomSongs();
             else if (b >= 0) ui.buttonDown(b, 0), ui.buttonUp(b, 0);
             return true;
         }
@@ -821,7 +823,8 @@ const std::vector<std::string>& knownClasses() {
         "GHScreen", "UIScreen", "MultiSelectScreen", "TrackBudgetScreen", "GHPanel", "UIPanel", "MetaPanel", "HelpBarPanel",
         "SelSongPanel", "SliderPanel", "EndGamePanel", "FadePanel", "GamePanel", "HudPanel", "TrackPanel", "TrackMaskPanel",
         "MidiLoaderPanel", "LagPanel", "CreditsPanel", "StatsProvider", "MultiSelectPanel", "GuitarDisplayPanel", "CharsysPanel",
-        "GuitarSelectPanel", "StorePanel", "MultiCharSelPanel", "MultiSelectListPanel", "TutorialPanel", "GamepadPanel", "EnhancedPanel"};
+        "GuitarSelectPanel", "StorePanel", "MultiCharSelPanel", "MultiSelectListPanel", "TutorialPanel", "GamepadPanel", "EnhancedPanel",
+        "CustomSongsPanel"};
     return k;
 }
 
@@ -844,6 +847,7 @@ std::unique_ptr<ScriptObject> makeClassObject(UiManager& ui, const std::string& 
     if (cls == "StatsProvider") return std::make_unique<StatsProviderObj>(name, cls);
     if (cls == "GamepadPanel") return makeGamepadPanel(ui, name);
     if (cls == "EnhancedPanel") return makeEnhancedPanel(ui, name);
+    if (cls == "CustomSongsPanel") return makeCustomSongsPanel(ui, name);
     // GHPanel / UIPanel, and the classes of screens outside quickplay
     // (multiplayer, tutorials: later milestones) as plain panels.
     if (std::find(knownClasses().begin(), knownClasses().end(), cls) != knownClasses().end())

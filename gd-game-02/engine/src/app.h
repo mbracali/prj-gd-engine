@@ -3,6 +3,8 @@
 #pragma once
 
 #include <string>
+#include <utility>
+#include <vector>
 
 struct Options {
     std::string dataPath;  // disc image or extracted folder
@@ -11,6 +13,10 @@ struct Options {
     bool autoplay = false;
     bool noFail = false;
     std::string walk;      // --walktest <scenario> (tests/walktest.h)
+    // Additive songs (GDALL-042): other games' discs the launcher shared, as
+    // (game id, disc path), from --extra-disc <id>=<path> (module_entry.cpp
+    // sets them from GdHost.extra_discs).
+    std::vector<std::pair<std::string, std::string>> extraDiscs;
     // A restart from Enhanced > Graphics / Audio Backend (Restart Now): no
     // boot screens, this screen opens.
     std::string startScreen;

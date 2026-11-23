@@ -37,7 +37,20 @@ struct Texture {
     int w = 0, h = 0;
 };
 
-enum class FontId { Title, Regular, SemiBold, Count };
+enum class FontId { Title, Regular, SemiBold, Icons, Count };
+
+// Material Symbols (Outlined) codepoints for the launcher's icons. The subset
+// font res/fonts/MaterialSymbols-subset.ttf carries exactly these glyphs.
+namespace icon {
+constexpr uint32_t kPercent = 0xeb58, kCircle = 0xef4a;
+constexpr uint32_t kClock10 = 0xf726, kClock20 = 0xf725, kClock40 = 0xf724, kClock60 = 0xf723, kClock80 = 0xf722,
+                   kClock90 = 0xf721, kStars = 0xe8d0, kStrokeFull = 0xf749;
+constexpr uint32_t kPauseCircle = 0xe1a2, kStopCircle = 0xef71;
+constexpr uint32_t kPlayCircle = 0xe1c4, kAlbum = 0xe019, kDiscFull = 0xe610, kMusicNoteAdd = 0xf391,
+                   kAddShoppingCart = 0xe854, kDatabaseSearch = 0xf38e, kHandyman = 0xf10b;
+// UTF-8 for one codepoint (text() takes UTF-8 strings).
+std::string u8(uint32_t cp);
+}  // namespace icon
 
 class Renderer {
 public:

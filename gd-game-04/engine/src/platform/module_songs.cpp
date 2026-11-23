@@ -7,6 +7,7 @@
 // song) summed, as the song sounds when played. No window or GL work; called
 // on the launcher's thread.
 #include <algorithm>
+#include <array>
 #include <exception>
 #include <memory>
 #include <string>
@@ -20,12 +21,24 @@
 
 namespace {
 
+// One stem the launcher can mute/solo: SongStream exposes three (guitar, rhythm,
+// song/backing) as six channels (two each), summed as the song is heard.
+struct Playback {
+    int index = -1;
+    std::unique_ptr<SongStream> stream;
+    int nch = 0, rate = 0, nStems = 0;
+    std::array<unsigned char, 3> on = {{1, 1, 1}};  // guitar, rhythm, backing
+};
+
+const char* const kStemNames[3] = {"Guitar", "Rhythm", "Backing"};
+
 struct SongsImpl {
     std::unique_ptr<Disc> disc;
     std::unique_ptr<Globals> globals;
     SongDb db;
     std::vector<const SongInfo*> list;  // songs that have audio on the disc
     std::vector<std::string> details;   // stable storage for GdSong::detail
+    Playback pb;  // the streaming song (stem player)
 };
 
 int songCount(void* self) {
@@ -88,6 +101,83 @@ int decodePreview(void* self, int index, GdSongPcm* out) {
     }
 }
 
+int partCount(void* self, int index) {
+    auto* impl = static_cast<SongsImpl*>(self);
+    return (index >= 0 && index < int(impl->list.size())) ? 3 : 0;  // guitar, rhythm, backing
+}
+
+int part(void* self, int index, int part, GdSongPart* out) {
+    auto* impl = static_cast<SongsImpl*>(self);
+    if (!out || index < 0 || index >= int(impl->list.size()) || part < 0 || part >= 3) return 1;
+    out->name = kStemNames[part];
+    out->default_on = 1;
+    return 0;
+}
+
+int playSong(void* self, int index) {
+    auto* impl = static_cast<SongsImpl*>(self);
+    if (index < 0 || index >= int(impl->list.size())) return 1;
+    try {
+        std::string error;
+        Playback pb;
+        pb.index = index;
+        pb.stream = SongStream::open(*impl->disc, impl->list[size_t(index)]->name, error);
+        if (!pb.stream) return 2;
+        pb.nch = pb.stream->channels();
+        pb.rate = pb.stream->sampleRate();
+        pb.nStems = pb.nch / 2;
+        impl->pb = std::move(pb);
+        return 0;
+    } catch (const std::exception&) {
+        return 3;
+    }
+}
+
+int readSong(void* self, float* samples, int capacityFrames, int* rate) {
+    auto* impl = static_cast<SongsImpl*>(self);
+    Playback& pb = impl->pb;
+    if (!samples || capacityFrames < 1 || !pb.stream) return 0;
+    if (rate) *rate = pb.rate;
+    const int nch = pb.nch;
+    constexpr int kBlock = 2048;
+    const size_t nz = size_t(nch);
+    std::vector<std::vector<float>> buf(nz, std::vector<float>(size_t(kBlock)));
+    std::vector<float*> ptrs(nz);
+    for (int c = 0; c < nch; ++c) ptrs[size_t(c)] = buf[size_t(c)].data();
+    int written = 0;
+    while (written < capacityFrames) {
+        const int want = std::min(kBlock, capacityFrames - written);
+        const int n = pb.stream->decode(ptrs.data(), want);
+        if (n <= 0) break;
+        for (int f = 0; f < n; ++f) {
+            float l = 0.0f, r = 0.0f;
+            for (int st = 0; st < pb.nStems; ++st) {
+                if (st < 3 && !pb.on[size_t(st)]) continue;  // a muted stem
+                l += buf[size_t(st * 2)][size_t(f)];
+                r += buf[size_t(st * 2 + 1)][size_t(f)];
+            }
+            samples[size_t((written + f) * 2)] = std::clamp(l, -1.0f, 1.0f);
+            samples[size_t((written + f) * 2 + 1)] = std::clamp(r, -1.0f, 1.0f);
+        }
+        written += n;
+    }
+    return written;
+}
+
+void setPart(void* self, int part, int enabled) {
+    auto* impl = static_cast<SongsImpl*>(self);
+    if (part >= 0 && part < 3) impl->pb.on[size_t(part)] = enabled ? 1 : 0;
+}
+
+void stopSong(void* self) {
+    static_cast<SongsImpl*>(self)->pb = Playback{};
+}
+
+int songFrames(void* self) {
+    const Playback& pb = static_cast<SongsImpl*>(self)->pb;
+    return pb.stream ? int(pb.stream->length()) : 0;
+}
+
 void closeSongs(void* self) {
     delete static_cast<SongsImpl*>(self);
 }
@@ -135,6 +225,13 @@ extern "C" GD_MODULE_EXPORT const GdSongs* gd_game_songs(const GdHost* host) {
     g_songs.song = song;
     g_songs.decode_preview = decodePreview;
     g_songs.close = closeSongs;
+    g_songs.part_count = partCount;
+    g_songs.part = part;
+    g_songs.play_song = playSong;
+    g_songs.read_song = readSong;
+    g_songs.set_part = setPart;
+    g_songs.stop_song = stopSong;
+    g_songs.song_frames = songFrames;
     if (host->log) host->log(host->log_user, "gd04: song previews ready");
     return &g_songs;
 }

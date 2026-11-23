@@ -35,6 +35,7 @@
 #include "game/camera_director.h"
 #include "game/key_script.h"
 #include "game/light_presets.h"
+#include "game/foreign_songs.h"
 #include "game/song_db.h"
 #include "game/song_setup.h"
 #include "game/venue.h"
@@ -167,7 +168,7 @@ Part partFor(const Song& song, const std::string& instrument, bool coop) {
 // fade in and out [I: GH2's fade times]; the menu music: the whole loop).
 class LoopSource final : public AudioSource {
 public:
-    LoopSource(std::unique_ptr<VorbisStream> s, double startMs, double endMs, double fadeMs)
+    LoopSource(std::unique_ptr<AudioSource> s, double startMs, double endMs, double fadeMs)
         : s_(std::move(s)), start_(uint64_t(std::max(0.0, startMs) * s_->sampleRate() / 1000.0)) {
         end_ = endMs > startMs ? uint64_t(endMs * s_->sampleRate() / 1000.0) : s_->lengthFrames();
         end_ = std::min<uint64_t>(std::max<uint64_t>(end_, start_ + 1), s_->lengthFrames() ? s_->lengthFrames() : end_);
@@ -206,7 +207,7 @@ public:
     }
 
 private:
-    std::unique_ptr<VorbisStream> s_;
+    std::unique_ptr<AudioSource> s_;
     uint64_t start_ = 0, end_ = 0, pos_ = 0, fade_ = 0;
 };
 
@@ -426,6 +427,7 @@ private:
     float trackFactor_ = 1;
     Rules playRules_;
     std::vector<SongInfo> songs_;
+    ForeignLibrary foreignLib_;  // additive songs: discs the launcher shared (GDALL-042)
     bool running_ = true;
     bool restart_ = false;  // Enhanced's Restart Now: runApp starts the game again
     int exitCode_ = 0;
@@ -480,7 +482,7 @@ private:
     bool hadDevice_[2] = {};  // each slot had a device at the song's start (gameDeviceLost)
     std::unique_ptr<Player> player_;
     std::unique_ptr<Autoplay> bot_;
-    std::unique_ptr<VorbisStream> pendingStream_;
+    std::unique_ptr<AudioSource> pendingStream_;  // VorbisStream (disc) or a foreign source (additive songs)
     float bandVolume_ = 1, guitarVolume_ = 1;
     int syncOffsetMs_ = 0;
     // Enhanced Options > Audio / Video Calibration (ms, + late): the heard
@@ -886,6 +888,12 @@ bool App::loadData(const std::string& path) {
         trackTried_ = false;
         synth_.reset();
         data_ = std::move(data), rules_ = rules, songs_ = std::move(songs);
+        // Additive songs (GDALL-042): append the songs of the discs the launcher
+        // shared (other games the player exposed in the Additive Music tool).
+        foreignLib_ = {};
+        for (SongInfo& fs : openForeignSongs(options_.extraDiscs, foreignLib_)) songs_.push_back(std::move(fs));
+        if (!foreignLib_.discs.empty())
+            SDL_Log("additive songs: %zu shared disc(s), %zu songs total", foreignLib_.discs.size(), songs_.size());
         // The sound effects: the banks decode here (all of them: ~0.1 s).
         const uint64_t t0 = SDL_GetTicksNS();
         synth_ = std::make_unique<Synth>();
@@ -946,7 +954,9 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
     stopMusic();
     mixer_.setVolumeDb(0);
     try {
-        song_ = std::make_unique<Song>(loadChart(*data_, info, rules_));
+        // Additive songs: a foreign song's chart comes from its own game's
+        // reader, not GH2's disc (GDALL-042).
+        song_ = std::make_unique<Song>(info.foreign() ? loadForeignChart(foreignLib_, info) : loadChart(*data_, info, rules_));
         difficulty_ = std::clamp(difficulty, 0, kDifficultyCount - 1);
         // Without the menus: GD02_MODE (with the menus gameLoad set the mode).
         if (!ui_) {
@@ -976,7 +986,12 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         const bool coopBlock = coop || (mode_ == DevMode::Practice && songBlock_ == "song_coop");
         const SongAudio& audio = coopBlock && info.coopAudio ? *info.coopAudio : info.audio;
         audio_ = &audio;
-        pendingStream_ = std::make_unique<VorbisStream>(data_->read(audio.moggPath));
+        if (info.foreign()) {  // its audio comes from the foreign reader, not a disc mogg
+            pendingStream_ = loadForeignAudio(foreignLib_, info);
+            if (!pendingStream_) throw std::runtime_error("foreign song audio could not be opened");
+        } else {
+            pendingStream_ = std::make_unique<VorbisStream>(data_->read(audio.moggPath));
+        }
         // Face-off players own the face-off sections' gems: the parser fills
         // player_mask only with separate_parts and two players (0x823450B0)
         // [C]; the others play every gem.
@@ -2456,7 +2471,12 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
                 };
             }
         }
-        band_->loadSong(parseMidi(data_->read(info.audio.midiPath)), &song);
+        // The band's performance MIDI: a foreign song's lives on its own disc
+        // (data_ can't read it), so take its bytes from the shared reader. The
+        // GH1 and GH2 chart MIDIs share the band/venue track layout, so the
+        // on-stage band animates for a foreign song as for a native one.
+        const std::vector<uint8_t> perfMidi = info.foreign() ? loadForeignMidi(foreignLib_, info) : data_->read(info.audio.midiPath);
+        band_->loadSong(parseMidi(perfMidi), &song);
         // The characters enter with the world (World::start); a world already
         // started (the menus' world_panel) gets them at once.
         if (world_->started()) band_->enter();
@@ -2529,7 +2549,11 @@ void App::songPreview(const std::string& songId) {
     auto it = std::find_if(songs_.begin(), songs_.end(), [&](const SongInfo& s) { return s.id == songId; });
     if (it == songs_.end()) return;
     try {
-        auto s = std::make_unique<VorbisStream>(data_->read(it->audio.moggPath));
+        // A foreign song's audio is on its own disc; take it from the shared
+        // reader so its preview loops in the Custom Songs overlay like a native.
+        std::unique_ptr<AudioSource> s = it->foreign() ? loadForeignAudio(foreignLib_, *it)
+                                                       : std::make_unique<VorbisStream>(data_->read(it->audio.moggPath));
+        if (!s) return;
         auto loop = std::make_unique<LoopSource>(std::move(s), it->previewStartMs, it->previewEndMs, 1000);
         mixer_.play(std::move(loop), mixerTracks(it->audio), 0);
         music_ = Music::Preview;

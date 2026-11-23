@@ -1194,6 +1194,13 @@ public:
         if (msg == "get_difficulty") return r = Value::integer(difficulty), true;
         if (msg == "get_difficulty_sym") return r = sym(kDiff[difficulty]), true;
         if (msg == "set_song_index" && !a.empty()) return pick(a[0].integerValue()), true;
+        // Additive songs (GDALL-042): choose a song by its engine index directly
+        // (a foreign song is not a row of the quickplay provider).
+        if (msg == "set_engine_song" && !a.empty()) {
+            engineSongId = a[0].integerValue();
+            songIndex = 0;
+            return r = Value::integer(0), true;
+        }
         if (msg == "get_song_index") return r = Value::integer(songIndex), true;
         // Tutorial songs are in no list (tut_loading / the lessons' load_song).
         auto tutorialSong = [&](const std::string& id) {
@@ -1386,6 +1393,11 @@ std::vector<std::pair<std::string, std::string>> UiSystem::PanelObj::helpItems()
     if (!hasOverride_ && ui_.current_ && ui_.current_->name() == "main") {
         auto strumAt = std::find_if(out.begin(), out.end(), [](const auto& e) { return e.first == "strum"; });
         out.insert(strumAt, {"fret3", "GAMEPADS"});
+    }
+    // The Quick Play song screen offers the "Custom songs" overlay (yellow, §7).
+    if (ui_.current_ && ui_.current_->name() == "qp_selsong") {
+        auto strumAt = std::find_if(out.begin(), out.end(), [](const auto& e) { return e.first == "strum"; });
+        out.insert(strumAt, {"fret3", "CUSTOM SONGS"});
     }
     addAccessButtons(out);
     return out;
@@ -2109,6 +2121,12 @@ UiSystem::UiSystem(Renderer& renderer, const GameData& data, Hooks hooks)
                 (panels meta gamepads helpbar)
                 (focus gamepads)
                 (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))}
+            {new_custom_songs_panel custom_songs (rnd_file "")}
+            {new_gh_screen custom_songs
+                (animate_transition 0)
+                (panels meta custom_songs helpbar)
+                (focus custom_songs)
+                (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))}
         )dta"));
         interp_.run(scripts_.back());
     } catch (const std::exception& ex) {
@@ -2136,7 +2154,7 @@ void UiSystem::installVerbs() {
                           "new_guitar_display_panel", "new_guitar_select_panel", "new_store_panel", "new_status_panel",
                           "new_slider_panel", "new_credits_panel", "new_game_panel", "new_arena_panel",
                           "new_fade_panel", "new_hud_panel", "new_track_panel", "new_multi_char_sel_panel",
-                          "new_tutorial_panel", "new_enhanced_panel", "new_gamepad_panel"})
+                          "new_tutorial_panel", "new_enhanced_panel", "new_gamepad_panel", "new_custom_songs_panel"})
         interp_.addBuiltin(v, definePanel);
     auto defineScreen = [this](Interp&, const DataNode& c) {
         if (c.children.size() < 2) return Value::integer(0);
@@ -2798,8 +2816,10 @@ bool UiSystem::mouse(float x, float y, bool click) {
                 int b = elem == "fret1" ? select : elem == "fret2" ? (guitar_ ? Circle : Triangle) : elem == "start" ? Start
                         : elem == "strum" ? (y < (h.y0 + h.y1) * 0.5f ? Up : Down) : -1;
                 if (click && b >= 0) press(b);
-                // The main menu's GAMEPADS (yellow): as the yellow fret does (app.cpp) (#51).
-                if (click && elem == "fret3") gotoScreen("gamepads");
+                // The main menu's GAMEPADS and Quick Play's Custom Songs (yellow):
+                // as the yellow fret does (app.cpp).
+                if (click && elem == "fret3")
+                    gotoScreen(currentScreen() == "qp_selsong" ? "custom_songs" : "gamepads");
                 // Pointing (not a click or tap, which acts at once and may
                 // change the screen) gives the pill the only highlight.
                 helpHover_ = !click;

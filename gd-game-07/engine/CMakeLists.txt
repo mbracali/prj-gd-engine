@@ -348,7 +348,7 @@ if(GD07_MODULE)
   get_target_property(gd07_srcs gd07 SOURCES)
   list(FILTER gd07_srcs EXCLUDE REGEX "\\.(rc|icns)$")
   add_library(gd07_module SHARED ${gd07_srcs} src/platform/module_entry.cpp src/platform/module_sounds.cpp
-              src/platform/module_songs.cpp
+              src/platform/module_songs.cpp src/platform/module_explore.cpp
               ${GD07_HOST_SDK}/gd_module_shim.cpp)
   foreach(prop INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS LINK_LIBRARIES LINK_OPTIONS)
     get_target_property(value gd07 ${prop})

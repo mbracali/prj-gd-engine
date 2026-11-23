@@ -170,7 +170,24 @@ Song buildSong(const MidiFile& midi, int hopoThresholdTicks) {
     uint32_t lastTick = 0;
     for (const auto& t : midi.tracks)
         if (!t.events.empty()) lastTick = std::max(lastTick, t.events.back().tick);
-    // The band and venue notes the world plays (VenueNote).
+    // The band and venue notes the world plays (VenueNote) and the EVENTS track.
+    parseBandAndEvents(midi, song);
+    for (const SongEvent& ev : song.events)
+        if (ev.text == "end") {
+            song.endMs = ev.ms;
+            lastTick = static_cast<uint32_t>(ev.tick);
+        }
+    if (song.endMs == 0) song.endMs = static_cast<float>(song.tempo.tickToMs(lastTick));
+
+    for (uint32_t tick = 0; tick <= lastTick; tick += midi.division) {
+        double measure = song.tempo.tickToMeasure(tick);
+        song.beats.push_back({static_cast<float>(song.tempo.tickToMs(tick)),
+                              std::abs(measure - std::round(measure)) < 1e-6});
+    }
+    return song;
+}
+
+void parseBandAndEvents(const MidiFile& midi, Song& song) {
     const std::pair<const char*, VenueNote::Track> venueTracks[] = {
         {"BAND DRUMS", VenueNote::Track::Drums}, {"BAND BASS", VenueNote::Track::Bass}, {"TRIGGERS", VenueNote::Track::Triggers}};
     for (const auto& [name, kind] : venueTracks)
@@ -187,20 +204,7 @@ Song buildSong(const MidiFile& midi, int hopoThresholdTicks) {
     if (const MidiTrack* events = findTrack(midi, "EVENTS")) {
         for (const MidiEvent& e : events->events) {
             if (e.status != 0xFF || e.data1 != 0x01) continue;
-            std::string text = eventText(e.text);
-            song.events.push_back({static_cast<float>(song.tempo.tickToMs(e.tick)), static_cast<int>(e.tick), text});
-            if (text == "end") {
-                song.endMs = static_cast<float>(song.tempo.tickToMs(e.tick));
-                lastTick = e.tick;
-            }
+            song.events.push_back({static_cast<float>(song.tempo.tickToMs(e.tick)), static_cast<int>(e.tick), eventText(e.text)});
         }
     }
-    if (song.endMs == 0) song.endMs = static_cast<float>(song.tempo.tickToMs(lastTick));
-
-    for (uint32_t tick = 0; tick <= lastTick; tick += midi.division) {
-        double measure = song.tempo.tickToMeasure(tick);
-        song.beats.push_back({static_cast<float>(song.tempo.tickToMs(tick)),
-                              std::abs(measure - std::round(measure)) < 1e-6});
-    }
-    return song;
 }

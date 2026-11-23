@@ -102,6 +102,10 @@ std::vector<Member> everyBody(const Globals& g);
 // of its allowed_parts, as memberGh4 builds it for `songKey` (--chartest).
 std::vector<Member> everyTalentGh4(const Globals& g, uint32_t songKey);
 std::vector<Member> everyInstrument(const Globals& g);
+// gh4: standalone instrument-only members from the preset talents' appearances
+// (only the instrument parts, no body, on the default rocker skeleton; one per
+// distinct mesh set), for the Explore screen's Guitars/Bass/Drums/Mics groups.
+std::vector<Member> everyInstrumentGh4(const Globals& g);
 
 using ClipMap = std::unordered_map<uint32_t, std::shared_ptr<const anim::Clip>>;
 
