@@ -31,7 +31,9 @@ bool matches(uint8_t shape, const TrackNote& n) {
 
 int PlayerStats::multiplier() const {
     const int r = multiplierRun;
-    const int m = r < 10 ? 1 : r < 20 ? 2 : r < 30 ? 3 : 4;  // [C 0x8210BB40, 0x8210A748]
+    // Enhanced > CHEATS > Always Max Multiplier (issue #94): forces the base
+    // multiplier to x4, so x8 with Star Power; off (default), the streak sets it.
+    const int m = Player::maxMultiplier ? 4 : r < 10 ? 1 : r < 20 ? 2 : r < 30 ? 3 : 4;  // [C 0x8210BB40, 0x8210A748]
     return starPowerActive ? m * 2 : m;
 }
 
@@ -286,6 +288,10 @@ void Player::updateStarPower(double now, double dt, const FrameInput& in) {
             events_.push_back({PlayerEvent::Kind::StarPowerOff, -1, now});
         }
     }
+    // Enhanced > CHEATS > Star Power Always Full (issue #94): pin the meter at
+    // 100 each frame, so it is ready to deploy and (while active) never drains
+    // to 0; off (default), the meter behaves as the original.
+    if (Player::fullStarPower) st_.starPower = 100.0f;
 }
 
 void Player::frame(double now, double dt, const FrameInput& raw) {

@@ -69,6 +69,15 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"no_effects", {"off", "on"}},
         {"no_fail", {"off", "on"}},
         {"autoplay", {"off", "on"}},
+        // Enhanced > CHEATS (issue #94): the port's extra cheats, off at the
+        // default, applied by the app on load and on a live toggle at the call
+        // sites. cheat_unlock_all runs gh4's own unlock-all; cheat_full_sp pins
+        // Star Power; cheat_multiplier forces the max score multiplier;
+        // cheat_hyperspeed speeds the note highway (Hyperspeed).
+        {"cheat_unlock_all", {"off", "on"}},
+        {"cheat_full_sp", {"off", "on"}},
+        {"cheat_multiplier", {"off", "on"}},
+        {"cheat_hyperspeed", {"off", "on"}},
         {"dev_debug_menu", {"off", "on"}},
         {"hopo_mode", {"original", "forgiving"}},
         {"easy_chords", {"off", "on"}},  // Accessibility (GDALL-039): off, as the original

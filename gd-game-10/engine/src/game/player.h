@@ -81,6 +81,14 @@ public:
     static bool chordShape(uint8_t shape, uint8_t frets) {
         return easyChords ? shape != 0 && (shape & ~frets) == 0 : shape == frets;
     }
+    // Enhanced > CHEATS (issue #94; set by the app). maxMultiplier forces the
+    // live score multiplier to its highest (x4, and x8 while Star Power is
+    // active) from the first note, without building up a streak [C 0x8210BB40].
+    // fullStarPower keeps the Star Power meter pinned at 100 during a song, so
+    // it can always be deployed and never runs out. Both off by default and
+    // inert when off (normal play).
+    static inline bool maxMultiplier = false;
+    static inline bool fullStarPower = false;
     // `inputOffsetMs`: the input offset (xenon_input_offset + the song's +
     // calibration) [C script gem_scroller]; 0 in the self-test.
     Player(const NoteTrack& track, const Tuning& tuning, int difficulty, bool noFail, float inputOffsetMs = 0);

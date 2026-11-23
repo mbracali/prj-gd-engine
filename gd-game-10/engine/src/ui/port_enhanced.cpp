@@ -279,6 +279,19 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "not a Guitar Hero: Metallica save is refused."},
         {Kind::Check, "no_fail", "No Fail Mode", true, "The rock meter cannot fail you: every song plays to the end."},
         {Kind::Check, "autoplay", "Autoplay", true, "The game plays every note of a song by itself, without a miss."},
+        // Extra cheats (issue #94): the port's own switches, off by default.
+        {Kind::Check, "cheat_unlock_all", "Unlock Everything", true,
+         "Unlocks every song, venue, guitar, character, outfit and bonus at once, as the game's own unlock-all does. You "
+         "can then pick anything without progressing. (Quickplay already lists every song on your disc; this also opens the "
+         "locked characters and venues.)"},
+        {Kind::Check, "cheat_full_sp", "Star Power Always Full", true,
+         "During a song the Star Power meter stays full, so you can deploy Star Power whenever you like and it never runs out."},
+        {Kind::Check, "cheat_multiplier", "Always Max Multiplier", true,
+         "Forces the score multiplier to its highest (4x, and 8x while Star Power is active) from the first note, without "
+         "building up a streak."},
+        {Kind::Check, "cheat_hyperspeed", "Hyperspeed", true,
+         "The notes travel down the highway faster, as the Hyperspeed cheat does: they reach the play line sooner, leaving "
+         "you less time but a shorter highway to read."},
         {Kind::Choice, "hopo_mode", "Forgiving Hammer-ons & Pull-offs", true,
          "Notes with a coloured top can be played without strumming. Forgiving: a note whose fret is already held when "
          "it arrives plays by itself.",

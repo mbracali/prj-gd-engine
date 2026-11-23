@@ -132,6 +132,24 @@ bool ensureGlitches(Vm& vm) {
     return changed;
 }
 
+bool unlockEverything(Vm& vm) {
+    // The same mechanism gd10 uses for The Glitches at the main menu
+    // (front_end.cpp): gh4's own unlock-all scripts, plus a save-wide sweep of
+    // every tag's `unlocked` field (as the walk's unlock:all helper does), so
+    // characters, venues and any career / song tags present read unlocked.
+    // FLAG: gd10's career / song-tier progression is not a working gate yet, so
+    // this does not drive career progression; quickplay's set list is
+    // disc-presence only (IsSongAvailable) and already lists every disc song.
+    const uint32_t a = vm.spawn(K("unlock_all_profiles"), qb::Struct{});
+    const uint32_t b = vm.spawn(K("purchase_all_profiles"), qb::Struct{});
+    int n = 0;
+    for (auto& [k, st] : vm.globalTags)
+        if (Vm::param(st, K("unlocked"))) Vm::set(st, K("unlocked"), Vm::makeInt(1)), ++n;
+    SDL_Log("cheat_unlock_all: unlock_all_profiles=%s purchase_all_profiles=%s, %d unlocked tags",
+            a ? "spawned" : "missing", b ? "spawned" : "missing", n);
+    return a || b || n > 0;
+}
+
 namespace {
 
 struct StoreState {
