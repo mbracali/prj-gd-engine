@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+// Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
+#pragma once
+
+#include <cstdint>
+#include <cstdio>
+#include <memory>
+#include <mutex>
+#include <string>
+
+#include "gd/core/platform/file.h"
+
+// A file opened for 64-bit random access reads (from gd01's data/iso9660).
+// Reads are serialised, so the audio worker and the main thread can share it.
+
+namespace gd::core::gh2 {
+
+class RandomFile {
+public:
+    static std::unique_ptr<RandomFile> open(const std::string& path);
+    ~RandomFile();
+    RandomFile(const RandomFile&) = delete;
+    RandomFile& operator=(const RandomFile&) = delete;
+
+    // Reads exactly `size` bytes at `offset`; throws on short read.
+    void read(uint64_t offset, void* dst, size_t size);
+    uint64_t size() const { return size_; }
+
+private:
+    RandomFile(std::FILE* f, uint64_t size) : f_(f), size_(size) {}
+    std::FILE* f_;
+    uint64_t size_;
+    std::mutex mutex_;
+    // A CHD disc image, read as the image it holds by gd-engine-core (GDUL-030).
+    std::unique_ptr<gd::core::platform::RandomAccessFile> core_;
+};
+
+}  // namespace gd::core::gh2
