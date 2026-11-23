@@ -43,6 +43,7 @@ target_sources(gdul PRIVATE
   src/additive.cpp
   src/action_log.cpp
   src/platform.cpp
+  src/shortcut.cpp
   src/ui_sounds.cpp
   src/update_ui.cpp
   src/updater.cpp
@@ -75,6 +76,8 @@ target_compile_options(gdul_stb PRIVATE $<IF:$<C_COMPILER_ID:MSVC>,/w,-w>)
 target_link_libraries(gdul PRIVATE gdul_stb)
 if(NOT WIN32)
   target_link_libraries(gdul PRIVATE m)
+else()
+  target_link_libraries(gdul PRIVATE ole32 shell32)  # IShellLink desktop shortcuts (#141)
 endif()
 
 if(MSVC)
@@ -138,4 +141,6 @@ if(GDUL_BUILD_TESTS AND NOT ANDROID)
            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/order/run_order.cmake)
   # Updates (#114): version compare, asset pick, warn decision, release JSON, SHA-256, a download writing a file.
   add_test(NAME gdul_update COMMAND $<TARGET_FILE:gdul> --update-selftest)
+  # Instant icons (#141): the shortcut name, launch command and generated file.
+  add_test(NAME gdul_shortcut COMMAND $<TARGET_FILE:gdul> --shortcut-selftest)
 endif()

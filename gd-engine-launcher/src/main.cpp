@@ -13,6 +13,7 @@
 #include "launcher.h"
 #include "module_host.h"
 #include "platform.h"
+#include "shortcut.h"
 #include "updater.h"
 
 #if defined(_WIN32)
@@ -112,6 +113,9 @@ int main(int argc, char** argv) {
         } else if (a == "--update-selftest") {
             attachConsole();
             return update::selfTest();
+        } else if (a == "--shortcut-selftest") {
+            attachConsole();
+            return shortcut::selfTest();
         } else if (a == "--list") {
             listOnly = true;
         } else if (a == "--version" || a == "-v") {

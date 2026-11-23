@@ -12,6 +12,7 @@
 #include "module_host.h"
 #include "palette.h"
 #include "platform.h"
+#include "shortcut.h"
 
 extern const unsigned char kGdulIconPng[];
 extern const std::size_t kGdulIconPngSize;
@@ -795,6 +796,20 @@ void Launcher::handle(const SDL_Event& e) {
         const float my = (e.type == SDL_EVENT_MOUSE_MOTION ? e.motion.y : e.button.y) * density;
         const bool click = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT;
         if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_RIGHT) {
+            // Right-click on a game row opens its quick-access menu (#141);
+            // anywhere else keeps the old meaning (Red / Back).
+            if (!dialog_.open && !explore_ && !songs_) {
+                int row = -1;
+                for (auto it = hits_.rbegin(); it != hits_.rend(); ++it)
+                    if (it->r.contains(mx, my) && it->row >= 0) {
+                        row = it->row;
+                        break;
+                    }
+                if (row >= 0) {
+                    gameMenu(row);
+                    break;
+                }
+            }
             press(Fret::Red);
             break;
         }
@@ -990,6 +1005,46 @@ void Launcher::activate(int row, int col) {
         else sounds_.play(UiSound::Select), exploreOpen(g);
         break;
     default: break;
+    }
+}
+
+// The right-click quick-access menu on a game row (#141). It is offered only
+// for a game that has a disc loaded: without one there is nothing to launch.
+void Launcher::gameMenu(int row) {
+    if (row < 0 || row >= int(catalog_.games().size())) return;
+    Game& g = catalog_.games()[size_t(row)];
+    focusRow_ = row;
+    if (g.iso.empty()) {  // no disc: the menu's one action cannot work, so say so
+        sounds_.play(UiSound::Error);
+        toast("Load a " + g.title() + " disc image first to add an instant icon.");
+        return;
+    }
+    if (!shortcut::supported()) {
+        sounds_.play(UiSound::Error);
+        toast("Instant icons aren't available on this system.");
+        return;
+    }
+    sounds_.play(UiSound::Select);
+    std::vector<Button> buttons;
+    buttons.push_back({"Add instant icon", Fret::Green, [this, row] { addInstantIcon(row); }});
+    buttons.push_back({"Cancel", Fret::Red, nullptr});
+    showDialog(g.title(), "Put a desktop icon that starts " + g.title() + " straight away, with its loaded disc.",
+               std::move(buttons));
+}
+
+void Launcher::addInstantIcon(int row) {
+    if (row < 0 || row >= int(catalog_.games().size())) return;
+    Game& g = catalog_.games()[size_t(row)];
+    if (g.iso.empty()) return;  // guarded in gameMenu, kept here for safety
+    std::string path, error;
+    if (shortcut::createForGame(g.title(), g.id, g.iso, path, error)) {
+        sounds_.play(UiSound::Select);
+        log_.add("instant icon for " + g.id + " -> " + path);
+        toast("Instant icon added: " + platform::fileName(path));
+    } else {
+        sounds_.play(UiSound::Error);
+        log_.add("instant icon for " + g.id + " failed: " + error);
+        toast("Could not add the instant icon: " + error);
     }
 }
 

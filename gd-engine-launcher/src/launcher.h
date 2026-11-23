@@ -74,6 +74,8 @@ private:
     bool enabled(int row, int col) const;
 
     void play(Game& g);
+    void gameMenu(int row);       // right-click quick-access menu (#141)
+    void addInstantIcon(int row); // create a desktop shortcut for that game
     void pickDisc(Game& g);
     void handleDisc(const std::string& path, const std::string& wantedId);
     // The Explore models screen (explorer.cpp): the launcher draws the list
