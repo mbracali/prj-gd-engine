@@ -291,6 +291,14 @@ typedef struct GdSongPcm {
                           // game's preview offset, or 0 for the beginning
 } GdSongPcm;
 
+// One playable part (stem) of a song: an instrument group of the disc's audio
+// channels (guitar, bass, drums, vocals, the backing "song" mix...). The
+// launcher shows a checkbox per part so the player can mute/solo parts live.
+typedef struct GdSongPart {
+    const char* name;  // "Guitar", "Bass", "Drums", "Vocals", "Song"...
+    int default_on;    // 1 when the part plays at the start (the full mix is on)
+} GdSongPart;
+
 typedef struct GdSongs {
     uint32_t size;  // sizeof(GdSongs) of the module (fields only ever appended)
     void* self;
@@ -302,6 +310,26 @@ typedef struct GdSongs {
     // that it is loading); called on the launcher's thread.
     int (*decode_preview)(void* self, int index, GdSongPcm* out);
     void (*close)(void* self);
+
+    // ---- Full-song playback with live per-part (stem) control (optional) ----
+    // A module that fills these lets the launcher play a whole song and mute or
+    // solo its parts while it plays (the "Songs" section of Explore). All called
+    // on the launcher's thread; only one song streams at a time.
+    //
+    // The parts of song `index`: part_count returns how many, part() fills one.
+    int (*part_count)(void* self, int index);
+    int (*part)(void* self, int index, int part, GdSongPart* out);  // 0 on success
+    // Begins streaming song `index` from the start with every part on. Returns 0
+    // on success (then read_song decodes it), non-zero on failure.
+    int (*play_song)(void* self, int index);
+    // Decodes the next chunk of the streaming song into `samples` (interleaved
+    // stereo, up to capacity_frames frames), applying the current part mask.
+    // Writes the sample rate to *rate. Returns the frame count, or 0 at the end.
+    int (*read_song)(void* self, float* samples, int capacity_frames, int* rate);
+    // Mutes (enabled 0) or unmutes (1) a part of the streaming song, live.
+    void (*set_part)(void* self, int part, int enabled);
+    // Stops and frees the streaming song (play_song may be called again after).
+    void (*stop_song)(void* self);
 } GdSongs;
 
 #define GD_SONGS_HAS(api, field) ((api)->size >= offsetof(GdSongs, field) + sizeof((api)->field) && (api)->field)

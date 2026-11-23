@@ -114,6 +114,8 @@ private:
     void songsDraw();
     void songsPlay(int row);
     void songsStop();
+    void songsTogglePart(int part);  // mute/unmute a stem of the playing song
+    void songsTogglePause();
 
     // The Additive Music management tool (additive.cpp; GDUL-036): a table of
     // the playable games with per-game "additive" and "custom songs" toggles,

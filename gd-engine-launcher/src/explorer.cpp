@@ -142,19 +142,13 @@ void Launcher::exploreOpen(Game& g) {
     }
     for (const Explore::Item& it : ex->items)
         if (std::find(ex->groups.begin(), ex->groups.end(), it.group) == ex->groups.end()) ex->groups.push_back(it.group);
-    ex->collapsed.assign(ex->groups.size(), false);
+    ex->collapsed.assign(ex->groups.size(), true);  // everything starts collapsed (owner 11-23)
     log_.add("explore models of " + g.id + ": " + std::to_string(ex->items.size()) + " models in " +
              std::to_string(ex->groups.size()) + " groups");
     explore_ = std::move(ex);
     explore_->lastFrame = now_;
     exploreFilter();
-    // Start on the first model, shown at once.
-    for (size_t r = 0; r < explore_->rows.size(); ++r)
-        if (explore_->rows[r] >= 0) {
-            exploreCursor(int(r));
-            explore_->pendingAt = now_;
-            break;
-        }
+    explore_->cursor = 0;  // the first group header; a model shows once a group is opened
 }
 
 void Launcher::exploreClose() {
@@ -592,6 +586,9 @@ bool Launcher::exploreHandle(const SDL_Event& e) {
                 sounds_.play(UiSound::Select);
             } else if (h.row == -3) {  // a footer button: as its fret
                 explorePress(Fret(h.col));
+            } else if (h.row == -5) {  // the Songs button: open the song player
+                for (Game& g : catalog_.games())
+                    if (g.id == ex.gameId) { songsOpen(g); break; }
             } else if (ex.rows[size_t(h.row)] < 0) {  // a group's header: open / close it
                 exploreCursor(h.row);
                 exploreGroup(-1 - ex.rows[size_t(h.row)], -1);
@@ -720,6 +717,10 @@ bool Launcher::exploreScript(const std::string& cmd, const std::string& arg) {
     } else if (cmd == "songs") {
         for (Game& g : catalog_.games())
             if (g.id == ex.gameId) { songsOpen(g); break; }
+    } else if (cmd == "songplay") {  // dev aid: play row <arg> in the open song player
+        if (songs_) songsPlay(std::atoi(arg.c_str()));
+    } else if (cmd == "songpart") {  // dev aid: toggle stem <arg> of the playing song
+        if (songs_) songsTogglePart(std::atoi(arg.c_str()));
     } else if (cmd == "turntable") {
         ex.turntable = arg != "0";
     } else if (cmd == "collapse" || cmd == "expand") {  // a group (its name has <arg>), or "all"
@@ -1189,7 +1190,22 @@ void Launcher::exploreDrawFooter() {
     button(Fret::Yellow, "Reset view", true);
     button(Fret::Blue, "Next animation", !ex.clips.empty());
     button(Fret::Orange, ex.turntable ? "Stop turning" : "Turntable", true);
-    const std::string mouse = "Drag to turn" + kDot + "right-drag to pan" + kDot + "wheel to zoom";
+    // A distinct "Songs" button (gold): opens the song player — the game's songs,
+    // playable whole with per-part (stem) checkboxes (owner 11-23).
+    {
+        const Color fc = rgb(0xf2b43a);
+        const std::string label = "Songs";
+        const float bw = measure(FontId::SemiBold, 16, label) + 30;
+        const Rect r = R(x, cy - 17, bw, 34);
+        const bool hover = r.contains(mx, my);
+        if (hover) gfx_.glow(r, withAlpha(fc, 0.4f), 17 * s_, 12 * s_);
+        gfx_.rect(r, hover ? gfx::mix(fc, kInk, 0.5f) : rgb(0x241d12, 0.95f), hover ? gfx::mix(fc, kInk, 0.68f) : rgb(0x1a150d, 0.95f), 17 * s_);
+        gfx_.ring(r, withAlpha(fc, hover ? 0.95f : 0.75f), 17 * s_, (hover ? 1.8f : 1.4f) * s_);
+        text(FontId::SemiBold, 16, x + 15, cy - 10, label, hover ? kCream : fc);
+        ex.hits.push_back({r, -5, 0});
+        x += bw + 10;
+    }
+    const std::string mouse = "Drag to turn" + kDot + "wheel to zoom";
     if (x + measure(FontId::Regular, 15, mouse) + 20 < W_ - kMargin)
         text(FontId::Regular, 15, W_ - kMargin - measure(FontId::Regular, 15, mouse), cy - 10, mouse, kDim);
 }

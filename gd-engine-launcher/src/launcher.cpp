@@ -669,6 +669,13 @@ void Launcher::runScript() {
         auto& games = catalog_.games();
         for (size_t i = 0; i < games.size(); ++i)
             if (games[i].id == st.arg) focusRow_ = int(i), focusCol_ = kPlay, activate(int(i), kPlay);
+    } else if (st.cmd == "songs") {  // dev aid: open the song player for a game (no explorer needed)
+        for (Game& g : catalog_.games())
+            if (g.id == st.arg) { songsOpen(g); break; }
+    } else if (st.cmd == "songplay") {  // dev aid: play row <arg> in the open song player
+        if (songs_) songsPlay(std::atoi(st.arg.c_str()));
+    } else if (st.cmd == "songpart") {  // dev aid: toggle stem <arg> of the playing song
+        if (songs_) songsTogglePart(std::atoi(st.arg.c_str()));
     }
 }
 
