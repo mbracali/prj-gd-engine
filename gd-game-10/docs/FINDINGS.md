@@ -88,3 +88,97 @@ checksum list `[$dont_care,$p2_faceoff,$p2_pro_faceoff,$p2_battle,$p2_coop]`].
   transition is not driven. Script-driven flow bug, distinct from the in-game
   rules above; the dev hook `GD10_DEV_GAME_MODE` bypasses the lobby. Left for
   routing (flow/front-end), not fixed here to avoid a risky blind flow change.
+## Career mode (RE 2026-11-23)
+
+Deep-dive of the original career flow (data in `qb.pak.xen`:
+`scripts\guitar\guitar_progression*.qb`, `...\menu\career_menu_flow.qb`,
+`...\menu\states\layouts\ui_game_mode.qb`,
+`...\ui_singleplayer_character_hub.qb`, `...\cas\ui_character_selection.qb`;
+dumped with `tools/qbscript.py dis` and `tools/qb.py`). The career is
+**script-driven**: the engine interprets the disc's QScript; the port's C++
+supplies natives and the atoms engine. All claims below are [C scripts /
+data] unless marked [I].
+
+### Original progression model (differs from the GH3 model the code assumes)
+
+- Metallica career is **gig/tier + star based**, not GH3's "win N songs".
+  Each part has a `GH4_Career_<part>_Progression` atom list with only three
+  atoms: `set_initial_states` (`Progression_Career_<part>_Init`),
+  `<part>_career_gig1_complete` (`Progression_Career_Gig_Complete`, condition
+  `scr Progression_Career_Check_Gig_Complete {gig=1}`) and
+  `end_of_first_update`. No `depends_on` atom chains, no per-difficulty
+  `required` arrays, no encore/boss atoms — so the port's `atoms.cpp`
+  difficulty-`required`/encore/boss/relock paths are **dormant** for gd10.
+- **Song complete** = `GetGlobalTags <song_checksum> params=stars` with
+  `stars > 2` at any of the 5 `difficulty_index` values, i.e. **>= 3 stars at
+  any difficulty** (`Progression_Career_Check_Gig_Complete`). A gig completes
+  when every song in `tier<gig>.songs` is complete.
+- **Tier unlock** = cumulative stars: `progression_check_for_total_stars`
+  returns true when `tier.stars <= progression_total_stars_unlocked`;
+  `progression_get_total_stars` sums each song's best-difficulty stars over
+  all tiers (minus boss songs). `GH4_Career_Guitar_Songs` has `num_tiers = 9`,
+  `prefix = 'career_guitar'`, per-tier `stars`/`encore_stars` thresholds
+  (tier2 6, tier3 16, tier4 26, tier5 36, tier6 50, ...).
+- Per-song-per-difficulty tag key: `format_globaltag_song_checksum` =>
+  `FormatText '%s%p%d' s=<songname> p=<part text_nl> d=<difficulty text_nl>`
+  hashed (`addtostringlookup`). Writes (`Progression_SongWon`,
+  `update_song_star_rating` -> `player<i>_status.stars`, min 3) and reads
+  (gig check) use the same script, so the checksum is self-consistent.
+- Entry: main menu CAREER -> `main_menu_select_career` (`change game_mode =
+  $p1_career`) -> `uistate_game_mode`; SINGLE -> `game_mode_select_career`
+  (no `$band`: `game_mode=$p1_career`, 1 player), BAND (`$band`:
+  `game_mode=$p2_career`, co-op, `uistate_band_mode`).
+
+### BLOCKER: career mode is currently unreachable in the port (out of scope)
+
+- `ui_create_game_mode` sets `first_character_hub_enter = 1` on every career
+  entry. After instrument+difficulty the flow pushes
+  `UIstate_singleplayer_character_hub`; `init_singleplayer_character_hub`
+  only sets `first_character_hub_enter = 0` (and proceeds, returning `$true`)
+  when `GetGlobalTags <savegame> last_singleplayer_character != none`.
+  Otherwise it spawns `character_hub_continue_to_selection`, which waits for
+  `menu_change uistate_character_selection`.
+- `uistate_character_selection` focus runs `new_custom_char_focus` ->
+  `generate_random_appearance` / `cas_queue_add_request` (CAS,
+  `scripts\game\cas\cas_build_queue.qb`). `last_singleplayer_character` is set
+  **only** by CAS paths (`choose_character_to_play`,
+  `exit_save_changes`/`exit_skip_save`); `reset_globaltags` sets it to `none`.
+- The port **does not implement CAS** (confirmed `tests/walk.cpp:1205` "the
+  port builds no CAS characters yet, cas_queue never empties"; the `cas_*`
+  scripts have no native support). Observed with `engine/build/linux-video`
+  (video build reusing the repo's ffmpeg prefix), `--walktest career`:
+  `uistate_select_difficulty` -> `UIstate_singleplayer_character_hub` ->
+  `uistate_character_selection` (focus hits `cas_queue_add_request`) ->
+  `menu_back uistate_select_difficulty`, looping; the walk never reaches the
+  setlist/song. `--walktest quickplay` passes on the same build.
+- Consequence: because the **first-ever** career entry can never set
+  `last_singleplayer_character` without CAS, all of single-player career
+  (hub, gig board, venue, setlist, the progression above, cash rewards,
+  autosave) is unreachable. This is a **character-creation/selection**
+  dependency (another agent's domain), not a defect in the career logic.
+- Candidate minimal unblock (for the CAS/character agent to decide, NOT done
+  here): on career entry with no custom character, seed
+  `last_singleplayer_character` to a premade character (the script already
+  falls back to `judy` via `profile_exists`), analogous to the existing "The
+  Glitches" band stand-in; needs a premade singleplayer character that the
+  port renders, and `cas_queue_new_character_profile` to no-op cleanly.
+
+### Port notes (not player-visible bugs; for cleanup/other agents)
+
+- `ui/glitches.cpp` `ensureGlitches()` (+ its `unlockList`, GH3-era names
+  `GH3_Career_Songs`, `careertier`, `num_songs_to_progress`,
+  `encore_unlocked`, `boss_unlocked`) is **dead code** — no caller; the port
+  unlocks The Glitches via the original `unlock_all_profiles` /
+  `purchase_all_profiles` scripts (`front_end.cpp:265`). Those GH3 names are
+  not in gd10's data.
+- `script/natives_core.cpp` `GetGlobalTags`/`SetGlobalTags` (lines 433/459)
+  ignore the `savegame` and `all_active_players` params; fine for the single
+  profile (read/write collapse to one namespace, so the gig star-check stays
+  consistent), but would matter for band/multiplayer careers that write per
+  savegame (note for the multiplayer agent).
+- `SetProgressionMaxDifficulty` is a no-op stub (`natives_flow.cpp:67`); not
+  exercised by the gig model above.
+- `ui/front_end.cpp:84-98` forces `game_mode=p1_career` on the main-menu
+  CAREER choose. The original `main_menu_select_career` already sets it; the
+  C++ sets it before the game_mode screen's Single/Band choices are built
+  (timing), so it is belt-and-suspenders, not required for correctness.
