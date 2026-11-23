@@ -38,6 +38,15 @@ struct SongInfo {
     float previewStartMs = 0, previewEndMs = 0;
     int animTempo = 1;  // kTempoMedium 1, kTempoFast 2
     std::string venue;  // (quickplay (venue x))
+    // Additive songs (GDALL-042): a song read from another game's disc, not
+    // GH2's own. foreignDisc >= 0 indexes App's foreign library; foreignSong is
+    // the song's index on that disc; foreignLabel is its section header
+    // ("Guitar Hero"). audio.pans/vols/cores are the source song's; moggPath /
+    // midiPath are empty (the chart and audio come from the foreign reader).
+    int foreignDisc = -1;
+    int foreignSong = -1;
+    std::string foreignLabel;
+    bool foreign() const { return foreignDisc >= 0; }
 };
 
 // The songs of config/gen/songs.dtb (retail build: _SHIP and HX_XBOX

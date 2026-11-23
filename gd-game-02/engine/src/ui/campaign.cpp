@@ -3,6 +3,9 @@
 // GH2's career rules (ui/campaign.h, docs/career_and_store.md).
 #include "ui/campaign.h"
 
+#include "game/song_db.h"
+#include "ui/ui_host.h"
+
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -191,6 +194,18 @@ std::string encoreOf(UiManager& ui, const std::string& venue) {
 
 bool isStoreSong(UiManager& ui, const std::string& song) { return contains(config(ui).storeSongs, song); }
 bool isDownload(UiManager& ui, const std::string& song) { return contains(config(ui).downloads, song); }
+
+// Additive songs (GDALL-042): a song shared from another game's disc.
+bool isForeign(UiManager& ui, const std::string& song) {
+    for (const SongInfo& s : ui.host().songs())
+        if (s.id == song) return s.foreign();
+    return false;
+}
+std::string foreignLabel(UiManager& ui, const std::string& song) {
+    for (const SongInfo& s : ui.host().songs())
+        if (s.id == song) return s.foreignLabel;
+    return {};
+}
 
 bool isEncore(UiManager& ui, const std::string& song) {
     for (const auto& [v, songs] : config(ui).tiers)
@@ -525,6 +540,9 @@ std::vector<std::string> quickplaySongs(UiManager& ui) {
     std::vector<std::string> out;
     for (const std::string& s : allSongs(ui))
         if (ui.session().allAccess || offered.count(s) || isDownload(ui, s)) out.push_back(s);
+    // Additive songs (GDALL-042): the shared games' songs, after GH2's own.
+    for (const SongInfo& s : ui.host().songs())
+        if (s.foreign()) out.push_back(s.id);
     return out;
 }
 
