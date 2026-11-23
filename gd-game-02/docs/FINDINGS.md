@@ -792,3 +792,48 @@ and UFO all agree. `final_song` is still true at `game_won_msg` (the song is
 not marked passed until `finish_song` on `post_show_screen`). No change to the
 venue trigger machinery was needed — the port already parses and fires
 `EventTrigger`s; it just never received `campaign_won`.
+---------------------------------------------------------------------------------------------------
+## 2026-11-23 — Issue #123: tutorial property read (shared root cause with gd03)
+
+**Context:** Issue #123 reports gd02 tutorial trouble (bugged drawings; the
+guitar audio track dropping out and "repercussing" into the rest of the game).
+While reverse-engineering the tutorial I found the same engine-level defect that
+breaks gd03's tutorial pause, and it is present here too with byte-identical
+data.
+
+**The defect (engine/src/script/script.cpp).** A property read
+(`{o get key}` / `[key]`) fell back to `handler()`, whose list is built
+back-to-front so later-added handlers win message dispatch (correct for
+overrides) — but that returned the **last** duplicate `(key value)` array, while
+Harmonix's `DataArray::FindData` returns the **first**. The `tutorial` object
+(`new TutorialPanel tutorial`, ui/gen/tutorials.dta) declares the property twice:
+`(state "")` at the top (line ~60) and a trailing `(state intro)` at the end
+(line ~369). The original reads `""` during a lesson; the port read `intro`.
+
+**Effect on the tutorial pause.** `tut_pause_screen`'s `BUTTON_DOWN_MSG` swallows
+every button while its local `[paused]` is `FALSE`, and `[paused]` is armed by
+the `pause` handler, which `enter` calls only when `{== {tutorial get state} ""}`
+(tutorials.dta line ~503). With the port reading `intro`, the pause never armed:
+the game was not actually frozen (`paused=0` while `tut_pause_screen` was up) and
+Resume/Restart/Quit did nothing. Verified at runtime (`tutorials_screen` ->
+tut_1 -> Start -> Resume): before, `paused=0` and the Resume press produced no
+screen change; after, `paused=1` while the overlay is up and Resume pops back to
+`tut_script_screen` with in-game input re-armed.
+
+**Fix.** Added `ScriptObject::propDef(key)` (first-defined `(key value)` array,
+matching `DataArray::FindData`) and used it from `getProp`/`hasProp`; message
+dispatch (`handler()`, last-wins override) is unchanged. Objects that declare a
+property once are unaffected. Validated: `--scripttest` ok, `--uitest` 26/0.
+(`--walktest pause` fails identically on baseline and with the fix — a pre-existing
+headless-audio artifact: 0 samples decoded / 195 device failures under the dummy
+driver, "the synth stayed paused" — unrelated to this change.)
+
+**On the reported drawings / guitar-track symptoms (honest status).** This fix
+restores the tutorial pause. It is also a plausible *upstream* cause of the
+"guitar audio track disappears, repercusses" report: before it, pressing Start
+did not freeze the game, so the song kept running under a dead pause menu with no
+hits to un-mute the player's guitar stem (the stem mutes on every miss). I could
+not reproduce the bugged drawings headless, and I ruled out guitar-mute
+persistence across songs (Mixer::play resets `guitarGain_`/`guitarTarget_` to 1
+and loadSong resets `setVolumeDb(0)`), so if the drawings and guitar-track are a
+*separate* defect from the pause, they remain open.
