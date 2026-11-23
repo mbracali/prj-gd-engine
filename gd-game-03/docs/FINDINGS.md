@@ -118,3 +118,53 @@ others are read from the decompiler.
   conversions (0x00225D50, 0x0022CDD8..0x0022D100). The reverb network
   itself is the SPU2 chip's, in no code on the disc, so it stays from the
   hardware documentation [I by nature].
+
+---------------------------------------------------------------------------------------------------
+## 2026-11-23 — Issue #123: pausing in the tutorial killed the controller
+
+**Symptom (reported):** pressing Start during a tutorial lesson brought up the
+pause overlay, but the controller then did nothing — you could not select
+Resume/Restart/Quit, so the tutorial was stuck.
+
+**Original behaviour (ui/gen/tutorials.dta, confirmed from the shipped data):**
+- `tut_pause_screen`'s `BUTTON_DOWN_MSG` eats every button (returns `TRUE`)
+  while its local `[paused]` is `FALSE`, and only lets the press reach the
+  focused component (Resume/Restart/Quit) once `[paused]` is `TRUE`.
+- `[paused]` is set `TRUE` by the screen's `pause` handler, which its `enter`
+  calls only when `{== {tutorial get state} ""}`.
+- The `tutorial` object (`new TutorialPanel tutorial`) runs lessons with its
+  `[state]` driven by a small machine: `loading` -> `wait_for_song_load` ->
+  `start_lesson` -> `""`. During actual lesson play `[state]` is `""`, so the
+  pause arms and input flows to the menu.
+- Crucially, that object's definition declares the property **twice**:
+  `(state "")` near the top (tutorials.dta line ~113) and a trailing
+  `(state intro)` at the very end (line ~743). Harmonix's `DataArray::FindData`
+  returns the **first** match, so `{tutorial get state}` reads `""`.
+
+**Port discrepancy:** `ScriptObject::getProp` resolved a property read through
+`handler()`, whose list is built back-to-front so later-added handlers win
+message dispatch (correct for overrides) — but that made a property read return
+the **last** duplicate, `(state intro)`. So `{tutorial get state}` returned
+`intro`, the `pause` handler was never called, `[paused]` stayed `FALSE`, and
+`tut_pause_screen`'s `BUTTON_DOWN_MSG` swallowed every press -> dead controller.
+Verified at runtime (`tutorials_screen` -> tut_1 -> pause): `tut.state='intro'`,
+`scr.paused='0'`, the Resume press logged "handled by screen button_down" and
+nothing happened.
+
+**Fix (engine/src/script/script.{h,cpp}):** added `ScriptObject::propDef(key)`,
+which scans `handlers_` in reverse to return the **first-defined** `(key value)`
+array, matching `DataArray::FindData`. `getProp`/`hasProp` now use it for
+property reads; message dispatch (`handler()`, last-wins) is unchanged. Objects
+that define a property once are unaffected (first == only); only duplicates flip
+to the original's first-match semantics.
+
+**Objective before/after (offscreen, gh80s.chd, Start->pause->Resume):**
+- before: pause overlay up but `paused=0`; the Resume `confirm` produced no
+  screen change (stuck on `tut_pause_screen`).
+- after: `paused=1` while the overlay is up; the Resume `confirm` pops back to
+  `tut_script_screen` with in-game input re-armed (`inGame=1`).
+- Regression checks: `--scripttest` ok, `--uitest` 26/0, `--walktest pause` OK,
+  `--walktest career` OK, 187 .dtb scripts decoded / 0 failed. (`--selftest`
+  still fails only its pre-existing `internal_res` 900-vs-1080 platform-defaults
+  assertion, which reads the hardcoded C++ `platformDefault` and is unrelated to
+  this change.)

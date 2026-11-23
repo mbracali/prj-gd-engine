@@ -284,18 +284,32 @@ const DataNode* ScriptObject::handler(const std::string& message) const {
     return nullptr;
 }
 
+// A property read ({o get key} / [key]) resolves to the FIRST (key value) array
+// in definition order, as Harmonix's DataArray::FindData does, not the last.
+// handlers_ is built back-to-front (later-added handlers win message dispatch),
+// so a reverse scan gives the earliest-defined entry. This matters when an
+// object declares the same property twice: e.g. gd03's `tutorial` has both
+// (state "") and a trailing (state intro); the original reads "" during a
+// lesson, which lets the tut pause menu arm its input (tutorials.dta
+// tut_pause_screen (enter {if {== {tutorial get state} ""} {$this pause}})).
+const DataNode* ScriptObject::propDef(const std::string& key) const {
+    for (auto it = handlers_.rbegin(); it != handlers_.rend(); ++it)
+        if ((*it)->children[0].s == key) return *it;
+    return nullptr;
+}
+
 void ScriptObject::setTypeDef(const DataNode* def, size_t first) {
     typeDef_ = def;
     if (def) addHandlers(*def, first);
 }
 
-bool ScriptObject::hasProp(const std::string& key) const { return props.count(key) || handler(key); }
+bool ScriptObject::hasProp(const std::string& key) const { return props.count(key) || propDef(key); }
 
 Value ScriptObject::getProp(Interp& in, const std::string& key) {
     if (auto it = props.find(key); it != props.end()) return it->second;
     // A definition's (key value) array: its value, evaluated when it is code
     // (ui_objects.dta's (normal_color {pack_color 1 0 0})); several values make a list.
-    if (const DataNode* h = handler(key)) {
+    if (const DataNode* h = propDef(key)) {
         if (h->children.size() == 2) {
             const DataNode& v = h->children[1];
             if (v.type == DataNode::Type::Command) return in.eval(v);

@@ -128,6 +128,9 @@ public:
     // Adds handler arrays list.children[first...]; later additions win.
     void addHandlers(const DataNode& list, size_t first = 0);
     const DataNode* handler(const std::string& message) const;
+    // The first-defined (key value) array for a property read (Harmonix
+    // DataArray::FindData is first-match, unlike message dispatch's last-wins).
+    const DataNode* propDef(const std::string& key) const;
     // The `new` definition ({new Class name (...)...}) or null.
     const DataNode* typeDef() const { return typeDef_; }
     void setTypeDef(const DataNode* def, size_t first);
