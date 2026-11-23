@@ -1,7 +1,14 @@
 # Guitar Dream Universal Launcher: changes
 
-## Unreleased
+## 1.1.18
 
+- Guitar Hero II: the campaign ending is fixed — the end-of-game "Death Threat Records" letter no longer fades to a black screen, and the UFO abduction finale on the Stonehenge stage now plays before it (#127).
+- Guitar Hero II: the Rock Meter's drop shadow no longer lingers on screen after "You Rock" (#125).
+- Tutorial mode: pausing during the tutorial no longer freezes the controller in Guitar Hero II and Guitar Hero Encore 80s (#123).
+- HDR: when True HDR is on, two new sliders let you set the HDR white and black levels (#80).
+- Quick access: right-click a game that has a disc loaded and choose "Add instant icon" to drop a desktop shortcut that boots that game directly (#141).
+- Extra Enhanced cheats (Unlock Everything, Star Power Always Full, Always Max Multiplier, Hyperspeed) now also on Guitar Hero: Metallica (#94).
+- Guitar Hero (iOS) added as a placeholder/backlog module for a future port (#139).
 - Update from inside the launcher is simpler now (#114): when a newer version is out it still tells you and shows what is new, but Update now just downloads the package for your system to your Downloads folder (checked against the release's SHA-256) and leaves it there for you to install — it no longer replaces your current launcher. Android still opens the new APK in the browser.
 
 ## 1.1.17
