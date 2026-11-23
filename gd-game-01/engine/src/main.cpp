@@ -137,6 +137,11 @@ int main(int argc, char** argv) {
         else if (a == "--at") opt.venueName = value();
         else if (a == "--guitar") opt.guitar = value();
         else if (a == "--skip-boot") opt.skipBoot = true;
+        else if (a == "--extra-disc") {  // additive songs: "<game-id>=<disc path>"
+            const std::string v = value();
+            const size_t eq = v.find('=');
+            if (eq != std::string::npos) opt.extraDiscs.emplace_back(v.substr(0, eq), v.substr(eq + 1));
+        }
         else if (a == "--root") opt.viewRoot = value();
         else if (a == "--cam") opt.viewCam = value();
         else if (a == "--help" || a == "-h") { usage(); return 0; }

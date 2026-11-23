@@ -27,6 +27,7 @@
 #include "game/chart.h"
 #include "game/player.h"
 #include "game/rules.h"
+#include "game/foreign_songs.h"
 #include "game/song_db.h"
 #include "input/input.h"
 #include "gd/core/render/device.h"
@@ -508,6 +509,7 @@ private:
         return gd::core::speed::scrollSpeed(rules_.trackSpeed[size_t(difficulty_)], trackFactor_, songSpeed_);
     }
     std::vector<SongInfo> songs_;
+    ForeignLibrary foreignLib_;  // additive songs: discs the launcher shared (GDALL-042)
     size_t selected_ = 0;
     int difficulty_;
 
@@ -692,6 +694,12 @@ void App::tryLoadData(const std::string& path) {
         data_ = std::move(data);
         rules_ = rules;
         songs_ = std::move(songs);
+        // Additive songs (GDALL-042): append the songs of the discs the launcher
+        // shared (other games the player exposed in the Additive Music tool).
+        foreignLib_ = {};
+        for (SongInfo& fs : openForeignSongs(opt_.extraDiscs, foreignLib_)) songs_.push_back(std::move(fs));
+        if (!foreignLib_.discs.empty())
+            SDL_Log("additive songs: %zu shared disc(s), %zu songs total", foreignLib_.discs.size(), songs_.size());
         selected_ = 0;
         screen_ = Screen::Menu;
         message_.clear();
@@ -959,8 +967,12 @@ void App::startSong(size_t index, ControllerMode mode) {
         if (!careerGuitar_.empty()) info.guitar = careerGuitar_;
     }
     try {
-        auto song = std::make_unique<Song>(buildSong(parseMidi(data_->read(info.midiPath))));
-        auto vgs = std::make_unique<VgsStream>(data_->read(info.audioPath));
+        // Additive songs (GDALL-042): a foreign song's chart and audio come from
+        // its own game's reader, transcoded to GH1's formats.
+        auto song = info.foreign() ? std::make_unique<Song>(loadForeignChart(foreignLib_, info))
+                                   : std::make_unique<Song>(buildSong(parseMidi(data_->read(info.midiPath))));
+        auto vgs = info.foreign() ? std::make_unique<VgsStream>(loadForeignVgs(foreignLib_, info))
+                                  : std::make_unique<VgsStream>(data_->read(info.audioPath));
         std::vector<Mixer::Track> tracks(vgs->channels());
         for (size_t c = 0; c < tracks.size(); ++c) {
             if (c < info.vols.size()) tracks[c].volume = info.vols[c];

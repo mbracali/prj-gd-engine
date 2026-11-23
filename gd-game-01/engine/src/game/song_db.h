@@ -24,6 +24,13 @@ struct SongInfo {
     // (band SINGER_FEMALE_METAL BASS_METAL DRUMMER_METAL): the song's backing band
     // (band_chars.dta macros); empty = charsys.dta's default band.
     std::vector<std::string> band;
+    // Additive songs (GDALL-042): a song read from another game's disc, not GH1's
+    // own. foreignDisc >= 0 indexes App's foreign library; foreignSong is its
+    // index on that disc; foreignLabel is its section header ("Guitar Hero II").
+    int foreignDisc = -1;
+    int foreignSong = -1;
+    std::string foreignLabel;
+    bool foreign() const { return foreignDisc >= 0; }
 };
 
 // Songs from config/songs.dta whose chart and audio exist in the archive.

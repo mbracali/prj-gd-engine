@@ -28,6 +28,19 @@ extern "C" GD_MODULE_EXPORT int gd_game_run(const GdHost* host) {
     gdshim_setenv("GD01_FULLSCREEN", (GD_HOST_FLAGS(host) & GD_HOST_FULLSCREEN) ? "1" : "0");
     std::vector<std::string> args(host->argv, host->argv + host->argc);
     if (args.empty()) args.emplace_back("gd01");
+    // Additive songs: other games' discs the launcher shared (GdHost.extra_discs),
+    // as --extra-disc flags before the disc image (kept last in argv).
+    if (GD_HOST_HAS(host, extra_disc_count) && host->extra_discs) {
+        std::vector<std::string> flags;
+        for (uint32_t i = 0; i < host->extra_disc_count; ++i) {
+            const GdDisc& d = host->extra_discs[i];
+            if (d.game_id && d.path) {
+                flags.emplace_back("--extra-disc");
+                flags.emplace_back(std::string(d.game_id) + "=" + d.path);
+            }
+        }
+        args.insert(args.begin() + (args.empty() ? 0 : long(args.size()) - 1), flags.begin(), flags.end());
+    }
     std::vector<char*> argv;
     for (std::string& a : args) argv.push_back(a.data());
     argv.push_back(nullptr);

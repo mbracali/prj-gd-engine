@@ -38,6 +38,7 @@ target_sources(gd01 PRIVATE
   src/data/midi.cpp
   src/data/vgs.cpp
   src/game/chart.cpp
+  src/game/foreign_songs.cpp
   src/game/player.cpp
   src/game/rules.cpp
   src/game/song_db.cpp

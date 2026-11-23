@@ -3,6 +3,8 @@
 #pragma once
 
 #include <string>
+#include <utility>
+#include <vector>
 
 struct Options {
     std::string dataPath;   // .iso or extracted game folder; empty = remembered / ask
@@ -23,6 +25,9 @@ struct Options {
     // boot screens are skipped, this screen opens and this profile slot is used.
     std::string startScreen;
     int startSlot = -1;
+    // Additive songs (GDALL-042): other games' discs the launcher shared, as
+    // (game id, disc path), from --extra-disc <id>=<path>.
+    std::vector<std::pair<std::string, std::string>> extraDiscs;
 };
 
 int runApp(const Options& options);
