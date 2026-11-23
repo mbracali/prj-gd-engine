@@ -1778,6 +1778,9 @@ void App::uiButton(const InputEvent& e) {
     bool guitar = e.mode == ControllerMode::Guitar;
     // The main menu's GAMEPADS help item: the yellow fret opens the Gamepads screen (as in every game).
     if (e.action == Action::Fret2 && e.down && ui_->currentScreen() == "main") return ui_->gotoScreen("gamepads");
+    // The yellow fret on the Quick Play song screen opens the "Custom songs"
+    // overlay (additive songs, §7).
+    if (e.action == Action::Fret2 && e.down && ui_->currentScreen() == "qp_selsong") return ui_->gotoScreen("custom_songs");
     if (e.player == 1) mode2_ = e.mode;
     else uiMode_ = e.mode;
     int b = -1;

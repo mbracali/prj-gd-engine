@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "game/song_db.h"
 #include "script/script.h"
 
 #include <array>
@@ -41,6 +42,14 @@ public:
     // Sends a script message to a named object.
     virtual Value sendTo(const std::string& object, const std::string& msg, std::vector<Value> args) = 0;
     virtual std::string localize(const std::string& token) = 0;
+    // Additive songs (GDALL-042): go to a screen, and the whole song list
+    // (GH1's own plus the shared games', foreign flags set).
+    virtual void gotoScreen(const std::string& screen) { (void)screen; }
+    virtual const std::vector<SongInfo>& menuSongs() {
+        static const std::vector<SongInfo> none;
+        return none;
+    }
+    virtual std::string currentScreenName() { return {}; }
     // The playing player's state for the HUD (false when no song is playing).
     struct PlayerState {
         int score = 0, multiplier = 1, streak = 0;

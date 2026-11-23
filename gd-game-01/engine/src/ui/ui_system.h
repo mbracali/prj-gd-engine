@@ -116,7 +116,10 @@ public:
     static int releasedHeldSlot(int held0, int held1, int button, int player);
     ~UiSystem();
 
-    void gotoScreen(const std::string& screen);
+    void gotoScreen(const std::string& screen) override;
+    // Additive songs (GDALL-042): the SelectHost song-list / screen accessors.
+    const std::vector<SongInfo>& menuSongs() override { return hooks_.songs(); }
+    std::string currentScreenName() override { return currentScreen(); }
     // Starts the UI: the boot logos (unless skipped), then $first_screen.
     void boot(bool skipLogos);
     // Runs `fn` after `ms` of UI time.

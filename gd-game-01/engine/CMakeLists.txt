@@ -77,6 +77,7 @@ target_sources(gd01 PRIVATE
   src/ui/ui_resources.cpp
   src/ui/pc_strings.cpp
   src/ui/gamepad_panel.cpp
+  src/ui/custom_songs_panel.cpp
   src/ui/ui_system.cpp
   src/platform/gpu_select.cpp
   src/platform/paths.cpp
