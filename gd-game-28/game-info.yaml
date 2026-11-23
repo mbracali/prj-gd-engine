@@ -1,0 +1,12 @@
+# Read by the Guitar Dream Universal Launcher (gd-engine-launcher/games.yaml).
+# launch: release date (YYYY-MM-DD) of the version this folder reimplements
+# (based_on). guitar_dream_version: this folder's own version. completeness: 0..1.
+id: gd-game-28
+name: "Guitar Hero (iOS)"
+nick_name: "Guitar Hero iOS"
+launch: 2010-11-18   # approximate — confirm during Discovery (GD28-001)
+platforms: [iOS]
+based_on: iOS
+guitar_dream_version: "0.0.0"
+ready_to_play: false
+completeness: 0

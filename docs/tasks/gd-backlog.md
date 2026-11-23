@@ -1343,3 +1343,9 @@ universal launcher, not released on its own.
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
 | GD26-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-26/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 11-05 |
+
+## gd-game-28: Guitar Hero (iOS)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD28-001 | Original | ❌ | **LOW PRIORITY.** Discovery: the iOS Guitar Hero (Activision, 2010) — its package/formats, the executable, its input model (on-screen taps + drag/strum gestures, to be mapped to buttons for PC and to touch for modern phones), what the existing games give it; plan with the owner | Module placeholder added `gd-game-28/` (GitHub #139). `gd-game-28/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md). Owner 11-23: low priority, not forgotten | GitHub #139 Owner 11-23 |
