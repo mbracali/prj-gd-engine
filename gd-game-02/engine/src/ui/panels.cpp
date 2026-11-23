@@ -111,6 +111,7 @@ public:
             const int b = kind == "fret1" ? kPad_X : kind == "fret2" ? kPad_Tri : kind == "start" ? kPad_Start
                           : kind == "strum" ? (y < (h.y0 + h.y1) * 0.5f ? kPad_DUp : kPad_DDown) : -1;
             if (kind == "fret3" && ui.currentScreen() == "main_screen") ui.openGamepads();
+            else if (kind == "fret3" && ui.currentScreen() == "qp_selsong_screen") ui.openCustomSongs();
             else if (b >= 0) ui.buttonDown(b, 0), ui.buttonUp(b, 0);
             return true;
         }

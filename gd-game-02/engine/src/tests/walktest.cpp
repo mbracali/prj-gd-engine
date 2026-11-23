@@ -180,11 +180,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("main_screen");
         press(kX);  // QUICK PLAY
         at("qp_selsong_screen");
+        wait(900);        // GD02_WALK_SHOTS captures the yellow CUSTOM SONGS legend
         press(kYellow);  // open the Custom songs overlay
         at("custom_songs_screen");
         wait(900);
         press(kX);        // expand the first folder (Guitar Hero)
-        wait(500);
+        wait(1200);       // a shot of the expanded, aligned song rows
         press(kDown);     // the first GH1 song
         wait(300);
         press(kX);        // select -> difficulty screen

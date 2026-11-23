@@ -93,6 +93,7 @@ void UiManager::logOnce(const std::string& what) {
 
 std::string UiManager::localize(const std::string& token) const {
     if (token == "port_gamepads") return "GAMEPADS";  // the port's main-menu help item
+    if (token == "port_custom_songs") return "CUSTOM SONGS";  // the Quick Play additive-songs overlay (§7)
     if (token == "gd_uab_start") return "START";      // the help bar's START access button (universal_mechanisms.md 1.1.3)
     return locale_ ? locale_->text(token) : token;
 }
@@ -786,6 +787,16 @@ void UiManager::updateHelpbar() {
             return e.type == Value::Type::Array && e.array && !e.array->empty() && (*e.array)[0].str() == "strum";
         });
         items.insert(strum, Value::list({Value::symbol("fret3"), Value::symbol("port_gamepads")}));
+        display = Value::list(std::move(items));
+    }
+    // The Quick Play song screen offers the "Custom songs" overlay on the
+    // yellow fret (additive songs, §7).
+    if (current_->name() == "qp_selsong_screen" && display.type == Value::Type::Array && display.array) {
+        std::vector<Value> items = *display.array;
+        auto strum = std::find_if(items.begin(), items.end(), [](const Value& e) {
+            return e.type == Value::Type::Array && e.array && !e.array->empty() && (*e.array)[0].str() == "strum";
+        });
+        items.insert(strum, Value::list({Value::symbol("fret3"), Value::symbol("port_custom_songs")}));
         display = Value::list(std::move(items));
     }
     setHelpbarDisplay(*this, display);
