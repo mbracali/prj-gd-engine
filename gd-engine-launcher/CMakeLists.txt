@@ -136,6 +136,6 @@ if(GDUL_BUILD_TESTS AND NOT ANDROID)
   # The list order: playable games first (tests/order/run_order.cmake, `ctest -R gdul_order`).
   add_test(NAME gdul_order COMMAND ${CMAKE_COMMAND} -DGDUL=$<TARGET_FILE:gdul> -DDIR=${CMAKE_BINARY_DIR}/order-test
            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/order/run_order.cmake)
-  # Updates (GDUL-031): version compare, asset pick, release JSON, SHA-256, the swap and its rollback.
+  # Updates (#114): version compare, asset pick, warn decision, release JSON, SHA-256, a download writing a file.
   add_test(NAME gdul_update COMMAND $<TARGET_FILE:gdul> --update-selftest)
 endif()

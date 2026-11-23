@@ -228,6 +228,17 @@ std::string saveDir() {
 #endif
 }
 
+std::string downloadsDir() {
+    // SDL knows the platform's real Downloads folder (XDG on Linux, the shell
+    // known folder on Windows, ~/Downloads on macOS). It may be null when the
+    // folder is not set up; the save folder is then a safe, writable fallback.
+    std::string dir;
+    if (const char* d = SDL_GetUserFolder(SDL_FOLDER_DOWNLOADS); d && *d) dir = d;
+    if (dir.empty()) dir = saveDir();
+    if (!dir.empty() && dir.back() != '/' && dir.back() != '\\') dir += '/';
+    return dir;
+}
+
 std::string userName() {
 #ifdef _WIN32
     wchar_t buf[257];

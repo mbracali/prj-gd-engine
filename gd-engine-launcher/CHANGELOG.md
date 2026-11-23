@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Update from inside the launcher is simpler now (#114): when a newer version is out it still tells you and shows what is new, but Update now just downloads the package for your system to your Downloads folder (checked against the release's SHA-256) and leaves it there for you to install — it no longer replaces your current launcher. Android still opens the new APK in the browser.
+
 ## 1.1.17
 
 Highlights
