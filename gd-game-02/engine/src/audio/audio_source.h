@@ -18,4 +18,6 @@ public:
     // Seeks to a frame (for a start offset / practice). Sources that cannot
     // seek return false and keep playing from where they are.
     virtual bool seek(uint64_t /*frame*/) { return false; }
+    // Total length in frames, or 0 when unknown (a stream of indefinite length).
+    virtual uint64_t lengthFrames() const { return 0; }
 };

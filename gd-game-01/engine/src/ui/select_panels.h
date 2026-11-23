@@ -50,6 +50,7 @@ public:
         return none;
     }
     virtual std::string currentScreenName() { return {}; }
+    virtual void songPreview(const std::string& id) { (void)id; }  // loop a song's preview; "" stops it
     // The playing player's state for the HUD (false when no song is playing).
     struct PlayerState {
         int score = 0, multiplier = 1, streak = 0;

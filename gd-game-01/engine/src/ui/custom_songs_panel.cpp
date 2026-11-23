@@ -42,12 +42,30 @@ public:
         scroll_ = scrollTarget_ = 0;
         build();
     }
-    void exit() override { host_.menuBackdrop(false); }
+    void exit() override {
+        host_.menuBackdrop(false);
+        lastPreview_.clear();
+        host_.songPreview("");  // stop the hover preview; Quick Play resumes its own
+    }
 
     void poll(float dtMs) override {
         updateTransition();
         keepVisible();
+        previewHovered();  // loop the hovered song's preview, like the native song list
         scroll_ += (scrollTarget_ - scroll_) * std::min(1.0f, dtMs / 60.f);
+    }
+
+    // Previews the hovered song (host transcodes a foreign song's preview window
+    // to VGS and loops it). Deduped so it starts once per song and stops on a folder.
+    void previewHovered() {
+        std::string id;
+        if (cursor_ >= 0 && cursor_ < int(rows_.size())) {
+            const Row& r = rows_[size_t(cursor_)];
+            if (!r.folder && r.song >= 0) id = host_.menuSongs()[size_t(r.song)].id;
+        }
+        if (id == lastPreview_) return;
+        lastPreview_ = id;
+        host_.songPreview(id);
     }
 
     bool buttonDown(int button, int player) override {
@@ -266,6 +284,7 @@ private:
     std::vector<Row> rows_;
     std::map<std::string, bool> expanded_;
     int cursor_ = 0;
+    std::string lastPreview_;  // the song id currently previewing (dedupe)
     float scroll_ = 0, scrollTarget_ = 0, offset_ = 0, fade_ = 1;
     static constexpr float boxX0_ = 180, boxX1_ = 1100, boxY0_ = 70, boxY1_ = 660;
     static constexpr float searchY_ = 118, tabsY_ = 160, listTop_ = 206, listBottom_ = 614, scrollX_ = 1066;

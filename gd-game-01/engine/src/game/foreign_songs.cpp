@@ -123,30 +123,29 @@ Song loadForeignChart(const ForeignLibrary& lib, const SongInfo& info) {
     return song;
 }
 
-Bytes loadForeignVgs(const ForeignLibrary& lib, const SongInfo& info) {
-    if (info.foreignDisc < 0 || info.foreignDisc >= int(lib.discs.size())) return {};
+namespace {
+
+// Decodes [startFrame, startFrame+count) of a foreign stream, resamples each
+// channel to GH1's rate and PS-ADPCM encodes it into VGS bytes, one block per
+// channel per 28-frame step. The VGS starts at startFrame (loop it from 0).
+Bytes transcodeToVgs(gd::core::gh2::AudioStream& stream, uint64_t startFrame, uint64_t count, const char* id) {
     const uint64_t t0 = SDL_GetTicksNS();
-    auto stream = lib.discs[size_t(info.foreignDisc)]->openAudio(info.foreignSong);
-    if (!stream) return {};
-    const int nch = stream->channels();
+    const int nch = stream.channels();
     const size_t nchz = size_t(nch);
-    const int rate = stream->sampleRate();
-    const uint64_t frames = stream->lengthFrames();
-    if (nch <= 0 || frames == 0) return {};
-    // Decode the whole song to float per channel.
+    const int rate = stream.sampleRate();
+    if (nch <= 0 || count == 0) return {};
+    stream.seek(startFrame);
     std::vector<std::vector<float>> pcm(nchz);
-    for (auto& v : pcm) v.assign(size_t(frames), 0.f);
+    for (auto& v : pcm) v.assign(size_t(count), 0.f);
     {
         std::vector<float*> ptrs(nchz);
         const uint64_t kChunk = 1 << 16;
-        for (uint64_t pos = 0; pos < frames; pos += kChunk) {
-            const int want = int(std::min<uint64_t>(kChunk, frames - pos));
+        for (uint64_t pos = 0; pos < count; pos += kChunk) {
+            const int want = int(std::min<uint64_t>(kChunk, count - pos));
             for (int c = 0; c < nch; ++c) ptrs[size_t(c)] = pcm[size_t(c)].data() + pos;
-            stream->decode(ptrs.data(), want);
+            stream.decode(ptrs.data(), want);
         }
     }
-    // Resample each channel to GH1's rate, then PS-ADPCM encode, interleaving
-    // one block per channel per 28-frame step.
     std::vector<std::vector<int16_t>> res(nchz);
     size_t outFrames = 0;
     for (int c = 0; c < nch; ++c) {
@@ -175,7 +174,32 @@ Bytes loadForeignVgs(const ForeignLibrary& lib, const SongInfo& info) {
             vgs.insert(vgs.end(), out, out + 16);
         }
     }
-    SDL_Log("additive: transcoded %s (%d ch, %d Hz -> %d Hz, %zu KB VGS) in %.0f ms", info.id.c_str(), nch, rate, kOutRate,
+    SDL_Log("additive: transcoded %s (%d ch, %d Hz -> %d Hz, %zu KB VGS) in %.0f ms", id, nch, rate, kOutRate,
             vgs.size() / 1024, double(SDL_GetTicksNS() - t0) / 1e6);
     return vgs;
+}
+
+}  // namespace
+
+Bytes loadForeignVgs(const ForeignLibrary& lib, const SongInfo& info) {
+    if (info.foreignDisc < 0 || info.foreignDisc >= int(lib.discs.size())) return {};
+    auto stream = lib.discs[size_t(info.foreignDisc)]->openAudio(info.foreignSong);
+    if (!stream) return {};
+    return transcodeToVgs(*stream, 0, stream->lengthFrames(), info.id.c_str());
+}
+
+Bytes loadForeignVgsWindow(const ForeignLibrary& lib, const SongInfo& info, float startMs, float endMs) {
+    if (info.foreignDisc < 0 || info.foreignDisc >= int(lib.discs.size())) return {};
+    auto stream = lib.discs[size_t(info.foreignDisc)]->openAudio(info.foreignSong);
+    if (!stream) return {};
+    const double rate = stream->sampleRate();
+    const uint64_t total = stream->lengthFrames();
+    uint64_t start = uint64_t(std::max(0.f, startMs) * rate / 1000.0);
+    uint64_t end = endMs > startMs ? uint64_t(double(endMs) * rate / 1000.0) : total;
+    if (total) {
+        start = std::min(start, total);
+        end = std::min(std::max(end, start + 1), total);
+    }
+    if (end <= start) return {};
+    return transcodeToVgs(*stream, start, end - start, info.id.c_str());
 }

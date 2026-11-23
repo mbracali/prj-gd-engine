@@ -25,7 +25,7 @@ public:
 
     int channels() const override { return channels_; }
     int sampleRate() const override { return rate_; }
-    uint64_t lengthFrames() const { return length_; }
+    uint64_t lengthFrames() const override { return length_; }
     // Decodes up to `frames` frames into one buffer per channel; returns the
     // count decoded (less than asked only at the end of the stream).
     int decode(float* const* channelBuffers, int frames) override;

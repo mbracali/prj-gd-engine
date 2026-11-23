@@ -120,6 +120,9 @@ public:
     // Additive songs (GDALL-042): the SelectHost song-list / screen accessors.
     const std::vector<SongInfo>& menuSongs() override { return hooks_.songs(); }
     std::string currentScreenName() override { return currentScreen(); }
+    void songPreview(const std::string& id) override {
+        if (hooks_.songPreview) hooks_.songPreview(id);
+    }
     // Starts the UI: the boot logos (unless skipped), then $first_screen.
     void boot(bool skipLogos);
     // Runs `fn` after `ms` of UI time.

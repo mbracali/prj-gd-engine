@@ -57,6 +57,8 @@ public:
     }
     void exit() override {
         ui.host().menuBackdrop(false);
+        ui.session().lastPreview.clear();
+        ui.host().songPreview("");  // stop the hover preview; Quick Play resumes its own
         PanelObj::exit();
     }
 
@@ -99,7 +101,22 @@ public:
         PanelObj::poll(dtMs);
         d_.updateTransition();
         keepVisible();
+        previewHovered();  // loop the hovered song's preview, like the native list
         scroll_ += (scrollTarget_ - scroll_) * std::min(1.0f, float(dtMs) / 60.f);
+    }
+
+    // Plays the hovered song's preview section, exactly as the native song list
+    // does (song_preview). Deduped by session().lastPreview, so it starts once
+    // when the cursor lands on a song and stops over a folder.
+    void previewHovered() {
+        std::string id;
+        if (cursor_ >= 0 && cursor_ < int(rows_.size())) {
+            const Row& r = rows_[size_t(cursor_)];
+            if (!r.folder && r.song >= 0) id = ui.host().songs()[size_t(r.song)].id;
+        }
+        if (id == ui.session().lastPreview) return;
+        ui.session().lastPreview = id;
+        ui.host().songPreview(id);
     }
 
     void draw() override {

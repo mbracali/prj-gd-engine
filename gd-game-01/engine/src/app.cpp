@@ -619,6 +619,8 @@ private:
     void playerEvent(const PlayerEvent& ev, int player = 0);
     void pollMenuMusic();
     bool menuMusicOn_ = false, previewing_ = false;
+    std::string previewCacheId_;  // additive songs: the last foreign preview transcoded (cached so re-hover is instant)
+    Bytes previewCacheVgs_;
     std::string menuLoop_;  // the metamusic loop picked when the meta panel loaded
     // meta play_movie (FUN_0024edf8): one picture per NTSC frame, 48 kHz PCM on its
     // own stream, everything else frozen and silent; Green / X / Start skip.
@@ -1632,13 +1634,30 @@ void App::songPreview(const std::string& id) {
         return;
     }
     try {
-        auto vgs = std::make_unique<VgsStream>(data_->read(it->audioPath));
+        std::unique_ptr<VgsStream> vgs;
+        double loopStart = it->previewStartMs, loopEnd = it->previewEndMs;
+        if (it->foreign()) {
+            // GH1's mixer only plays VGS, so transcode the foreign song's preview
+            // window (a few seconds) to VGS. Cache the last one so looping it and
+            // re-hovering the same song never re-transcodes; the window becomes
+            // the whole stream, so loop it from 0.
+            if (previewCacheId_ != id) {
+                previewCacheVgs_ = loadForeignVgsWindow(foreignLib_, *it, it->previewStartMs, it->previewEndMs);
+                previewCacheId_ = id;
+            }
+            if (previewCacheVgs_.empty()) return;
+            vgs = std::make_unique<VgsStream>(previewCacheVgs_);
+            loopStart = 0;
+            loopEnd = it->previewEndMs - it->previewStartMs;
+        } else {
+            vgs = std::make_unique<VgsStream>(data_->read(it->audioPath));
+        }
         std::vector<Mixer::Track> tracks(vgs->channels());
         for (size_t c = 0; c < tracks.size(); ++c) {
             if (c < it->vols.size()) tracks[c].volume = it->vols[c];
             if (c < it->pans.size()) tracks[c].pan = it->pans[c];
         }
-        mixer_.playMusic(std::move(vgs), std::move(tracks), it->previewStartMs, it->previewEndMs, true, 1000, 1.0f);
+        mixer_.playMusic(std::move(vgs), std::move(tracks), loopStart, loopEnd, true, 1000, 1.0f);
         previewing_ = true;
     } catch (const std::exception& ex) {
         SDL_Log("preview %s: %s", id.c_str(), ex.what());

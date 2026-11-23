@@ -168,7 +168,7 @@ Part partFor(const Song& song, const std::string& instrument, bool coop) {
 // fade in and out [I: GH2's fade times]; the menu music: the whole loop).
 class LoopSource final : public AudioSource {
 public:
-    LoopSource(std::unique_ptr<VorbisStream> s, double startMs, double endMs, double fadeMs)
+    LoopSource(std::unique_ptr<AudioSource> s, double startMs, double endMs, double fadeMs)
         : s_(std::move(s)), start_(uint64_t(std::max(0.0, startMs) * s_->sampleRate() / 1000.0)) {
         end_ = endMs > startMs ? uint64_t(endMs * s_->sampleRate() / 1000.0) : s_->lengthFrames();
         end_ = std::min<uint64_t>(std::max<uint64_t>(end_, start_ + 1), s_->lengthFrames() ? s_->lengthFrames() : end_);
@@ -207,7 +207,7 @@ public:
     }
 
 private:
-    std::unique_ptr<VorbisStream> s_;
+    std::unique_ptr<AudioSource> s_;
     uint64_t start_ = 0, end_ = 0, pos_ = 0, fade_ = 0;
 };
 
@@ -2549,7 +2549,11 @@ void App::songPreview(const std::string& songId) {
     auto it = std::find_if(songs_.begin(), songs_.end(), [&](const SongInfo& s) { return s.id == songId; });
     if (it == songs_.end()) return;
     try {
-        auto s = std::make_unique<VorbisStream>(data_->read(it->audio.moggPath));
+        // A foreign song's audio is on its own disc; take it from the shared
+        // reader so its preview loops in the Custom Songs overlay like a native.
+        std::unique_ptr<AudioSource> s = it->foreign() ? loadForeignAudio(foreignLib_, *it)
+                                                       : std::make_unique<VorbisStream>(data_->read(it->audio.moggPath));
+        if (!s) return;
         auto loop = std::make_unique<LoopSource>(std::move(s), it->previewStartMs, it->previewEndMs, 1000);
         mixer_.play(std::move(loop), mixerTracks(it->audio), 0);
         music_ = Music::Preview;

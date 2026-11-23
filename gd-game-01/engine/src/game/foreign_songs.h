@@ -37,3 +37,8 @@ Song loadForeignChart(const ForeignLibrary& lib, const SongInfo& info);
 // Transcodes a foreign song's audio into VGS bytes GH1's VgsStream can play
 // (decoded, resampled to 44.1 kHz, PS-ADPCM encoded). Empty on failure.
 Bytes loadForeignVgs(const ForeignLibrary& lib, const SongInfo& info);
+
+// As loadForeignVgs, but only the [startMs, endMs) window (the song's preview
+// section), so a hover preview transcodes a few seconds, not the whole song.
+// The returned VGS starts at the window, so loop it from 0.
+Bytes loadForeignVgsWindow(const ForeignLibrary& lib, const SongInfo& info, float startMs, float endMs);
