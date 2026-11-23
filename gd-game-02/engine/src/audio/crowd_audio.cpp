@@ -47,6 +47,10 @@ CrowdAudio::CrowdAudio(const GameData& data, const std::string& venue, const Dat
                     (e.children[0].type == DataNode::Type::Int && e.children[0].i == n))
                     entries_[size_t(kBoot + n)] = entryOf(e);
         }
+    // The campaign-ending victory stream (stone only; not in the crowd config):
+    // `crowd_audio play_stream 0.0 wingame` from the win animation's
+    // god_effect_start event (char_objects.dta).
+    if (data.exists("world/" + venue + "/streams/wingame.mogg")) entries_[kWinGame].file = "wingame";
     // "world/%s/streams" (0x8204958c) + the file. Read here (GameData is not
     // shared with threads); decoded on the worker.
     for (size_t s = 0; s < kStreams; ++s) {
@@ -215,6 +219,13 @@ void CrowdAudio::update(double now) {
 }
 
 void CrowdAudio::encoreOutro() { play(kEncoreOutro, true); }
+
+// play_stream (0x822DFD98 -> 0x822DF860, loop flag = 1.0): the named venue
+// stream. Only `wingame` (the campaign finale) is a non-config stream.
+void CrowdAudio::playStream(const std::string& name) {
+    if (name == "wingame") play(kWinGame, true);
+    else SDL_Log("crowd audio: play_stream: unknown stream '%s'", name.c_str());
+}
 
 // 0x822DF0E8 [C]: only the stream goes (started, the level and the pending
 // excitement_loop messages stay).

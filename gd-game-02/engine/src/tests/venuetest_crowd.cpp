@@ -123,9 +123,14 @@ int crowdRun(Venue& v, std::string& report) {
     // ---- the crowd audio
     CrowdAudio& au = crowd.audio();
     const int decoded = au.decodedStreams();
+    // kWinGame (wingame.mogg, the campaign finale) is venue-conditional: only
+    // the stone venue ships it, so it is optional here.
+    const bool hasWin = !au.entry(CrowdAudio::kWinGame).file.empty();
     for (int s = 0; s < CrowdAudio::kStreams; ++s)
-        c.check(!au.entry(CrowdAudio::Stream(s)).file.empty(), "crowd audio: no stream " + std::to_string(s));
-    c.check(decoded == CrowdAudio::kStreams, "crowd audio: " + std::to_string(decoded) + " streams decoded");
+        if (s != CrowdAudio::kWinGame)
+            c.check(!au.entry(CrowdAudio::Stream(s)).file.empty(), "crowd audio: no stream " + std::to_string(s));
+    c.check(decoded == CrowdAudio::kStreams - (hasWin ? 0 : 1),
+            "crowd audio: " + std::to_string(decoded) + " streams decoded" + (hasWin ? " (with wingame)" : ""));
     c.check(au.entry(CrowdAudio::kEncoreOutro).loopEndMs > au.entry(CrowdAudio::kEncoreOutro).loopStartMs, "crowd audio: encore loop_ms");
     au.introStart(false, false);
     c.check(au.playing() == CrowdAudio::kIntro, "crowd audio: intro");

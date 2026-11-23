@@ -888,7 +888,19 @@ public:
         if (msg == "get_track_sym") return r = trackSym(ui_, std::clamp(intArg(args, 0), 0, 1)), true;
         if (msg == "get_player_config") return r = in.send("game", "get_player_config", args), true;
         if (msg == "foreach_player") return r = ui_.foreachPlayer(args), true;
-        if (msg == "win_campaign_song") return r = Value::integer(0), true;
+        if (msg == "win_campaign_song") {
+            // GameConfig::IsWinCampaignSong (0x822B8B18): TRUE while the song
+            // being played is the career's last song. world_objects_worldbase's
+            // `game_won_msg` gates the WIN_GAME camera/lighting and
+            // `{handle ($this campaign_won)}` on it; `campaign_won` is the event
+            // that fires the stone venue's `win.trig` (the UFO abduction). Same
+            // test as the band's `campaignFinal` (natives_game change_chars):
+            // career mode and `campaign final_song` (the final tier's last,
+            // not-yet-passed song — still true at game_won_msg, before
+            // finish_song marks it passed).
+            const bool career = gameCfgValue(ui_, "mode").str() == "career";
+            return r = Value::integer(career && in.send("campaign", "final_song", {}).truthy() ? 1 : 0), true;
+        }
         // get_section_bounds $sec $start $end (0x00127138) [C]: section $sec's
         // start and end ms into $start / $end (-1 the whole song); the
         // variables come by name (Interp::byNameMessages).

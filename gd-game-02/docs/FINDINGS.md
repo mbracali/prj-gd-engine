@@ -728,3 +728,67 @@ the fix the screen starts white, clears over 4 s and holds the letter
 (stable at t = 5/8/15 s); `(color 0 0 0) (fade_out TRUE)` on exit and the
 plain `start_fade DURATION` path are unchanged. `--uitest` and the
 `main`/`endgame`/`lose` screens are unaffected.
+
+## Campaign ending part 2: the stone-venue UFO abduction finale (issue #127, 2026-11-23)
+
+**The original finale, end to end.** After the final career tier is beaten,
+the in-game sequence on the **stone** venue (Stonehenge; final tier songs
+`beastandtheharlot carrymehome institutionalized misirlou hangar18 freebird`,
+`config/campaign.dta`) is: the band plays its `win_finals` animation, a UFO
+descends and **abducts the guitarist** with a tractor beam, then the game
+hands off to `win_game_screen` (the "Death Threat Records" letter, fixed in
+the section above).
+
+Driver: `world/gen/world_objects_worldbase.dta`, the WorldDir base type, which
+every venue's `WorldDir` inherits (`world_objects.dta` line 62
+`#include world_objects_worldbase.dta`; the port loads this and sets it as the
+`world` object's typeDef, `world.cpp` ~L289). Its `game_won_msg` handler
+(fired by the game at song end, `WorldDriver::gameWon` → `world.message
+("game_won_msg")`, binary `0x822CB5B8`):
+
+1. `$category = $encore ? WIN_ENCORE : WIN`; then **`if {gamecfg
+   win_campaign_song} {set $category WIN_GAME}`** (else, if `game
+   want_encore_fx`, `(WIN_ENCORE_SONG WIN)`).
+2. after `WIN_CAMERA_DELAY`, `pick_shot $category` → the stone venue's
+   `win_game.shot` CamShot (`stone.milo`); for `WIN_ENCORE`/`WIN_GAME` it then
+   schedules `game set_outro_complete` after `shot.duration / 30` s.
+3. `set_lighting` to `{if_else {gamecfg win_campaign_song} (WIN_GAME WIN)
+   {if_else $encore (WIN_ENCORE WIN) (WIN)}}`.
+4. `{handle ($this game_won)}` — fires the `game_won` venue event.
+5. **`{if {gamecfg win_campaign_song} {handle ($this campaign_won)}}`** — fires
+   the `campaign_won` venue event only on the career's last song.
+
+`campaign_won` (listed in `config/macros.dta` WORLDEVENTS) fires the stone
+venue's **`win.trig`** EventTrigger (`world/stone/ng/gen/stone_geom.milo_xbox`),
+which plays the abduction: anims `comet.filt`, `cometalpha.filt`,
+`sky01_alpha1.filt`, `sky01_alpha.filt`, `starflare_filter.filt`,
+**`ufo_win_fly.filt`** (the UFO's flight-in `TransAnim` `ufo01.tnm`/`ufo02.tnm`/
+`ufo_parent.tnm`), `stars_black.filt`, `ufo02.filt`; and shows `win_sky.grp`,
+`UFO2.grp`, `ufo.grp`. Supporting assets in `stone_geom.milo`: meshes
+`ufo01.mesh` (60 KB), `ufo02.mesh`, `ufo_parent.mesh`, `ufobeam.mesh`;
+textures `ufo01`, `ufo02`, `ufo_beam`/`ufobeam`, `ufo_second_stage`,
+`ufo_glow01/02`, `ufo_flare`, `ufo_particle`, `ufo_emissive`; `ufobeam.mnm`
+(the beam), `UFO_energy_field.trig`/`ufo_energy_field.mnm` (the energy field),
+`ufolight.lit`, plus the night sky (`moon`, `comet`, `starfield`,
+`starmessage.milo`). `world/stone/streams/wingame.mogg` is the victory music.
+(The stone UFO is on stage throughout the song too, reacting to frets via
+`UFO_fret_*`/`ufo_show_ufo_*`/`ufo_beam_move` triggers — those already play in
+the port; only the `campaign_won` finale was missing.)
+
+**What the port was missing.** `GameConfig::win_campaign_song`
+(`natives_game.cpp`, binary `0x822B8B18`) was a stub returning `0`.
+Consequently the worldbase `game_won_msg` handler — which the port *does* run
+(the world shares the UI interp during a menu game, `app.cpp:2293`) — always
+took the non-campaign branch: category stayed `WIN` (not `WIN_GAME`, so the
+`win_game.shot` camera was never picked), lighting was `(WIN)` not
+`(WIN_GAME WIN)`, and **`campaign_won` was never fired**, so `win.trig` never
+ran and the UFO never appeared. `campaign_won` was a known world event
+(`world.cpp` worldEvents) with no sender.
+
+**Fix.** `gamecfg win_campaign_song` now returns `career && {campaign
+final_song}` — the same test the port already uses for the band's
+`campaignFinal` (`win_finals` + `kWinGameWalkSpot`), so the camera, lighting
+and UFO all agree. `final_song` is still true at `game_won_msg` (the song is
+not marked passed until `finish_song` on `post_show_screen`). No change to the
+venue trigger machinery was needed — the port already parses and fires
+`EventTrigger`s; it just never received `campaign_won`.
