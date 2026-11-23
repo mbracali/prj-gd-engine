@@ -161,7 +161,7 @@ bool Explorer::open(const GdHost* host) {
             seen.push_back(m.profileName);
             bodies_.push_back(m);
         }
-        instruments_ = band::everyInstrument(*globals_);
+        instruments_ = band::everyInstrumentGh4(*globals_);  // gh4: standalone instruments from preset appearances
     } catch (const std::exception& e) {
         SDL_Log("explore: %s", e.what());
     }

@@ -628,6 +628,59 @@ std::vector<Member> everyInstrument(const Globals& g) {
     return out;
 }
 
+// gh4: standalone instrument-only members built from the preset talents'
+// appearances — only the instrument parts (no body), skinned to the default
+// rocker skeleton, one per distinct mesh set. For the Explore screen's
+// Guitars / Bass / Drums / Mics groups (owner 11-23: "standalone, rough is
+// fine"); everyInstrument reads GH3's musician_instrument, empty on gh4 discs.
+std::vector<Member> everyInstrumentGh4(const Globals& g) {
+    std::vector<Member> out;
+    const qb::Array* a = globalArray(g, K("Preset_Musician_Profiles_Locked"));
+    if (!a) return out;
+    std::vector<std::vector<std::string>> seen;  // dedupe identical instruments
+    for (const qb::Value& e : a->values) {
+        if (e.type != qb::Type::Struct || !e.st) continue;
+        const qb::Struct* app = structOf(e.st->find(K("appearance")));
+        if (!app) continue;
+        const qb::Value* parts = e.st->find(K("allowed_parts"));
+        if (!parts || parts->type != qb::Type::Array || !parts->arr) continue;
+        std::unordered_map<uint32_t, const qb::Struct*> appParts;
+        for (const qb::Item& it : app->items)
+            if (it.name && it.value.type == qb::Type::Struct && it.value.st) appParts[it.name] = it.value.st.get();
+        const std::string talent = qbkey::names().get(keyOf(e.st->find(K("name"))));
+        for (const qb::Value& pv : parts->arr->values) {
+            const uint32_t part = keyOf(&pv);
+            std::vector<std::string> meshes;
+            for (const char* n : instrumentParts(part)) {
+                auto it = appParts.find(K(n));
+                if (it == appParts.end()) continue;
+                if (const qb::Struct* d = casDesc(g, K(n), keyOf(it->second->find(K("desc_id")))))
+                    if (std::string mesh = meshOf(g, *d); !mesh.empty()) meshes.push_back(mesh);
+            }
+            if (meshes.empty()) continue;
+            if (std::find(seen.begin(), seen.end(), meshes) != seen.end()) continue;
+            seen.push_back(meshes);
+            Member m{};
+            m.gh4 = true;
+            m.part = part;
+            m.role = part == K("bass")     ? Role::Bassist
+                     : part == K("drum")   ? Role::Drummer
+                     : part == K("vocals") ? Role::Vocalist
+                                           : Role::Guitarist;
+            m.object = m.role == Role::Bassist    ? K("bassist")
+                       : m.role == Role::Drummer  ? K("drummer")
+                       : m.role == Role::Vocalist ? K("vocalist")
+                                                  : K("guitarist");
+            m.profileName = talent;
+            m.meshes = std::move(meshes);
+            m.skeleton = K("GH_Rocker_Male_original");
+            m.body = m.skeleton;
+            out.push_back(std::move(m));
+        }
+    }
+    return out;
+}
+
 void Library::load(const Disc& disc) {
     const auto globalPak = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
     const Pak& global = *globalPak;
