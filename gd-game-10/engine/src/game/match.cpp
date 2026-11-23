@@ -54,9 +54,17 @@ GameMode gameModeFromKey(uint32_t m, bool boss) {
 }
 
 bool BattleData::load(const Globals& g) {
-    powerups.clear();
     const qb::Value* a = g.find(K("battlemode_powerups"));
     if (!a || a->type != qb::Type::Array || !a->arr) return false;
+    // The table's entries are placed by `name`, not by their order, so the
+    // Attack enum's index is the power-up regardless of how the disc orders
+    // them. Metallica's nine: GH3's first seven, then Mines and blackout
+    // [C data guitar_battle.qb, verified on our disc].
+    const uint32_t keyOf[kAttacks] = {K("Lightning"),   K("DifficultyUp"), K("DoubleNotes"),
+                                      K("PowerUpSteal"), K("LeftyNotes"),   K("BrokenString"),
+                                      K("WhammyAttack"), K("Mines"),        K("blackout")};
+    powerups.assign(size_t(kAttacks), BattlePowerup{});
+    std::array<bool, kAttacks> have{};
     for (const qb::Value& e : a->arr->values) {
         if (!e.st) continue;
         BattlePowerup p;
@@ -71,18 +79,30 @@ bool BattleData::load(const Globals& g) {
         p.immediate = numField(g, *e.st, "immediate", 0) != 0;
         p.noAiDamage = numField(g, *e.st, "no_ai_damage", 0) != 0;
         p.fireBolt = numField(g, *e.st, "fire_bolt", 0) != 0;
+        // blackout's drain grows on Easy (params = { easy_drain = .. }) [C data].
+        if (const qb::Value* pr = g.field(*e.st, K("params"))) {
+            const qb::Value* rp = g.resolve(*pr);
+            if (rp && rp->st) p.easyDrain = int(numField(g, *rp->st, "easy_drain", 0));
+        }
         for (int d = 0; d < 4; ++d) {
             const std::string dn = kDiffKey[d];
             p.flicker[size_t(d)] = int(numField(g, *e.st, (dn + "_flicker").c_str(), float(p.flicker[size_t(d)])));
             p.repair[size_t(d)] = int(numField(g, *e.st, (dn + "_repair").c_str(), 0));
             p.killRate[size_t(d)] = numField(g, *e.st, (dn + "_kill_rate").c_str(), p.killRate[size_t(d)]);
         }
-        powerups.push_back(p);
+        int idx = -1;
+        for (int i = 0; i < kAttacks; ++i)
+            if (keyOf[i] == p.name) idx = i;
+        if (idx < 0) continue;  // a power-up we do not know (a future disc): skip, do not fail the whole table
+        powerups[size_t(idx)] = p;
+        have[size_t(idx)] = true;
     }
     for (int d = 0; d < 4; ++d)
         drainOffset[size_t(d)] = int(qbNumber(g, K(("battle_" + std::string(kDiffKey[d]) + "_drain_offset").c_str()), float(drainOffset[size_t(d)])));
     maxCards = std::max(1, qbInt(g, K("max_num_powerups"), 3));
-    return powerups.size() == size_t(kAttacks);
+    for (bool h : have)
+        if (!h) return false;  // every attack must be present
+    return true;
 }
 
 bool BattleData::loadBoss(const Globals& g, uint32_t key, BossProps& out) const {
@@ -320,7 +340,7 @@ int Match::select(int who) {
         else w[size_t(i)] = p.weightLosing;
         total += w[size_t(i)];
     }
-    if (setup_.suddenDeath && setup_.mode == GameMode::Battle) return kDeathLick;
+    // Metallica has no battle sudden death (GH3's DeathLick is gone) [C data].
     if (total <= 0) return 0;
     int r = std::uniform_int_distribution<int>(0, total - 1)(rng_);
     for (int i = 0; i < kAttacks; ++i) {
@@ -363,9 +383,10 @@ void Match::fire(int who, double now) {
     const int drain = data_.powerups[size_t(card)].drainMs + (setup_.mode == GameMode::Boss ? 0 : data_.drainOffset[size_t(vdiff)]);
     b.finalBlow = card;
     ++b.attacks;
-    // attack_bolt: fire_bolt cards (60 deg), Death Drain's own (80 deg) [C scripts battle_trigger_on, battle_death_lick].
+    // attack_bolt: fire_bolt cards throw a 60 deg bolt [C script battle_trigger_on].
+    // (Metallica's Mines and blackout both set fire_bolt; GH3's 80 deg Death
+    // Drain bolt is gone with DeathLick [C data guitar_battle.qb].)
     if (data_.powerups[size_t(card)].fireBolt) b.boltAt = now, b.boltAngle = 60;
-    if (card == kDeathLick) b.boltAt = now, b.boltAngle = 80;
     ++counters_.fired[size_t(who)];
     ++counters_.byAttack[size_t(who)][size_t(card)];
     startAttack(victim, card, drain, now);
@@ -426,10 +447,19 @@ void Match::startAttack(int v, int card, int drain, double now) {
         if (b.whammyLeft < 1) b.whammyLeft = p.repair[size_t(d)];
         else if (b.whammyLeft < 15) b.whammyLeft += p.repair[size_t(d)];
         break;
-    case kDeathLick:  // [C battle_death_lick]
-        if (b.deathLickRate < 0) b.deathLickRate = p.killRate[size_t(d)], b.deathLickNext = now, b.deathAt = now;
-        else b.deathLickRate *= 0.5;
+    case kMines:  // [C battle_mine_attack]: mine gems on the victim's highway for the drain.
+        // The window extends on a second Mines (as the script does: mine_attack
+        // += drain). The mine gems and the health lost for strumming one are the
+        // remaining piece (FillInputArrayForBattle, note-track / judge work) --
+        // see docs/FINDINGS.md.
+        b.mineUntil = b.mineUntil > now ? b.mineUntil + drain : now + drain;
         break;
+    case kBlackout: {  // [C battle_blackout_attack] ("Hit The Lights"): the victim's highway goes dark.
+        // Easy adds params.easy_drain to the already diff-offset drain [C script].
+        const double bd = drain + (d == 0 ? double(p.easyDrain) : 0.0);
+        b.blackoutUntil = b.blackoutUntil > now ? b.blackoutUntil + bd : now + bd;
+        break;
+    }
     default: break;
     }
 }
@@ -564,6 +594,10 @@ void Match::battleFrame(double now, double dt, std::array<FrameInput, 2>& in) {
             }
         }
         if (b.doubleUntil >= 0 && now > b.doubleUntil) b.doubleUntil = -1;
+        // Hit The Lights (blackout) / Mines windows end with their drain [C scripts
+        // battle_blackout_attack, battle_mine_attack].
+        if (b.blackoutUntil >= 0 && now > b.blackoutUntil) b.blackoutUntil = -1;
+        if (b.mineUntil >= 0 && now > b.mineUntil) b.mineUntil = -1;
         // Difficulty Up: the switch after the held sustains, back after the drain [C battle_up_difficulty].
         if (b.diffUpWaiting && now > b.holdDiffUp) {
             b.diffUpWaiting = false, b.diffUpActive = true;

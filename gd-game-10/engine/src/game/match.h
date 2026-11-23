@@ -26,16 +26,22 @@ GameMode gameModeFromKey(uint32_t gameMode, bool boss);
 
 // battlemode_powerups (guitar_battle.qb) [C data].
 struct BattlePowerup {
-    uint32_t name = 0;  // Lightning, DifficultyUp, DoubleNotes, PowerUpSteal, LeftyNotes, BrokenString, WhammyAttack, DeathLick
+    uint32_t name = 0;  // Lightning, DifficultyUp, DoubleNotes, PowerUpSteal, LeftyNotes, BrokenString, WhammyAttack, Mines, blackout
     std::string text, altText;
     int weight = 0, weightLow = 0, weightLosing = 0;
     int drainMs = 5000;
     std::array<int, 4> flicker{2, 2, 3, 3}, repair{0, 0, 0, 0};
     std::array<float, 4> killRate{0.4f, 0.3f, 0.25f, 0.2f};
+    int easyDrain = 0;  // blackout's params.easy_drain (Easy adds this to the drain) [C data guitar_battle.qb].
     bool immediate = false, noAiDamage = false, fireBolt = false;
     uint32_t cardTexture = 0;
 };
-enum Attack : int { kLightning, kDifficultyUp, kDoubleNotes, kSteal, kLefty, kBrokenString, kWhammy, kDeathLick, kAttacks };
+// Guitar Hero: Metallica's eight-nine power-up set (battlemode_powerups,
+// guitar_battle.qb): GH3's first seven, then Mines and blackout ("Hit The
+// Lights"); GH3's eighth, DeathLick, is gone and Metallica has no battle
+// sudden death [C data; verified against our disc's guitar_battle.qb].
+// Mapped by `name` so the index is these regardless of the table's order.
+enum Attack : int { kLightning, kDifficultyUp, kDoubleNotes, kSteal, kLefty, kBrokenString, kWhammy, kMines, kBlackout, kAttacks };
 
 // A boss's props (Boss_TomMorello_Props ...) [C data guitar_boss.qb].
 struct BossProps {
@@ -136,6 +142,16 @@ public:
         uint8_t brokenMask = 0;
         int whammyLeft = -1;
         bool whammyUp = true;
+        // Hit The Lights (blackout): the victim's highway blacked out until this
+        // time; purely a view obstruction, no judge / health effect (the highway
+        // renderer reads it) [C script battle_blackout_attack guitar_battle.qb].
+        double blackoutUntil = -1;
+        // Mines: the mine window on the victim (battle_mine_attack sets
+        // other_player_status.mine_attack = time + drain); FillInputArrayForBattle
+        // puts mine gems on the highway for it [C script guitar_battle.qb]. The
+        // mine gems and their strum damage are not yet reproduced (note-track /
+        // judge work) -- the window and the attack's book-keeping are.
+        double mineUntil = -1;
         double deathLickRate = -1, deathLickNext = -1;
         int flickerF = 0;
         std::vector<int8_t> flicker;  // per live note: >0 hidden for that many flicker events
