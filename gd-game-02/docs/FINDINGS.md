@@ -678,3 +678,53 @@ Details, the save and the store: `docs/career_and_store.md`.
 9. The bass-cue path of OnHit / OnMiss / wrong HOPOs (`+0x10` vtable
    `+0x28` by tick → `0x823526f8`, `bass_%d.cue`): which object answers and
    what chart data marks those ticks (see "Fret matching").
+
+## Campaign ending: the win-game letter faded to black (issue #127, 2026-11-23)
+
+**Symptom.** After beating the final career tier, the ending screen
+(`win_game_screen`) rendered as a plain black screen in the port: the whole
+end-of-game sequence "does not display correctly".
+
+**What the original does.** The ending is a full-screen "fan letter"
+newspaper, one per difficulty, in `ui/gen/win_<difficulty>.milo_xbox`
+(`win_easy` / `win_medium` / `win_hard` / `win_expert`; `PanelDir`, 31
+objects: a cinderblock wall, newspaper/tape/letter/skull/sticker meshes, and
+five `BandLabel`s). `win_game_panel` (`ui/gen/endgame.dta`) loads
+`{sprintf "win_%s.milo" {gamecfg get_difficulty_sym 0}}` and fills
+`we_bandname.lbl` with the band's profile name; the labels' localized text
+(tokens `win_easy`, `LETTERHEAD1..3`, from `ui/eng/locale.dtb`) is the
+"Death Threat Records / The Management" letter.
+
+`win_game_screen`'s enter runs
+`{fade_panel start_fade WIN_GAME_FADE_IN_SCREEN_SEC (color 1 1 1)
+(fade_synth FALSE) (fade_out FALSE)}` — a **white** overlay that **clears**
+over 4 s to reveal the letter — and its `BUTTON_DOWN_MSG` leaves with
+`(color 0 0 0) ... (fade_out TRUE)` (fade to black, 1 s).
+
+`FadeOut::StartFade` (`Function_82318240` refs → start handler
+**`0x822D5510`**) reads three keyword options, defaulting to
+`color (0 0 0)` (string `0x82004bb0`), `fade_synth TRUE` (`0x82047bc8`) and
+`fade_out TRUE` (`0x8201ea44`), plus the positional duration; the state is
+stored by `0x822D50E0` (colour at +0x44..+0x50, fade_out at +0x59). The
+per-frame alpha is `0x822D51D8`: with `progress = clamp((now-start)/dur,0,1)`,
+`fade_out TRUE → alpha = progress` (0→1, the scene fades **to** the colour)
+and `fade_out FALSE → alpha = 1 - progress` (1→0, the colour overlay clears).
+
+**The discrepancy (port bug).** `FadePanelObj::start_fade`
+(`engine/src/ui/panels.cpp`) read only `args[0]` (the duration) and **ignored
+the `(color …)` and `(fade_out …)` options**, always drawing a
+transparent→opaque **black** quad (`alpha = progress`, colour hard-coded
+black). That is correct for `start_fade DURATION` (the pause/lose fade,
+`game.dta`), but for the ending's `(color 1 1 1) (fade_out FALSE)` it did the
+opposite of the original: instead of a white cover clearing to show the
+letter, it faded the letter **to black**. Measured offscreen
+(`SDL_VIDEO_DRIVER=offscreen`, `GD02_SCREEN=win_game_screen`): the letter was
+visible at t≈500 ms, then darkened to ~100 % black by t≈8 s.
+
+**Fix.** `start_fade` now parses the keyword options (same defaults as the
+binary: black, fade to colour) and the draw uses
+`alpha = fade_out ? progress : 1 - progress` with the parsed colour. After
+the fix the screen starts white, clears over 4 s and holds the letter
+(stable at t = 5/8/15 s); `(color 0 0 0) (fade_out TRUE)` on exit and the
+plain `start_fade DURATION` path are unchanged. `--uitest` and the
+`main`/`endgame`/`lose` screens are unaffected.
