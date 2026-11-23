@@ -616,6 +616,7 @@ private:
     // Enhanced > HDR > True HDR: the window's surface (chosen at start) and why it is SDR when it is.
     hdr::Surface hdrSurface_ = hdr::Surface::Sdr;
     std::string hdrReason_, hdrApplied_;
+    float hdrWhiteApplied_ = -1, hdrBlackApplied_ = -1;  // the White / Black levels last applied, in nits (#80)
     std::string hdrStatus();
     std::string savedHdrMode();  // enhanced.json's HDR before the window exists
     std::string screenModeApplied_;
@@ -2217,6 +2218,9 @@ int App::gameCounter(int player, const std::string& key) const {
     // GD02-164: the song over (won or lost), and the HUD's displays hidden.
     if (key == "song_over") return wonSent_ || lostSent_ ? 1 : 0;
     if (key == "hud_displays_hidden") return hud_ ? int(hud_->displaysHidden()) : -1;
+    // issue #125: the rock-meter drop shadow (meter_extras.grp) drawn last frame;
+    // on_game_over must clear it with the meters (so 0 after "You Rock").
+    if (key == "hud_shadow_shown") return hud_ ? int(hud_->shadowShown()) : -1;
     const int p = std::clamp(player, 0, 1);
     if (key == "sp_phrases") return spPhrases_[p];
     if (key == "sp_started") return spStarted_[p];
@@ -3040,6 +3044,15 @@ void App::applyEnhancedLook() {
         p.original = false, p.bokeh = 0;
     }
     canvas_.renderer().post().setSettings(p);
+    // True HDR output levels (#80): paper white and the black floor, in nits,
+    // clamped to the menu's range; they reach the device's scRGB / PQ pass.
+    const float hdrWhiteNits = float(std::clamp(std::atoi(v("hdr_white").c_str()), 80, 480));
+    const float hdrBlackNits = std::clamp(float(std::atof(v("hdr_black").c_str())), 0.0f, 1.0f);
+    canvas_.renderer().device().setHdrUserLevels(hdrWhiteNits, hdrBlackNits);
+    if (hdrWhiteNits != hdrWhiteApplied_ || hdrBlackNits != hdrBlackApplied_) {
+        hdrWhiteApplied_ = hdrWhiteNits, hdrBlackApplied_ = hdrBlackNits;
+        SDL_Log("hdr: levels white %.0f nits, black %.2f nits", double(hdrWhiteNits), double(hdrBlackNits));
+    }
     if (const std::string mode = none ? "none" : v("hdr"); mode != hdrApplied_) {
         hdrApplied_ = mode;
         const std::string st = hdrStatus();

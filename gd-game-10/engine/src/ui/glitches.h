@@ -21,6 +21,11 @@ class Vm;
 // returns whether anything changed.
 bool ensureGlitches(qs::Vm& vm);
 
+// Enhanced > CHEATS > Unlock Everything (issue #94): runs gh4's own unlock-all
+// scripts and sweeps every tag's `unlocked` field to 1, save-wide. Called at
+// the main menu / on a live toggle; returns true if anything was unlocked.
+bool unlockEverything(qs::Vm& vm);
+
 // The Vault: GH3 keeps its purchases (guitars, finishes, characters,
 // outfits, styles, videos, bonus songs) save-wide; the port scopes "all
 // bought" to The Glitches' band only (owner 2026-10-29, GD10-026). While the

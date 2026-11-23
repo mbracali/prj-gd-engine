@@ -110,8 +110,12 @@ std::vector<std::string> neighbourPaks(qs::Vm& v, const std::string& discPath) {
         const qb::Value* type = e.st->find(qbkey::key("Type"));
         if (!type || type->key != qbkey::key("Guitarist") || e.st->find(qbkey::key("debug_only"))) continue;
         const uint32_t body = descOf(*e.st, "musician_body");
-        if (auto t = v.globalTags.find(body); t != v.globalTags.end())
-            if (const qb::Value* u = qs::Vm::param(t->second, qbkey::key("unlocked")); u && u->number() == 0) continue;
+        // Enhanced > CHEATS > Unlock Everything (issue #94): off (default), a
+        // locked character (unlocked = 0) is skipped as the original; on, the
+        // gate is bypassed so every character is selectable.
+        if (!qs::Vm::unlockAllCheat)
+            if (auto t = v.globalTags.find(body); t != v.globalTags.end())
+                if (const qb::Value* u = qs::Vm::param(t->second, qbkey::key("unlocked")); u && u->number() == 0) continue;
         valid.push_back(e.st.get());
     }
     auto bodyPak = [&](const qb::Struct& prof) -> const qb::Struct* { return descIn(g, "musician_body", descOf(prof, "musician_body")); };

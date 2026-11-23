@@ -316,7 +316,23 @@ public:
     }
 };
 
-// FadePanel (fade_panel, fade.milo): start_fade fades the picture to black.
+// FadePanel (fade_panel, fade.milo): start_fade covers the screen with a
+// colour quad whose alpha animates over a duration.
+//
+// start_fade DURATION (color r g b) (fade_synth bool) (fade_out bool)
+// (FadeOut::StartFade 0x822D5510): the keyword options default to
+// color (0 0 0), fade_synth TRUE and fade_out TRUE (0x82004bb0 "color",
+// 0x82047bc8 "fade_synth", 0x8201ea44 "fade_out"); DURATION is the first
+// positional float. The alpha each frame (0x822D51D8): with
+//   progress = clamp((now - start) / duration, 0, 1),
+//   fade_out TRUE  -> alpha = progress      (0->1: the scene fades to the colour)
+//   fade_out FALSE -> alpha = 1 - progress  (1->0: the colour overlay clears,
+//                                            revealing the scene).
+// The campaign ending (endgame.dta win_game_screen) enters with
+// `(color 1 1 1) (fade_out FALSE)`: the screen starts white and clears to show
+// the "Death Threat Records" letter; pressing X leaves with
+// `(color 0 0 0) (fade_out TRUE)`. Plain `start_fade DURATION` (game.dta
+// pause/lose) keeps the defaults: fade to black. (fade_synth is audio-only.)
 class FadePanelObj : public PanelObj {
 public:
     FadePanelObj(UiManager& ui, const std::string& name) : PanelObj(ui, name, "FadePanel") {}
@@ -328,6 +344,19 @@ public:
         if (msg == "start_fade") {
             fadeStart_ = ui.nowMs();
             fadeLen_ = std::max(0.01f, args.empty() ? 1.0f : args[0].number()) * 1000.0f;
+            // The defaults match the binary: black, fade to the colour.
+            fadeColor_ = {0, 0, 0};
+            fadeOut_ = true;
+            for (size_t k = 1; k < args.size(); ++k) {
+                const Value& opt = args[k];
+                if (!opt.array || opt.array->empty() || !opt.array->front().isText()) continue;
+                const std::vector<Value>& v = *opt.array;
+                const std::string key = v.front().str();
+                if (key == "color" && v.size() >= 4)
+                    fadeColor_ = {channel(v[1].number()), channel(v[2].number()), channel(v[3].number())};
+                else if (key == "fade_out" && v.size() >= 2)
+                    fadeOut_ = v[1].truthy();
+            }
             r = Value::integer(0);
             return true;
         }
@@ -336,15 +365,20 @@ public:
     }
     void draw() override {
         if (fadeStart_ >= 0) {
-            const float a = float(std::clamp((ui.nowMs() - fadeStart_) / fadeLen_, 0.0, 1.0));
-            ui.canvas().fillRect(0, 0, kScreenW, kScreenH, {0, 0, 0, Uint8(a * 255)});
+            const float progress = float(std::clamp((ui.nowMs() - fadeStart_) / fadeLen_, 0.0, 1.0));
+            const float a = fadeOut_ ? progress : 1.0f - progress;
+            ui.canvas().fillRect(0, 0, kScreenW, kScreenH, {fadeColor_[0], fadeColor_[1], fadeColor_[2], Uint8(a * 255)});
             ui.canvas().flush();
         }
         PanelObj::draw();
     }
 
 private:
+    static Uint8 channel(float v) { return Uint8(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); }
+
     double fadeStart_ = -1, fadeLen_ = 1000;
+    std::array<Uint8, 3> fadeColor_{0, 0, 0};
+    bool fadeOut_ = true;
 };
 
 // LagPanel (lag.milo): calculate_lag from the strums against the clicks.

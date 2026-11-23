@@ -31,6 +31,7 @@
 #include "script/globals.h"
 #include "tests/walk.h"
 #include "ui/front_end.h"
+#include "ui/glitches.h"
 #include "ui/port_screens.h"
 #include "ui/port_settings.h"
 #include "data/json.h"
@@ -48,6 +49,7 @@
 #include "render/canvas.h"
 #include "render/hitch.h"
 #include "render/core_backend.h"
+#include "render/highway2d.h"
 #include "render/venue_stage.h"
 #include "ui/port_draw.h"
 #include "game/chart.h"
@@ -893,6 +895,14 @@ void App::applyEnhanced(const std::string& key) {
         ps.chromatic = idx("chromatic", {"none", "light", "medium", "strong"});
         Player::forgivingHopos = enhanced_.get("hopo_mode") == "forgiving";
         Player::easyChords = enhanced_.on("easy_chords");
+        // Enhanced > CHEATS (issue #94): the extra cheats, off unless enabled.
+        // These flags gate the in-song effects per frame; cheat_unlock_all is
+        // run below on a live toggle (the save is loaded by then) and otherwise
+        // by The Glitches at the main menu / the gate flag.
+        qs::Vm::unlockAllCheat = enhanced_.on("cheat_unlock_all");
+        Player::maxMultiplier = enhanced_.on("cheat_multiplier");
+        Player::fullStarPower = enhanced_.on("cheat_full_sp");
+        Highway2D::hyperspeed = enhanced_.on("cheat_hyperspeed");
         VenueStage::extras.shadowsAll = enhanced_.on("shadows_all");
         VenueStage::extras.moreLights = idx("more_lights", {"none", "1.5x", "2x", "2.5x"});
         VenueStage::extras.lightDust = idx("light_dust", {"none", "1.5x", "2x", "2.5x"});
@@ -921,6 +931,12 @@ void App::applyEnhanced(const std::string& key) {
     input_.setRockBand(true), input_.setGamepadPlay(true);
     if (is("touch")) input_.setTouch(enhanced_.on("touch"));
     if (is("mouse")) mouseMovedMs_ = -1e9;
+    // Enhanced > CHEATS > Unlock Everything (issue #94): a live toggle to on
+    // runs the unlock at once (the save is already loaded by now). At boot the
+    // save is not ready yet; the main menu's Glitches hook (front_end) and the
+    // live gate flag cover that. gd10's career-tier progression is not a
+    // working gate, so the career part is best-effort (see unlockEverything).
+    if (is("cheat_unlock_all") && !key.empty() && enhanced_.on("cheat_unlock_all") && front_) unlockEverything(front_->vm());
 }
 
 // The on-screen touch buttons (Input::touchButtons, menu units): a

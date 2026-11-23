@@ -92,6 +92,11 @@ class Vm {
 public:
     // Enhanced > Enable Cut Content (StructureContains ... debug_only reads false; set by the app).
     static inline bool cutContent = false;
+    // Enhanced > CHEATS > Unlock Everything (issue #94; set by the app): run
+    // at the main menu / on a live toggle (unlockEverything); this flag also
+    // lets the port's live availability gates (e.g. character select) treat
+    // everything as unlocked. Off by default and inert when off.
+    static inline bool unlockAllCheat = false;
     // GD10_UI_SLOW diagnostic: armed once the first main menu is reached, so the
     // slow-motion applies to menu transitions but never to boot (front_end.cpp).
     static inline bool slowArmed = false;

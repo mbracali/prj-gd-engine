@@ -65,8 +65,11 @@ public:
         if (msg == "set_paused") return a_.setPaused(num(0) != 0), true;
         if (msg == "set_volume") return a_.setVolumeDb(num(0)), true;
         if (msg == "play_stream") {
-            // wingame (stone, after the game is beaten): not a venue level stream.
-            in.onStub("crowd_audio", "play_stream " + (args.size() > 1 ? textOf(in, args[1]) : std::string()), r);
+            // play_stream <volume> <name> (0x822DFD98): `wingame` (stone,
+            // the campaign finale, from the win clip's god_effect_start) is
+            // not a venue level stream; it loops until crowd_audio turn_off
+            // on post_show_screen.
+            a_.playStream(args.size() > 1 ? textOf(in, args[1]) : std::string());
             return true;
         }
         if (msg == "excitement") return react_(a_.excitement(int(num(0)), w_.seconds())), true;

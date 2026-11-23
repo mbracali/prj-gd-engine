@@ -668,3 +668,37 @@ Full table in docs/guitar_audio.md. Summary [C]:
   (FUN_00267d08); player 2's stream mutes every non-guitar channel (FUN_00267b08). Each player's misses and whammy act
   on their own copy.
 
+---------------------------------------------------------------------------------------------------
+## 2026-11-23 — Issue #123: tutorial "ends early" — investigated, not reproduced
+
+Issue #123 reports that the gd01 tutorial ends while the narrator is still
+talking. I drove the tutorial headlessly (offscreen, gh1.chd, `GD01_SKIP_BOOT=1
+GD01_SCREEN=tutorials`, Confirm to pick tut_1, `GD01_UILOG`/`GD01_TUTLOG`) and
+could **not** reproduce an early end:
+
+- A full Basic Lessons run played faithfully: `main_intro` at 1.8 s, then
+  `intro_1..intro_5` each separated by its VO + `WAIT_FOR_VO` + `LONG_VO_GAP`
+  (no VO cut short), `start_tuning_mode` at 39 s, the tuning timeout at exactly
+  99 s (60 s later), `all_frets_tuned`, then `playing_notes` with `hit_vo` per
+  hit. Lessons advanced in order; nothing was skipped.
+- The end of a tutorial is script-timed, not `WAIT_FOR_VO`-timed
+  (tutorial_19_wrapup.dta: `play_vo wrapup1_1`, `sleep 15`, lets_rock + `sleep 4`,
+  `goto tutorial_quit`). Booting straight into `wrapup`
+  (`GD01_TUT_STATE=wrapup`), `tutorial_quit` fires ~19 s after the VO starts.
+  The VO `wrapup1_1` = `tutorial/streams/V19902.vgs` is **22.06 s** (1 ch,
+  22050 Hz; measured from the VgsStream), i.e. ~3 s longer than that 19 s window
+  — but this matches the shipped script, and in both the original and the port
+  the `tut` panel (and its VoiceMgr stream) is still on the `tutorial_quit`
+  screen (`tutorials.dta`: `tutorial_quit (panels tut tut_script)`), so the
+  stream plays through the transition. Instrumenting `voiceStop` confirmed the
+  port never stops the VO while it is still playing during
+  wrapup -> tutorial_quit -> meta_loading -> main.
+- gd01's engine resolves properties differently from gd02/gd03 (ui_system.cpp
+  `props[key]=…` per child) and the gd01 `tutorial` object has no duplicate
+  `(state …)`, so the gd02/gd03 #123 property-read defect does not apply here.
+
+Status: could not reproduce the reported early end in the current port; the
+tutorial's VO pacing and wrap-up match the shipped scripts and the decompiled
+behaviour. If it is real, it may be guitar/timing-specific on real hardware or in
+tutorial 2/3 (not covered here) — left open rather than guessing a fix.
+

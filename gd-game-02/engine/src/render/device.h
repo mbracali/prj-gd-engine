@@ -223,6 +223,13 @@ public:
     // (SDL_EVENT_WINDOW_HDR_STATE_CHANGED).
     virtual void setHdrSurface(int surface) { (void)surface; }
     virtual void hdrStateChanged() {}
+    // Enhanced > HDR White / Black Level (#80): the paper white (a full-white
+    // pixel and the menus) and the black floor the True HDR output pass uses,
+    // in nits. They override the display's auto paper white.
+    virtual void setHdrUserLevels(float whiteNits, float blackNits) {
+        (void)whiteNits;
+        (void)blackNits;
+    }
     // The display's headroom in paper whites while it shows HDR on the surface (1: SDR).
     virtual float hdrHeadroom() const { return 1; }
     // What True HDR outputs, or "off: <why>".

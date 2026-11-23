@@ -49,7 +49,7 @@ public:
     // paper white at 1.0) for the window's surface into `dst` (w x h):
     // linear scRGB scaled to paper white `white`, or BT.2020 PQ. False when
     // its program did not compile (the caller then shows `src` unconverted).
-    bool hdrOutput(Texture src, Texture dst, int w, int h, float white, bool pq);
+    bool hdrOutput(Texture src, Texture dst, int w, int h, float white, float black, bool pq);
     std::string upscalerStatus() const { return upscalerStatus_; }
 
 private:

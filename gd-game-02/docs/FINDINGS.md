@@ -458,6 +458,62 @@ player and the mode's `competitive` flag), practice and tutorials
 multiplayer game; in GH2 **co-op can fail** [C for the check; which meter
 decides in co-op is [I], see below].
 
+## HUD rock-meter drop shadow at song end (issue #125, 2026-11-23)
+
+Issue #125: at "You Rock" the rock meter leaves the screen but its drop
+shadow lingered in the port. The original removes the shadow together with
+the meters. Traced from the binary.
+
+The in-song HUD is a `HudPanel` driven by `ui/gen/hud_panel.dtb` [C data].
+Its song-end handlers:
+
+```
+(game_won_msg  {$this on_game_over} {$this set_win_showing TRUE} …)   ; "You Rock"
+(game_lost     {$this on_game_over} {$this show_message … song_failed})
+```
+
+`on_game_over`, `set_meters_showing`, `set_win_showing` and `set_showing`
+are native `HudPanel` methods, dispatched by `Function_8268EBD8`
+(`0x8268ebd8`) [C]. Message names resolved from the dispatcher's cached
+symbol hashes: `on_game_over` (string `0x8204501c`) runs
+`set_meters_showing FALSE` then, if the win record exists, `0x82690d98`.
+
+`set_meters_showing` = `FUN_8268e9f8` (`0x8268e9f8`) [C]. It writes the
+`showing` byte (`+0x88`) on every meter display held in the panel's three
+vectors (`HudPanel +0x50`, `+0x5c`, `+0x68`) and the two single displays
+(`+0x74`, `+0x78`), **and** clears the group at `HudPanel +0x90` via its
+`+0x18` byte, and sets the panel flag `+0x80`.
+
+`HudPanel::load` = `Function_82690308` (`0x82690308`) [C]. Its last act:
+
+```
++0x90 = DataFindObj(dir, "meter_extras.grp")     ; Function_82254C00, string 0x820d6740
+```
+
+So `meter_extras.grp` is the object at `+0x90` — i.e. `set_meters_showing`
+hides it with the meters. In `hud_sp.milo_xbox` `meter_extras.grp` holds a
+single mesh, `spraypaint.mesh`: the sprayed drop shadow behind the meters.
+(Same load also hides `youwin.mesh` at `+0x7c` and every `mask*` object at
+load, matching the port's existing note.)
+
+**Conclusion [C]:** in GH2 the rock-meter drop shadow (`meter_extras.grp` →
+`spraypaint.mesh`) is itself a "meter"; `on_game_over` → `set_meters_showing
+FALSE` clears its `showing` flag at the same instant as the dial, so it
+leaves the screen together with the meter at "You Rock" (and at "Song
+Failed").
+
+**Port bug:** `meter_extras.grp` is a top-level `Group` in the HUD root
+`NewPanelDir`, not inside a `Band*` display proxy. `HudView::gameOver()`
+set `displaysHidden_`, but that flag only gated the `DirObj` proxy branch of
+`HudView::drawObject` (`render/hud_view.cpp`), so the root-level shadow kept
+drawing after the meters were gone.
+
+**Fix:** `render/hud_view.cpp` `HudView::drawDir` now skips `meter_extras.grp`
+while `displaysHidden_`, matching `set_meters_showing FALSE`. Instrumented
+with `HudView::shadowShown()` / the `hud_shadow_shown` counter and an
+assertion in the `hud_after_song` walktest (shadow present during play, gone
+once the displays hide).
+
 ## Practice mode
 
 - `update_practice_speed` (`0x822cee60`): speed = `practice_speeds[i]` of the
@@ -622,3 +678,162 @@ Details, the save and the store: `docs/career_and_store.md`.
 9. The bass-cue path of OnHit / OnMiss / wrong HOPOs (`+0x10` vtable
    `+0x28` by tick → `0x823526f8`, `bass_%d.cue`): which object answers and
    what chart data marks those ticks (see "Fret matching").
+
+## Campaign ending: the win-game letter faded to black (issue #127, 2026-11-23)
+
+**Symptom.** After beating the final career tier, the ending screen
+(`win_game_screen`) rendered as a plain black screen in the port: the whole
+end-of-game sequence "does not display correctly".
+
+**What the original does.** The ending is a full-screen "fan letter"
+newspaper, one per difficulty, in `ui/gen/win_<difficulty>.milo_xbox`
+(`win_easy` / `win_medium` / `win_hard` / `win_expert`; `PanelDir`, 31
+objects: a cinderblock wall, newspaper/tape/letter/skull/sticker meshes, and
+five `BandLabel`s). `win_game_panel` (`ui/gen/endgame.dta`) loads
+`{sprintf "win_%s.milo" {gamecfg get_difficulty_sym 0}}` and fills
+`we_bandname.lbl` with the band's profile name; the labels' localized text
+(tokens `win_easy`, `LETTERHEAD1..3`, from `ui/eng/locale.dtb`) is the
+"Death Threat Records / The Management" letter.
+
+`win_game_screen`'s enter runs
+`{fade_panel start_fade WIN_GAME_FADE_IN_SCREEN_SEC (color 1 1 1)
+(fade_synth FALSE) (fade_out FALSE)}` — a **white** overlay that **clears**
+over 4 s to reveal the letter — and its `BUTTON_DOWN_MSG` leaves with
+`(color 0 0 0) ... (fade_out TRUE)` (fade to black, 1 s).
+
+`FadeOut::StartFade` (`Function_82318240` refs → start handler
+**`0x822D5510`**) reads three keyword options, defaulting to
+`color (0 0 0)` (string `0x82004bb0`), `fade_synth TRUE` (`0x82047bc8`) and
+`fade_out TRUE` (`0x8201ea44`), plus the positional duration; the state is
+stored by `0x822D50E0` (colour at +0x44..+0x50, fade_out at +0x59). The
+per-frame alpha is `0x822D51D8`: with `progress = clamp((now-start)/dur,0,1)`,
+`fade_out TRUE → alpha = progress` (0→1, the scene fades **to** the colour)
+and `fade_out FALSE → alpha = 1 - progress` (1→0, the colour overlay clears).
+
+**The discrepancy (port bug).** `FadePanelObj::start_fade`
+(`engine/src/ui/panels.cpp`) read only `args[0]` (the duration) and **ignored
+the `(color …)` and `(fade_out …)` options**, always drawing a
+transparent→opaque **black** quad (`alpha = progress`, colour hard-coded
+black). That is correct for `start_fade DURATION` (the pause/lose fade,
+`game.dta`), but for the ending's `(color 1 1 1) (fade_out FALSE)` it did the
+opposite of the original: instead of a white cover clearing to show the
+letter, it faded the letter **to black**. Measured offscreen
+(`SDL_VIDEO_DRIVER=offscreen`, `GD02_SCREEN=win_game_screen`): the letter was
+visible at t≈500 ms, then darkened to ~100 % black by t≈8 s.
+
+**Fix.** `start_fade` now parses the keyword options (same defaults as the
+binary: black, fade to colour) and the draw uses
+`alpha = fade_out ? progress : 1 - progress` with the parsed colour. After
+the fix the screen starts white, clears over 4 s and holds the letter
+(stable at t = 5/8/15 s); `(color 0 0 0) (fade_out TRUE)` on exit and the
+plain `start_fade DURATION` path are unchanged. `--uitest` and the
+`main`/`endgame`/`lose` screens are unaffected.
+
+## Campaign ending part 2: the stone-venue UFO abduction finale (issue #127, 2026-11-23)
+
+**The original finale, end to end.** After the final career tier is beaten,
+the in-game sequence on the **stone** venue (Stonehenge; final tier songs
+`beastandtheharlot carrymehome institutionalized misirlou hangar18 freebird`,
+`config/campaign.dta`) is: the band plays its `win_finals` animation, a UFO
+descends and **abducts the guitarist** with a tractor beam, then the game
+hands off to `win_game_screen` (the "Death Threat Records" letter, fixed in
+the section above).
+
+Driver: `world/gen/world_objects_worldbase.dta`, the WorldDir base type, which
+every venue's `WorldDir` inherits (`world_objects.dta` line 62
+`#include world_objects_worldbase.dta`; the port loads this and sets it as the
+`world` object's typeDef, `world.cpp` ~L289). Its `game_won_msg` handler
+(fired by the game at song end, `WorldDriver::gameWon` → `world.message
+("game_won_msg")`, binary `0x822CB5B8`):
+
+1. `$category = $encore ? WIN_ENCORE : WIN`; then **`if {gamecfg
+   win_campaign_song} {set $category WIN_GAME}`** (else, if `game
+   want_encore_fx`, `(WIN_ENCORE_SONG WIN)`).
+2. after `WIN_CAMERA_DELAY`, `pick_shot $category` → the stone venue's
+   `win_game.shot` CamShot (`stone.milo`); for `WIN_ENCORE`/`WIN_GAME` it then
+   schedules `game set_outro_complete` after `shot.duration / 30` s.
+3. `set_lighting` to `{if_else {gamecfg win_campaign_song} (WIN_GAME WIN)
+   {if_else $encore (WIN_ENCORE WIN) (WIN)}}`.
+4. `{handle ($this game_won)}` — fires the `game_won` venue event.
+5. **`{if {gamecfg win_campaign_song} {handle ($this campaign_won)}}`** — fires
+   the `campaign_won` venue event only on the career's last song.
+
+`campaign_won` (listed in `config/macros.dta` WORLDEVENTS) fires the stone
+venue's **`win.trig`** EventTrigger (`world/stone/ng/gen/stone_geom.milo_xbox`),
+which plays the abduction: anims `comet.filt`, `cometalpha.filt`,
+`sky01_alpha1.filt`, `sky01_alpha.filt`, `starflare_filter.filt`,
+**`ufo_win_fly.filt`** (the UFO's flight-in `TransAnim` `ufo01.tnm`/`ufo02.tnm`/
+`ufo_parent.tnm`), `stars_black.filt`, `ufo02.filt`; and shows `win_sky.grp`,
+`UFO2.grp`, `ufo.grp`. Supporting assets in `stone_geom.milo`: meshes
+`ufo01.mesh` (60 KB), `ufo02.mesh`, `ufo_parent.mesh`, `ufobeam.mesh`;
+textures `ufo01`, `ufo02`, `ufo_beam`/`ufobeam`, `ufo_second_stage`,
+`ufo_glow01/02`, `ufo_flare`, `ufo_particle`, `ufo_emissive`; `ufobeam.mnm`
+(the beam), `UFO_energy_field.trig`/`ufo_energy_field.mnm` (the energy field),
+`ufolight.lit`, plus the night sky (`moon`, `comet`, `starfield`,
+`starmessage.milo`). `world/stone/streams/wingame.mogg` is the victory music.
+(The stone UFO is on stage throughout the song too, reacting to frets via
+`UFO_fret_*`/`ufo_show_ufo_*`/`ufo_beam_move` triggers — those already play in
+the port; only the `campaign_won` finale was missing.)
+
+**What the port was missing.** `GameConfig::win_campaign_song`
+(`natives_game.cpp`, binary `0x822B8B18`) was a stub returning `0`.
+Consequently the worldbase `game_won_msg` handler — which the port *does* run
+(the world shares the UI interp during a menu game, `app.cpp:2293`) — always
+took the non-campaign branch: category stayed `WIN` (not `WIN_GAME`, so the
+`win_game.shot` camera was never picked), lighting was `(WIN)` not
+`(WIN_GAME WIN)`, and **`campaign_won` was never fired**, so `win.trig` never
+ran and the UFO never appeared. `campaign_won` was a known world event
+(`world.cpp` worldEvents) with no sender.
+
+**Fix.** `gamecfg win_campaign_song` now returns `career && {campaign
+final_song}` — the same test the port already uses for the band's
+`campaignFinal` (`win_finals` + `kWinGameWalkSpot`), so the camera, lighting
+and UFO all agree. `final_song` is still true at `game_won_msg` (the song is
+not marked passed until `finish_song` on `post_show_screen`). No change to the
+venue trigger machinery was needed — the port already parses and fires
+`EventTrigger`s; it just never received `campaign_won`.
+---------------------------------------------------------------------------------------------------
+## 2026-11-23 — Issue #123: tutorial property read (shared root cause with gd03)
+
+**Context:** Issue #123 reports gd02 tutorial trouble (bugged drawings; the
+guitar audio track dropping out and "repercussing" into the rest of the game).
+While reverse-engineering the tutorial I found the same engine-level defect that
+breaks gd03's tutorial pause, and it is present here too with byte-identical
+data.
+
+**The defect (engine/src/script/script.cpp).** A property read
+(`{o get key}` / `[key]`) fell back to `handler()`, whose list is built
+back-to-front so later-added handlers win message dispatch (correct for
+overrides) — but that returned the **last** duplicate `(key value)` array, while
+Harmonix's `DataArray::FindData` returns the **first**. The `tutorial` object
+(`new TutorialPanel tutorial`, ui/gen/tutorials.dta) declares the property twice:
+`(state "")` at the top (line ~60) and a trailing `(state intro)` at the end
+(line ~369). The original reads `""` during a lesson; the port read `intro`.
+
+**Effect on the tutorial pause.** `tut_pause_screen`'s `BUTTON_DOWN_MSG` swallows
+every button while its local `[paused]` is `FALSE`, and `[paused]` is armed by
+the `pause` handler, which `enter` calls only when `{== {tutorial get state} ""}`
+(tutorials.dta line ~503). With the port reading `intro`, the pause never armed:
+the game was not actually frozen (`paused=0` while `tut_pause_screen` was up) and
+Resume/Restart/Quit did nothing. Verified at runtime (`tutorials_screen` ->
+tut_1 -> Start -> Resume): before, `paused=0` and the Resume press produced no
+screen change; after, `paused=1` while the overlay is up and Resume pops back to
+`tut_script_screen` with in-game input re-armed.
+
+**Fix.** Added `ScriptObject::propDef(key)` (first-defined `(key value)` array,
+matching `DataArray::FindData`) and used it from `getProp`/`hasProp`; message
+dispatch (`handler()`, last-wins override) is unchanged. Objects that declare a
+property once are unaffected. Validated: `--scripttest` ok, `--uitest` 26/0.
+(`--walktest pause` fails identically on baseline and with the fix — a pre-existing
+headless-audio artifact: 0 samples decoded / 195 device failures under the dummy
+driver, "the synth stayed paused" — unrelated to this change.)
+
+**On the reported drawings / guitar-track symptoms (honest status).** This fix
+restores the tutorial pause. It is also a plausible *upstream* cause of the
+"guitar audio track disappears, repercusses" report: before it, pressing Start
+did not freeze the game, so the song kept running under a dead pause menu with no
+hits to un-mute the player's guitar stem (the stem mutes on every miss). I could
+not reproduce the bugged drawings headless, and I ruled out guitar-mute
+persistence across songs (Mixer::play resets `guitarGain_`/`guitarTarget_` to 1
+and loadSong resets `setVolumeDb(0)`), so if the drawings and guitar-track are a
+*separate* defect from the pause, they remain open.

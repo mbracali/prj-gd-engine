@@ -882,6 +882,11 @@ public:
             setValue(it, it.options[size_t(i)].value);
             return true;
         }
+        if ((button == kLeft || button == kRight) && it.kind == Kind::Slider) {
+            if (!editable(it)) return sound("button_error"), true;
+            setSlider(it, sliderValue(it) + (button == kRight ? it.sstep : -it.sstep));
+            return true;
+        }
         if (host_.isSelectButton(button)) return activate(), true;
         return false;  // back: the screen's auto-back
     }
@@ -934,7 +939,11 @@ public:
             if (x < kListX0 || x > kCtrlX1 + 16 || y < top || y > top + h) continue;
             // Hovering focuses (without scrolling the list) and shows the explanation.
             if (int(r) != focus_) focus_ = int(r), sound("button_toggle");
-            if (click) activate();
+            if (click) {
+                const Item& it = item(int(r));
+                if (it.kind == Kind::Slider && editable(it)) sliderClick(it, x);
+                else activate();
+            }
             return true;
         }
         return false;
@@ -1016,7 +1025,7 @@ public:
     }
 
 private:
-    enum class Kind { Section, Separator, Check, Choice, Button };
+    enum class Kind { Section, Separator, Check, Choice, Button, Slider };
     struct Option {
         const char* value;
         const char* label;
@@ -1030,6 +1039,11 @@ private:
         const char* help;
         std::vector<Option> options = {};  // a Choice's values; a Button's label
         const char* needs = nullptr;  // shown only while this setting is on (a check) or not none / off (a choice)
+        const char* needsValue = nullptr;  // with `needs`: shown only while that setting equals this exact value
+        // A Slider's range (enhanced.json stores the number as a string): from
+        // smin to smax in steps of sstep, with `unit` drawn after the value.
+        float smin = 0, smax = 0, sstep = 1;
+        const char* unit = "";
     };
     static const std::vector<Item>& items() {
         static const std::vector<Item> k = {
@@ -1153,6 +1167,20 @@ private:
              "on), brighter highlights, menus at the screen's paper white; it starts with the game, and where it "
              "cannot run Emulated is used. Menus and the HUD keep their colours.",
              {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR"}}},
+            // True HDR's output levels (#80), shown only while HDR is True HDR.
+            // White: paper white, the brightness of a full-white pixel and the
+            // menus (nits). Black: the darkest the image is lifted to, for
+            // screens that crush near-black (nits). They feed the scRGB / PQ
+            // output pass (render/hdr_output.h).
+            {Kind::Slider, "hdr_white", "HDR White Level", true,
+             "True HDR only. How bright a full-white pixel and the menus are, in nits (cd/m2). The HDR standard's "
+             "reference paper white is 203 nits; raise it for a brighter image, lower it for a softer one. Highlights "
+             "still go above it, up to your screen's peak.",
+             {}, "hdr", "true", 80, 480, 1, " nits"},
+            {Kind::Slider, "hdr_black", "HDR Black Level", true,
+             "True HDR only. Lifts the darkest part of the image to this brightness, in nits (cd/m2). 0 keeps true "
+             "black (best on OLED); raise it only if your screen crushes dark detail.",
+             {}, "hdr", "true", 0, 1, 0.05f, " nits"},
             {Kind::Choice, "bokeh", "Bokeh Effect", true,
              "The depth-of-field blur of the close shots. None: always sharp. Medium: as the original game. Light is "
              "softer; Strong and Stronger start the focus nearer the subject and blur wider.",
@@ -1309,7 +1337,7 @@ private:
             if (it.kind == Kind::Section) hidden = collapsed(it.key);
             if (it.kind == Kind::Separator) hidden = false;
             if (it.kind != Kind::Section && it.kind != Kind::Separator && hidden) continue;
-            if (it.needs && !settingOn(it.needs)) continue;
+            if (it.needs && (it.needsValue ? host_.enhancedValue(it.needs) != it.needsValue : !settingOn(it.needs))) continue;
             rows_.push_back(int(i));
         }
         focus_ = 0;
@@ -1379,6 +1407,36 @@ private:
         if ((key == "graphics_backend" || key == "audio_backend") && v != before && v != host_.enhancedValue(key + "_now"))
             ask_ = 0;
     }
+    // -- sliders (#80): a free numeric setting stored as a string in enhanced.json.
+    static constexpr float kSliderValW = 62;  // room on the control's right for the value text
+    static std::string formatSlider(const Item& it, float f) {
+        if (it.sstep >= 1) return std::to_string(int(std::lround(f)));
+        int h = int(std::lround(f * 100));  // two decimals, e.g. 0.05
+        std::string s = std::to_string(h / 100) + ".";
+        if (h % 100 < 10) s += "0";
+        return s + std::to_string(h % 100);
+    }
+    float sliderValue(const Item& it) const {
+        float f = it.smin;
+        try {
+            f = std::stof(host_.enhancedValue(it.key));
+        } catch (...) {
+        }
+        return std::clamp(f, it.smin, it.smax);
+    }
+    void setSlider(const Item& it, float f) {
+        if (it.sstep > 0) f = it.smin + std::round((f - it.smin) / it.sstep) * it.sstep;
+        f = std::clamp(f, it.smin, it.smax);
+        const std::string s = formatSlider(it, f);
+        if (s == host_.enhancedValue(it.key)) return;  // no change: no click
+        host_.setEnhancedValue(it.key, s);
+        sound("button_toggle");
+    }
+    void sliderClick(const Item& it, float x) {  // x in menu units (offset removed)
+        const float x0 = kDdX0, x1 = kCtrlX1 - kSliderValW;
+        const float frac = std::clamp((x - x0) / std::max(1.0f, x1 - x0), 0.0f, 1.0f);
+        setSlider(it, it.smin + frac * (it.smax - it.smin));
+    }
     void sound(const char* seq) { host_.sendTo("synth", "play_sequence", {Value::symbol(seq)}); }
     void activate() {
         const Item& it = item(focus_);
@@ -1408,6 +1466,8 @@ private:
             sound("button_select");
             return;
         }
+        case Kind::Slider:
+            return;  // adjusted with Left / Right or by clicking the track
         case Kind::Button:
             if (!it.ready) return sound("button_error");
             sound("button_select");
@@ -1499,7 +1559,7 @@ private:
         const std::array<float, 4> nameC = f ? kFocused : locked ? kDim : kNormal;
         // A long name next to a dropdown is drawn smaller to fit before it.
         float nameH = 23;
-        if (it.kind == Kind::Choice && !isToggle(it))
+        if ((it.kind == Kind::Choice && !isToggle(it)) || it.kind == Kind::Slider)
             if (float w = host_.textWidth("impactor.font", it.name, 23), room = kDdX0 - kNameX - 14; w > room) nameH = 23 * room / w;
         text("impactor.font", it.name, kNameX + o, cy + 1, nameH, nameC, 0x21);
         if (!it.ready) warning(kNameX + o + host_.textWidth("impactor.font", it.name, 23) + 10, cy);
@@ -1528,6 +1588,16 @@ private:
             const float x1 = kCtrlX1 + o, x0 = x1 - 120;
             frame(x0, cy - 13, x1, cy + 13, 2, ctrl);
             text("impactor.font", it.options.empty() ? "" : it.options[0].label, (x0 + x1) * 0.5f, cy + 1, 20, ctrl, 0x22);
+            break;
+        }
+        case Kind::Slider: {
+            const float x1 = kCtrlX1 + o, tx1 = x1 - kSliderValW, x0 = kDdX0 + o;
+            const float frac = it.smax > it.smin ? (sliderValue(it) - it.smin) / (it.smax - it.smin) : 0;
+            const float kx = x0 + frac * (tx1 - x0);
+            quad(x0, cy - 2, tx1, cy + 2, locked ? kDim : std::array<float, 4>{0.3f, 0.3f, 0.34f, 1});  // track
+            quad(x0, cy - 2, kx, cy + 2, locked ? kDim : kAccent);                                       // filled
+            quad(kx - 3, cy - 9, kx + 3, cy + 9, ctrl);                                                  // knob
+            text("impactor.font", formatSlider(it, sliderValue(it)) + it.unit, x1, cy + 1, 19, ctrl, 0x24);
             break;
         }
         default: break;

@@ -2177,20 +2177,26 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         // the Band* displays at once (0x8268EBD8 -> set_meters_showing FALSE).
         const bool over = ui.host().gameCounter(0, "song_over") == 1;
         const int hidden = ui.host().gameCounter(0, "hud_displays_hidden");
+        const int shadow = ui.host().gameCounter(0, "hud_shadow_shown");
         if (!over) {
             if (hidden == 1) return fail("the HUD's displays hidden before the song ended");
+            // issue #125: while the song runs the drop shadow is part of the HUD.
+            if (shadow == 0) return fail("the rock-meter drop shadow was gone before the song ended");
             if (nowMs - stepStart_ > s.ms) return fail("the song did not end");
             return;
         }
         if (hudOverMs_ < 0) hudOverMs_ = nowMs;
-        if (hidden == 1) {
-            std::printf("  HUD displays hidden %.0f ms after the song ended\n", nowMs - hudOverMs_);
+        // issue #125: the displays AND the drop shadow (meter_extras.grp) must
+        // both leave together (set_meters_showing FALSE covers both).
+        if (hidden == 1 && shadow == 0) {
+            std::printf("  HUD displays hidden %.0f ms after the song ended (drop shadow gone too)\n", nowMs - hudOverMs_);
             hudOverMs_ = -1;
             return pass();
         }
         if (nowMs - hudOverMs_ > 1000) {
+            const char* what = hidden != 1 ? "displays" : "drop shadow (meter_extras.grp)";
             hudOverMs_ = -1;
-            return fail("the HUD's displays still showing 1 s after the song ended");
+            return fail(std::string("the HUD's ") + what + " still showing 1 s after the song ended");
         }
         return;
     }

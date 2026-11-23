@@ -415,7 +415,19 @@ void HudView::drawDir(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const s
     std::vector<const scene::Object*> top;
     for (const auto& o : dir.objects) {
         if (grouped.count(o->name)) continue;
-        if (o->as<scene::Mesh>() || o->as<scene::Group>() || o->as<scene::DirObj>() || o->as<scene::ParticleSys>()) top.push_back(o.get());
+        // The drop shadow (meter_extras.grp -> spraypaint.mesh) sits in the HUD
+        // root, not in a Band* display proxy, so displaysHidden_ (which only
+        // gates the DirObj proxies) did not reach it and it outlived the meters
+        // at "You Rock" (issue #125). In GH2 the shadow is a meter: HudPanel::load
+        // (0x82690308) stores meter_extras.grp at HudPanel+0x90, and
+        // set_meters_showing (0x8268E9F8) clears its showing flag together with
+        // every display; on_game_over (0x8268EBD8) calls set_meters_showing
+        // FALSE, so the shadow leaves with the meters [C]. Match that here.
+        if (displaysHidden_ && o->name == "meter_extras.grp") continue;
+        if (o->as<scene::Mesh>() || o->as<scene::Group>() || o->as<scene::DirObj>() || o->as<scene::ParticleSys>()) {
+            if (o->name == "meter_extras.grp") shadowShown_ = true;
+            top.push_back(o.get());
+        }
     }
     // [I] The drop shadow behind the rock meter (meter_extras.grp, z mode
     // force) has to come first; the game's draw order is not traced.
@@ -505,6 +517,7 @@ void HudView::draw(gfx::Renderer& r, gfx::SceneCache& cache, Canvas& canvas, con
     drive(players, band, nowMs);
     // The HUD draws over everything (the UI camera's depth range 0..0.02).
     r.device().clear(nullptr, true);
+    shadowShown_ = false;
     frameSet_ = false;
     currentEnv_ = nullptr;
     gfx::MaterialRenderer& mr = r.materials();

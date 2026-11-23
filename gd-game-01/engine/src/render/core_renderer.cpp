@@ -500,7 +500,7 @@ void CoreRenderer::endFrame() {
             hdrOutW_ = ww, hdrOutH_ = wh;
         }
         if (!post_) post_ = std::make_unique<CorePostFx>(*dev_);
-        if (hdrOut_ && post_->hdrOutput(frameColor_, hdrOut_, ww, wh, r_.hdrWhite_, r_.hdrSurface_ == 2)) {
+        if (hdrOut_ && post_->hdrOutput(frameColor_, hdrOut_, ww, wh, r_.hdrWhite_, r_.hdrBlack_, r_.hdrSurface_ == 2)) {
             dev_->present(hdrOut_, {0, 0, ww, wh}, gr::Filter::Nearest, true);  // GL style storage
         } else {
             if (!toldHdr_) SDL_Log("hdr: output shader: %s; showing the frame unconverted", dev_->lastError().c_str());

@@ -1279,11 +1279,13 @@ const char* kHdrFragment = R"(#version 330 core
 in vec2 vUv;
 uniform sampler2D uTex;
 uniform float uWhite;  // paper white in scRGB units
+uniform float uBlack;  // black floor in scRGB units (#80)
 uniform int uPq;
 out vec4 fragColor;
 void main() {
     vec3 c = max(texture(uTex, vUv).rgb, 0.0);
     vec3 lin = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)) * uWhite;
+    lin = max(lin, vec3(uBlack));  // lift the darkest output to the black level
     if (uPq != 0) {
         const mat3 toBt2020 = mat3(0.6274, 0.0691, 0.0164, 0.3293, 0.9195, 0.0880, 0.0433, 0.0114, 0.8956);
         vec3 y = clamp(toBt2020 * lin * (80.0 / 10000.0), 0.0, 1.0);
@@ -1313,6 +1315,11 @@ void Renderer::updateHdr() {
         // A PQ surface is absolute: SDR white at BT.2408's 203 nits.
         if (hdrSurface_ == 2) hdrWhite_ = 203.0f / 80.0f;
     }
+    // Enhanced > HDR White / Black Level (#80): the user's paper white overrides
+    // the display's auto value; the black floor lifts the darkest output. Both
+    // are kept in scRGB units (1.0 = 80 nits) for the output pass.
+    hdrWhite_ = std::max(1.0f, hdrUserWhite_) / 80.0f;
+    hdrBlack_ = std::max(0.0f, hdrUserBlack_) / 80.0f;
     const std::string st = hdrStatus();
     if (st != hdrLogged_) SDL_Log("hdr: %s", (hdrLogged_ = st).c_str());
 }
@@ -1373,6 +1380,7 @@ void Renderer::outputHdr(int ww, int wh) {
         gl::glBindTexture(GL_TEXTURE_2D, main_.color);
         gl::glUniform1i(gl::glGetUniformLocation(hdrProgram_, "uTex"), 0);
         gl::glUniform1f(gl::glGetUniformLocation(hdrProgram_, "uWhite"), hdrWhite_);
+        gl::glUniform1f(gl::glGetUniformLocation(hdrProgram_, "uBlack"), hdrBlack_);
         gl::glUniform1i(gl::glGetUniformLocation(hdrProgram_, "uPq"), hdrSurface_ == 2 ? 1 : 0);
         gl::glBindVertexArray(vao_);
         gl::glDrawArrays(GL_TRIANGLES, 0, 3);

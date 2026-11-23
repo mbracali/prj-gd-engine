@@ -186,6 +186,14 @@ public:
         if (surface) updateHdr();  // the window's HDR state now, for the start-up log
     }
     void hdrStateChanged() { hdrDirty_ = true; }
+    // Enhanced > HDR White / Black Level (#80): the paper white (a full-white
+    // pixel and the menus) and the black floor the True HDR output pass uses,
+    // in nits. They override the display's auto paper white.
+    void setHdrUserLevels(float whiteNits, float blackNits) {
+        if (whiteNits == hdrUserWhite_ && blackNits == hdrUserBlack_) return;
+        hdrUserWhite_ = whiteNits, hdrUserBlack_ = blackNits, hdrDirty_ = true;
+        if (hdrSurface_) updateHdr();
+    }
     // True HDR on the Vulkan backend (#80): before init, asks its swapchain for an
     // HDR colour space (gamescope / Wayland); after init, what it got (hdr::Surface
     // values) or why not.
@@ -253,6 +261,8 @@ private:
     bool deviceHdr_ = false;  // requestDeviceHdr
     bool hdrDirty_ = true, hdrOn_ = false;
     float hdrWhite_ = 1, hdrHeadroom_ = 1;  // scRGB units (1 = 80 nits); headroom in paper whites
+    float hdrBlack_ = 0;                     // scRGB units: the black floor the output pass lifts to (#80)
+    float hdrUserWhite_ = 203, hdrUserBlack_ = 0;  // Enhanced HDR White / Black Level, in nits (#80)
     std::string hdrLogged_;
     unsigned hdrProgram_ = 0;
     unsigned pointProgram_ = 0;  // testDepthsAsync

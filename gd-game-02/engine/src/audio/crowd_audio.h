@@ -59,7 +59,9 @@ public:
     CrowdAudio(const CrowdAudio&) = delete;
     CrowdAudio& operator=(const CrowdAudio&) = delete;
 
-    enum Stream { kIntro, kBoot, kBad, kOkay, kGreat, kPeak, kEncoreIntro, kEncoreOutro, kStreams };
+    // kWinGame is the campaign-ending `wingame.mogg` (stone only, not in the
+    // venue's crowd config): `crowd_audio play_stream 0.0 wingame`.
+    enum Stream { kIntro, kBoot, kBad, kOkay, kGreat, kPeak, kEncoreIntro, kEncoreOutro, kWinGame, kStreams };
     struct Entry {
         std::string file;
         float db = 0;
@@ -77,6 +79,10 @@ public:
     std::string musicStart(int excitement, double now);
     std::string excitement(int level, double now);
     void encoreOutro();
+    // crowd_audio play_stream <vol> <name> (Handle 0x822DFD98 -> play 0x822DF860,
+    // loop): the campaign finale's `wingame` victory stream. Unknown names are
+    // ignored.
+    void playStream(const std::string& name);
     void turnOff();
     void setPaused(bool paused);
     std::string setEnabled(bool on, double now);

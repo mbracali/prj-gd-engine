@@ -32,6 +32,14 @@ inline constexpr const char* kArch = "unknown";
 
 std::string baseDir();  // the program's folder, with a trailing separator ("" on Android: the APK's assets)
 std::string saveDir();  // the launcher's save folder (SDL_GetPrefPath("gd-engine", "gdul"))
+// The user's Downloads folder (where the updater saves a new build), with a
+// trailing separator; the save folder as a fallback, "" only when even that
+// is unknown (never used on Android: it downloads through the browser).
+std::string downloadsDir();
+// The launcher's own executable, a full path (for launch commands / desktop
+// shortcuts), or "" when it cannot be found. macOS: the binary inside the
+// .app (shortcut.cpp opens the bundle itself). "" on Android.
+std::string executablePath();
 std::string userName();  // the OS account name
 std::string isoNow();    // local time, ISO 8601 with offset: 2026-10-27T14:03:12-03:00
 

@@ -194,6 +194,46 @@ std::string baseDir() {
 #endif
 }
 
+std::string executablePath() {
+#if defined(__ANDROID__)
+    return "";  // no desktop here
+#elif defined(_WIN32)
+    std::wstring buf(1024, L'\0');
+    for (;;) {
+        DWORD n = GetModuleFileNameW(nullptr, buf.data(), DWORD(buf.size()));
+        if (n == 0) return "";
+        if (n < buf.size()) {
+            buf.resize(n);
+            return narrow(buf.c_str());
+        }
+        buf.resize(buf.size() * 2);  // path longer than the buffer: grow and retry
+    }
+#elif defined(__APPLE__)
+    // _NSGetExecutablePath (dlsym: no header to include here).
+    if (void* self = dlopen(nullptr, RTLD_LAZY)) {
+        using GetPath = int (*)(char*, uint32_t*);
+        auto getPath = reinterpret_cast<GetPath>(dlsym(self, "_NSGetExecutablePath"));
+        dlclose(self);
+        if (getPath) {
+            uint32_t size = 0;
+            getPath(nullptr, &size);
+            std::string buf(size ? size : 4096, '\0');
+            if (getPath(buf.data(), &size) == 0) {
+                buf.resize(std::char_traits<char>::length(buf.c_str()));
+                std::error_code ec;
+                fs::path real = fs::canonical(toPath(buf), ec);  // resolve symlinks
+                return ec ? buf : real.u8string();
+            }
+        }
+    }
+    return "";
+#else  // Linux and other ELF systems
+    std::error_code ec;
+    fs::path p = fs::read_symlink("/proc/self/exe", ec);
+    return ec ? std::string() : p.u8string();
+#endif
+}
+
 std::string nativeLibDir() {
 #ifdef __ANDROID__
     // Where this library (libmain.so) was loaded from: the APK's native
@@ -226,6 +266,17 @@ std::string saveDir() {
 #else
     return s;
 #endif
+}
+
+std::string downloadsDir() {
+    // SDL knows the platform's real Downloads folder (XDG on Linux, the shell
+    // known folder on Windows, ~/Downloads on macOS). It may be null when the
+    // folder is not set up; the save folder is then a safe, writable fallback.
+    std::string dir;
+    if (const char* d = SDL_GetUserFolder(SDL_FOLDER_DOWNLOADS); d && *d) dir = d;
+    if (dir.empty()) dir = saveDir();
+    if (!dir.empty() && dir.back() != '/' && dir.back() != '\\') dir += '/';
+    return dir;
 }
 
 std::string userName() {

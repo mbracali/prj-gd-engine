@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
-// Update from inside the launcher (GDUL-031): see updater.h.
+// Update from inside the launcher (#114): see updater.h.
 #include "updater.h"
 
 #include <algorithm>
@@ -27,14 +27,11 @@ constexpr const char* kApiLatest = "https://api.github.com/repos/mbracali/prj-gd
 constexpr const char* kApiList = "https://api.github.com/repos/mbracali/prj-gd-engine/releases?per_page=20";
 constexpr const char* kReleasesPage = "https://github.com/mbracali/prj-gd-engine/releases/latest";
 constexpr const char* kTagPrefix = "gdul/v";
-// The new launcher counts as started when it says so (the state file), or,
-// for a version that does not know the state file, when it still runs after this long.
-constexpr double kAliveSeconds = 15;
 
 fs::path P(const std::string& s) { return fs::u8path(s); }
 std::string U(const fs::path& p) { return p.u8string(); }
 
-// ---- A small JSON reader (GitHub's release JSON, the package manifest) ----
+// ---- A small JSON reader (GitHub's release JSON) ----
 
 struct Json {
     enum Type { Null, Bool, Num, Str, Arr, Obj } type = Null;
@@ -302,17 +299,64 @@ std::string field(const std::string& text, const std::string& key) {
     return "";
 }
 
-std::string firstLine(const std::string& text) {
-    std::istringstream in(text);
-    std::string line;
-    std::getline(in, line);
-    return trim(line);
+// ---- Helper programs (curl), without a console window on Windows ----
+
+#ifdef _WIN32
+std::string system32(const char* exe) {
+    const char* root = SDL_getenv("SystemRoot");
+    return std::string(root && *root ? root : "C:\\Windows") + "\\System32\\" + exe;
+}
+#endif
+
+std::string curlPath() {
+#if defined(_WIN32)
+    return system32("curl.exe");  // Windows 10 1803 and later
+#elif defined(__APPLE__)
+    return "/usr/bin/curl";
+#else
+    return "curl";
+#endif
 }
 
-bool skippedPart(const fs::path& rel) {
-    for (const fs::path& part : rel)
-        if (part == "original_isos" || part == ".gdul-update") return true;
-    return false;
+// Runs a helper program; stops it (killed) when `cancel` turns true. On
+// Windows it runs in the background (no console flash), so its exit code is
+// always 0 there: the result is checked by what it leaves on disk.
+bool runProcess(const std::vector<std::string>& args, std::atomic<bool>* cancel, std::string& error) {
+    std::vector<const char*> argv;
+    for (const std::string& a : args) argv.push_back(a.c_str());
+    argv.push_back(nullptr);
+    SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());
+    SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
+    SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_NULL);
+    SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_NULL);
+#ifdef _WIN32
+    SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, true);
+#endif
+    SDL_Process* p = SDL_CreateProcessWithProperties(props);
+    SDL_DestroyProperties(props);
+    if (!p) return error = args[0] + " did not start: " + SDL_GetError(), false;
+    int code = 0;
+    while (!SDL_WaitProcess(p, false, &code)) {
+        if (cancel && cancel->load()) {
+            SDL_KillProcess(p, true);
+            SDL_WaitProcess(p, true, &code);
+            SDL_DestroyProcess(p);
+            return error = "cancelled", false;
+        }
+        SDL_Delay(50);
+    }
+    SDL_DestroyProcess(p);
+    if (code != 0) return error = platform::fileName(args[0]) + " failed (exit " + std::to_string(code) + ")", false;
+    return true;
+}
+
+// GETs `url` to `outFile` with curl (also used by selfTest with a file:// URL).
+bool httpFetchToFile(const std::string& url, const std::string& outFile, const std::string& ua, std::atomic<bool>* cancel,
+                     std::string& error) {
+    return runProcess({curlPath(), "-fsSL", "--connect-timeout", "20", "--max-time", "900", "--retry", "2", "-A", ua, "-H",
+                       "Accept: application/vnd.github+json", "-o", outFile, url},
+                      cancel, error);
 }
 
 }  // namespace
@@ -378,6 +422,19 @@ const Asset* Release::find(const std::string& name) const {
     for (const Asset& a : assets)
         if (a.name == name) return &a;
     return nullptr;
+}
+
+std::string pickAsset(Kind k, const Release& r) {
+    for (const std::string& name : assetNames(k, r.version))
+        if (r.find(name)) return name;
+    return "";
+}
+
+bool shouldWarn(const std::string& remoteVersion, const std::string& localVersion, const std::string& asset, bool manual,
+                bool skipped) {
+    if (compareVersions(remoteVersion, localVersion) <= 0) return false;  // not newer
+    if (asset.empty()) return false;                                      // no download for this build
+    return manual || !skipped;                                           // a skipped version is quiet unless asked
 }
 
 bool parseRelease(const std::string& json, Release& out, std::string& error) {
@@ -460,125 +517,6 @@ std::string expectedSum(const std::string& sums, const std::string& name) {
     return "";
 }
 
-// ---- The package and the swap ----
-
-bool checkPackage(const std::string& root, const std::string& exe, std::string& error) {
-    std::error_code ec;
-    const fs::path r = P(root);
-    if (!fs::is_regular_file(r / P(exe), ec) || fs::file_size(r / P(exe), ec) == 0)
-        return error = "the package has no " + exe, false;
-    fs::path games = r / "gd-engine-games";
-    if (fs::is_directory(r / "Contents" / "Resources", ec)) games = r / "Contents" / "Resources" / "gd-engine-games";
-    const std::string manifest = readFile(U(games / "manifest.json"));
-    Json m;
-    if (manifest.empty() || !JsonReader(manifest).parse(m) || m.type != Json::Obj)
-        return error = "the package has no gd-engine-games/manifest.json", false;
-    const Json* list = m.get("games");
-    if (!list || list->type != Json::Obj || list->o.empty()) return error = "the package's manifest lists no game", false;
-    for (const auto& [id, g] : list->o) {
-        const std::string mod = g.str("module");
-        const fs::path f = games / P(id) / P(mod);
-        if (mod.empty() || !fs::is_regular_file(f, ec) || fs::file_size(f, ec) == 0)
-            return error = "the package lacks " + id + "'s module (" + (mod.empty() ? "none listed" : mod) + ")", false;
-    }
-    return true;
-}
-
-bool rollback(const std::string& journal, std::string& error) {
-    const std::string text = readFile(journal);
-    if (text.empty()) return error = "no journal", false;
-    const fs::path src = P(field(text, "src")), dst = P(field(text, "dst")), backup = P(field(text, "backup"));
-    std::vector<std::string> steps;
-    std::istringstream in(text);
-    std::string line;
-    while (std::getline(in, line))
-        if (line.size() > 2 && line[1] == ' ' && (line[0] == 'B' || line[0] == 'N' || line[0] == 'D')) steps.push_back(line);
-    bool ok = true;
-    std::error_code ec;
-    for (auto it = steps.rbegin(); it != steps.rend(); ++it) {
-        const fs::path rel = P(it->substr(2));
-        ec.clear();
-        if ((*it)[0] == 'N') {  // the new file goes back where it came from
-            fs::create_directories((src / rel).parent_path(), ec);
-            fs::rename(dst / rel, src / rel, ec);
-            if (ec) fs::remove(dst / rel, ec);
-        } else if ((*it)[0] == 'B') {  // the old file comes back
-            fs::rename(backup / rel, dst / rel, ec);
-        } else {
-            fs::remove(dst / rel, ec);  // a folder the update made: only when empty
-            ec.clear();
-        }
-        if (ec) {
-            ok = false;
-            error = "cannot put back " + U(rel) + ": " + ec.message();
-        }
-    }
-    return ok;
-}
-
-bool swapIn(const std::string& srcS, const std::string& dstS, const std::string& backupS, const std::string& journalS,
-            std::string& error) {
-    const fs::path src = P(srcS), dst = P(dstS), backup = P(backupS);
-    std::error_code ec;
-    std::vector<fs::path> files;
-    for (fs::recursive_directory_iterator it(src, ec), end; !ec && it != end; it.increment(ec)) {
-        const fs::path rel = it->path().lexically_relative(src);
-        if (skippedPart(rel)) {
-            if (it->is_directory(ec) && !it->is_symlink(ec)) it.disable_recursion_pending();
-            continue;
-        }
-        if (it->is_symlink(ec) || !it->is_directory(ec)) files.push_back(rel);
-    }
-    if (ec) return error = "cannot read the new files: " + ec.message(), false;
-    if (files.empty()) return error = "the package is empty", false;
-
-    std::ofstream journal(P(journalS), std::ios::binary | std::ios::trunc);
-    if (!journal) return error = "cannot write " + journalS, false;
-    journal << "src=" << U(src) << "\ndst=" << U(dst) << "\nbackup=" << U(backup) << "\n";
-    journal.flush();
-    auto fail = [&](const std::string& why) {
-        journal.close();
-        std::string undo;
-        if (!rollback(journalS, undo)) error = why + " (and putting the old files back: " + undo + ")";
-        else error = why;
-        return false;
-    };
-    for (const fs::path& rel : files) {
-        // The folders on the way, made when missing (and removed again on a rollback).
-        fs::path part;
-        for (const fs::path& p : rel.parent_path()) {
-            part /= p;
-            ec.clear();
-            const fs::file_status st = fs::symlink_status(dst / part, ec);
-            if (fs::exists(st)) {
-                if (!fs::is_directory(fs::status(dst / part, ec)))
-                    return fail(U(part) + " is in the way (a file where the update has a folder)");
-                continue;
-            }
-            if (!fs::create_directory(dst / part, ec) || ec) return fail("cannot make " + U(dst / part) + ": " + ec.message());
-            journal << "D " << part.generic_u8string() << "\n";
-            journal.flush();
-        }
-        ec.clear();
-        const fs::file_status st = fs::symlink_status(dst / rel, ec);
-        if (fs::exists(st)) {
-            if (fs::is_directory(st)) return fail(U(rel) + " is in the way (a folder where the update has a file)");
-            fs::create_directories((backup / rel).parent_path(), ec);
-            ec.clear();
-            fs::rename(dst / rel, backup / rel, ec);
-            if (ec) return fail("cannot move " + U(rel) + " aside: " + ec.message());
-            journal << "B " << rel.generic_u8string() << "\n";
-            journal.flush();
-        }
-        fs::rename(src / rel, dst / rel, ec);
-        if (ec) return fail("cannot move the new " + U(rel) + " in: " + ec.message());
-        journal << "N " << rel.generic_u8string() << "\n";
-        journal.flush();
-    }
-    journal << "done\n";
-    return true;
-}
-
 // ---- Self-test (gdul --update-selftest) ----
 
 int selfTest() {
@@ -587,7 +525,7 @@ int selfTest() {
         std::printf("%s %s\n", ok ? "ok  " : "FAIL", what.c_str());
         if (!ok) ++failed;
     };
-    // Versions.
+    // (a) Version compare: older, newer, equal.
     check(compareVersions("gdul/v1.1.16", "1.1.15") > 0, "1.1.16 is newer than 1.1.15");
     check(compareVersions("1.1.9", "1.1.10") < 0, "1.1.9 is older than 1.1.10 (numbers, not text)");
     check(compareVersions("v1.2.0", "1.1.99") > 0, "1.2.0 is newer than 1.1.99");
@@ -602,6 +540,7 @@ int selfTest() {
           "portable takes portable-x86_64.tar.gz (linux-x86_64.tar.gz read for old releases)");
     check(assetNames(Kind::Windows, "1.1.16")[0] == "gdul-1.1.16-windows-x86_64.zip", "Windows takes the zip");
     check(assetNames(Kind::MacOS, "1.1.16")[0] == "gdul-1.1.16-macos-arm64.zip", "macOS takes the zip");
+    check(assetNames(Kind::AppImage, "1.1.16")[0] == "gdul-1.1.16-linux-x86_64.AppImage", "AppImage takes the AppImage");
     check(assetNames(Kind::Android, "1.1.16")[0] == "gdul-1.1.16-android-arm64.apk", "Android takes the APK");
     // Release JSON and highlights.
     const std::string json =
@@ -620,6 +559,18 @@ int selfTest() {
               l.version == "1.1.17",
           "release list: the newest non-draft gdul release");
     check(!parseRelease("{\"message\":\"API rate limit exceeded\"}", l, err) && err == "API rate limit exceeded", "an API error is an error");
+    // (c) The platform's asset is the one chosen (name + URL).
+    check(pickAsset(Kind::SteamDeck, r) == "gdul-1.1.16-steamdeck-x86_64.tar.gz" &&
+              r.find(pickAsset(Kind::SteamDeck, r))->url == "https://x/d",
+          "pickAsset: this build's asset and its download URL");
+    check(pickAsset(Kind::Windows, r).empty(), "pickAsset: nothing when the release has no asset for this build");
+    // (b) "Update available" triggers only when remote > local (and there is an asset).
+    check(shouldWarn("1.1.16", "1.1.15", "gdul-1.1.16-steamdeck-x86_64.tar.gz", false, false), "warn: newer with an asset");
+    check(!shouldWarn("1.1.15", "1.1.15", "gdul-1.1.15-steamdeck-x86_64.tar.gz", false, false), "no warn: same version");
+    check(!shouldWarn("1.1.14", "1.1.15", "gdul-1.1.14-steamdeck-x86_64.tar.gz", false, false), "no warn: older online");
+    check(!shouldWarn("1.1.16", "1.1.15", "", false, false), "no warn: newer but no asset for this build");
+    check(!shouldWarn("1.1.16", "1.1.15", "gdul-1.1.16-steamdeck-x86_64.tar.gz", false, true), "no warn: a skipped version (automatic check)");
+    check(shouldWarn("1.1.16", "1.1.15", "gdul-1.1.16-steamdeck-x86_64.tar.gz", true, true), "warn: a skipped version when asked by hand");
     // SHA-256.
     check(sha256Hex("abc", 3) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "SHA-256 of abc");
     check(sha256Hex("", 0) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "SHA-256 of nothing");
@@ -631,63 +582,30 @@ int selfTest() {
               expectedSum(sums, "gdul-1.1.16-portable-x86_64.tar.gz").empty(),
           "SHA256SUMS.txt: the asset's line, none for another");
 
-    // The swap, in a temporary folder.
+    // (d) A download writes the file: curl a local file:// URL and check its bytes.
     std::error_code ec;
     const fs::path t = fs::temp_directory_path(ec) / ("gdul-update-selftest-" + std::to_string(SDL_GetTicksNS()));
-    const fs::path install = t / "install", pkg = t / "pkg", up = t / "install" / ".gdul-update";
-    auto put = [](const fs::path& f, const std::string& text) {
-        std::error_code e;
-        fs::create_directories(f.parent_path(), e);
-        writeFile(U(f), text);
-    };
-    put(install / "Launcher", "old exe");
-    put(install / "gd-engine-games/manifest.json", "{\"games\":{\"gd-game-01\":{\"module\":\"gd-game-01.so\"}}}");
-    put(install / "gd-engine-games/gd-game-01/gd-game-01.so", "old module");
-    put(install / "gd-engine-games/gd-game-01/old-only.txt", "old only");
-    put(install / "original_isos/My Game.iso", "player's disc");
-    put(install / "mine/notes.txt", "player's file");
-    put(install / "player.cfg", "player's settings");
-    put(pkg / "Launcher", "new exe");
-    put(pkg / "gd-engine-games/manifest.json", "{\"games\":{\"gd-game-01\":{\"module\":\"gd-game-01.so\"},\"gd-game-02\":{\"module\":\"gd-game-02.so\"}}}");
-    put(pkg / "gd-engine-games/gd-game-01/gd-game-01.so", "new module 1");
-    put(pkg / "gd-engine-games/gd-game-02/gd-game-02.so", "new module 2");
-    put(pkg / "original_isos/README.md", "new readme");
-    put(pkg / "original_isos/My Game.iso", "must never land");
-    check(checkPackage(U(pkg), "Launcher", err), "package check: the program and every module of the manifest");
-    fs::remove(pkg / "gd-engine-games/gd-game-02/gd-game-02.so", ec);
-    const bool caught = !checkPackage(U(pkg), "Launcher", err);
-    check(caught && err.find("gd-game-02") != std::string::npos, "package check: a missing module fails (" + err + ")");
-    put(pkg / "gd-engine-games/gd-game-02/gd-game-02.so", "new module 2");
-    fs::create_directories(up, ec);
-    const std::string journal = U(up / "journal.txt");
-    const bool swapped = swapIn(U(pkg), U(install), U(up / "previous-1.0.0"), journal, err);
-    check(swapped, swapped ? "swap: done" : "swap: " + err);
-    check(readFile(U(install / "Launcher")) == "new exe" && readFile(U(install / "gd-engine-games/gd-game-02/gd-game-02.so")) == "new module 2" &&
-              readFile(U(install / "gd-engine-games/gd-game-01/gd-game-01.so")) == "new module 1",
-          "swap: the program and the modules are the new ones (gd-engine-games carried over)");
-    check(readFile(U(install / "original_isos/My Game.iso")) == "player's disc" && !fs::exists(install / "original_isos/README.md") &&
-              readFile(U(install / "mine/notes.txt")) == "player's file" && readFile(U(install / "player.cfg")) == "player's settings" &&
-              readFile(U(install / "gd-engine-games/gd-game-01/old-only.txt")) == "old only",
-          "swap: original_isos and the player's files untouched, nothing deleted");
-    check(readFile(U(up / "previous-1.0.0/Launcher")) == "old exe" &&
-              readFile(U(up / "previous-1.0.0/gd-engine-games/gd-game-01/gd-game-01.so")) == "old module",
-          "swap: the old files kept in .gdul-update/previous-<version>/");
-    const bool back = rollback(journal, err);
-    check(back, back ? "rollback: done" : "rollback: " + err);
-    check(readFile(U(install / "Launcher")) == "old exe" && readFile(U(install / "gd-engine-games/gd-game-01/gd-game-01.so")) == "old module" &&
-              !fs::exists(install / "gd-engine-games/gd-game-02") && readFile(U(install / "original_isos/My Game.iso")) == "player's disc" &&
-              readFile(U(install / "mine/notes.txt")) == "player's file",
-          "rollback: the old version back as it was, the player's files untouched");
-    // A swap that fails half-way undoes itself: a folder where the package has a file.
-    fs::remove_all(up / "previous-1.0.0", ec);
-    put(install / "zzz/dummy", "player's");
-    put(pkg / "zzz", "a file where the install has a folder");
-    err.clear();
-    const bool refused = !swapIn(U(pkg), U(install), U(up / "previous-1.0.0"), journal, err);
-    check(refused && readFile(U(install / "Launcher")) == "old exe" &&
-              readFile(U(install / "zzz/dummy")) == "player's",
-          "a failed swap puts everything back (" + err + ")");
+    fs::create_directories(t, ec);
+    const std::string srcName = "gdul-1.1.16-steamdeck-x86_64.tar.gz";
+    const fs::path src = t / srcName, downloads = t / "Downloads", dst = downloads / srcName;
+    fs::create_directories(downloads, ec);
+    const std::string payload = "a pretend release package\n";
+    check(writeFile(U(src), payload), "download: a local source file to fetch");
+    // A file:// URL curl can read (POSIX file://<abs>; Windows file:///<drive path>).
+    std::string srcUrl = U(fs::absolute(src, ec));
+#ifdef _WIN32
+    std::replace(srcUrl.begin(), srcUrl.end(), '\\', '/');
+    srcUrl = "file:///" + srcUrl;
+#else
+    srcUrl = "file://" + srcUrl;
+#endif
+    std::atomic<bool> noCancel{false};
+    const bool fetched = httpFetchToFile(srcUrl, U(dst), "gdul/" + std::string(GDUL_VERSION), &noCancel, err);
+    std::string got;
+    check(fetched && fs::is_regular_file(dst, ec) && sha256File(U(dst), got) && got == sha256Hex(payload.data(), payload.size()),
+          fetched ? "download: the file is written to the Downloads folder with matching bytes" : "download: " + err);
     fs::remove_all(t, ec);
+
     std::printf("%s: %d failed\n", failed ? "update self-test FAILED" : "update self-test passed", failed);
     return failed ? 1 : 0;
 }
@@ -703,15 +621,14 @@ void Updater::init(const std::string& launcherVersion) {
     const std::string settings = readFile(platform::join(platform::saveDir(), "update.txt"));
     checkAtStart_ = field(settings, "check_at_start") != "0";
     skip_ = field(settings, "skip");
+    downloadsDir_ = platform::downloadsDir();
 
 #if defined(__ANDROID__)
     kind_ = Kind::Android;
 #elif defined(_WIN32)
     kind_ = Kind::Windows;
-    exeRel_ = "Guitar Dream Universal Launcher.exe";
 #elif defined(__APPLE__)
     kind_ = Kind::MacOS;
-    exeRel_ = "Contents/MacOS/Guitar Dream Universal Launcher";
 #else
     const std::string base = platform::baseDir();
     const char* appImage = SDL_getenv("APPIMAGE");
@@ -722,45 +639,11 @@ void Updater::init(const std::string& launcherVersion) {
 #else
     else kind_ = Kind::Portable;
 #endif
-    exeRel_ = "Guitar Dream Universal Launcher";
 #endif
 
-    std::error_code ec;
-    if (kind_ == Kind::Windows || kind_ == Kind::Portable || kind_ == Kind::SteamDeck) {
-        installRoot_ = platform::baseDir();
-    } else if (kind_ == Kind::MacOS) {
-        installRoot_ = platform::appBundle();
-        if (installRoot_.empty()) whyNot_ = "the launcher does not run from its .app";
-        else if (platform::isTranslocated(installRoot_)) whyNot_ = "macOS runs the app from a read-only copy (move it out of Downloads first)";
-    } else if (kind_ == Kind::AppImage) {
-        whyNot_ = "the AppImage updates with AppImageUpdate, AppManager or Gear Lever";
-    } else if (kind_ == Kind::Android) {
-        whyNot_ = "Android installs the new APK itself";
-    }
-    if (!installRoot_.empty() && whyNot_.empty()) {
-        const fs::path root = P(installRoot_);
-        const fs::path manifest = kind_ == Kind::MacOS ? root / "Contents/Resources/gd-engine-games/manifest.json"
-                                                       : root / "gd-engine-games/manifest.json";
-        if (!fs::is_regular_file(root / P(exeRel_), ec) || !fs::is_regular_file(manifest, ec)) {
-            whyNot_ = "this is not a release download (a development build)";
-        } else {
-            // Writable? (Program Files, a read-only folder: no.)
-            const fs::path probe = P(updateDir()).parent_path().parent_path() / ".gdul-write-test";
-            if (!writeFile(U(probe), "ok")) whyNot_ = "the launcher's folder is read-only (" + installRoot_ + ")";
-            fs::remove(probe, ec);
-        }
-    }
-    selfUpdate_ = whyNot_.empty() && !installRoot_.empty();
-    SDL_Log("gdul: update: %s build, %s", kindName(kind_),
-            recomp_ ? "RecompLauncher updates it" : selfUpdate_ ? "updates itself" : whyNot_.c_str());
+    SDL_Log("gdul: update: %s build, downloads to %s%s", kindName(kind_), downloadsDir_.c_str(),
+            recomp_ ? " (RecompLauncher updates it; no check)" : "");
 }
-
-std::string Updater::updateDir() const {
-    if (kind_ == Kind::MacOS) return platform::join(platform::parentDir(installRoot_), ".gdul-update") + "/";
-    return platform::join(installRoot_, ".gdul-update") + "/";
-}
-
-std::string Updater::statePath() const { return updateDir() + "state.txt"; }
 
 std::string Updater::releasesPage() const {
     std::lock_guard<std::mutex> g(lock_);
@@ -797,6 +680,11 @@ std::string Updater::assetName() const {
     return asset_;
 }
 
+std::string Updater::downloadedPath() const {
+    std::lock_guard<std::mutex> g(lock_);
+    return state_.load() == State::Downloaded ? downloadPath_ : "";
+}
+
 void Updater::progress(long long& done, long long& total) const {
     total = total_.load();
     std::string path;
@@ -820,7 +708,7 @@ void Updater::fail(const std::string& why) {
 
 void Updater::startCheck(bool manual) {
     const State s = state_.load();
-    if (recomp_ || s == State::Checking || s == State::Downloading || s == State::Applying) return;
+    if (recomp_ || s == State::Checking || s == State::Downloading) return;
     if (thread_) SDL_WaitThread(thread_, nullptr), thread_ = nullptr;
     manual_ = manual;
     cancel_ = false;
@@ -831,7 +719,8 @@ void Updater::startCheck(bool manual) {
 }
 
 void Updater::startDownload() {
-    if (state_.load() != State::Available || !selfUpdate_) return;
+    // Android downloads through the browser (the UI opens the APK URL), not here.
+    if (state_.load() != State::Available || kind_ == Kind::Android) return;
     if (thread_) SDL_WaitThread(thread_, nullptr), thread_ = nullptr;
     cancel_ = false;
     job_ = 2;
@@ -845,7 +734,6 @@ void Updater::cancel() { cancel_ = true; }
 void Updater::shutdown() {
     cancel_ = true;
     if (thread_) SDL_WaitThread(thread_, nullptr), thread_ = nullptr;
-    if (child_) SDL_DestroyProcess(child_), child_ = nullptr;  // the new launcher keeps running
 }
 
 int Updater::threadMain(void* self) {
@@ -854,57 +742,6 @@ int Updater::threadMain(void* self) {
     else u->runDownload();
     return 0;
 }
-
-// A helper program (curl, tar, ditto), without a console window on Windows.
-bool Updater::run(const std::vector<std::string>& args, std::string& error) {
-    std::vector<const char*> argv;
-    for (const std::string& a : args) argv.push_back(a.c_str());
-    argv.push_back(nullptr);
-    SDL_PropertiesID props = SDL_CreateProperties();
-    SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());
-    SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
-    SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_NULL);
-    SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_NULL);
-#ifdef _WIN32
-    // No console window flashing up (its exit code is then always 0: the
-    // results are checked by what they leave on disk).
-    SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, true);
-#endif
-    SDL_Process* p = SDL_CreateProcessWithProperties(props);
-    SDL_DestroyProperties(props);
-    if (!p) return error = args[0] + " did not start: " + SDL_GetError(), false;
-    int code = 0;
-    while (!SDL_WaitProcess(p, false, &code)) {
-        if (cancel_) {
-            SDL_KillProcess(p, true);
-            SDL_WaitProcess(p, true, &code);
-            SDL_DestroyProcess(p);
-            return error = "cancelled", false;
-        }
-        SDL_Delay(50);
-    }
-    SDL_DestroyProcess(p);
-    if (code != 0) return error = platform::fileName(args[0]) + " failed (exit " + std::to_string(code) + ")", false;
-    return true;
-}
-
-namespace {
-#ifdef _WIN32
-std::string system32(const char* exe) {
-    const char* root = SDL_getenv("SystemRoot");
-    return std::string(root && *root ? root : "C:\\Windows") + "\\System32\\" + exe;
-}
-#endif
-std::string curlPath() {
-#if defined(_WIN32)
-    return system32("curl.exe");  // Windows 10 1803 and later
-#elif defined(__APPLE__)
-    return "/usr/bin/curl";
-#else
-    return "curl";
-#endif
-}
-}  // namespace
 
 bool Updater::httpGet(const std::string& url, std::string& body, std::string& error) {
     const std::string ua = "gdul/" + std::string(GDUL_VERSION);
@@ -935,10 +772,7 @@ bool Updater::httpGet(const std::string& url, std::string& body, std::string& er
     const std::string tmp = platform::join(platform::saveDir(), "update-answer.tmp");
     std::error_code ec;
     fs::remove(P(tmp), ec);
-    if (!run({curlPath(), "-fsSL", "--max-time", "30", "--connect-timeout", "10", "-A", ua, "-H", "Accept: application/vnd.github+json",
-              "-o", tmp, url},
-             error))
-        return false;
+    if (!httpFetchToFile(url, tmp, ua, &cancel_, error)) return false;
     body = readFile(tmp);
     fs::remove(P(tmp), ec);
     if (body.empty()) return error = "no answer from GitHub (no network?)", false;
@@ -955,12 +789,7 @@ void Updater::runCheck() {
         if (!httpGet(kApiList, body, err)) return fail("check: " + err);
         if (!parseRelease(body, r, err)) return fail("check: " + err);
     }
-    std::string asset;
-    for (const std::string& name : assetNames(kind_, r.version))
-        if (r.find(name)) {
-            asset = name;
-            break;
-        }
+    const std::string asset = pickAsset(kind_, r);
     {
         std::lock_guard<std::mutex> g(lock_);
         release_ = r;
@@ -970,8 +799,7 @@ void Updater::runCheck() {
     const bool newer = compareVersions(r.version, version_) > 0;
     SDL_Log("gdul: update: latest is %s, this is %s%s", r.version.c_str(), version_.c_str(),
             newer ? (asset.empty() ? " (newer, but no download for this build)" : " (newer)") : "");
-    if (newer && !asset.empty() && (manual_ || !skipped(r.version))) state_ = State::Available;
-    else state_ = State::UpToDate;
+    state_ = shouldWarn(r.version, version_, asset, manual_, skipped(r.version)) ? State::Available : State::UpToDate;
 }
 
 void Updater::runDownload() {
@@ -983,155 +811,44 @@ void Updater::runDownload() {
         asset = asset_;
     }
     const Asset* a = r.find(asset);
-    const Asset* sumsAsset = r.find("SHA256SUMS.txt");
     if (!a) return fail("the release has no " + asset);
-    if (!sumsAsset) return fail("the release has no SHA256SUMS.txt: not updating without it");
+    if (downloadsDir_.empty()) return fail("could not find a Downloads folder to save to");
     std::error_code ec;
-    const std::string dir = updateDir();
-    const fs::path dl = P(dir) / "download", staging = P(dir) / "staging";
-    fs::remove_all(dl, ec);
-    fs::remove_all(staging, ec);
-    fs::create_directories(dl, ec);
-    fs::create_directories(staging, ec);
-    if (ec) return fail("cannot make " + U(staging) + ": " + ec.message());
+    fs::create_directories(P(downloadsDir_), ec);
 
-    std::string sums, err;
-    if (!httpGet(sumsAsset->url, sums, err)) return fail("SHA256SUMS.txt: " + err);
-    const std::string want = expectedSum(sums, asset);
-    if (want.empty()) return fail("SHA256SUMS.txt has no line for " + asset);
+    const std::string ua = "gdul/" + std::string(GDUL_VERSION);
+    // SHA256SUMS.txt is optional: when the release has it we check the download.
+    const Asset* sumsAsset = r.find("SHA256SUMS.txt");
+    std::string want;
+    if (sumsAsset) {
+        std::string sums, err;
+        if (!httpGet(sumsAsset->url, sums, err)) return fail("SHA256SUMS.txt: " + err);
+        want = expectedSum(sums, asset);
+    }
 
-    const std::string file = U(dl / P(asset));
+    const std::string file = U(P(downloadsDir_) / P(asset));
     total_ = a->size;
     {
         std::lock_guard<std::mutex> g(lock_);
         downloadPath_ = file;
     }
-    const std::string ua = "gdul/" + std::string(GDUL_VERSION);
-    if (!run({curlPath(), "-fsSL", "--connect-timeout", "20", "--retry", "2", "-A", ua, "-o", file, a->url}, err))
-        return fail(err == "cancelled" ? err : "download: " + err);
-    if (cancel_) return fail("cancelled");
-    std::string got;
-    if (!sha256File(file, got)) return fail("download: no file (no network?)");
-    if (got != want) {
-        fs::remove(P(file), ec);
-        return fail("the download's SHA-256 does not match SHA256SUMS.txt (" + got.substr(0, 12) + "... instead of " + want.substr(0, 12) +
-                    "...): nothing was changed");
-    }
-    SDL_Log("gdul: update: %s downloaded, SHA-256 %s matches", asset.c_str(), got.c_str());
-
-    // Extract next to the install (the same disk: the swap only renames).
-#if defined(_WIN32)
-    const std::vector<std::string> extract = {system32("tar.exe"), "-xf", file, "-C", U(staging)};
-#elif defined(__APPLE__)
-    const std::vector<std::string> extract = {"/usr/bin/ditto", "-x", "-k", file, U(staging)};
-#else
-    const std::vector<std::string> extract = {"tar", "-xzf", file, "-C", U(staging)};
-#endif
-    if (!run(extract, err)) return fail("extract: " + err);
-    fs::remove(P(file), ec);
-    // The archive has one folder (gdul-<v>-<system>/); macOS: the .app in it.
-    fs::path root = staging;
-    std::vector<fs::path> top;
-    for (const auto& e : fs::directory_iterator(staging, ec)) top.push_back(e.path());
-    if (top.size() == 1 && fs::is_directory(top[0], ec)) root = top[0];
-    if (kind_ == Kind::MacOS) {
-        fs::path app;
-        for (const auto& e : fs::directory_iterator(root, ec))
-            if (e.path().extension() == ".app") app = e.path();
-        if (app.empty()) return fail("the package has no .app");
-        root = app;
-    }
-    if (!checkPackage(U(root), exeRel_, err)) return fail(err + ": nothing was changed");
-    // Its manifest says the version it is.
-    fs::path games = kind_ == Kind::MacOS ? root / "Contents/Resources/gd-engine-games" : root / "gd-engine-games";
-    Json m;
-    const std::string manifest = readFile(U(games / "manifest.json"));
-    if (JsonReader(manifest).parse(m) && !m.str("launcher_version").empty() && m.str("launcher_version") != r.version)
-        return fail("the package says it is " + m.str("launcher_version") + ", not " + r.version + ": nothing was changed");
-    {
-        std::lock_guard<std::mutex> g(lock_);
-        packageRoot_ = U(root);
-        downloadPath_.clear();
-    }
-    state_ = State::Ready;
-}
-
-bool Updater::apply() {
-    if (state_.load() != State::Ready) return false;
-    if (thread_) SDL_WaitThread(thread_, nullptr), thread_ = nullptr;
-    const Release r = release();
-    const std::string dir = updateDir();
-    const std::string backup = dir + "previous-" + version_;
-    journal_ = dir + "journal.txt";
-    std::error_code ec;
-    fs::remove_all(P(backup), ec);
     std::string err;
-    if (!swapIn(packageRoot_, installRoot_, backup, journal_, err)) {
-        fail("the swap failed, the old version is kept: " + err);
-        return false;
+    if (!httpFetchToFile(a->url, file, ua, &cancel_, err)) return fail(err == "cancelled" ? err : "download: " + err);
+    if (cancel_) return fail("cancelled");
+    if (!want.empty()) {
+        std::string got;
+        if (!sha256File(file, got)) return fail("download: no file (no network?)");
+        if (got != want) {
+            fs::remove(P(file), ec);
+            return fail("the download's SHA-256 does not match SHA256SUMS.txt (" + got.substr(0, 12) + "... instead of " +
+                        want.substr(0, 12) + "...): the file was removed");
+        }
+        SDL_Log("gdul: update: %s downloaded to %s, SHA-256 %s matches", asset.c_str(), downloadsDir_.c_str(), got.c_str());
+    } else {
+        SDL_Log("gdul: update: %s downloaded to %s (release has no SHA256SUMS.txt to check against)", asset.c_str(),
+                downloadsDir_.c_str());
     }
-    writeFile(statePath(), "swapped\nfrom=" + version_ + "\nto=" + r.version + "\n");
-    SDL_Log("gdul: update: %s -> %s swapped in, starting the new launcher", version_.c_str(), r.version.c_str());
-
-    // The new launcher, with this environment minus the development aids.
-    const std::string exe = U(P(installRoot_) / P(exeRel_));
-    const char* argv[] = {exe.c_str(), nullptr};
-    SDL_Environment* env = SDL_CreateEnvironment(true);
-    for (const char* v : {"GDUL_SCRIPT", "GDUL_UPDATE_AS_VERSION"}) SDL_UnsetEnvironmentVariable(env, v);
-    SDL_PropertiesID props = SDL_CreateProperties();
-    SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv);
-    SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, env);
-    child_ = SDL_CreateProcessWithProperties(props);
-    SDL_DestroyProperties(props);
-    SDL_DestroyEnvironment(env);
-    if (!child_) {
-        const std::string why = std::string("the new launcher did not start (") + SDL_GetError() + ")";
-        std::string undo;
-        rollback(journal_, undo);
-        writeFile(statePath(), "rolledback\n");
-        fail(why + "; the old version is back" + (undo.empty() ? "" : " (" + undo + ")"));
-        return false;
-    }
-    childStartNs_ = SDL_GetTicksNS();
-    state_ = State::Applying;
-    return true;
-}
-
-int Updater::pollStarted() {
-    if (state_.load() != State::Applying || !child_) return -1;
-    if (firstLine(readFile(statePath())) == "ok") return 1;
-    int code = 0;
-    if (SDL_WaitProcess(child_, false, &code)) {
-        SDL_DestroyProcess(child_);
-        child_ = nullptr;
-        std::string undo;
-        const bool back = rollback(journal_, undo);
-        writeFile(statePath(), "rolledback\n");
-        fail("the new launcher stopped at once (exit " + std::to_string(code) + "); " +
-             (back ? "the old version is back" : "putting the old version back failed: " + undo));
-        return -1;
-    }
-    if (double(SDL_GetTicksNS() - childStartNs_) / 1e9 > kAliveSeconds) return 1;  // a version without the state file
-    return 0;
-}
-
-std::string Updater::finishPending() {
-    if (!selfUpdate_) return "";
-    const std::string state = readFile(statePath());
-    const std::string what = firstLine(state);
-    std::error_code ec;
-    if (what == "swapped" && field(state, "to") == version_) return field(state, "from");
-    if (what == "ok" || what == "rolledback") {
-        // A finished update: the previous version's files and the leftovers go.
-        fs::remove_all(P(updateDir()), ec);
-        SDL_Log("gdul: update: cleaned %s%s", updateDir().c_str(), ec ? (" (" + ec.message() + ")").c_str() : "");
-    }
-    return "";
-}
-
-void Updater::confirmStarted() {
-    const std::string state = readFile(statePath());
-    if (firstLine(state) == "swapped") writeFile(statePath(), "ok\nfrom=" + field(state, "from") + "\nto=" + field(state, "to") + "\n");
+    state_ = State::Downloaded;
 }
 
 }  // namespace update

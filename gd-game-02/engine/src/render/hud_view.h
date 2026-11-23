@@ -56,6 +56,11 @@ public:
     // (GD02-164).
     void gameOver() { displaysHidden_ = true; }
     bool displaysHidden() const { return displaysHidden_; }
+    // Whether the rock-meter drop shadow (meter_extras.grp / spraypaint.mesh)
+    // was part of the HUD draw in the most recent frame. set_meters_showing
+    // FALSE (0x8268E9F8) clears it with the meters at on_game_over, so after
+    // "You Rock" this reads false (issue #125 regression check).
+    bool shadowShown() const { return shadowShown_; }
     // Player `player`'s events of this frame (-1: the co-op band's).
     void onEvents(const std::vector<PlayerEvent>& events, int player, float nowMs);
     // Draws the HUD over the bound 16:9 picture (its own camera, depth
@@ -126,6 +131,7 @@ private:
     float introStartMs_ = -1e9f;
     float wonMs_ = -1e9f;
     bool displaysHidden_ = false;
+    bool shadowShown_ = false;  // meter_extras.grp drawn this frame (see shadowShown())
     float meterShakeMs_ = -1e9f, scoreShakeMs_ = -1e9f;
     bool sharedStar_ = false;
 };

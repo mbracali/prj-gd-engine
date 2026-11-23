@@ -74,6 +74,8 @@ private:
     bool enabled(int row, int col) const;
 
     void play(Game& g);
+    void gameMenu(int row);       // right-click quick-access menu (#141)
+    void addInstantIcon(int row); // create a desktop shortcut for that game
     void pickDisc(Game& g);
     void handleDisc(const std::string& path, const std::string& wantedId);
     // The Explore models screen (explorer.cpp): the launcher draws the list
@@ -271,18 +273,19 @@ private:
     std::string missingModules_;  // ready games whose module the download lacks (said at start)
     static std::string noModuleText(const Game& g);
 
-    // Updates from inside the launcher (update_ui.cpp, updater.h; GDUL-031).
+    // Updates from inside the launcher (update_ui.cpp, updater.h; #114): warn
+    // about a newer version and download it to the Downloads folder; the player
+    // installs it themselves, the current install is never touched.
     update::Updater updater_;
     update::Updater::State updateSeen_ = update::Updater::State::Idle;
     bool updateCheckPending_ = false;  // the start-up check, once the window shows
     bool updatePromptPending_ = false; // a newer version found while a dialog was open
-    bool updateApplyPending_ = false;  // Ready: swap on the next frame (after the card is drawn)
-    std::string updatedFrom_;          // this run follows an update from that version
     void updateInit();
     void updateFrame();
     void updateMenu();
     void updatePrompt();
     void updateProgressDialog();
+    void updateDownloadedDialog();
 
     std::vector<ScriptStep> script_;
     size_t scriptPos_ = 0;

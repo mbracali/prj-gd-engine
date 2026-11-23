@@ -216,6 +216,10 @@ const std::map<std::string, Json>& enhancedDefaults() {
         {"cheat_no_venue", Json::boolean(false)},   {"cheat_monkey_crowd", Json::boolean(false)},
         {"cheat_skull_crowd", Json::boolean(false)}, {"audio_offset", Json::string("0")},
         {"video_offset", Json::string("0")},
+        // Enhanced > HDR > True HDR output levels (#80): paper white and the
+        // black floor in nits. Free numbers (like the offsets), clamped where
+        // they reach the renderer. 203 = the HDR reference paper white.
+        {"hdr_white", Json::string("203")}, {"hdr_black", Json::string("0")},
         // Enhanced > Performance > Graphics / Audio backend (GDCORE-006): read
         // once at start-up (startupGraphicsBackend / startupAudioBackend); no
         // Mode button sets them. Graphics: Vulkan on Windows / Linux (GDALL-050),
@@ -534,6 +538,7 @@ private:
     std::string hdrReason_;
     std::string hdrStatus() const;
     std::string hdrApplied_;  // the mode last applied (logged on change)
+    float hdrWhiteApplied_ = -1, hdrBlackApplied_ = -1;  // the White / Black levels last applied, in nits (#80)
     // A setting's value in effect: saved, else its default.
     Json enhanced(const std::string& key) const {
 #ifdef __ANDROID__
@@ -2176,6 +2181,15 @@ void App::applyEnhanced() {
         const std::string hdrMode = enhanced("hdr").str();
         post.hdr = hdrMode == "true" ? 2 : hdrMode == "emulated" ? 1 : 0;
         renderer_.setPost(post);
+        // True HDR output levels (#80): paper white and the black floor, in
+        // nits, clamped to the menu's range. They reach the scRGB / PQ pass.
+        const float hdrWhiteNits = float(std::clamp(enhancedInt("hdr_white"), 80, 480));
+        const float hdrBlackNits = std::clamp(float(std::atof(enhanced("hdr_black").str().c_str())), 0.0f, 1.0f);
+        renderer_.setHdrUserLevels(hdrWhiteNits, hdrBlackNits);
+        if (hdrWhiteNits != hdrWhiteApplied_ || hdrBlackNits != hdrBlackApplied_) {
+            hdrWhiteApplied_ = hdrWhiteNits, hdrBlackApplied_ = hdrBlackNits;
+            SDL_Log("hdr: levels white %.0f nits, black %.2f nits", double(hdrWhiteNits), double(hdrBlackNits));
+        }
         if (hdrMode != hdrApplied_) {
             hdrApplied_ = hdrMode;
             const std::string st = hdrStatus();
