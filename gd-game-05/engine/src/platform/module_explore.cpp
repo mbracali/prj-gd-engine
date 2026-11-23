@@ -191,16 +191,21 @@ void Explorer::list() {
             mics.push_back({"Mics", pretty(s), p, Kind::Static});
         } else if (p.rfind("char/ng/drums/gen/", 0) == 0) {
             drums.push_back({"Drums", pretty(s.rfind("dw_", 0) == 0 ? s.substr(3) : s), p, Kind::Static});
-        } else if (p.rfind("world/", 0) == 0 && p.find("/ng/") != std::string::npos) {
-            const std::string venue = p.substr(6, p.find('/', 6) - 6);
-            if (endsWith(s, "_lighting")) continue;
-            if (s.rfind(venue + "_geom", 0) == 0 && s.find("proxy") == std::string::npos && s.find("flashpot") == std::string::npos) {
-                const std::string extra = s.substr(venue.size() + 5);
-                Item it{"Venues", pretty(venue) + (extra == "_mp" ? " (face-off)" : extra.empty() ? "" : " (" + pretty(extra.substr(1)) + ")"), p,
-                        Kind::Static};
-                it.venue = true;
-                venues.push_back(it);
-            }  // venue props dropped
+        } else if (p.rfind("world/", 0) == 0) {
+            // Rock Band venue geometry: world/<venue>/gen/<venue>_geom.milo_xbox
+            // (the base stage). world/shared/... is props; the per-song numbered
+            // variants live in world/<venue>/<venue>_NN/gen/... (not .../gen/
+            // straight after the venue), and the empty "blank" stage has no
+            // _geom, so both drop out naturally.
+            const size_t v0 = 6, v1 = p.find('/', v0);
+            if (v1 != std::string::npos && p.compare(v1 + 1, 4, "gen/") == 0) {
+                const std::string venue = p.substr(v0, v1 - v0);
+                if (venue != "shared" && s == venue + "_geom") {
+                    Item it{"Venues", pretty(venue), p, Kind::Static};
+                    it.venue = true;
+                    venues.push_back(it);
+                }
+            }
         }
     }
     for (auto* g : {&venues, &guitars, &bass, &drums, &mics, &chars}) items_.insert(items_.end(), g->begin(), g->end());
