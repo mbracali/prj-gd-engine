@@ -102,6 +102,14 @@ private:
     void exploreCursor(int row);
     void exploreLoad();
     gfx::Rect exploreViewRect() const;
+    // The Songs group of Explore: an in-pane player (play/pause/stop + stems).
+    void exploreSongsEnsure();              // open the song session on demand
+    void exploreSongPlay(int songIndex);    // play a song whole (shows the player)
+    void exploreSongStop();                 // stop and hide the player
+    void exploreSongTogglePause();
+    void exploreSongTogglePart(int part);
+    void exploreSongFeed();                 // keep the audio device fed (each frame)
+    void exploreDrawPlayer(const gfx::Rect& view);
 
     // The "Hear the songs" screen (songs.cpp): a module's songs listed, one
     // played as a short preview through the launcher's audio device.

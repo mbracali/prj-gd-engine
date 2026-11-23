@@ -58,8 +58,27 @@ struct Launcher::Explore {
 
     struct Item {
         std::string group, name, detail, key;  // key: what the search matches (lower case)
+        bool song = false;                      // a song row (in the "Songs" group), not a model
+        int songIndex = -1;                     // its index in the song session
     };
     std::vector<Item> items;
+
+    // The "Songs" group: the disc's songs, played whole in an in-pane player with
+    // per-part (stem) checkboxes (gd_game_songs). Opened lazily when first needed.
+    SongSession songSession;
+    bool songsOpened = false, songsOk = false;
+    int songPlaying = -1;  // the songIndex currently playing (-1: none) -> the player shows
+    bool songPaused = false, songAtEnd = false;
+    int songRate = 0;
+    SDL_AudioStream* songStream = nullptr;
+    std::vector<float> songChunk;
+    struct SongPart {
+        std::string name;
+        bool on = true;
+    };
+    std::vector<SongPart> songParts;
+    std::string songTitle, songArtist;
+    std::vector<Hit> songHits;  // player controls: {rect, -6, 0=play/pause 1=stop}, parts {rect, -7, partIndex}
     // The list as shown: an item index, or -1 - n for the header of group n.
     std::vector<int> rows;
     std::vector<std::string> groups;
@@ -140,12 +159,20 @@ void Launcher::exploreOpen(Game& g) {
         item.key = lower(item.group + " " + item.name + " " + item.detail);
         ex->items.push_back(std::move(item));
     }
-    for (const Explore::Item& it : ex->items)
-        if (std::find(ex->groups.begin(), ex->groups.end(), it.group) == ex->groups.end()) ex->groups.push_back(it.group);
-    ex->collapsed.assign(ex->groups.size(), true);  // everything starts collapsed (owner 11-23)
-    log_.add("explore models of " + g.id + ": " + std::to_string(ex->items.size()) + " models in " +
-             std::to_string(ex->groups.size()) + " groups");
     explore_ = std::move(ex);
+    exploreSongsEnsure();  // add the disc's songs as a "Songs" group (its own session)
+    // Build the group list: Songs first (owner 11-23), then the model groups.
+    Explore& e = *explore_;
+    e.groups.clear();
+    bool hasSongs = false;
+    for (const Explore::Item& it : e.items)
+        if (it.song) { hasSongs = true; break; }
+    if (hasSongs) e.groups.push_back("Songs");
+    for (const Explore::Item& it : e.items)
+        if (std::find(e.groups.begin(), e.groups.end(), it.group) == e.groups.end()) e.groups.push_back(it.group);
+    e.collapsed.assign(e.groups.size(), true);  // everything starts collapsed (owner 11-23)
+    log_.add("explore models of " + g.id + ": " + std::to_string(e.items.size()) + " items in " +
+             std::to_string(e.groups.size()) + " groups");
     explore_->lastFrame = now_;
     exploreFilter();
     explore_->cursor = 0;  // the first group header; a model shows once a group is opened
@@ -153,6 +180,8 @@ void Launcher::exploreOpen(Game& g) {
 
 void Launcher::exploreClose() {
     if (!explore_) return;
+    exploreSongStop();
+    if (explore_->songsOpened) explore_->songSession.close();
     const std::string id = explore_->gameId;
     gfx_.release(explore_->frameTex);
     const bool unloaded = explore_->session.close();
@@ -160,6 +189,146 @@ void Launcher::exploreClose() {
     restoreWindow();
     SDL_StopTextInput(window_);
     log_.add("explore models of " + id + ": closed" + (unloaded ? " (module unloaded)" : " (module stayed loaded)"));
+}
+
+// ---- The Songs group: an in-pane player with per-part (stem) checkboxes ----
+
+void Launcher::exploreSongsEnsure() {
+    Explore& ex = *explore_;
+    if (ex.songsOpened) return;
+    ex.songsOpened = true;
+    Game* game = nullptr;
+    for (Game& g : catalog_.games())
+        if (g.id == ex.gameId) { game = &g; break; }
+    if (!game) return;
+    std::string error;
+    ex.songsOk = ex.songSession.open(window_, context_, *game, catalog_.launcherVersion(), log_, error);
+    SDL_GL_MakeCurrent(window_, context_);
+    if (!ex.songsOk) {
+        log_.add("explore songs of " + ex.gameId + ": none (" + error + ")");
+        return;
+    }
+    const GdSongs* api = ex.songSession.api();
+    const int n = api->song_count(api->self);
+    for (int i = 0; i < n; ++i) {
+        GdSong s{};
+        if (api->song(api->self, i, &s) != 0) continue;
+        Explore::Item it;
+        it.group = "Songs";
+        it.name = s.title ? s.title : (s.id ? s.id : "?");
+        it.detail = s.artist ? s.artist : "";
+        it.key = lower("songs " + it.name + " " + it.detail);
+        it.song = true;
+        it.songIndex = i;
+        ex.items.push_back(std::move(it));
+    }
+    log_.add("explore songs of " + ex.gameId + ": " + std::to_string(n) + " songs");
+}
+
+void Launcher::exploreSongStop() {
+    Explore& ex = *explore_;
+    if (ex.songStream) {
+        SDL_DestroyAudioStream(ex.songStream);
+        ex.songStream = nullptr;
+    }
+    if (ex.songPlaying >= 0 && ex.songsOk) {
+        const GdSongs* api = ex.songSession.api();
+        if (api && GD_SONGS_HAS(api, stop_song)) api->stop_song(api->self);
+    }
+    ex.songPlaying = -1;
+    ex.songPaused = false;
+    ex.songAtEnd = false;
+    ex.songParts.clear();
+}
+
+void Launcher::exploreSongPlay(int songIndex) {
+    Explore& ex = *explore_;
+    if (!ex.songsOk) return;
+    const GdSongs* api = ex.songSession.api();
+    if (!api || !GD_SONGS_HAS(api, play_song) || !GD_SONGS_HAS(api, read_song)) return;
+    if (ex.songPlaying == songIndex) { exploreSongStop(); return; }  // a second click stops it
+    exploreSongStop();
+    if (api->play_song(api->self, songIndex) != 0) {
+        sounds_.play(UiSound::Error);
+        toast("This song could not be played.");
+        return;
+    }
+    ex.songParts.clear();
+    const int np = GD_SONGS_HAS(api, part_count) ? api->part_count(api->self, songIndex) : 0;
+    for (int i = 0; i < np; ++i) {
+        GdSongPart p{};
+        if (api->part(api->self, songIndex, i, &p) != 0) continue;
+        Explore::SongPart part;
+        part.name = p.name ? p.name : "Part";
+        part.on = p.default_on != 0;
+        if (!part.on && GD_SONGS_HAS(api, set_part)) api->set_part(api->self, i, 0);
+        ex.songParts.push_back(std::move(part));
+    }
+    ex.songChunk.assign(size_t(48000) * 2, 0.f);
+    int rate = 0;
+    const int frames = api->read_song(api->self, ex.songChunk.data(), 48000, &rate);
+    if (frames <= 0 || rate <= 0) {
+        if (GD_SONGS_HAS(api, stop_song)) api->stop_song(api->self);
+        sounds_.play(UiSound::Error);
+        toast("This song could not be decoded.");
+        return;
+    }
+    SDL_AudioSpec spec{};
+    spec.format = SDL_AUDIO_F32;
+    spec.channels = 2;
+    spec.freq = rate;
+    ex.songStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+    if (!ex.songStream) {
+        if (GD_SONGS_HAS(api, stop_song)) api->stop_song(api->self);
+        sounds_.play(UiSound::Error);
+        toast("No audio device for the song.");
+        return;
+    }
+    SDL_PutAudioStreamData(ex.songStream, ex.songChunk.data(), frames * 2 * int(sizeof(float)));
+    SDL_ResumeAudioStreamDevice(ex.songStream);
+    ex.songRate = rate;
+    ex.songPlaying = songIndex;
+    ex.songPaused = false;
+    ex.songAtEnd = false;
+    // Remember the title shown in the player.
+    for (const Explore::Item& it : ex.items)
+        if (it.song && it.songIndex == songIndex) { ex.songTitle = it.name; ex.songArtist = it.detail; break; }
+    sounds_.play(UiSound::Select);
+    log_.add("explore songs: playing " + ex.songTitle + " (" + std::to_string(ex.songParts.size()) + " parts)");
+}
+
+void Launcher::exploreSongTogglePause() {
+    Explore& ex = *explore_;
+    if (ex.songPlaying < 0 || !ex.songStream) return;
+    ex.songPaused = !ex.songPaused;
+    if (ex.songPaused) SDL_PauseAudioStreamDevice(ex.songStream);
+    else SDL_ResumeAudioStreamDevice(ex.songStream);
+    sounds_.play(UiSound::Move);
+}
+
+void Launcher::exploreSongTogglePart(int part) {
+    Explore& ex = *explore_;
+    if (part < 0 || part >= int(ex.songParts.size())) return;
+    ex.songParts[size_t(part)].on = !ex.songParts[size_t(part)].on;
+    const GdSongs* api = ex.songSession.api();
+    if (api && GD_SONGS_HAS(api, set_part)) api->set_part(api->self, part, ex.songParts[size_t(part)].on ? 1 : 0);
+    sounds_.play(UiSound::Move);
+}
+
+void Launcher::exploreSongFeed() {
+    Explore& ex = *explore_;
+    if (ex.songPlaying < 0 || !ex.songStream || !ex.songsOk) return;
+    const GdSongs* api = ex.songSession.api();
+    if (!api) return;
+    const int bytesPerFrame = 2 * int(sizeof(float));
+    const int target = std::max(1, ex.songRate / 2) * bytesPerFrame;
+    for (int guard = 0; !ex.songAtEnd && !ex.songPaused && SDL_GetAudioStreamQueued(ex.songStream) < target && guard < 8; ++guard) {
+        int rate = 0;
+        const int frames = api->read_song(api->self, ex.songChunk.data(), int(ex.songChunk.size() / 2), &rate);
+        if (frames <= 0) { ex.songAtEnd = true; break; }
+        SDL_PutAudioStreamData(ex.songStream, ex.songChunk.data(), frames * bytesPerFrame);
+    }
+    if (ex.songAtEnd && SDL_GetAudioStreamQueued(ex.songStream) <= 0) exploreSongStop();
 }
 
 // ---- The list ----
@@ -218,6 +387,10 @@ void Launcher::exploreCursor(int row) {
     ex.mouseScrolled = false;
     const int item = ex.rows[size_t(row)];
     if (item < 0) {  // a group's header: the model on show stays
+        ex.pending = -1;
+        return;
+    }
+    if (ex.items[size_t(item)].song) {  // a song row: no model loads; a click plays it
         ex.pending = -1;
         return;
     }
@@ -280,6 +453,9 @@ void Launcher::explorePress(Fret f) {
             sounds_.play(UiSound::Select);
         } else if (ex.cursor >= 0 && ex.cursor < int(ex.rows.size()) && ex.rows[size_t(ex.cursor)] < 0) {
             exploreGroup(-1 - ex.rows[size_t(ex.cursor)], -1);
+        } else if (ex.cursor >= 0 && ex.cursor < int(ex.rows.size()) && ex.rows[size_t(ex.cursor)] >= 0 &&
+                   ex.items[size_t(ex.rows[size_t(ex.cursor)])].song) {
+            exploreSongPlay(ex.items[size_t(ex.rows[size_t(ex.cursor)])].songIndex);  // play the song
         } else if (ex.pending >= 0) {
             ex.pendingAt = now_;
             sounds_.play(UiSound::Select);
@@ -547,11 +723,6 @@ bool Launcher::exploreHandle(const SDL_Event& e) {
         case SDLK_V: case SDLK_F11: exploreToggleFullscreen(); return true;
         case SDLK_P: case SDLK_F12: exploreCapture(); return true;  // transparent, high-res PNG for wikis
         case SDLK_H: ex.showLegend = !ex.showLegend; sounds_.play(UiSound::Select); return true;
-        case SDLK_M: {  // Hear the songs
-            for (Game& g : catalog_.games())
-                if (g.id == ex.gameId) { songsOpen(g); break; }
-            return true;
-        }
         case SDLK_LEFT: case SDLK_A: exploreMove(0, -1); return true;  // also on key repeat
         case SDLK_RIGHT: case SDLK_D: exploreMove(0, 1); return true;
         case SDLK_UP: case SDLK_W: exploreMove(-1, 0); return true;
@@ -563,11 +734,20 @@ bool Launcher::exploreHandle(const SDL_Event& e) {
         const float density = SDL_GetWindowPixelDensity(window_);
         const float mx = e.button.x * density, my = e.button.y * density;
         const Rect view = exploreViewRect();
+        // A song is playing: the player fills the viewer, so its controls take clicks first.
+        if (ex.songPlaying >= 0) {
+            for (const Hit& h : ex.songHits) {
+                if (!h.r.contains(mx, my)) continue;
+                if (h.row == -6) { if (h.col == 0) exploreSongTogglePause(); else exploreSongStop(); }
+                else if (h.row == -7) exploreSongTogglePart(h.col);
+                return true;
+            }
+        }
         if (e.button.button == SDL_BUTTON_LEFT && ex.instrumentBox.w > 0 && ex.instrumentBox.contains(mx, my)) {
             exploreToggleInstrument();
             return true;
         }
-        if (view.contains(mx, my)) {
+        if (ex.songPlaying < 0 && view.contains(mx, my)) {  // drag to turn the model (not while the player shows)
             const bool shift = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
             ex.drag = e.button.button == SDL_BUTTON_LEFT && !shift ? 1 : 2;
             ex.lastX = mx, ex.lastY = my;
@@ -580,19 +760,23 @@ bool Launcher::exploreHandle(const SDL_Event& e) {
         }
         for (const Hit& h : ex.hits) {
             if (!h.r.contains(mx, my)) continue;
-            if (h.row == -2) {
+            if (h.row == -2) {  // the search box
+                exploreSongStop();
                 ex.searching = true;
                 SDL_StartTextInput(window_);
                 sounds_.play(UiSound::Select);
             } else if (h.row == -3) {  // a footer button: as its fret
+                exploreSongStop();
                 explorePress(Fret(h.col));
-            } else if (h.row == -5) {  // the Songs button: open the song player
-                for (Game& g : catalog_.games())
-                    if (g.id == ex.gameId) { songsOpen(g); break; }
             } else if (ex.rows[size_t(h.row)] < 0) {  // a group's header: open / close it
+                exploreSongStop();
                 exploreCursor(h.row);
                 exploreGroup(-1 - ex.rows[size_t(h.row)], -1);
-            } else {
+            } else if (ex.items[size_t(ex.rows[size_t(h.row)])].song) {  // a song row: play it in the pane
+                exploreCursor(h.row);
+                exploreSongPlay(ex.items[size_t(ex.rows[size_t(h.row)])].songIndex);
+            } else {  // a model row: stop any song, show the model
+                exploreSongStop();
                 exploreCursor(h.row);
                 if (ex.pending >= 0) ex.pendingAt = now_, sounds_.play(UiSound::Select);
             }
@@ -721,6 +905,11 @@ bool Launcher::exploreScript(const std::string& cmd, const std::string& arg) {
         if (songs_) songsPlay(std::atoi(arg.c_str()));
     } else if (cmd == "songpart") {  // dev aid: toggle stem <arg> of the playing song
         if (songs_) songsTogglePart(std::atoi(arg.c_str()));
+    } else if (cmd == "exsongplay") {  // dev aid: play the Songs-group song whose name has <arg>, in the pane
+        for (const Explore::Item& it : ex.items)
+            if (it.song && lower(it.name).find(lower(arg)) != std::string::npos) { exploreSongPlay(it.songIndex); break; }
+    } else if (cmd == "exsongpart") {  // dev aid: toggle stem <arg> of the pane player
+        exploreSongTogglePart(std::atoi(arg.c_str()));
     } else if (cmd == "turntable") {
         ex.turntable = arg != "0";
     } else if (cmd == "collapse" || cmd == "expand") {  // a group (its name has <arg>), or "all"
@@ -788,6 +977,7 @@ void Launcher::exploreFrame() {
     Explore& ex = *explore_;
     const float dt = float(std::clamp(now_ - ex.lastFrame, 0.0, 0.1));
     ex.lastFrame = now_;
+    exploreSongFeed();  // keep the song player's audio flowing
     // A model waiting to load: one frame says so, the next loads it.
     if (ex.pending >= 0 && now_ >= ex.pendingAt) {
         if (ex.loadingDrawn) {
@@ -826,7 +1016,7 @@ void Launcher::exploreFrame() {
     // (Two contexts presenting or drawing over each other's back buffer
     // flickered on macOS, where each context has its own drawable surface
     // and a back buffer's content is undefined after a swap.)
-    const bool model = ex.shown >= 0 && ex.ok;
+    const bool model = ex.songPlaying < 0 && ex.shown >= 0 && ex.ok;  // the player replaces the model while a song plays
     const Rect v = exploreViewRect();
     bool frame = false;
     if (model) {
@@ -915,7 +1105,7 @@ void Launcher::exploreDrawLegend() {
     const Row rows[] = {
         {"V / F11", "Fullscreen"}, {"Space", "Pause / resume turning"}, {"R", "Reset view & pose"},
         {"N / B", "Next / previous animation"}, {"I", "Instrument on / off"}, {"K", "Instrument variant"},
-        {"P / F12", "Save transparent PNG"}, {"M", "Hear the songs"}, {"/", "Search"}, {"H", "Hide this"},
+        {"P / F12", "Save transparent PNG"}, {"/", "Search"}, {"H", "Hide this"},
     };
     const int n = int(sizeof rows / sizeof rows[0]);
     float keyW = 0, whatW = 0;
@@ -1034,14 +1224,15 @@ void Launcher::exploreDrawList(const Rect& panelPx) {
         }
         const Explore::Item& it = ex.items[size_t(ex.rows[r])];
         const bool cur = int(r) == ex.cursor;
-        const bool showing = ex.rows[r] == ex.shown;
+        const bool playing = it.song && it.songIndex == ex.songPlaying;
+        const bool showing = ex.rows[r] == ex.shown || playing;
         const Rect row = R(x + 10, ry + 3, w - 20, kItemH - 6);
         if (cur) {
             gfx_.rect(row, rgb(0x2c2731, 0.98f), rgb(0x232027, 0.98f), 10 * s_);
             gfx_.ring(row, withAlpha(kCream, 0.6f), 10 * s_, 1.5f * s_);
         }
-        // The fret gem: blue for the model on show.
-        const Color gem = showing ? fretColor(Fret::Blue) : withAlpha(kMuted, 0.7f);
+        // The fret gem: green for a playing song, blue for the model on show.
+        const Color gem = playing ? fretColor(Fret::Green) : showing ? fretColor(Fret::Blue) : withAlpha(kMuted, 0.7f);
         if (showing) gfx_.glow(R(x + 22, ry + kItemH / 2 - 5, 10, 10), withAlpha(gem, 0.5f), 5 * s_, 8 * s_);
         gfx_.circle((x + 27) * s_, (ry + kItemH / 2) * s_, 4.5f * s_, gem);
         const std::string name = gfx_.elide(FontId::SemiBold, 18 * s_, it.name, (w - 70) * s_);
@@ -1063,10 +1254,89 @@ void Launcher::exploreDrawList(const Rect& panelPx) {
     if (ex.scroll < content - view - 1) gfx_.rect(R(x + 1, listBottom - 18, w - 2, 18), rgb(0x141216, 0), rgb(0x141216, 0.95f));
 }
 
+// The in-pane song player: title + artist, a Play/Pause and Stop button, and a
+// checkbox per part (stem). Conventional transport; the mix starts full, click a
+// part to mute it. Hits go to ex.songHits ({-6,0} play/pause, {-6,1} stop, {-7,i} part).
+void Launcher::exploreDrawPlayer(const Rect& viewPx) {
+    Explore& ex = *explore_;
+    ex.songHits.clear();
+    const float vx = viewPx.x / s_, vy = viewPx.y / s_, vw = viewPx.w / s_, vh = viewPx.h / s_;
+    const float cx = vx + vw / 2;
+    float mx = -1, my = -1;
+    SDL_GetMouseState(&mx, &my);
+    const float density = SDL_GetWindowPixelDensity(window_);
+    mx *= density, my *= density;
+
+    // Title + artist, centred near the top.
+    const std::string title = ex.songTitle.empty() ? "Song" : ex.songTitle;
+    const std::string tshown = gfx_.elide(FontId::Title, 34 * s_, title, (vw - 48) * s_);
+    text(FontId::Title, 34, cx - measure(FontId::Title, 34, tshown) / 2, vy + vh * 0.12f, tshown, kCream);
+    if (!ex.songArtist.empty()) {
+        const std::string ashown = gfx_.elide(FontId::SemiBold, 16 * s_, ex.songArtist, (vw - 48) * s_);
+        text(FontId::SemiBold, 16, cx - measure(FontId::SemiBold, 16, ashown) / 2, vy + vh * 0.12f + 42, ashown, kSand);
+    }
+
+    // Transport: a large Play/Pause and a Stop, centred.
+    const float by = vy + vh * 0.40f;
+    const float r1 = 34, r2 = 27, gap = 30;
+    const float totalW = 2 * r1 + gap + 2 * r2;
+    float bx = cx - totalW / 2;
+    {  // Play / Pause
+        const float bcx = bx + r1;
+        const Rect hit = R(bcx - r1, by - r1, 2 * r1, 2 * r1);
+        const bool hover = hit.contains(mx, my);
+        const Color fc = fretColor(Fret::Green);
+        if (hover) gfx_.glow(hit, withAlpha(fc, 0.35f), r1 * s_, 12 * s_);
+        icon(ex.songPaused ? gfx::icon::kPlayCircle : gfx::icon::kPauseCircle, bcx, by, r1 * 1.9f, hover ? kCream : fc);
+        ex.songHits.push_back({hit, -6, 0});
+        bx += 2 * r1 + gap;
+    }
+    {  // Stop
+        const float bcx = bx + r2;
+        const Rect hit = R(bcx - r2, by - r2, 2 * r2, 2 * r2);
+        const bool hover = hit.contains(mx, my);
+        const Color fc = fretColor(Fret::Red);
+        if (hover) gfx_.glow(hit, withAlpha(fc, 0.35f), r2 * s_, 10 * s_);
+        icon(gfx::icon::kStopCircle, bcx, by, r2 * 1.9f, hover ? kCream : fc);
+        ex.songHits.push_back({hit, -6, 1});
+    }
+
+    // PARTS: a centred checkbox per stem.
+    const float py0 = by + r1 + 34;
+    text(FontId::SemiBold, 12, cx - measure(FontId::SemiBold, 12, "PARTS", 1.5f) / 2, py0, "PARTS", kMuted, 1.5f);
+    float py = py0 + 26;
+    const float rowW = std::min(vw - 60, 280.f);
+    for (size_t i = 0; i < ex.songParts.size(); ++i) {
+        const Explore::SongPart& p = ex.songParts[i];
+        const Rect r = R(cx - rowW / 2, py, rowW, 34);
+        const bool hover = r.contains(mx, my);
+        const Color fc = p.on ? fretColor(Fret::Green) : kMuted;
+        gfx_.rect(r, rgb(0x1f1b23, p.on ? 0.92f : 0.5f), rgb(0x18151b, p.on ? 0.92f : 0.5f), 10 * s_);
+        gfx_.ring(r, withAlpha(fc, p.on ? (hover ? 0.95f : 0.6f) : (hover ? 0.5f : 0.22f)), 10 * s_, 1.2f * s_);
+        const Rect box = R(cx - rowW / 2 + 12, py + 8, 18, 18);
+        if (p.on)
+            gfx_.rect(box, fc, gfx::mix(fc, kInk, 0.2f), 5 * s_);
+        else {
+            gfx_.rect(box, rgb(0x16141a), 5 * s_);
+            gfx_.ring(box, withAlpha(kMuted, 0.6f), 5 * s_, 1.2f * s_);
+        }
+        text(FontId::SemiBold, 15, cx - rowW / 2 + 40, py + 9, p.name, p.on ? (hover ? kCream : kSand) : kMuted);
+        ex.songHits.push_back({r, -7, int(i)});
+        py += 42;
+    }
+    const std::string hint = "Click a part to mute it";
+    text(FontId::Regular, 13, cx - measure(FontId::Regular, 13, hint) / 2, vy + vh - 28, hint, kDim);
+}
+
 void Launcher::exploreDrawViewer(const Rect& viewPx) {
     Explore& ex = *explore_;
     const float vx = viewPx.x / s_, vy = viewPx.y / s_, vw = viewPx.w / s_, vh = viewPx.h / s_;
     gfx_.ring(viewPx, withAlpha(kCream, 0.07f), 16 * s_, 1 * s_);
+    if (ex.songPlaying >= 0) {  // the song player fills the viewer instead of a model
+        ex.instrumentBox = {};
+        exploreDrawPlayer(viewPx);
+        return;
+    }
 
     const bool loading = ex.pending >= 0 && ex.loadingDrawn;
     if (ex.shown >= 0) {
@@ -1190,21 +1460,6 @@ void Launcher::exploreDrawFooter() {
     button(Fret::Yellow, "Reset view", true);
     button(Fret::Blue, "Next animation", !ex.clips.empty());
     button(Fret::Orange, ex.turntable ? "Stop turning" : "Turntable", true);
-    // A distinct "Songs" button (gold): opens the song player — the game's songs,
-    // playable whole with per-part (stem) checkboxes (owner 11-23).
-    {
-        const Color fc = rgb(0xf2b43a);
-        const std::string label = "Songs";
-        const float bw = measure(FontId::SemiBold, 16, label) + 30;
-        const Rect r = R(x, cy - 17, bw, 34);
-        const bool hover = r.contains(mx, my);
-        if (hover) gfx_.glow(r, withAlpha(fc, 0.4f), 17 * s_, 12 * s_);
-        gfx_.rect(r, hover ? gfx::mix(fc, kInk, 0.5f) : rgb(0x241d12, 0.95f), hover ? gfx::mix(fc, kInk, 0.68f) : rgb(0x1a150d, 0.95f), 17 * s_);
-        gfx_.ring(r, withAlpha(fc, hover ? 0.95f : 0.75f), 17 * s_, (hover ? 1.8f : 1.4f) * s_);
-        text(FontId::SemiBold, 16, x + 15, cy - 10, label, hover ? kCream : fc);
-        ex.hits.push_back({r, -5, 0});
-        x += bw + 10;
-    }
     const std::string mouse = "Drag to turn" + kDot + "wheel to zoom";
     if (x + measure(FontId::Regular, 15, mouse) + 20 < W_ - kMargin)
         text(FontId::Regular, 15, W_ - kMargin - measure(FontId::Regular, 15, mouse), cy - 10, mouse, kDim);

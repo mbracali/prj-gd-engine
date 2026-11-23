@@ -99,7 +99,7 @@ bool Launcher::init() {
     // The Deck's own controls when Steam does not own them (Desktop Mode
     // without Steam, a terminal): SDL's Steam Deck HIDAPI driver.
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK, "1");
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_EVENTS)) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_EVENTS | SDL_INIT_AUDIO)) {
         SDL_Log("gdul: cannot start SDL: %s", SDL_GetError());
         return false;
     }

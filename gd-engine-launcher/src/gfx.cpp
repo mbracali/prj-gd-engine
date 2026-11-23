@@ -194,7 +194,8 @@ const int kIconCps[] = {int(icon::kPercent),      int(icon::kCircle),    int(ico
                         int(icon::kClock80),      int(icon::kClock90),   int(icon::kStars),
                         int(icon::kPlayCircle),   int(icon::kAlbum),     int(icon::kDiscFull),
                         int(icon::kMusicNoteAdd), int(icon::kAddShoppingCart), int(icon::kDatabaseSearch),
-                        int(icon::kHandyman),     int(icon::kStrokeFull)};
+                        int(icon::kHandyman),     int(icon::kStrokeFull),
+                        int(icon::kPauseCircle),  int(icon::kStopCircle)};
 const int kIconCount = int(sizeof kIconCps / sizeof kIconCps[0]);
 
 }  // namespace
