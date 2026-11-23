@@ -258,6 +258,7 @@ shipped in the universal launcher.
 | GDALL-071 | Enhancement | ❌ | Custom song formats: Clone Hero, YARG, Guitar Hero DLC, Rock Band readers into gd-engine-core (quick validation in the launcher tool GDUL-036, full load for play) | Extends GDALL-060 (Clone Hero reader). Spec §3/§7. Owner 11-22 |
 | GDALL-072 | Enhancement | ❌ | Per-game stem behaviour for additive/custom songs (owner 11-22, §6): each host plays the stems it has as gameplay and adds the rest to the background mix; missing host instruments leave empty tracks; a notes-less song just plays the mix. Table of all 18 compatible games in the spec | Spec [additive-and-custom-songs.md](../guidelines/additive-and-custom-songs.md) §4. gd-game-19..26 not compatible. Owner 11-22 |
 | GDALL-073 | Enhancement | ❌ | Band behaviour for custom songs (owner 11-22, §8): random animations when a custom song has no predefined ones; if a custom song is DLC of the game being played, load that game's proper mechanisms, else random. May be its own wave | Spec [additive-and-custom-songs.md](../guidelines/additive-and-custom-songs.md) §6. Owner 11-22 |
+| GDALL-075 | Enhancement | ❌ | #126: version-exclusive characters reference (the per-version list of exclusive/unlockable characters: GH3, Aerosmith, World Tour, Metallica, GH5, etc.) — keep as a documented reference and, where feasible, make them selectable on the X360 ports (overlaps closed #81). Lower priority (owner 11-23) | GitHub #126 Owner 11-23 |
 
 ## gd-engine-core
 
