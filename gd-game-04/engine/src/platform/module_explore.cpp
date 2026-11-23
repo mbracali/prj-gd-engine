@@ -143,6 +143,7 @@ bool Explorer::open(const GdHost* host) {
     for (size_t i = 0; i < instruments_.size(); ++i)
         items_.push_back({"Instruments", label(instruments_[i]), band::roleName(instruments_[i].role), true, i});
     SDL_Log("explore: %s: %d models (%zu bodies, %zu instruments)", disc.c_str(), count(), bodies_.size(), instruments_.size());
+    if (items_.empty()) return false;  // no enumerable models: the launcher falls back to songs-only
     return true;
 }
 
