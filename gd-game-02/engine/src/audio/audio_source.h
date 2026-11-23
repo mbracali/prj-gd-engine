@@ -17,5 +17,5 @@ public:
     virtual int decode(float* const* channelBuffers, int frames) = 0;
     // Seeks to a frame (for a start offset / practice). Sources that cannot
     // seek return false and keep playing from where they are.
-    virtual bool seek(uint64_t frame) { return false; }
+    virtual bool seek(uint64_t /*frame*/) { return false; }
 };
