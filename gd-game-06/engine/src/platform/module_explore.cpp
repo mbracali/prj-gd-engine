@@ -20,11 +20,13 @@
 #include "data/venue.h"
 #include "gd_host.h"
 #include "gd_module_shim.h"
+#include "game/chart.h"
 #include "render/band_anim.h"
 #include "render/band_view.h"
 #include "render/renderer.h"
 #include "render/venue_camera.h"
 #include "render/venue_lights.h"
+#include "render/venue_stage.h"
 #include "script/globals.h"
 
 namespace {
@@ -71,10 +73,23 @@ const char* roleGroup(band::Role r) {
     return r == band::Role::Bassist ? "Bass" : r == band::Role::Drummer ? "Drums" : r == band::Role::Vocalist ? "Mics" : "Guitars";
 }
 
+std::string venueName(const std::string& z) {
+    std::string s = z.rfind("z_", 0) == 0 ? z.substr(2) : z;
+    bool start = true;
+    for (char& c : s) {
+        if (c == '_') { c = ' '; start = true; continue; }
+        if (start && c >= 'a' && c <= 'z') c = char(c - 'a' + 'A');
+        start = false;
+    }
+    return s.empty() ? z : s;
+}
+
 struct Item {
     std::string group, name, detail;
     bool instrument = false;
-    size_t idx = 0;  // index into bodies_ or instruments_
+    bool venue = false;
+    std::string zone;  // the venue zone to load (venue items)
+    size_t idx = 0;    // index into bodies_ or instruments_
 };
 
 class Explorer {
@@ -101,6 +116,11 @@ private:
     int memberId_ = -1;
     Vec3 center_{};
     float radius_ = 1;
+
+    // The venue shown (its own full stage pipeline, driven by a fixed camera).
+    std::unique_ptr<VenueStage> stage_;
+    Chart chart_;      // an empty chart: the venue runs with no song notes
+    bool venueShown_ = false;
 };
 
 bool Explorer::open(const GdHost* host) {
@@ -145,6 +165,16 @@ bool Explorer::open(const GdHost* host) {
     } catch (const std::exception& e) {
         SDL_Log("explore: %s", e.what());
     }
+    // Venues first: the game's stage zones, rendered with the orbit camera.
+    try {
+        for (const std::string& z : venue::venueZones(*globals_)) {
+            Item it;
+            it.group = "Venues", it.name = venueName(z), it.detail = z, it.venue = true, it.zone = z;
+            items_.push_back(std::move(it));
+        }
+    } catch (const std::exception& e) {
+        SDL_Log("explore: venues: %s", e.what());
+    }
     // Instruments, split into Guitars / Bass / Drums / Mics by role (one per
     // character per role), in that group order; then the character presets.
     for (band::Role role : {band::Role::Guitarist, band::Role::Bassist, band::Role::Drummer, band::Role::Vocalist}) {
@@ -153,11 +183,11 @@ bool Explorer::open(const GdHost* host) {
             const band::Member& m = instruments_[i];
             if (m.role != role || std::find(seen.begin(), seen.end(), m.profileName) != seen.end()) continue;
             seen.push_back(m.profileName);
-            items_.push_back({roleGroup(role), label(m), band::roleName(role), true, i});
+            items_.push_back({roleGroup(role), label(m), band::roleName(role), true, false, "", i});
         }
     }
     for (size_t i = 0; i < bodies_.size(); ++i)
-        items_.push_back({"Chars", label(bodies_[i]), band::roleName(bodies_[i].role), false, i});
+        items_.push_back({"Chars", label(bodies_[i]), band::roleName(bodies_[i].role), false, false, "", i});
     SDL_Log("explore: %s: %d models (%zu bodies, %zu instruments)", disc.c_str(), count(), bodies_.size(), instruments_.size());
     if (items_.empty()) return false;  // no enumerable models: the launcher falls back to songs-only
     return true;
@@ -165,6 +195,7 @@ bool Explorer::open(const GdHost* host) {
 
 void Explorer::close() {
     gdshim_make_current();
+    stage_.reset();
     view_.reset();
     model_.reset();
     skin_.clear();
@@ -180,9 +211,27 @@ int Explorer::select(int index, char* info, int infoSize) {
     model_.reset();
     skin_.clear();
     memberId_ = -1;
+    stage_.reset();
+    venueShown_ = false;
     std::string result;
     bool ok = false;
-    if (index >= 0 && index < count()) {
+    if (index >= 0 && index < count() && items_[size_t(index)].venue) {
+        const Item& it = items_[size_t(index)];
+        try {
+            std::string error;
+            stage_ = std::make_unique<VenueStage>();
+            if (!stage_->start(*disc_, *globals_, it.zone, chart_, 0, 3000.0, &renderer_.device(), error))
+                throw std::runtime_error(error.empty() ? "the venue did not load" : error);
+            for (int g = 0; g < 32 && !stage_->attachDone(); ++g) stage_->attachStep(renderer_.device(), *disc_, error);
+            venueShown_ = true;
+            result = "venue stage";
+            ok = true;
+        } catch (const std::exception& e) {
+            result = e.what();
+            stage_.reset();
+            venueShown_ = false;
+        }
+    } else if (index >= 0 && index < count()) {
         const Item& it = items_[size_t(index)];
         const band::Member& m = it.instrument ? instruments_[it.idx] : bodies_[it.idx];
         try {
@@ -231,6 +280,39 @@ void Explorer::draw(const GdExploreView& v) {
     SDL_GetWindowSizeInPixels(window_, &ww, &wh);
     dev.setViewport(0, 0, dw, dh);
     dev.clear(clear, true);
+    // A venue: its full stage pipeline, framed by a fixed orbit camera.
+    if (venueShown_ && stage_ && dw > 0 && dh > 0 && ww > 0 && wh > 0) {
+        const float sx = float(dw) / float(ww), sy = float(dh) / float(wh);
+        const int rw = std::max(1, int(float(v.w) * sx)), rh = std::max(1, int(float(v.h) * sy));
+        const int rx = int(float(v.x) * sx);
+        const int ry = std::max(0, dh - int(float(v.y) * sy) - rh);
+        dev.setViewport(rx, ry, rw, rh);
+        const float aspect = float(rw) / float(rh);
+        const Vec3 vc = {0, 1.6f, 0};  // the stage front, roughly
+        const float vr = 6.5f, fovDeg = 55.0f;
+        const float hf = fovDeg * 3.14159265f / 180.0f;
+        const float tanH = std::tan(hf * 0.5f), tanV = tanH / aspect;
+        const float fit = std::min(tanH, tanV) * 0.9f;
+        const float dist = vr / std::sin(std::atan(fit)) * std::max(0.05f, v.zoom);
+        const float yaw = v.yaw, pitch = std::clamp(v.pitch, -1.45f, 1.45f);
+        const Vec3 dir = {std::sin(yaw) * std::cos(pitch), std::sin(pitch), std::cos(yaw) * std::cos(pitch)};
+        Vec3 eye = add(vc, scale(dir, dist));
+        Vec3 fwd = norm(sub(vc, eye));
+        const Vec3 wup = std::fabs(fwd[1]) > 0.98f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
+        Vec3 right = norm(cross(fwd, wup));
+        Vec3 up = cross(right, fwd);
+        const Vec3 pan = add(scale(right, v.pan_x * vr), scale(up, v.pan_y * vr));
+        eye = add(eye, pan);
+        const Vec3 target = add(vc, pan);
+        fwd = norm(sub(target, eye)), right = norm(cross(fwd, wup)), up = cross(right, fwd);
+        venue::CamPose cam;
+        cam.pos = eye, cam.fov = fovDeg, cam.rot = quatFor(right, up, fwd);
+        stage_->setFixedCamera(&cam);
+        stage_->update(16000.0, 1.0f);
+        stage_->draw(16000.0);
+        renderer_.endFrame();
+        return;
+    }
     if (!model_ || !view_ || memberId_ < 0 || dw <= 0 || dh <= 0 || ww <= 0 || wh <= 0) {
         renderer_.endFrame();
         return;
