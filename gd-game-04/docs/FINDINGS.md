@@ -1163,3 +1163,76 @@ immaterial by the data's own constraint limits, below).
   matrix was not found (confirmed this audit). Per the owner rule (fix only
   confidently-groundable defects, do not invent), narrow-phase collision is
   left unimplemented -- a known limitation, not a defect to fix blind.
+## Venue light show audit (2026-11-24)
+
+A full re-RE of the light-show processor pipeline against the disc data and the
+XEX, with the gd10 "dead-mood / processor-table" bug class as the lead
+hypothesis. Sources: `qb.pak.xen` (globals), the eight zone paks'
+`<zone>_lightshow_mapping` / `<zone>_snapshots` / `<zone>_lightshow_processors`,
+`dbg.pak.xen` (symbol table), and the XEX decomp (`ghidra/analysis/decomp`).
+
+- **Processor-table / inline-processor (the gd10 bug): FAITHFUL.** GH3's
+  `<zone>_lightshow_mapping` stores an inline `processor` (qbkey 0xd63fb9af) on
+  **every** mood x performance entry, in all ten zones (checked: artdeco,
+  budokan, dive, hell, party, prison, video, wikker, soundcheck, credits -
+  0 entries missing a processor). `LightShow_InitEventMappings` (script
+  0xdb830c61) registers `LightShow_SharedProcessors` (global 0xa1b494ab, 10
+  entries: `name` 0xa1dc81f9 -> enter 0x3be47b24 / event 0xb93ab1ed / exit
+  0x072c7f7e scripts) plus the optional `<zone>_lightshow_processors`, then
+  calls `LightShow_SetParams` (native 0x82128c50) perf=medium mood=intro. There
+  is **no `default_generic`** in GH3 and no defaulting of a missing processor
+  (that is the Metallica/gd10 addition). The port reads the inline processor
+  (`venue_lights.cpp:202`) and hardcodes each processor's behaviour by name; as
+  every entry carries the name, no mood is dead. The two non-obvious moods
+  0x79d8d4b6 / 0x4f35c489 are the song-lose / song-win moods, processors
+  `Fail_Generic` (0xc29f7b4d) / `Win_Generic` (0x7d17e328); both share the
+  generic enter/event/exit, so the port's generic treatment is correct.
+
+- **Blackout / Flare intensity override: BUG (FIXED).** `Blackout_Generic`
+  (enter 0x7236971a) and `Flare_Generic` (enter 0x5e1e8383) call
+  `LightShow_AppendSnapshotParams { intensity=0.25, specularintensity=0.25 }`
+  before their single `LightShow_CycleNextSnapshot`, held until the mood's exit
+  `clear` (a `GetPakManCurrent` switch skips it only for z_soundcheck /
+  z_training / z_viewer). `LightShow_AppendSnapshotParams` (native 0x82125148)
+  stores the params into slot DAT_82a307d4; the snapshot applier (0x82128e28)
+  merges that slot into every played entry, **overriding** the per-light value.
+  Proven override (not default) by the strobe case: the saved lit snapshot's
+  stored intensities (e.g. z_dive verse 0x1df0cdc0: 0.5/2.0/1.0/...) are all
+  shown at 1.0 while `AppendSnapshotParams { intensity=1.0 }` is active - the
+  port already modelled that one inline. The blackout snapshot (z_dive
+  0x2dff7ec7) stores intensity 0.5/0.5/0.0..., so GH3's blackout/flare moods
+  show every light at 0.25 intensity + 0.25 specular; the port used the stored
+  values, so both moods were too bright and too shiny in all seven venues that
+  use the shared processors (blackout: all but z_wikker; flare: all but
+  z_prison). Fix: a general append-params override
+  (`venue_lights.cpp` enterMood sets 0.25 for Blackout_Generic / Flare_Generic
+  off the debug zones; play() applies it like the strobe 1.0),
+  `venue_lights.h` `appendIntensity_` / `appendSpecular_`. --venuetest: all 8
+  venues still 1016/1016 checkpoints identical at 60 vs 240 fps.
+
+- **Custom venue processors Z_Prison_Flare / Z_Wikker_Blackout: partial gap
+  (NOT fixed - staging, not light values).** z_prison's `flare` mood uses
+  `Z_Prison_Flare` (0x7fe26da1) and z_wikker's `blackout` uses
+  `Z_Wikker_Blackout` (0x3eadcdd6), defined in their `<zone>_lightshow_processors`
+  (other zones' tables are empty). Their enters cycle one snapshot (save=false,
+  one-shot) and their events do not cycle, and both mood lists are a single
+  snapshot - so the port's generic treatment produces the **correct light
+  values** (verified). What the port misses is the scripts' venue-specific
+  extras, which the port never runs because the LightShow class does not execute
+  processor enter/event/exit QScripts: `Z_Prison_LightShow_Flare_Enter`
+  (0x56847ae3) fires `screenflash` (ScreenFlashOn), `Z_Prison_LightShow_Flare_Event`
+  (0xd45ab02a) swaps the Z_Prison_Flare_Skeleton01 ped and plays anims, and
+  `Z_Wikker_LightShow_Blackout_Enter`/`_Exit` hide/unhide the flower petals. The
+  port implements the ScreenFX_* / FlashBS natives (particles.cpp) but nothing
+  triggers them from the flare mood (its only caller is the flare processor
+  enter). Left as a documented gap: wiring it means running the venue lightshow
+  processor scripts on the venue VM on mood transitions.
+
+- Other areas FAITHFUL: snapshot field keys (lightchecksum 0x7ce4d954, r/g/b,
+  intensity 0x164d476d, specularintensity 0xb9832749, shadowintensity
+  0xa0bad95d; FarAttenStart/End present but not applied - correct); generic
+  (enter 0xbd9fb969 cycle save=true, event 0x3f4173a0 cycle on `snapshotchange`
+  0x1b36b057) and Poor (event 0x1cd91b07 waits but does not cycle) match the
+  port; `lightshow_statenodeflagmapping` groups `performance` 0x7d28697e /
+  `mood` 0xfcc65109 and `lightshow_coloroverrides` (8 colours, no black/off)
+  match the port's reads.
