@@ -283,6 +283,74 @@ player's `player_status` struct.
   calc_health_invincible_time, 0x8210FD18]. No loss with cheat_nofail (non-career),
   tutorial, training.
 
+### Boss battles: deep per-boss pass + invincibility fix (2026-11-24)
+
+A full per-boss RE of the three career bosses (Tom Morello, Slash, Lou/the
+Devil) against `guitar_battle.qb` and the XEX. Everything below is [C] from the
+disc data / decompiled C unless noted; one genuine defect was found and fixed.
+
+- Per-boss `PowerUps` (card pool both players draw from, `bossbattle_select`),
+  by `name` key against `battlemode_powerups` (0xab5dd1f9): Tom Morello
+  (Boss_TomMorello_Props 0x9a5885e7) = Amp Overload, Difficulty Up, Double
+  Notes, Whammy; Slash (0x79cdef14) = + Broken String; Lou (Boss_Devil_Props
+  0xd38033de, `character_name` "Lou") = + Lefty Flip + Broken String. No boss
+  uses Powerup Steal or Death Drain as a card (Death Drain only in sudden
+  death, which boss battles do not have; the boss drain is the scripted
+  `boss_battle_begin_deathlick`). gainpernote/losspernote/PowerUpMissedNote/
+  WhammySpeed/BrokenStringSpeed/BrokenStringMissedNote all read per-difficulty
+  from the props at runtime (BattleData::loadBoss); field keys verified. The
+  port's filter and enum ordering match the table exactly.
+- `bossbattle_select` (0xc6bd40ce) vs `battlemode_select` (0x503e0639):
+  identical roll EXCEPT the boss path has no health-<=0.5 "losing" branch
+  (always `weight`, `weight_low` for the last-rolled and the top card) and no
+  sudden-death forced Death Drain. It skips Difficulty Up when the victim's
+  difficulty (current_difficulty2 for P1, current_difficulty for the boss) is
+  expert. The port's `select()` with `bossRules` reproduces this.
+- Boss AI: firing (0x82108948) = reset a 100-frame counter at 0 cards, count
+  down at 1 card, fire at once at 2; `CheckButtonsBoss` (0x821096E8) +
+  `CheckBossCutoff` (0x82109A78) = plays the rhythm chart, HOPO tapped 4 times
+  then strummed on the 5th (a global hammer counter reset on every strum), hold
+  = max fret sustain /1000 + 1 s (1 s when < 61 ms), frets released when the
+  hold expires; `bossbattle_ai_damage` (0x5076aabf) + ApplyBossBattleGemMisses
+  (0x82103eb8) = pct % of the fret-gems in each [start,end) window missed
+  (immediate cards from the boss's current note, delayed cards one travel+1 s
+  ahead), Whammy has `no_ai_damage` so only kills the frets, Broken String runs
+  until all five broken counters < 3; 200 ms lead. All match the port
+  (`bossInput`, `bossDamage`, `applyBossMisses`). The `game_mode == tutorial`
+  (0x39940016) guard in the firing/select scripts is irrelevant to a real boss
+  battle (not tutorial).
+- Outcome: boss at 0 -> Outcome::P1Wins -> `failed()` false -> `r.won` ->
+  GuitarEvent_SongWon (newspaper); player at 0 -> Outcome::Failed ->
+  GuitarEvent_SongFailed. `battleKo` is Battle-only, so a boss win is a normal
+  SongWon, not a KO-fail. Lou's death-drain restart is wired through
+  `setup.devilFinish`/`startMs` (player 2 off-screen at x 1000). Faithful.
+- GuitarEvent_BattleAttackFinished (0x30252d4c): still not raised, and this
+  stays a faithful-in-effect omission. It only resets battle audio-mixing state
+  (ramps the five guitar busses over 0.15 s and zeroes the per-player balance
+  buss DSP 0xf6a36814). No attack-start script (battle_lightning /
+  _up_difficulty / _death_lick / _trigger_on / _steal / _broken_string /
+  _whammy_attack) applies any guitar buss/DSP, and the port applies none per
+  attack either, so there is nothing stuck to reset -- implementing it would be
+  a no-op without first adding the attack-time ducking it reverses. Documented,
+  not fixed.
+
+FIX -- boss early-window invincibility (game/player.cpp). CrowdDecrease
+(0x8210FD18) gates every health loss on `song_time < player_status.invincible_time
+(0xf4cecb3d) && health <= health_invincible_minimum x 0.02 (0.5)`, reading
+whichever `player_status` it is handed; the boss's own loss is computed past the
+same gate. In a career boss battle game_mode is `p1_career` (0x76362f1e, per the
+KO logic's own `iVar6 == 0x76362f1e` test), which is in
+`calc_health_invincible_time`'s first branch, so it sets the window for BOTH
+players by their own difficulty (the boss shares P1's via current_difficulty2) --
+easy 20 % / medium 10 %. The port's `changeHealth` had `if (!rules_.boss && ...)`,
+which denied the boss the window, so on easy/medium the boss could be drained
+below 0.5 and killed in the opening of the song, unlike the original. Dropping
+the `!rules_.boss` guard (the boss's `invinciblePct` is -1 -> by difficulty, diff
+= P1's) restores it; hard/expert unchanged (0 % window). Verified with a
+deterministic Player-level harness (before: boss 0.50 -> 0.395 inside the easy &
+medium windows; after: held at 0.50 inside, still loses after the window and
+when > 0.5, hard still loses).
+
 ### 8. Modes (details, per mode, in `modes.md`)
 
 - Co-op (p2_career; p2_coop is online only: the local MULTIPLAYER menu has
