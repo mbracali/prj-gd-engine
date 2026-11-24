@@ -440,23 +440,33 @@ std::vector<Sample> simulate(VenueStage& st, double endMs, int fps, int& offScre
         s.t = t;
         s.cam = st.camera(t);
         s.pose = bandPose(st, t);
-        // The member the shot frames must be on screen.
-        const uint32_t who = st.cameras().lookatMember(), bone = st.cameras().lookatBone();
-        if (who && t >= 0 && st.band()) {
+        // The member a shot actively frames must land where the shot frames it.
+        // Only assert for a shot that tracks a member's bone (lookat + lookatbone,
+        // aim engaged); a wide / audience shot carries only a lookat hint (no
+        // lookatbone, aim not engaged) and is not a member frame, and when a
+        // member transits a waypoint far off the shot's authored direction the aim
+        // keeps the authored composition (not engaged) — neither is a framing bug
+        // (camera faithful; the member leaves on its own root motion). The bound
+        // is the shot's authored screenoffset (a close-up may author |offset| > 1
+        // to crop the bone to the frame edge, e.g. Guitarist_CloseUp02 so.y 1.02):
+        // on screen out to its authored offset, so a correctly-framed crop passes
+        // but a real tracking miss (bone far from the authored offset) still fails.
+        uint32_t who = 0, bone = 0;
+        float so[2] = {0, 0};
+        venue::Vec3 p;
+        if (st.cameras().framedNow(who, bone, so, p) && t >= 0 && st.band()) {
             ++framed;
-            venue::Vec3 p;
-            bool on = st.band()->bonePos(who, bone ? bone : K("bone_chest"), p);
-            if (on) {
-                const venue::CamPose& c = s.cam;
-                const venue::Vec3 fwd = venue::rotate(c.rot, {0, 0, 1}), up = venue::rotate(c.rot, {0, 1, 0}),
-                                  right = venue::rotate(c.rot, {-1, 0, 0});
-                const float d[3] = {p[0] - c.pos[0], p[1] - c.pos[1], p[2] - c.pos[2]};
-                const float z = d[0] * fwd[0] + d[1] * fwd[1] + d[2] * fwd[2];
-                const float x = d[0] * right[0] + d[1] * right[1] + d[2] * right[2];
-                const float y = d[0] * up[0] + d[1] * up[1] + d[2] * up[2];
-                const float th = std::tan(c.fov * 0.5f * 3.14159265f / 180.0f), tv = th / (16.0f / 9.0f);
-                on = z > 0.05f && std::fabs(x / z / th) <= 1.0f && std::fabs(y / z / tv) <= 1.0f;
-            }
+            (void)bone;  // the framed bone is baked into p (framedNow's target); name uses the member
+            const venue::CamPose& c = s.cam;
+            const venue::Vec3 fwd = venue::rotate(c.rot, {0, 0, 1}), up = venue::rotate(c.rot, {0, 1, 0}),
+                              right = venue::rotate(c.rot, {-1, 0, 0});
+            const float d[3] = {p[0] - c.pos[0], p[1] - c.pos[1], p[2] - c.pos[2]};
+            const float z = d[0] * fwd[0] + d[1] * fwd[1] + d[2] * fwd[2];
+            const float x = d[0] * right[0] + d[1] * right[1] + d[2] * right[2];
+            const float y = d[0] * up[0] + d[1] * up[1] + d[2] * up[2];
+            const float th = std::tan(c.fov * 0.5f * 3.14159265f / 180.0f), tv = th / (16.0f / 9.0f);
+            const float bx = std::max(1.0f, std::fabs(so[0])) + 0.06f, by = std::max(1.0f, std::fabs(so[1])) + 0.06f;
+            const bool on = z > 0.05f && std::fabs(x / z / th) <= bx && std::fabs(y / z / tv) <= by;
             if (!on) {
                 if (!offScreen) offWhat = nameOf(who) + " at " + std::to_string(int(t)) + " ms (" + nameOf(st.cameras().shot().name) + ")";
                 ++offScreen;

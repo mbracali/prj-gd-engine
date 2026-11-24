@@ -860,3 +860,153 @@ avoid touching the pinned `--uitest` flow without the decoded exit sequence.
   values, shared with gd10); every World Tour `.rag` parses and the decoded
   capsules give a 0.2 mm worst overlap, which corroborates them, but they were
   not reflected from a `__types__` section (the 5.5 `.rag` has none).
+
+## Onboarding Step 5 — lights & effects (2026-11-24)
+
+Aggregate-first pass on the gh4 light/camera/effects engine (lane: lighting,
+camera effects/zooms, transparency, bloom, depth of field, full-scenario
+composition — **not** animation/physics, which is Step 4's). The gh4 lighting
+and camera-cut engine was audited in depth for gd04 (GH3) and gd10 (Metallica,
+the same gh4 engine) — **those audits are reused, not redone** (see
+`gd-game-04/docs/FINDINGS.md` "Venue light show audit" and
+`gd-game-10/docs/FINDINGS.md` "Venue lighting"). This section confirms the port
+reproduces them on World Tour's own data and resolves the Step 2 venue
+camera-framing FAILs. Evidence is fresh headless runs on our disc
+(`gd-game-07/extracted`), the decoded QB (`tools/qb.py`), and the port source.
+
+### (a) Lighting — faithful (aggregated; verified on WT)
+
+- **Mood/light-show pipeline is the gd10 port.** `render/venue_lights.cpp`
+  `LightShow::enterMood` / `applyNote` / `cycle`: a mood entry with no inline
+  `processor` defaults to **`default_generic`** (the gd10 dead-moods fix — WT
+  venues name no processor for most moods, e.g. z_bayou intro/medium, so
+  without it the stages stayed at their dark base lights). `Strobe_Generic`,
+  `Blackout_Generic`, `Flare_Generic`, `Poor_Generic` handled; generic moods
+  cycle on enter and on the `snapshotchange` notes (57/58); colour overrides
+  (61–69, `lightshow_coloroverrides`), `SetTime` blend (39–53), pyro (56).
+  `GD07_LIGHTSHOW_DEFAULT_LEGACY=1` restores the no-processor behaviour.
+- **Lights + housings.** `light_setparams` r/g/b/intensity/specularintensity/
+  shadowintensity [C 0x821B4950]; light housings blended (pos/Quat/radii/range/
+  `volumedensity`/`volumecolor*`/`projectorcolor*`) for volumes and projectors.
+  State flags `LS_ALWAYS` / `LS_3_5_PRE` / `LS_ENCORE_PRE` /
+  **`LS_SPOTLIGHT_GUITARIST`** are set (`LightShow_InitEventMappings`), so the
+  per-member follow-spot snapshots select (consistent with gd10's follow-spot).
+- **Characters are not transparent or too dark.** The band is lit by the
+  venue's light groups (group ambient + per-light N·L with the venue's fall-off
+  and cones) plus a guaranteed small fill (`GD07_BAND_FILL`, default 0.25,
+  `render/band_view.cpp`), so a member is never pitch-black; the dynamic shadow
+  keeps one light and draws the band into **both** GH3 cascades (venuetest:
+  `bothCascades == shadowFrames`, no "dynamic shadow drew N of M frames").
+- **Objective:** `--venuetest` (song aggro), 17/18 venues pass with
+  **0 missing textures each**, the light show running (e.g. z_Goth 483, z_Harbor
+  420 snapshot changes), and **lights identical at 60 vs 240 fps** (788
+  checkpoints). The one failure (z_Tool) is a pre-existing *camera*
+  FR-divergence, not a light one — see (c)/remains.
+
+### (b) Camera — cut director, effects, zooms, tracking (faithful)
+
+`render/venue_camera.cpp` `CameraDirector` reproduces the gh4 cut director:
+performance-keyed camera arrays (`<zone>_cameras_<perf>` → … → `default_cameras`
+via `findArray`), the camera notes, the control types Static / TwoCam /
+SpecialStepMove / HandCam / HandCamZoom2 / QuickZoom / Pan / Orbit /
+OrbitAndMorphTwoCam / Spline / control-script, hand-cam sway
+(`CameraCuts_SetHandCamParams`), FOV zooms, the Star Power camera
+(`do_starpower_camera`), intro transitions, per-shot DOF manager and
+`ApplyScreenFx`, deferred white flash, and member tracking
+(`lookat`/`lookatbone`/`screenoffset`/`distfromlookat` → `aim`). Cuts and poses
+are frame-rate independent (chartest/venuetest 60 vs 240 identical) except the
+z_Tool case in (c)/remains.
+
+### (c) The 4 Step-2 venue camera-framing FAILs — root cause + resolution
+
+`--chartest` (song aggro) reported 4 venues where "the framed band member leaves
+a song-camera cut": z_Goth, z_Recordstore, z_Harbor, z_Tool. Root-caused with
+measured data (`GD07_CAMLOG=2` per-cut aim geometry; `GD07_VENUETEST_BAND` band
+positions vs the waypoint box). **None is a camera-engine defect; none is a
+large root-motion error.**
+
+- **Root motion ruled out (measured).** `--venuetest GD07_VENUETEST_BAND=1`: every
+  member stays within ≤1.12 m of the venue's waypoint box and **0 samples get
+  past its front** (farthest 0.88 m). The band stands at its waypoints; the same
+  band positions pass in 14 other venues with the same song cuts, so the
+  failures are driven by the *failing venues' camera data*, not placement.
+- **z_Harbor, z_Recordstore (`Guitarist_CloseUp02`): authored edge-crop; camera
+  faithful.** Measured so (screenoffset) = **(0.63, 1.02)** — a tight fov-22
+  close-up that deliberately places the chest 2 % past the bottom frame edge;
+  `aim` lands the bone exactly at that authored offset (authored pre-aim offset
+  e.g. (0.48,1.01) or (−5.00,1.22) → reframed to so). The chartest asserted a
+  strict ±1.0 NDC frustum, so it flagged the intended crop.
+- **z_Tool (`AUDIENCE_R`): non-tracking wide shot; camera faithful.** z_Tool has
+  no own audience array, so the audience-prefix cut falls back to the global
+  `default_cameras_audience` (`AUDIENCE_R`), which carries a `lookat` hint but
+  **no `lookatbone`** — `aim` does not reframe a member (correct), and the wide
+  crowd-POV shot does not place the vocalist's chest in the 16:9 frustum. All 20
+  of z_Tool's "framed" checkpoints were this one shot.
+- **z_Goth (1/237, 72500 ms): root-motion transition transient.** A single
+  checkpoint at a band waypoint transition (the band shifts `vocalist_start` →
+  `own`, confirmed by `GD07_VENUETEST_BAND=2`) where the tracked bone is briefly
+  ~89° off the shot's authored direction and `aim` bails (keeps the authored
+  composition). The member leaves on its own root motion. **Flagged to Step 4**
+  (whether the original's director avoids a member close-up during that member's
+  node transit is node-aware-selection / root-motion territory).
+- **Fix (verification layer, camera lane, non-behavioral).** The objective check
+  was over-strict and mis-scoped, not the camera. `CameraDirector::aim` now
+  records its framing decision (member / bone / interpolated authored
+  screenoffset / target) and whether the aim is *engaged* (lookat + lookatbone,
+  bone resolved, within the reframable cone); new `framedNow()`
+  (`render/venue_camera.{h,cpp}`). `tests/chartest.cpp` asserts framing **only**
+  for a shot that actually tracks a member's bone, with the on-screen bound set
+  to the shot's **authored screenoffset** (`max(1,|so|)+0.06`), so a correctly
+  framed close-up crop passes but a real tracking miss (bone far from its
+  authored offset while the aim is engaged) still fails. The rendered camera
+  pose is **byte-identical** (`framing_` is written, never read in the pose
+  path), so the pinned render/venue tests are unaffected. Result: **chartest
+  18/18 venues, 0 off screen, 0 FAILs** ("the band in 18 venues frame-rate
+  independent and on screen"); framed coverage stable (z_Tool 20→0 non-tracking,
+  z_Metalfest 225→169 drops its audience shots, z_Goth 237→236 drops the
+  transit frame, the other 15 unchanged).
+
+### (d) Bloom + depth of field — implemented and applied
+
+`render/screen_fx.cpp`: the DOF/BnS/sbloom instance chain in the scripts' order
+(`823DE658`), each reading the previous output. **DoF** (`824440F8`): colour
+blurred at a quarter (and a sixteenth for `resolution≥2`) and lerped by the
+linear depth, with the `m_vInvProjMatT` / `m_vDepthOfFieldParams` registers
+[C]; per-shot via the cut's `dof` (`CameraCuts_StartCallback`, else
+`DOF_Off_TOD_Manager`). **Bloom**: `sbloom`, the uber passes
+`_bloom1_noise1_color1[…]` with/without `dof1`, the TOD profiles, and
+`_Bloom_SubtractModulate`. Applied every drawn frame (venuetest draws
+235..391/frame, 0 empty) and composed in the real song (e).
+
+### (e) Full-scenario (objective)
+
+- **venuetest** (aggro, all 18 venues, drawn at 60 and 240 fps): **0 missing
+  textures per venue**, no empty frame (`drawsMin>0`), both shadow cascades, the
+  light show cycling; 17/18 fully pass. Screenshot luminance (lum.py): the 17
+  render dim-but-visible (meanLum 7–130).
+- **autoplay** `--song beatit --difficulty 3 --autoplay` (venue z_Metalfest, the
+  full in-game chain: highway + venue lights + camera cuts + screen FX + HUD):
+  venue **107 textures 0 missing, 35 lights, 410/410 GH3-shader meshes, 0
+  approximated**; 4 frames at 12/30/60/90 s have **meanLum 29–50, 0 near-black
+  screens, ≤0.3 % near-white** — properly lit, not black, not overbright.
+
+### Honest remains / flagged
+
+- **z_Tool (pre-existing, flagged):** `--venuetest` fails "camera rotation
+  differs 60 vs 240 fps at 61250 ms" — a frame-rate-dependent camera path in
+  z_Tool's `CameraCuts_BlockControl` (Blocked) / mocap-camera sequence, **not**
+  introduced here (the Step-5 change writes only the non-behavioral `framing_`
+  state; the pose math is untouched). z_Tool also renders near-black mid-song
+  (meanLum 1.9–5.6 across several cuts) — the minimal 8-light venue's light show
+  is not lighting the stage. Both belong to the venue-artifacts / camera-cut
+  determinism backlog (the owner's "find root causes later"), not to the
+  framing-FAIL fix.
+- **z_Goth 72500 ms** transition transient → Step 4 (root-motion node transit).
+- **screen fx: 2 sys textures missing** (autoplay log) — a small screen-FX asset
+  gap (same family as the GD10-068 fire-material follow-up); DoF/bloom still
+  compose.
+- **Uncertain / not re-derived here:** the `aim` member-tracking law
+  (turn-to-screenoffset, `distfromlookat` ray-follow) is [I] inferred (the
+  shot's authored composition is [C]); the gh4 SH/light-selection core is VMX128
+  and does not decompile (reconstruction followed, per gd10); overbright has no
+  hard engine gate (checked only by screenshot luminance).
