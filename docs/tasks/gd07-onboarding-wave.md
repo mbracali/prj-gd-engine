@@ -36,7 +36,8 @@
    `cmake -S gd-game-07/engine -B build/<name> -G Ninja -DCMAKE_BUILD_TYPE=Release
    -DGD07_RUNTIME_SPIRV=OFF` then `cmake --build build/<name> -j4`. **Reuse the
    prebuilt ffmpeg** to avoid rebuilding deps:
-   `-DGD07_FFMPEG_DIR=/home/marcelobracali/Development/prj-gd-engine/gd-game-10/engine/build/ffmpeg/linux/ffmpeg-prefix`.
+   `-DGD07_FFMPEG_DIR=<repo>/gd-game-10/engine/build/ffmpeg/linux/ffmpeg-prefix`
+   (point it at your own checkout's gd-game-10 ffmpeg prefix).
    Dev hooks: `--selftest <disc>`, `--drumtest`, env `GD07_AUTOPLAY`,
    `GD07_CHARTEST_*`. Headless: `SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy`.
    **Only one heavy build at a time** (RAM): build once, at the end, at -j4.
