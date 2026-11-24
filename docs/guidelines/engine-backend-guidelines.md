@@ -76,11 +76,16 @@ At the repository root. Every game loads common code from here.
 
 1. **Not every game moves at once.** The backends are developed to this
    specification, shaped by the four implemented games (gd-game-01..04), and
-   adopted game by game. Today only gd-game-01 can select them.
-2. **`local` is always there.** The graphics default is Vulkan on Windows
-   and Linux (Steam Deck too) and `local` on macOS and Android (owner 11-13,
-   GDALL-050; gd-game-05 runs on the core only: Vulkan everywhere); audio
-   defaults to `local`. Choosing a core
+   adopted game by game. The Enhanced > Performance backend dropdowns are now
+   exposed by gd-game-01 (`select_panels`) and gd-game-02/03/05
+   (`enhanced_panel`); the GH3-family `port_enhanced` hosts (gd04/06/07/10)
+   carry the same settings.
+2. **`local` is always there.** The shipped graphics default is **Vulkan** on
+   every OS **except macOS**, which leads with **SDL3 GPU** (`sdl3`); audio
+   defaults to **`miniaudio`** everywhere (wave 20261118 §4, superseding the
+   older GDALL-050 `local` defaults; an older `enhanced.json` with `local` is
+   migrated once). The full live per-OS defaults table is in
+   [docs/spec-backend.md](../spec-backend.md). Choosing a core
    backend never removes the game's own path; a backend that fails to start
    (missing driver, missing library) falls back to `local` and says so in the
    log. A player must never be left with a black screen or no sound.
