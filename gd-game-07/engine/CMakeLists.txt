@@ -133,6 +133,7 @@ target_sources(gd07 PRIVATE
   src/tests/jamtest.cpp
   src/tests/tuttest.cpp
   src/tests/careertest.cpp
+  src/tests/enhancedtest.cpp
   src/tests/walk.cpp
   src/tests/selftest_play.cpp
   src/tests/sfxtest.cpp

@@ -2165,3 +2165,135 @@ Data-derived expected-vs-measured, no eyeballing:
   `$createagig`, `$debug_gig`) but their entry flow (spending cash to unlock a
   bonus gig, the Create-a-Gig editor) is not yet driven — flagged for the live-UI
   increment.
+
+
+## Onboarding Step 7.10 — enhanced menu + cheats + The Glitches (2026-11-24)
+
+Aggregate-first verification of the universal **Enhanced menu**, every **cheat**,
+and the house band **"The Glitches"** (gate 95%). gd07 already carries the
+GH3-lineage `port_enhanced` host (`ui/port_enhanced.cpp` + `ui/port_settings.{cpp,h}`,
+shared with gd04/06/10), the cheat flags, and the gh4 Glitches path, so this pass
+**confirmed them against the disc, closed the gaps, and added one objective,
+data-derived test** (`engine/src/tests/enhancedtest.{h,cpp}`, `--enhancedtest`).
+Evidence is a fresh headless run on our disc (`gd-game-07/extracted`) of
+`--enhancedtest` (exit 0, 0 checks failed) and `--uitest` (unchanged). The build
+was confirmed by grepping the ninja log for `FAILED`/`error:` (clean).
+
+### (a) Enhanced menu — complete, defaults respect the original, every option honoured
+
+`spec-enhanced-menu.md` option catalogue vs `enhancedSettings()` (`port_settings.cpp`):
+**40/40 required options present** (`--enhancedtest`): CONTROLS (`mouse`, `touch`,
+`shake_whammy`), PERFORMANCE & GRAPHICS (`graphics_backend`, `audio_backend`,
+`screen_mode`, `internal_res`, `sharp_ui`, `antialiasing`, `ai_upscaling`,
+`ai_upscaling_mode`, `max_fps`, `fps_counter`, `hdr`, `bokeh`, `particles`, `bloom`,
+`cinematic_color`, `color_grade`, `film_grain`, `chromatic`, `ssao`, `sharpening`,
+`star_blur`, `shadows_all`, `more_lights`, `light_dust`, `no_shaky_cam`,
+`no_effects`), ACCESSIBILITY (`easy_chords`), CHEATS & ENHANCERS (`hopo_mode`,
+`no_fail`, `autoplay`, `dev_debug_menu`, `cheat_unlock_all`, `cheat_full_sp`,
+`cheat_multiplier`, `cheat_hyperspeed`), Calibration (`audio_offset`,
+`video_offset`). Correctly **absent**: `hdr_white`/`hdr_black` sliders
+(port_enhanced has no Slider kind — audio/video offset are numeric, set via the
+Calibration tool), and the owner-removed `ground_fog`/`light_streaks` (an old
+`enhanced.json` with them loads and drops them — asserted).
+
+- **Defaults respect the ORIGINAL look out of the box** (an untouched install
+  plays like the original): **35/35 desktop defaults** asserted against the
+  profile (`enhancedProfile`/`enhancedDefault`). Effects off / GH3's own look
+  (`bloom=none`, `no_effects=off`, `cinematic_color=off`, `film_grain/chromatic/
+  ssao/star_blur/more_lights/light_dust=none`, `color_grade/sharpening/shadows_all/
+  no_shaky_cam=off`, `antialiasing/ai_upscaling=none`, GH3's own `bokeh=medium`,
+  `particles=original`); controls on (`mouse=on`, `fps_counter=on`, `sharp_ui=on`,
+  `screen_mode=borderless`, `internal_res=1080`); cheats + accessibility off
+  (`easy_chords=off`, `hopo_mode=original`, `no_fail/autoplay/dev_debug_menu=off`,
+  all four switch-cheats off); `audio/video_offset=0`; backends per-OS list front
+  (`audio_backend=miniaudio`, `graphics_backend`=vulkan on Linux/Win/Android, sdl3
+  on macOS). **Per-OS profile table** also asserted: desktop `touch=off`/
+  `shake_whammy=off`; handheld (Steam Deck / Android) `touch=on`/`shake_whammy=on`/
+  `max_fps=60`.
+- **The store honours every option**: a set/get round-trip of **every allowed
+  value — 127 values honoured, 0 failed**; invalid values refused (the last good
+  value kept); numeric out-of-range refused; `enhanced.json` persists across a
+  reload; unknown/removed keys dropped on load.
+- **Real in-game effect**: each option is applied in `app.cpp::applyEnhanced`
+  (`is(key)` → engine toggle: `screen_mode`, `internal_res`→`VenueStage::internalHeight`,
+  `particles`→`VenueStage::particlesOn`, the `enhanced_fx` chain
+  (`bloom`/`cinematic_color`/`fsr1`/…), `sharp_ui`→`TextureCache::sharp`,
+  `no_shaky_cam`→`CameraDirector::noShake`, `shadows_all`→`VenueStage::extras.shadowsAll`,
+  `hopo_mode`→`Player::forgivingHopos`, `easy_chords`→`Player::easyChords`,
+  `shake_whammy`/`touch`→`Input`, `fps_counter`, `max_fps`, the cheats below). The
+  cheat effects are proven below; the graphics effects are applied live (the
+  `--walktest enhanced` sets them through the real menu). **Untestable headless:**
+  True HDR (needs an HDR display) and the FSR Vulkan upscaler — noted, not proven.
+
+### (b) Cheats — every cheat proven to take effect
+
+Port switch-cheats (effect flags set by `applyEnhanced`), proven data-derived in
+`--enhancedtest`:
+
+| Cheat | Flag | Proof (measured) |
+|---|---|---|
+| Always Max Multiplier | `Player::maxMultiplier` | `PlayerStats::multiplier()` streak-0: **x1 off → x4 on → x8 on+SP** [C 0x8210BB40] |
+| Hyperspeed | `Highway2D::hyperspeed` | `applyHyperspeed(1000)`: **1000 ms off → 600 ms on** (×0.6) |
+| Star Power Always Full | `Player::fullStarPower` | a Player frame with SP=50: **50 off → 100 on** (pinned) |
+| Easy Chords (accessibility) | `Player::easyChords` | `chordShape`: a chord part counts on, not off; a fret outside never counts |
+| Forgiving HOPOs | `Player::forgivingHopos` | off by default; judging effect exercised by `--selftest` HOPO counts |
+| Unlock Everything | `unlockEverything()` | `unlock_all_profiles`+`purchase_all_profiles` **spawned**, the save-wide `unlocked` sweep **set all 3 seeded tags** |
+| Developer Debug Menu | `enable_button_cheats` | `app.cpp` sets the global so the pause menu's DEBUG MENU + button cheats appear |
+| No Fail / Autoplay | song setup | `enhanced_.on("no_fail")`/`("autoplay")` feed `song_->start(...)` (as `--no-fail`/`--autoplay`) |
+
+The **game's own Options > Cheats** (`guitar_hero_cheats` disc table) are surfaced
+as `Kind::Cheat` rows whose chosen option runs `cheat_set_globals` exactly as the
+cheats screen does: **14 toggleable cheats enumerated straight off the disc, all 14
+with a cheat global (`var`)**. (`--walktest enhanced` additionally drives one live:
+AIR INSTRUMENTS → `cheat_airinstruments=1`.)
+
+### (c) "The Glitches" — the fully-unlocked house band, last in the band-selection
+
+gd07 runs the **gh4 engine** (shared with gd10 Metallica); World Tour has **no
+GH3-style fixed 5-band career-slot roster** (`band5_info_p1_career`,
+`GH3_Career_Songs`, `num_career_bands` are all absent on our disc — confirmed), so
+the GH3-lineage `ensureGlitches()` in `ui/glitches.cpp` is **inert/dead code on
+WT** (never called). The faithful gh4 approach (gd10's) is a *returning band*: the
+save's band renamed **"The Glitches"** with the original's own unlock-all run, so
+it is the fully-unlocked band — the last the player meets in the band-selection
+screen (`career_choose_band_fs`).
+
+This pass extracted that wiring into **`ensureGlitchesGh4(vm)`** (`ui/glitches.cpp`),
+called from `front_end.cpp` at the first main menu and asserted by `--enhancedtest`.
+It runs `unlock_all_profiles` + `purchase_all_profiles` (everything unlocked), names
+`band_info` **"The Glitches"**, sets the house band's **$1,000,000** (kickoff rule
+11; gd04's `ensureGlitches`), clears `first_play`, and seeds
+`last_singleplayer_character = judy` (a `Preset_Musician_Profiles_Locked` entry on
+the disc; the port has no live Create-A-Rocker, so this lets
+`init_singleplayer_character_hub` proceed — gd10's gh4 seed). Proven: band named
+The Glitches, cash == 1,000,000, `first_play==0`, character seeded, the sweep ran;
+and **idempotent** — a player's own saved band name / chosen character is never
+overwritten.
+
+### (d) What remains (honest)
+
+- **The live multi-band band-selection list** (`career_choose_band_fs` /
+  `menu_choose_band`) and the live Career navigation are the **deferred
+  live-career-UI surface** already noted in Steps 7.3/7.6: on our disc the
+  navigating menu walks (`career`, `glitches`, `enhanced`) do not yet reach their
+  target screens (the WT main-menu navigation differs from the GH3/gd10 walks they
+  were copied from), so "The Glitches *rendered* as a distinct 5th entry in a
+  multi-band list" is not demonstrable live yet. The port holds a single save band,
+  which The Glitches *is* (first == last), fully unlocked. The GH3-copied `glitches`
+  walk (`band5_info_p1_career`) is left as-is — it is a GH3 artifact that does not
+  apply to WT; the WT-faithful proof is `--enhancedtest`.
+- **True HDR / FSR upscaler** effects cannot be verified on a headless, non-HDR box.
+- `ensureGlitches()` (GH3 band-5 model) stays in the tree as the gd04 reference /
+  shared-code lineage; it is not called by gd07.
+
+### Evidence
+- `gd07 --enhancedtest <disc>`: exit 0, **0 checks failed** — "40/40 required
+  options present; desktop defaults respect the original 35/35; store round-trip
+  127 values honoured 0 failed; cheat_multiplier off=x1 on=x4 on+SP=x8;
+  cheat_hyperspeed 1000→600 ms; cheat_full_sp 50→100; guitar_hero_cheats 14
+  toggleable cheats; unlock_all 3 tags swept + scripts spawned; The Glitches named,
+  $1,000,000, character seeded, player name/character preserved."
+- `gd07 --uitest <disc>`: **unchanged** — 47 flow states, **1181/1181** focusable
+  items mouse-hittable, 0 UNHANDLED, exit 0.
+- Files: `ui/glitches.{h,cpp}` (`ensureGlitchesGh4`), `ui/front_end.cpp` (calls it),
+  `tests/enhancedtest.{h,cpp}`, `main.cpp` + `CMakeLists.txt` (`--enhancedtest`).

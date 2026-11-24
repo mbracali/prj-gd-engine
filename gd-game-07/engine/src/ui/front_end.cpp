@@ -235,22 +235,13 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     }
     // The Glitches, once the boot has loaded or created the save (the first main menu).
     if (!glitchesDone_) {
-        // gh4 (D10): the original's own unlock-all scripts (GlobalTags_UnlockAll,
-        // unlock_all_profiles) stand for The Glitches until its band is built.
+        // gh4: the house band is the save's band renamed "The Glitches" with the
+        // original's own unlock-all scripts run (everything unlocked) — the
+        // fully-unlocked band the player meets last in the band-selection screen
+        // (ui/glitches.cpp ensureGlitchesGh4). GD07_NO_GLITCHES turns it off.
         if (states && states->top() == qbkey::key("uistate_mainmenu")) {
             glitchesDone_ = true;
-            if (!SDL_getenv("GD07_NO_GLITCHES")) {  // (development aid: off)
-                qb::Struct p;
-                qs::Vm::set(p, qbkey::key("songs_only"), qs::Vm::makeInt(0));
-                vm_->spawn(qbkey::key("unlock_all_profiles"), qb::Struct{});
-                vm_->spawn(qbkey::key("purchase_all_profiles"), qb::Struct{});
-                // Its band is named The Glitches (current_band_has_band_name
-                // reads band_info.name) [C script; the name is the port's].
-                qb::Struct& bi = vm_->globalTags[qbkey::key("band_info")];
-                const qb::Value* nm = qs::Vm::param(bi, qbkey::key("name"));
-                if (!nm || nm->str.empty()) qs::Vm::set(bi, qbkey::key("name"), qs::Vm::makeString("The Glitches"));
-                SDL_Log("The Glitches (gh4): unlock_all_profiles, purchase_all_profiles");
-            }
+            if (!SDL_getenv("GD07_NO_GLITCHES")) ensureGlitchesGh4(*vm_);  // (development aid: off)
         }
     }
     // During a song GH3's scripts keep running (the attract mode's input

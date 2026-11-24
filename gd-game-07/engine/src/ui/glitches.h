@@ -32,6 +32,17 @@ bool ensureGlitches(qs::Vm& vm);
 // regardless of unlock state (IsSongAvailable is disc-presence only).
 bool unlockEverything(qs::Vm& vm);
 
+// The Glitches on the gh4 engine (World Tour / Metallica). The port's house
+// band: the original's own unlock-all scripts (unlock_all_profiles /
+// purchase_all_profiles -> GlobalTags_UnlockAll) leave the save with every
+// song, venue, character, instrument and bonus unlocked; the save's band
+// becomes "The Glitches" (current_band_has_band_name reads band_info.name) with
+// the house band's $1,000,000, so it is the fully-unlocked band the player
+// meets last in the band-selection screen. Singleplayer career also gets a
+// premade character seeded (no live Create-A-Rocker). Run once after the first
+// main menu (front_end) and from --enhancedtest. Returns whether it changed.
+bool ensureGlitchesGh4(qs::Vm& vm);
+
 // The Vault: GH3 keeps its purchases (guitars, finishes, characters,
 // outfits, styles, videos, bonus songs) save-wide; the port scopes "all
 // bought" to The Glitches' band only (owner 2026-10-29, GD10-026). While the
