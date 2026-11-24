@@ -855,3 +855,55 @@ data sound_buss.qb]; the port's audio/sound_buss.h:
   SetSoundSeekPosition / PauseSound / StopStream play the song's SongStream on
   the song mixer while no song is (Mixer::play at the song's start resets the
   speed); walk practice checks it (check:preview).
+
+## Career mode audit (2026-11-24): faithful, no fix
+
+A full career audit (tier/setlist progression and the gating, boss battles,
+encores, co-op career, unlocks/store/cash/stars, the menus / screen-flow,
+save/profile). Ground: the static Ghidra export (`ghidra/analysis/decomp`,
+functions.tsv), the decoded QB, and headless walks. REA was not used (it
+cannot open the XEX2). **Verdict: faithful.** The career layer runs GH3's own
+QB scripts (progression, store, cash, stars, the newspaper, the flow states)
+over the native shims; only the atom VM is a reimplemented driver, and it
+matches the binary. No code change.
+
+- **Atom VM** (`script/atoms.cpp`), the one reimplemented career driver,
+  checked instruction-for-instruction against the XEX and found faithful:
+  the condition met-test `met()` = Function_8239E740 (`required[diff] == 0`
+  -> met, else state == 0x4e29e602); the conditions loop `conditions()` =
+  Function_8239EBE0 (re-evaluate each condition via Function_82422B18 in
+  order, break on the first unmet); the permanent-skip = Function_82422B18
+  (vtable+8 "permanent?" AND already-met -> skip evaluation), mirrored by the
+  guard `!(permanent && !isAtom && met(d))`; the per-atom update `step()` =
+  Function_8239F040 (Locked + conditions -> tool_only complete (8239E8F8)
+  else active+spawn+runNow (8239EDB8); Active + script ended -> complete);
+  tool_only on a retail disc = Function_8239E960 (DAT_82a6ca11 "is CD"); the
+  complete/relock `complete()` = Function_8239E8F8 / 8239F158 (disabled
+  waiters relocked, deps reset, updated at once); the UpdateAtoms walk
+  `update()` = Function_822B0978 (every atom in order; one whose script is
+  still running stops the pass). State constants: Locked 0x152d376e, Active
+  0xb4e103fd, Complete 0xbd982fdc, Disabled 0x7b01911c; condition true
+  0x4e29e602 / false 0x0f636d0d. SetProgressionDifficulty (Function_82270C90)
+  stores the raw numeric `difficulty` param (no key->index conversion), which
+  `natives_misc.cpp`'s `Vm::number` matches; it feeds `met()`'s `required[diff]`.
+- **Boss / battle outcome routing** (`game/match.cpp` 699-730, `app.cpp`
+  1299-1302, `ui/front_end.cpp` 170): GameMode::Boss is distinct from Battle,
+  so a boss defeat (h2 <= 0 -> P1Wins, "song_wonp2") takes the won path ->
+  `GuitarEvent_SongWon`; a player loss (h1 <= 0) -> Failed ->
+  `GuitarEvent_SongFailed`; a regular Battle KO (healths differ) sets
+  `battleKo` -> `GuitarEvent_SongFailed` (GH3 then raises GuitarEvent_SongWon
+  battle_win = 1). Matches modes.md §5/§6 [C 0x8210FD18].
+- **Save** (`ui/natives_flow.cpp` SaveToMemoryCard / LoadFromMemoryCard):
+  serialises the whole tag store -- `glitchesSaveView` (global tags) AND
+  `globalTagSections` (the per-band career sections) -- so no career field is
+  dropped. Cash, stars and store prices are GH3-script-driven (no native
+  `AwardCash`): faithful by construction given GetGlobalTags / SetGlobalTags.
+- **Objective evidence** (headless, build/linux, disc data): walk `career`
+  passed (band -> difficulty -> character -> venue -> setlist -> song -> won
+  -> newspaper -> cash_reward -> autosave -> setlist; 1 song); walk
+  `career_encore` passed with every embedded check (num_songs_to_progress
+  2->1->0, careertier1.complete 0->1, g_encore_ready = 1, encore =
+  rocknrollallnite, progression_completion_tier = 1, reaching
+  career_sponsored_fs; 4 songs) -- the atom-driven tier -> encore ->
+  tier-complete -> sponsor chain; walk `boss_devil` passed (the devil beaten,
+  the song restarts at 336682 ms "Lou's finish", then the newspaper; 2 songs).
