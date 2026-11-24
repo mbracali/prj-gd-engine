@@ -312,3 +312,191 @@ gated behind the env var — no behaviour change. It is the objective instrument
 `docs/guidelines/usual-bugs.md` requires for the hair/cloth bug class, which was
 previously absent. Build: Linux video build (`GD10_FFMPEG_DIR`), `band_motion`
 walk + chartest pass.
+
+## Controls audit (2026-11-24)
+
+Analysis-first, cautious pass requested after the owner reported the controls
+are "VERY FRAGILE" with "a bunch of errors". Goal: understand the original's
+input handling in depth, compare to ours, and produce a prioritized list. **No
+code change was made** (rationale in part (d)): the fragile input engine must
+stay untouched and the big gaps need one coordinated control model across all
+games. Evidence is from the static Ghidra export (`ghidra/analysis/`,
+base 0x82000000; REA cannot open the XEX2), the QScript native table
+(`analysis/cfuncs.tsv`), and the port source read in this worktree. Addresses
+are the real function entries from `cfuncs.tsv`; QB checksums resolved against
+the disc's debug-name table (`tools/qbkey.py --table`).
+
+### (a) What the ORIGINAL (gh4, GH: Metallica) does, with evidence
+
+The gh4 engine is QScript-driven: a set of native C functions read the Xbox
+360 controllers and expose them to the disc's QScript. The per-controller
+record is `FUN_82134d98(index)`; `record+0x18` is the raw input struct and
+`record+0x1c` the device descriptor. `descriptor+8` is the **controller-type
+enum** (the single most important finding):
+- `8`, `9` = guitar (`IsGuitarController` [C 0x821895F8]: type 8 or 9);
+- `10` (0xa) = **Guitar Hero drum kit**, `11` (0xb) = **Rock Band drum kit**
+  (`IsDrumController` [C 0x82189728]: type 10 or 11; `IsRBDrum` [C 0x82189838
+  -> 0x821897B8]: only type 11, else a `roland_drumkit` global check);
+- touch guitar is a separate flag at `record+0x18 + 0x4a`
+  (`IsGuitarTouchController` [C 0x82189688]).
+
+**Controller-type detection.** `GetControllerType` [C 0x82189448] reads the
+`controller` tag (qb 0xb30d9965) and maps a subtype (0..4) to one of four QB
+name checksums it hands back to script: `guitar` (0xbdc53cf2), `drum`
+(0x5cc16cdf), `vocals` (0xe8e6adcb), or `controller` (0xb30d9965, the generic
+fallback). A fallback branch reads `descriptor+0x9c` and consults the
+`roland_drumkit` (0x94db569c) and `is_network_game` (0x8737eeda) globals. So
+the original explicitly classifies each device as **guitar / drum / vocals /
+generic** and the game picks the instrument from that. Supporting natives:
+`IsStandardGuitarControllerPluggedIn` [C 0x8218AF70], `IsMicrophonePluggedIn`
+[C 0x8218AFC8], `IsControllerPluggedIn` [C 0x821898A0], `GetActiveControllers`
+[C 0x8218AEC0], `GuitarControllerMake` [C 0x8218A220]. Sign-in / hot-plug is a
+whole subsystem: `CheckForSignIn` [C 0x8217E798], `GetMaxControllerSignins`
+[C 0x82135448], `RefreshSigninStatus`/`IsSigninFinished` [C 0x82134E78/EA8],
+`MonitorControllerStates` [C 0x82196CC8], `KeepControllersAlive`/
+`ReAcquireControllers` [C 0x823B7398/823B7330], `Spawn`/`StopSecondControllerCheck`
+[C 0x823B73C0/823B6EC0], `GetSavegameFromController` [C 0x82181FA8].
+
+**GUITAR.** Frets/strum come from the raw struct read by the controller layer;
+the thin natives `ControllerPressed` [C 0x823B6C70], `ControllerMake`
+[C 0x823B6D50] and `ControllerDebounce` [C 0x823B6130] forward to the engine.
+`ControllerDebounce` carries a `time` float param (qb 0x906b67ba, default 1.0
+= 0x3f800000) -> a **time-based press debounce** in the original. Whammy:
+`UpdateWhammyBarProps` [C 0x821973C8], `SetNewWhammyValue` [C 0x8219A310],
+`SetAllWhammyValues` [C 0x8218CCB0], `ControlWhammyPitchShift` [C 0x8218CD78],
+`WhammyFXOn/Off` [C 0x8219AAD0/AD08] -> the whammy is an analog bar driving
+both the star-whammy and an audio pitch-shift. Tilt / Star Power:
+`check_for_star_power_CFunc` [C 0x8219BD68] polls the controller for the SP
+gesture (Select button + tilt), gated by `game_mode` (0x8320d478), with the
+tilt path well-grounded already in our `player.cpp` [C 0x82112F28 ..
+0x82112F90: Select deploys at once, tilt only after `star_power_trigger_frames`
+= 3 frames]. HOPO at the judge level: `ProcessHammerOns` [C 0x8214EE70] and
+`fretbar_update_hammer_on_tolerance_CFunc` [C 0x8218D6B0] compute a per-gem
+hammer-on window from `hammer_on_tolerance` (qb 0xdb48f9fa) and
+`hammer_on_measure_scale` (qb 0xdeb26abf), scaled by tempo. `GetStrumPattern`
+[C 0x8218D2B0] and `Band_SetStrumStyle` [C 0x8211E4D8] select the strum model.
+
+**DRUMS (gh4 band mode).** The drum kit is a first-class controller with
+**per-pad velocity / dynamics**. `GetDrumHitVelocity` [C 0x82192350] reads the
+input struct `record+0x18`, checks the drum flag at `+0x49`, and for a type-10
+GH drum takes the **max of six velocity bytes at +0x43..+0x48** (the pads +
+cymbals + kick), then stores `velocity` (qb 0x41272956). `ProcessDrumVelocity`
+[C 0x8214F1C0], `PlayDrumSample_CFunc`, `JamInputDrumStrum_CFunc`
+[C 0x821500F8], `JamDrumPlayback_Process` [C 0x82153F50],
+`BandManager_AddDrummer`. So the original reads discrete drum pads/cymbals/kick
+with velocity and judges a separate drum track — none of which the port has.
+
+**VOCALS (band mode).** A full microphone/pitch subsystem:
+`IsMicrophonePluggedIn` [C 0x8218AFC8], `Vocals_GetMicType` [C 0x821AEB80],
+`Vocals_GetAvailableMics` [C 0x821AE5B8], `Vocals_ControllerHasUsableHeadset`
+[C 0x821AE6D8], `IsMicAttachedForController` [C 0x823F14C0], `Vocals_SetMicGain`
+[C 0x821AEC30], `VocalDSPSetParams` [C 0x82190800], `InitJamMic`/`InitJamOverVocals`
+[C 0x82153E68 / 0x8214F458], `VocalsHighway_*` [C 0x821AE5.. ], `%s_vocals_phrases`
+/ `%s_vocals_note_range` / `%s_song_vocals` chart keys. Pitch/phrase scoring is
+read from the mic; absent entirely from the port.
+
+### (b) What OUR port does
+
+The port reuses gd01's GH1/GH2-lineage input engine (`input.{cpp,h}`), not a
+gh4 model. It exposes **15 universal controls** (`Input::Control`: General
+Start/Select/MenuUp/MenuDown + 5-fret guitar Start/Select/StrumUp/StrumDown/
+Green/Red/Yellow/Blue/Orange/Whammy/Gyro) and **three instruments**
+(`enum class Instrument { Guitar, Gamepad, Midi }`, input.h:129). `ControllerMode`
+is only `{ Guitar, Joypad }` (controller_mode.h). Device classification
+(input.cpp:~482): Rock Band HID guitar / Xbox guitar+Santroller / PS2-adapter
+guitar / else `Joypad`. Guitar input: strum is a pulse; whammy is an analog
+axis whose Whammy *action* fires past 0.15 (input.cpp:976, 1671) with
+`whammyValue()` 0..1 for star-whammy; axis-derived buttons use a half/third
+hysteresis "no chatter" debounce (input.cpp:~946) and a 300 ms post-connect
+settle (`settleNs`, input.cpp:650). Tilt/Star Power is faithfully modelled in
+`player.cpp` `updateStarPower` [C 0x82112D7C/F28]. The note judge
+(`player.cpp::frame`) is extensively RE-grounded to the original's gem scanner
+[C 0x8211FD40, 0x8211FF38, 0x82120090, 0x82120160, 0x82120260-880] with the
+HOPO windows driven by the tuning table (`hammerTimeEarly/Late`,
+`checkTimeEarly/Late`, `formBeforeStrumming`, `strumBeforeForming`,
+`splitLatePercent`). Chart `_drums_notes` [C] is parsed (chart.cpp:183) but
+drives only the **AI band drummer animation** (`render/band_anim`), never a
+playable drum track; vocals are AI only. There is no drum/vocal/cymbal/kick/mic
+control, no per-pad velocity, no controller-type classification beyond
+guitar-vs-joypad.
+
+### (c) Gaps and errors (original vs port)
+
+- **No drum instrument (major).** The original reads a GH/RB drum kit
+  (type 10/11) with six velocity bytes; the port has no Drums instrument, no
+  drum pad/cymbal/kick controls, no velocity. A real drum kit connected today
+  falls through device classification to `Joypad` and silently plays the
+  *guitar* part on scrambled buttons (wrong, confusing) — a detection error,
+  not just a missing feature.
+- **No vocal instrument (major).** The original has a mic/pitch/phrase
+  subsystem; the port has nothing (no mic enumeration, no pitch, no vocal
+  highway input). Vocals are AI-only.
+- **No controller-type classification for band instruments.** The port cannot
+  tell a drum kit or headset from a pad; `GetControllerType`'s guitar/drum/
+  vocals/controller decision has no port analogue.
+- **Guitar debounce model differs.** Original: a `time`-based press debounce
+  (`ControllerDebounce`, default 1.0). Port: half/third axis hysteresis +
+  300 ms settle. Likely fine, but not the same mechanism; the exact original
+  `time` units were not traced (uncertain).
+- **Engine lineage mismatch.** The port's input.h header text and defaults are
+  written against **GH2** data (beatmatch_controller.dta, joypad.dta,
+  addresses 0x822b3c50 / 0x8234a278) bolted onto a **gh4** title. The guitar
+  mapping is plausibly faithful for the 5-fret guitar, but the band model is
+  absent. (This is the known gap already flagged honestly in
+  `docs/spec-gamepad-menu.md`.)
+- **Not grounded here as a defect:** whammy 0.15 action threshold, the exact
+  strum/HOPO window numbers (these come from the tuning table and are already
+  RE-grounded), and the per-frame SP tilt count — these looked correct on
+  reading and were not changed.
+
+### (d) Prioritized improvement list
+
+SMALL / SAFE (low risk, isolated, still needs the owner/orchestrator's OK
+before coding — none done in this cautious pass):
+1. **Drum-kit mis-detection guard.** When a device is a known drum kit (USB id
+   / SDL name contains "drum"), do not silently bind it to the guitar Joypad
+   layout; at minimum surface it in the Gamepad menu as "unsupported
+   instrument (drums)" so it does not scramble the guitar part. Risk: LOW
+   (classification only, no judge change) — but still a behaviour change to the
+   fragile layer, so coordinate first. Evidence: `isSantrollerGuitar` already
+   excludes "drum" (input.cpp:70); generic drum kits still reach `Joypad`.
+2. **Add GD10 input-area log coverage.** A `GD10_INPUTLOG`-style trace of the
+   detected controller type and chosen profile per device, to make future
+   input debugging data-driven (owner rule: objective checks). Risk: LOW
+   (logging only).
+
+NEEDS COORDINATION (larger; must fit the ONE universal control model the
+orchestrator owns — do NOT implement piecemeal):
+3. **Extend the Control set for drums** (Red/Yellow/Blue/Green pads, Blue/
+   Green/Yellow cymbals, Kick) + a `Drums` instrument + `ControllerMode::Drums`
+   + a drum note-judge track. This is the biggest gap and the spec's known
+   limitation. Needs the cross-game control-model decision (gd05 Rock Band has
+   the same 15-control limitation). Evidence: `GetDrumHitVelocity` six-byte
+   velocity model [C 0x82192350], `_drums_notes` chart track.
+4. **Add a `Vocals` instrument + mic input** (pitch/phrase), per
+   `Vocals_*`/`InitJamMic` natives. Even larger; cross-game.
+5. **Per-pad velocity / dynamics** for drums once (3) exists [C 0x82192350].
+6. **Controller-type classification** mirroring `GetControllerType`
+   (guitar/drum/vocals/generic) so the Gamepad menu offers the right
+   instrument per device.
+
+**Why no code change now:** every grounded fix either (1) changes the fragile
+input/detection layer or (2) is a cross-game control-model extension the
+orchestrator must integrate as one consistent model. The owner's brief
+explicitly accepts "a thorough findings doc with no risky code change" as
+success, so this pass stops at analysis.
+
+### Uncertain / VMX128-blocked
+
+- The raw controller button/axis reading below `FUN_82134d98` (the actual fret
+  bit and strum-bar sampling, and the exact byte offsets for frets/strum in
+  `record+0x18`) was not fully traced; the drum velocity bytes +0x43..+0x48 and
+  the touch flag +0x4a are confirmed, frets/strum offsets are not.
+- `ControllerDebounce`'s `time` unit and whether it is frames or seconds: not
+  traced.
+- The `check_for_star_power_CFunc` [C 0x8219BD68] branch logic is large and
+  partly a QScript interpreter walk; the tilt/Select gesture is confirmed but
+  the full gesture state machine (states 0x597b534d p2_battle, etc.) was not
+  exhaustively decoded.
+- No controller/XInput reading appears to be VMX128 in the functions read, but
+  the deep pad layer was not disassembled instruction-by-instruction.
