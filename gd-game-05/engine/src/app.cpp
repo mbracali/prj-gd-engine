@@ -2168,6 +2168,7 @@ int App::controllerType(int pad) {
         std::string n = d.name;
         for (char& c : n) c = char(std::tolower(static_cast<unsigned char>(c)));
         if (n.find("drum") != std::string::npos) return 0;
+        if (n.find("microphone") != std::string::npos || n.find("singstar") != std::string::npos) return 2;  // a mic sings
     }
     return 1;
 }

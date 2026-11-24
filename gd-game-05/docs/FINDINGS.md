@@ -224,263 +224,106 @@ Applied (game/rb_bonus.cpp, app.cpp updateSeats):
 - Scripts' tasks: Rock Band passes the units first and positionally
   (`{thread_task kTaskTutorialSeconds (script ...)}`); GH2 used `(units ...)` [C data].
 
-## Controls audit (2026-11-24)
+## Controls Phase B — first-class vocals (mic) [port]
+A microphone is now a first-class seat in the universal input/controller
+model, parallel to the drum kit, without changing the (working) vocal
+pitch-scoring path.
 
-Reverse-engineers Rock Band's input path end to end (device detection ->
-beatmatch controller mapping -> watcher) and compares it to the port's
-`engine/src/input/input.{cpp,h}` and gameplay path (`app.cpp`). The reference
-is deliberately broad: the owner wants one universal control model across all
-games, and RB is the richest input game. Analysis-first; no change was made to
-the fragile input engine (see "Why no code change" at the end).
+Implemented (engine/src/input/input.cpp, input.h, engine/src/app.cpp):
+- A mic is detected when it reaches SDL as a HID "gamepad" (some Rock Band /
+  SingStar USB mics present a small control interface beside their USB-audio
+  one): `isRockBandMic(id, name)` matches by device name ("microphone",
+  "singstar", "rock band mic") or a short known-USB-id list (0x1415:0x0000
+  SingStar/Logitech wired mic; 0x12ba:0x00ff Harmonix [I]). The pad carries a
+  `mic` flag (Pad::mic), set at SDL_EVENT_GAMEPAD_ADDED.
+- `Input::instrument()` returns `Instrument::Vocals` for a mic by default;
+  `Input::instruments()` offers {Vocals, Gamepad} (Vocals first). The label is
+  already "Vocals (microphone)" (instrumentName). `setInstrument` to a real
+  controller type clears the mic flag, so a mis-detection is overridable.
+- Guard: a mic emits no gameplay actions (frets, strum, whammy, Star Power) —
+  `Input::update` skips `controlEdges` for a mic and zeroes its whammy — so a
+  buttonless or stray-HID mic is never a dead guitar that strums / misses.
+  Menu helpers still work, so a mic button can navigate menus. This mirrors
+  the drum-kit detection + guard.
+- `App::controllerType` routes a mic seat to the vocal part (type 2): via
+  `Input::instrument()==Vocals`, plus a name fallback ("microphone"/
+  "singstar") for devices consulted by name.
+- Test aid: `attachVirtualPad("<v>:<p>:mic")` plugs in a virtual
+  "Rock Band Microphone"; the input self-test asserts the seat is Vocals (not
+  a dead gamepad), is surfaced as "Vocals (microphone)", offers Vocals first,
+  is a listed device, plays no frets/strum when its button is pressed, and
+  that a guitar still frets alongside it.
 
-Evidence is Rock Band's unless marked: `[C data]` a decoded `extracted/dta/`
-file, `[C]` an address in `default.xex` (image base 0x82000000), `[I]`
-inferred. Named functions come from `strings.tsv` (the string's referencing
-function); watcher/judge addresses are carried over from the "gem judge" and
-"Vocals" sections above.
+Evidence (gd05 --selftest, GD05_VIDEO=OFF, RB USA disc): all input checks
+passed (incl. the 6 new mic checks); PART VOCALS 252 charts, 8648 phrases
+Awesome, 0 not fully hit; "vocals through the pitch detector: 58 songs,
+2136 of 2136 phrases Great or better"; GUITAR/BASS/DRUMS 0 not fully hit;
+0 judge rule checks failed.
 
-### A. The original, per input area
+Remaining (deeper routing — larger follow-up, deliberately NOT done here):
+- The mic's VOICE is still judged entirely outside the universal input
+  engine: `VocalInput` (gd-engine-core mic, or GD05_VOCALS_FILE) feeds a
+  `PitchDetector` into `VocalPlayer`, and `handleGameAction` still returns
+  early for a vocal seat (the singer deploys by singing, screamPoll). This
+  increment makes the *instrument/seat/detection* first-class; it does NOT
+  move pitch events through the universal Action model. Fully routing the
+  mic through the input engine (pitch as Actions) is a large change that
+  risks the working vocals and is left as a follow-up.
+- Associating a detected HID-mic device with the VocalInput audio capture of
+  the same physical mic (today VocalInput opens the default capture device
+  independently of the HID device) is not wired.
+- gd10 / gh4 vocals are NOT playable: gd10 has no VocalPlayer and no mic /
+  pitch path at all — that is a separate, larger feature (a new pitch
+  pipeline), out of scope for this increment.
 
-**Two-layer model.** RB turns every physical controller into one of a small
-set of *beatmatch controller* profiles, then feeds one of three *watchers*.
-The profile is pure data; the watcher is code.
-- Device -> profile: `system/run/config/gen/joypad.dta` `(controllers ...)`
-  per platform, detected by the XInput/USB subtype `[C data]`. On Xbox
-  (`#ifdef HX_XBOX`): `strat_xbox` <- `kJoypadXboxHxGuitar` (RB Stratocaster,
-  `lefty_flip`), `ro_guitar_xbox` <- `kJoypadXboxRoGuitar` (a Guitar Hero
-  RedOctane guitar, `ignore_buttons kPad_L2 kPad_R2`, `lefty_flip`),
-  `hx_drums_xbox` <- `kJoypadXboxDrums`, `stagekit_xbox` <-
-  `kJoypadXboxStageKit`, else `digital`/`analog` pads. So RB keys off the
-  controller's reported *type*, not its USB name. Detection code:
-  `get_controller_type_from_pad` / `get_controller_type_from_controller` /
-  `get_instrument_from_controller` / `get_instrument_track_order` /
-  `has_participating_guitar_controller` / `is_instrument_available` (all in
-  Function_824254E8) `[C]`; the raw pad layer is the joypad manager
-  Function_823B0CC8 (`joypad_controller_type`, `joypad_is_button_down`,
-  `joypad_get_lx/ly/rx/ry/tl/tr` analog reads, `joypad_stage_kit_raw`,
-  `joypad_get_player_from_padnum`) `[C]`.
-- Profile -> slots: `config/gen/beatmatch_controller.dta` maps each profile's
-  physical buttons to the beatmatcher's gameplay slots `[C data]`.
-- Profile -> watcher: `system/run/config/gen/beatmatch.dta`
-  `(beatmatch_controller_mapping ...)` `[C data]`: guitars (`guitar`,
-  `hx_guitar_xbox`, `ro_guitar_xbox`, `hx_guitar_ps3`, `strat_xbox` proto
-  guitars) -> the `guitar` watcher (GuitarTrackWatcherImpl 0x824C1598);
-  **every drum profile (`hx_drums_xbox`, `hx_drums_ps3`, `drums`,
-  `lefty_drums`, `midi_drums`, `stagekit`) -> the `joypad` watcher**, which
-  becomes DrumTrackWatcherImpl (0x824C1250 / Swing 0x824A2320) when the track
-  is a drum track `[C/I]`; `joypad`/`joypad_guitar` -> the joypad watcher.
-  So in RB a drum kit is a *joypad-class* controller (each pad is a discrete
-  strike, no strum bar) — which is exactly the port's wave-01 decision (D6).
-- Global input tuning (`joypad.dta`): `deadzone 36`, axis-as-button
-  `threshold 0.75`, menu `hold_ms 500` / `repeat_ms 50`, `(ignore 1 2 3 4 5
-  6 7)` `[C data]`.
+## Controls Phase B — first-class vocals (mic) [port]
+A microphone is now a first-class seat in the universal input/controller
+model, parallel to the drum kit, without changing the (working) vocal
+pitch-scoring path.
 
-**Guitar / bass.** Profile `ro_guitar_xbox` / `strat_xbox` / `hx_guitar_ps3`.
-- 5 frets: `beatmatch_controller.dta` `(slots ...)` per profile `[C data]`,
-  e.g. `ro_guitar_xbox (slots 6 0 4 1 5 2 7 3 2 4)` and
-  `hx_guitar_ps3 (slots 6 0 5 1 4 2 7 3 2 4)` (raw button -> slot 0..4 =
-  green..orange). `button_filters` remaps the same buttons for menu nav.
-- Strum up/down: the guitar watcher reads the strum bar; `strummed_up` /
-  `strummed_down` / `deploy_count` / `failed_deploy` live in the watcher
-  Function_824511F0 `[C]`. Strum/HOPO input-layer timing (carried over from
-  the gem-judge section, confirmed [C]): a strum <= 52 ms after the last
-  dropped strum (0x824AED60); HOPO-eligible late window +60 ms / hammer-on
-  window -slop..slop+60 (0x824C2030 / 0x824C2078); chord / wrong-strum grace
-  60 ms (0x824C1A88); `hopo_threshold 170` ticks (`beatmatch.dta`).
-- Whammy: a continuous bar, `whammy_rate` (Function_824352E8), `send_whammy`
-  (0x8245E4B8) / `whammy_end` (0x8245E900); it adds Overdrive 0.034 a beat
-  while a tail is held (0x824644E0) `[C]`. No separate "whammy range"
-  calibration beyond the axis read.
-- Tilt / Overdrive (Star Power): **two sources, both in every profile.** (1)
-  `force_mercury kPad_Select` in each `beatmatch_controller.dta` block — the
-  Select button always deploys `[C data]`. (2) the guitar's tilt sensor (the
-  "mercury switch"), filtered by `beatmatch.dta` `(mercury_switch_filter
-  (any_sign_filter (window 0.5) (num_frames 12) (threshold 0.93)))` — tilt is
-  recognised only when the accelerometer's sign holds past 0.93 for 12 frames
-  `[C data]`. Deploy logic: `can_deploy` / `is_deploying` / `force_deploy`
-  (Function_82442D68), `deploy_threshold`/`deploy_bonus`/`deploy_beats`
-  (Function_82445188) `[C]`.
-- The "upper / solo frets": **RB1 has none.** The RB1 Stratocaster is a
-  10-fret guitar; `five_way_controllers strat_xbox hx_guitar_ps3`
-  (Function_8241F8C8) `[C data]` names the controllers with the Strat's
-  5-way *pickup / effect selector*, used only in freestyle solo sections
-  (`in_freestyle_section` 0x82456C20, `drum_freestyle`) to pick an audio
-  effect (WahEffect / FlangerEffect / PitchShiftEffect strings at
-  0x82885...). It is **not** a scored note input. (Upper solo frets are a
-  later Guitar Hero feature, not RB1.)
+Implemented (engine/src/input/input.cpp, input.h, engine/src/app.cpp):
+- A mic is detected when it reaches SDL as a HID "gamepad" (some Rock Band /
+  SingStar USB mics present a small control interface beside their USB-audio
+  one): `isRockBandMic(id, name)` matches by device name ("microphone",
+  "singstar", "rock band mic") or a short known-USB-id list (0x1415:0x0000
+  SingStar/Logitech wired mic; 0x12ba:0x00ff Harmonix [I]). The pad carries a
+  `mic` flag (Pad::mic), set at SDL_EVENT_GAMEPAD_ADDED.
+- `Input::instrument()` returns `Instrument::Vocals` for a mic by default;
+  `Input::instruments()` offers {Vocals, Gamepad} (Vocals first). The label is
+  already "Vocals (microphone)" (instrumentName). `setInstrument` to a real
+  controller type clears the mic flag, so a mis-detection is overridable.
+- Guard: a mic emits no gameplay actions (frets, strum, whammy, Star Power) —
+  `Input::update` skips `controlEdges` for a mic and zeroes its whammy — so a
+  buttonless or stray-HID mic is never a dead guitar that strums / misses.
+  Menu helpers still work, so a mic button can navigate menus. This mirrors
+  the drum-kit detection + guard.
+- `App::controllerType` routes a mic seat to the vocal part (type 2): via
+  `Input::instrument()==Vocals`, plus a name fallback ("microphone"/
+  "singstar") for devices consulted by name.
+- Test aid: `attachVirtualPad("<v>:<p>:mic")` plugs in a virtual
+  "Rock Band Microphone"; the input self-test asserts the seat is Vocals (not
+  a dead gamepad), is surfaced as "Vocals (microphone)", offers Vocals first,
+  is a listed device, plays no frets/strum when its button is pressed, and
+  that a guitar still frets alongside it.
 
-**Drums.** Profile `hx_drums_xbox` (Xbox 360 4-pad kit + kick).
-- Pad -> lane: `hx_drums_xbox (slots 2 0  9 0  4 1  5 2  7 3  6 4)` `[C data]`
-  — `num_slots 5` (`beatmatcher.dta`). Four of the five lanes are single
-  buttons (slot 1=btn4, 2=btn5, 3=btn7, 4=btn6); **slot 0 is fed by two
-  buttons (2 and 9)** — the kick lane taking both the kick pedal and a second
-  source `[C data; which physical input is which: I]`. MIDI kit:
-  `midi_joypad (mapping (36 kPad_L2)(38 kPad_L1)(46 kPad_R1)(48 kPad_R2)(45
-  kPad_X)) (thresholds (36 50))` — notes 36/38/46/48/45 -> the 5 lanes.
-- Cymbals: **RB1 has none** (4-pad kit only; cymbals are an RB2/RB3-Pro kit).
-  There is no cymbal slot in `hx_drums_xbox` and no pad-vs-cymbal lane split.
-  (`hit_cymbal` 0x82818... is the drummer *character* animation, not input.)
-- Velocity / dynamics: **RB1 does not score drum velocity.** The slots are
-  binary button->lane; the only velocity in the input data is the MIDI-kit
-  *gate* `thresholds (36 50)` (a note counts if velocity >= 50), not graded
-  dynamics `[C data]`. No "velocity"/"dynamic" string appears in a drum
-  input/scoring context (only `stretch_with_velocity`, an animation helper,
-  and debug breakpoints). (Graded drum dynamics are an RB3 feature.)
-- Drum watcher timing & fills (DrumTrackWatcherImpl, carried over, [C]):
-  every pad of a chord is its own gem (0x824A21E8); a wrong pad misses the
-  closest unhit lane of the nearest time group; the crash lane deploys after
-  `crash_fill_ready_hits` pad hits inside a fill (0x824C1370 / 0x824C1530);
-  hits >1000 ms before the first gem enter `drum_freestyle` (0x824638D0).
+Evidence (gd05 --selftest, GD05_VIDEO=OFF, RB USA disc): all input checks
+passed (incl. the 6 new mic checks); PART VOCALS 252 charts, 8648 phrases
+Awesome, 0 not fully hit; "vocals through the pitch detector: 58 songs,
+2136 of 2136 phrases Great or better"; GUITAR/BASS/DRUMS 0 not fully hit;
+0 judge rule checks failed.
 
-**Vocals.** Not a button device at all.
-- The mic is sampled continuously; RB detects pitch with **Fonix at 16 kHz**
-  `[I, from the vocal section]`. The scorer (VocalPlayer 0x82452000..) grades
-  each phrase against the chart.
-- Pitch model (`config/gen/scoring.dta (vocals ...)`) `[C data]`:
-  `pitch_margin 3.3 / 2.3 / 1.5 / 1.2` semitones by difficulty,
-  `slop 140 / 120 / 120 / 120` ms, `rating_thresholds 0.6 / 0.75 / 0.9 /
-  0.99`, `phrase_value 200 / 400 / 800 / 1000`, octave-free matching,
-  `pitch_hit_multiplier`, `short_note_*`, `max_detune 1.0` / `detune_factor`.
-- Talkies (non-pitched): `nonpitch_slop 150`, `nonpitch_history 500`,
-  `nonpitch_warping_penalty 0.3`, `nonpitch_hit_multiplier 2.0`,
-  `nonpitch_easy_multiplier 2.5` — any voice counts `[C data]`.
-- Deploy gesture: **no button.** The singer deploys by singing >= 0.1 loud
-  for > 390 ms inside a freestyle gap (`freestyle_min_duration 600`,
-  `freestyle_pad 100`; `screamPoll` 0x82458F70 / 0x824AD9D0) `[C]`.
-- Percussion sections: tambourine from mic onsets (`tambourine_points 25`,
-  `tambourine_window_ticks 120`, 0x82456080) `[C data]`.
-
-**Controller-type -> player/part assignment.** `get_controller_type_from_pad`
-/ `get_instrument_from_controller` / `get_instrument_track_order` /
-`is_controller_type_with_lowest_pad_num` / `get_join_state_for_instrument`
-(Function_824254E8) resolve each pad to an instrument and a track, so a guitar
-joins GUITAR, a kit joins DRUMS, a mic joins VOCALS automatically `[C]`.
-
-### B. What the port does today
-
-- **One control model, guitar-shaped.** `Input::Control` has 15 controls:
-  General (Start, Select, MenuUp, MenuDown) + 5-fret guitar (GuitarStart,
-  GuitarSelect, StrumUp/Down, Green/Red/Yellow/Blue/Orange, Whammy, Gyro)
-  (`input.h:99`). Identical to gd01/gd04. There are **no** drum-pad, cymbal,
-  kick, mic, or effect-selector controls. Profiles (`XboxGuitar`,
-  `XboxGuitarOld`, `Ps2Guitar`, `RockBand`, `Joypad`, `Keyboard`, `Midi`) and
-  their default slot layouts mirror `beatmatch_controller.dta` for guitars.
-- **Drums ARE playable, as a joypad guitar.** When a player's part is Drums,
-  `app.cpp:1332` permutes the drum chart's lanes onto the 5 frets
-  (`g.frets = ((f&1)<<4) | (f&0x0E) | ((f>>4)&1)`: kick bit -> orange fret,
-  green pad -> green fret), `splitDrumChords` makes a gem per pad, and a
-  regular `Player` judges it in `ControllerMode::Joypad` with
-  `setDrumMode(true)` (`app.cpp:1360-1366`). The drum controller itself is a
-  `Profile::Joypad` whose 4 pads + kick are SDL gamepad buttons mapped to
-  Fret0..4. **This is the same two-layer idea as RB (drum = joypad watcher),
-  but collapsed onto the guitar's 5 fret controls.**
-- **Vocals ARE playable, outside the input engine.** `VocalPlayer`
-  (game/vocal_player.cpp) is driven by `VocalInput` (audio/vocal_input.cpp:
-  real mic via gd-engine-core, or `GD05_VOCALS_FILE`) through a
-  `PitchDetector`; `app.cpp:1376-1393` wires it, and `handleGameAction`
-  returns early for a vocal seat (`app.cpp:2104-2110`) so controller buttons
-  are ignored. The port's own pitch detector stands in for Fonix.
-- **Instrument marking is a label only.** Setting a device to Drums/Vocals in
-  the Gamepad menu writes `rbParts_[guid]` (`input.cpp:1476`) and
-  `controllers.json "rb_part"` (`input.cpp:514/567`); `instrument()`
-  (`input.cpp:1461`) returns it so `App::controllerType` (`app.cpp:2134`)
-  picks the part. It creates **no** new bindings — the device still emits the
-  15 guitar controls.
-- **Detection** is by USB id / SDL mapping (`isHidRockBandGuitar`,
-  `isXboxGuitar`, `isPs2Guitar`) + device-name substring "drum"
-  (`app.cpp:2159`); there is no XInput-subtype drum-kit detection like RB's
-  `kJoypadXboxDrums`.
-- `DrumPlayer` (the faithful RB drum watcher, `game/drum_player.cpp`, lanes
-  0=kick..4=green) and the DrumTrackWatcherImpl rules **exist but are wired
-  only in `tests/selftest.cpp`** — `strike()` has no live-input caller.
-
-### C. Gaps and errors
-
-1. **The universal control model cannot express a drum kit or a mic.** Drums
-   borrow the guitar's 5 frets (works for RB1's 4 pads + kick because
-   4+1 = 5); a mic is not representable at all. This is the headline gap for a
-   universal model — see D. `[fact]`
-2. **Drums use the GH2 joypad watcher, not DrumTrackWatcherImpl.** The port's
-   wave-01 D6 decision. RB pairs strikes to pads differently (wrong pad ->
-   nearest unhit lane, per-time-group chord penalties, fill/crash deploy,
-   drum_freestyle). This is a *judge* gap already tracked as GD05-018 (above),
-   not an input-engine gap, but it is the biggest behavioural difference a
-   drummer will feel. `[C]`
-3. **No drum-kit auto-detection.** A real Xbox 360 RB/GH drum kit that SDL
-   does not name "drum" is detected as a generic Joypad and plays as a
-   gamepad-guitar until the player manually picks Drums in GAMEPADS. RB keys
-   off `kJoypadXboxDrums`. Likely one of the owner's "errors". `[C data vs code]`
-4. **Tilt / Star Power has no debounce filter.** RB gates tilt through the
-   12-frame, 0.93 `mercury_switch_filter`; the port maps Star Power to the
-   Gyro/Select control (RB guitar tilt = the HID tilt bit on Right Shoulder,
-   `input.h:170`) with no equivalent sign-hold filter. On a twitchy
-   accelerometer bit this can mis-fire or drop Overdrive — a plausible
-   fragility. `[C data vs code]`
-5. **Axis-as-button thresholds differ from RB.** The port treats an axis as
-   pressed "past half way, released below a third" (`input.h` AxisButton) with
-   a 300 ms settle; RB uses `deadzone 36` and `threshold 0.75`
-   (`joypad.dta`). Different trigger/stick break-points can make frets on
-   triggers (L2/R2 -> green/blue) feel early or sticky. Worth a real-device
-   log comparison. `[C data vs code]`
-6. **Menu auto-repeat is not confirmed to match.** RB menus repeat at
-   `hold_ms 500` / `repeat_ms 50`; the port's menu repeat was not located in
-   this pass. `[I — needs a code check]`
-7. **No velocity / no cymbals in either engine.** Correct for RB1 (it has
-   neither); a problem only if a universal model must also serve RB2/RB3-Pro
-   kits. `[fact]`
-8. **Vocals live entirely outside the shared engine.** Functionally fine, but
-   the "one control model" does not own the mic, so the Gamepad menu cannot
-   test/calibrate it and other games cannot reuse it through the same path.
-   `[fact]`
-
-### D. Prioritized improvement list (for the universal control model)
-
-Marked **small-safe** (isolated, testable, low risk) vs
-**needs-coordination** (touches the shared control model / other games — a
-proposal for the orchestrator, one consistent model across all games).
-
-1. **(needs-coordination) Extend `Control` with a drum lane set + kick.** Add
-   DrumRed/Yellow/Blue/Green + Kick (and, behind a flag for RB2/3-Pro,
-   Hat/Crash1/Crash2 cymbals) as distinct controls with their own defaults
-   (RB `hx_drums_xbox` slots; keyboard Space=kick etc.). Route them to
-   `DrumPlayer::strike(lane)` (already written and tested). This is the
-   correct fix for gaps 1/2 and the core of the universal model, but it
-   changes the shared enum used by all games and must be designed once for
-   all. **High value, high blast-radius.** Risk: binding table, save-file and
-   every game's `actionsOf` change.
-2. **(needs-coordination) First-class mic "instrument".** Let the shared
-   engine own a mic device (open/level/pitch via `VocalInput`) so the Gamepad
-   menu can list and test it and other games reuse it. Risk: audio-capture
-   lifetime in the input layer.
-3. **(small-safe) Drum-kit detection by controller subtype/name.** Broaden
-   detection so a known RB/GH Xbox-360 drum kit auto-selects the Drums
-   instrument (today only a name containing "drum", `app.cpp:2159`, or a
-   manual pick). Isolated to detection; testable with a virtual pad
-   (`GD05_VIRTUAL_PAD`) carrying a drum-kit USB id and an objective assertion
-   that `instrument(id) == Drums`. Fixes gap 3. **Do first.**
-4. **(small-safe) Tilt debounce to match RB.** Add a sign-hold filter to the
-   tilt/Gyro source equivalent to `mercury_switch_filter` (hold past 0.93 for
-   ~12 frames) before it drives StarPower. Isolated; testable by feeding a
-   synthetic axis trace and asserting the deploy edge count. Needs a
-   real-device tilt log to set the constant honestly (owner rule: no
-   eyeballing). Addresses gap 4.
-5. **(small-safe) Reconcile axis thresholds with `joypad.dta`.** Document and,
-   if a real-device log shows a mismatch, align the fret-on-trigger break
-   points to `deadzone 36` / `threshold 0.75`. Data-derived only. Gap 5.
-6. **(small-safe) Confirm/align menu auto-repeat to 500/50 ms.** Locate the
-   port's repeat and compare; a one-line constant change if it differs. Gap 6.
-7. **(needs-coordination) Wire DrumPlayer to live input** once (1) exists, and
-   retire the fret-collapse path. This is GD05-018 territory; large.
-
-### Why no code change in this pass
-
-The owner called the controls "VERY FRAGILE" and asked for analysis-first.
-Every gap above is either (a) needs-coordination (the shared enum / model,
-which must be designed once across all games) or (b) a small-safe fix whose
-*honest* test needs a data-derived expected-vs-measured check against a
-real-device log (owner rule: no eyeballing), which this pass could not
-capture. The highest-confidence small-safe fix, drum-kit auto-detection (D3),
-is isolated and virtual-pad-testable and is the recommended first change — but
-it still alters device->part behaviour shared with the band code, so it is
-left as a reviewed proposal rather than slipped in unverified. The deliverable
-here is the reference model above.
+Remaining (deeper routing — larger follow-up, deliberately NOT done here):
+- The mic's VOICE is still judged entirely outside the universal input
+  engine: `VocalInput` (gd-engine-core mic, or GD05_VOCALS_FILE) feeds a
+  `PitchDetector` into `VocalPlayer`, and `handleGameAction` still returns
+  early for a vocal seat (the singer deploys by singing, screamPoll). This
+  increment makes the *instrument/seat/detection* first-class; it does NOT
+  move pitch events through the universal Action model. Fully routing the
+  mic through the input engine (pitch as Actions) is a large change that
+  risks the working vocals and is left as a follow-up.
+- Associating a detected HID-mic device with the VocalInput audio capture of
+  the same physical mic (today VocalInput opens the default capture device
+  independently of the HID device) is not wired.
+- gd10 / gh4 vocals are NOT playable: gd10 has no VocalPlayer and no mic /
+  pitch path at all — that is a separate, larger feature (a new pitch
+  pipeline), out of scope for this increment.

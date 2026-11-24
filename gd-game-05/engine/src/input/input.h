@@ -392,6 +392,7 @@ private:
         SDL_Gamepad* pad = nullptr;
         Profile profile = Profile::Joypad;
         Profile detected = Profile::Joypad;  // what the game guessed (type Auto)
+        bool mic = false;  // a microphone (isRockBandMic): the Vocals seat, never a dead guitar
         std::string guid, name;
         int slot = 0;
         bool chosenSlot = false;  // from controllers.json

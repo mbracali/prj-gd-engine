@@ -57,6 +57,28 @@ bool isHidRockBandGuitar(SDL_JoystickID id) {
     return false;
 }
 
+// A microphone that reaches SDL as a HID / joystick: the Rock Band and
+// SingStar USB mics present a small control interface beside their USB-audio
+// one, and SDL enumerates that as a buttonless (or nearly so) "gamepad". It
+// must be routed to the Vocals part, never opened as a dead guitar that
+// steals a player slot and plays no notes. [I] The reliable signal is the
+// device name SDL gives; the USB ids are the common SingStar / Logitech and
+// Harmonix Rock Band mics (not all verified on hardware). The voice itself
+// is captured through gd-engine-core's audio input (VocalInput), not this
+// HID device; this only makes the seat first-class.
+bool isRockBandMic(SDL_JoystickID id, const char* name) {
+    static const std::pair<uint16_t, uint16_t> kIds[] = {
+        {0x1415, 0x0000},  // Sony / Logitech SingStar & Rock Band wired USB mic (Nam Tai)
+        {0x12ba, 0x00ff},  // Harmonix / RedOctane USB microphone [I]
+    };
+    uint16_t vendor = SDL_GetGamepadVendorForID(id), product = SDL_GetGamepadProductForID(id);
+    for (const auto& [v, p] : kIds)
+        if (vendor == v && product == p) return true;
+    const std::string n = lower(name);
+    return n.find("microphone") != std::string::npos || n.find("singstar") != std::string::npos ||
+           n.find("rock band mic") != std::string::npos;
+}
+
 // A PS2 guitar through a USB adapter (GH2's ro_guitar joypad type, played
 // as beatmatch_controller.dta's `guitar`): a guitar by name that is neither
 // an Xbox nor a Rock Band guitar [I: joypad.dta detects ro_guitar by its
@@ -326,6 +348,10 @@ SDL_JoystickID Input::attachVirtualPad(const std::string& spec) {
         return jid;
     }
     const bool guitar = spec.find(":guitar") != std::string::npos;
+    // ":mic": a microphone that enumerates as a HID gamepad (isRockBandMic),
+    // for the input self-test. It carries one button (its mute / select), so
+    // the test can confirm it plays no guitar notes.
+    const bool mic = spec.find(":mic") != std::string::npos;
     // ":dpadaxis=<v>": a pad whose D-pad left / right and up / down are its
     // axes 6 and 7 (as SDL's mappings give many adapters and guitars),
     // axis 6 resting at <v> (e.g. -32768: SDL would see left held).
@@ -337,7 +363,8 @@ SDL_JoystickID Input::attachVirtualPad(const std::string& spec) {
     desc.type = guitar ? SDL_JOYSTICK_TYPE_GUITAR : SDL_JOYSTICK_TYPE_GAMEPAD;
     desc.vendor_id = Uint16(vendor), desc.product_id = Uint16(product);
     desc.naxes = SDL_GAMEPAD_AXIS_COUNT + (dpadAxis != std::string::npos ? 2 : 0), desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
-    desc.name = guitar ? "Xbox 360 Guitar (virtual)" : dpadAxis != std::string::npos ? "Adapter with a D-pad on axes (virtual)"
+    desc.name = guitar ? "Xbox 360 Guitar (virtual)" : mic ? "Rock Band Microphone (virtual)"
+                : dpadAxis != std::string::npos ? "Adapter with a D-pad on axes (virtual)"
                 : vendor == 0x054c ? "PLAYSTATION(R)3 Controller (virtual)" : "Xbox 360 Controller (virtual)";
     const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
     if (!id) {
@@ -370,6 +397,18 @@ SDL_JoystickID Input::attachVirtualPad(const std::string& spec) {
                         // full-range "a4" would rest at mid-scale (0.5), so a full pull is only
                         // 0.5 of travel - below the calibrated kAxisPress (0.75) axis-as-button.
                         "righty:a3,lefttrigger:+a4,righttrigger:+a5,";
+        if (SDL_AddGamepadMapping(m.c_str()) < 0) SDL_Log("virtual pad mapping: %s", SDL_GetError());
+    }
+    if (mic) {
+        // A plain gamepad mapping so SDL announces it as a gamepad with its
+        // mic name; the game recognises it as a microphone by name (GUID
+        // differs on SDL's virtual bus).
+        char guid[64];
+        SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), guid, sizeof guid);
+        const std::string m = std::string(guid) + "," + desc.name +
+                              ",a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,leftshoulder:b9,"
+                              "rightshoulder:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,rightx:a2,"
+                              "righty:a3,lefttrigger:a4,righttrigger:a5,";
         if (SDL_AddGamepadMapping(m.c_str()) < 0) SDL_Log("virtual pad mapping: %s", SDL_GetError());
     }
     return id;
@@ -707,6 +746,10 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         // of that device applies to it as to the real one (GD05-058).
         if (const char* g = SDL_getenv("GD05_TEST_PAD_GUID"); g && *g && SDL_IsJoystickVirtual(id)) np.guid = g;
         np.name = SDL_GetGamepadName(pad) ? SDL_GetGamepadName(pad) : "Gamepad";
+        // A microphone that reaches SDL as a HID device: a first-class Vocals
+        // seat, guarded so it never plays (or misses) guitar notes as a dead
+        // gamepad (its instrument defaults to Vocals below).
+        np.mic = isRockBandMic(id, np.name.c_str());
         if (auto t = types_.find(np.guid); t != types_.end()) np.profile = profile = t->second;  // chosen in GAMEPADS
         // The axes' rest values as connected (a whammy bar rests at -32768).
         for (int a = 0; a < SDL_GAMEPAD_AXIS_COUNT; ++a) np.axes[size_t(a)] = np.rest[size_t(a)] = SDL_GetGamepadAxis(pad, SDL_GamepadAxis(a));
@@ -750,7 +793,8 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         }
 #endif
         SDL_Log("Controller connected: %s (%04x:%04x, %s, %s)", np.name.c_str(), SDL_GetGamepadVendorForID(id),
-                SDL_GetGamepadProductForID(id), profileName(profile), np.slot < 0 ? "no player" : np.slot == 0 ? "player 1" : "player 2");
+                SDL_GetGamepadProductForID(id), np.mic ? "microphone (Vocals)" : profileName(profile),
+                np.slot < 0 ? "no player" : np.slot == 0 ? "player 1" : "player 2");
         break;
     }
     case SDL_EVENT_GAMEPAD_REMOVED:
@@ -1127,8 +1171,17 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
         p.down[c] = now;
     }
     curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy;
-    controlEdges(was, p.down, requireStrum("pad:" + std::to_string(SDL_GetGamepadID(p.pad))) ? ControllerMode::Guitar : ControllerMode::Joypad,
-                 p.slot, joypad, ts, out);
+    // A microphone is the Vocals seat (its voice is judged from the audio
+    // input, not here): it never emits guitar actions (frets, strum, whammy,
+    // Star Power), so a buttonless or stray-HID mic is never a dead guitar
+    // that strums or misses. Menu helpers below still let any mic button work
+    // the menus.
+    if (p.mic) {
+        p.whammyAxis = 0, p.analogWhammy = false;
+    } else {
+        controlEdges(was, p.down, requireStrum("pad:" + std::to_string(SDL_GetGamepadID(p.pad))) ? ControllerMode::Guitar : ControllerMode::Joypad,
+                     p.slot, joypad, ts, out);
+    }
     // The built-in menu helpers: d-pad left / right; a gamepad's south (select) and east (back).
     const std::array<bool, 4> help = {p.buttons[SDL_GAMEPAD_BUTTON_DPAD_LEFT], p.buttons[SDL_GAMEPAD_BUTTON_DPAD_RIGHT],
                                       joypad && p.buttons[SDL_GAMEPAD_BUTTON_SOUTH], joypad && p.buttons[SDL_GAMEPAD_BUTTON_EAST]};
@@ -1507,12 +1560,18 @@ void Input::discardEdit() {
 Input::Instrument Input::instrument(const std::string& id) const {
     if (auto it = rbParts_.find(guidOf(id)); it != rbParts_.end()) return it->second;
     if (midiById(id)) return Instrument::Midi;
-    if (const Pad* p = padById(id)) return p->profile == Profile::Joypad ? Instrument::Gamepad : Instrument::Guitar;
+    if (const Pad* p = padById(id)) {
+        if (p->mic) return Instrument::Vocals;  // a microphone sings by default (isRockBandMic)
+        return p->profile == Profile::Joypad ? Instrument::Gamepad : Instrument::Guitar;
+    }
     return Instrument::Guitar;  // the keyboard and touch play the guitar part
 }
 
 std::vector<Input::Instrument> Input::instruments(const std::string& id) const {
     if (midiById(id)) return {Instrument::Midi, Instrument::Drums};
+    // A microphone defaults to Vocals; Gamepad stays available in case SDL
+    // mis-identified a real controller as a mic.
+    if (const Pad* p = padById(id); p && p->mic) return {Instrument::Vocals, Instrument::Gamepad};
     if (padById(id)) return {Instrument::Guitar, Instrument::Gamepad, Instrument::Drums, Instrument::Vocals};
     return {Instrument::Guitar, Instrument::Drums, Instrument::Vocals};
 }
@@ -1527,6 +1586,9 @@ void Input::setInstrument(const std::string& id, Instrument i) {
     }
     rbParts_.erase(guidOf(id));
     Pad* p = padById(id);
+    // Overriding a mic to a real controller type (SDL mis-identified it):
+    // drop the mic flag so it plays as that type and is not forced to Vocals.
+    if (p && p->mic) p->mic = false;
     if (!p || i == Instrument::Midi || instrument(id) == i) return;
     // A guitar: the detected guitar type, else a PS2 guitar (adapter), as
     // gd01; the exact guitar type stays a choice (deviceType / cycleDeviceType).

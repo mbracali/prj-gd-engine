@@ -426,6 +426,55 @@ int runInputChecks() {
             check(false, "the adapter opens as a gamepad");
         }
 
+        // A microphone that enumerates as a HID gamepad (Phase B, first-class
+        // vocals): it is the Vocals instrument, surfaced as "Vocals
+        // (microphone)", and it plays no guitar notes as a dead gamepad. The
+        // name carries "microphone" with an id outside the known list, so this
+        // exercises name detection. The voice itself is judged from the audio
+        // input (VocalInput), tested in runGameChecks' vocal path.
+        const SDL_JoystickID micId = Input::attachVirtualPad("1234:5678:mic");
+        SDL_Joystick* micJoy = nullptr;
+        for (int k = 0; k < 100 && !micJoy; ++k) {
+            pump(in, evs);
+            micJoy = SDL_GetJoystickFromID(micId);
+            if (!micJoy) SDL_Delay(10);
+        }
+        if (micJoy) {
+            SDL_Delay(350);  // let it settle
+            pump(in, evs);
+            evs.clear();
+            const std::string micDev = "pad:" + std::to_string(micId);
+            check(in.instrument(micDev) == Input::Instrument::Vocals, "a microphone is the Vocals instrument (not a dead gamepad)");
+            check(std::string(Input::instrumentName(in.instrument(micDev))) == "Vocals (microphone)", "... surfaced as \"Vocals (microphone)\"");
+            const auto micInsts = in.instruments(micDev);
+            check(!micInsts.empty() && micInsts.front() == Input::Instrument::Vocals, "... Vocals offered first for the mic");
+            bool listed = false;
+            for (const Input::Device& d : in.devices()) listed = listed || d.id == micDev;
+            check(listed && in.instrument(g) == Input::Instrument::Guitar, "the mic is a device; the guitar is still a 5-fret guitar");
+            // The guard: a button on the mic strums / frets nothing in a song.
+            in.setInGame(true);
+            SDL_SetJoystickVirtualButton(micJoy, SDL_GAMEPAD_BUTTON_SOUTH, true);
+            pump(in, evs);
+            bool micPlayed = false;
+            for (const InputEvent& e : evs) micPlayed = micPlayed || (e.down && (isFret(e.action) || e.action == Action::Strum));
+            check(!micPlayed, "a mic button plays no frets or strum (guarded, never a dead guitar)");
+            SDL_SetJoystickVirtualButton(micJoy, SDL_GAMEPAD_BUTTON_SOUTH, false);
+            pump(in, evs);
+            // The guitar still frets while the mic is connected.
+            evs.clear();
+            SDL_SetJoystickVirtualButton(guitar, SDL_GAMEPAD_BUTTON_NORTH, true);  // Y: yellow
+            pump(in, evs);
+            check(has(evs, Action::Fret2, true, ControllerMode::Guitar), "the guitar still frets with a mic connected");
+            SDL_SetJoystickVirtualButton(guitar, SDL_GAMEPAD_BUTTON_NORTH, false);
+            pump(in, evs);
+            in.setInGame(false);
+            evs.clear();
+            SDL_DetachVirtualJoystick(micId);
+            pump(in, evs);
+        } else {
+            check(false, "the microphone opens as a gamepad");
+        }
+
         check(in.writeReport(), "controllers-report.txt written");
         const std::string report = readFile(in.reportPath());
         check(report.find("Xbox 360 Guitar (virtual)") != std::string::npos &&
