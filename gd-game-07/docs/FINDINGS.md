@@ -1262,6 +1262,165 @@ screen" (a menu with items, none hittable).
   fix + mouse structural coverage.** The remaining 7.1 board-menu live-mouse
   harness check is the honest follow-up.
 
+## Onboarding Step 7.5 — create-a-rocker (character) (2026-11-24)
+
+Milestone 7.5, the **character half** (Create-A-Rocker / CAR; the instrument +
+music-studio half is a separate agent's section). Aggregate-first: the port
+already parses the whole CAS catalog (`data/band.cpp`), reaches the
+character-hub / CAR screens (Step 3: `create_character_hub_menu`,
+`z_soundcheck`) and builds a gh4 member from a profile's `appearance`
+(`band::memberGh4`). What was missing was the **create / edit / name / save
+model** — a new character, the editable slot set, setting each slot to a
+catalog option under ownership, naming, and persistence. This pass REs that on
+our disc and ships it as a faithful, rendering-free, objectively-tested module
+(`game/car.{h,cpp}`), reusing Step 7.4's `game/shop.h` ownership model. No
+engine / UI / judge / input / decoder code was touched.
+
+### (a) A created character is a musician profile [C scripts guitar_band_profile.qb]
+
+A Create-A-Rocker character is a **musician profile struct** — the same shape
+`band::memberGh4` consumes in-game:
+`{ name, fullname, allowed_parts, appearance { <CAS part> = { desc_id } }, blurb,
+genre }`. A new character starts from the disc's
+`default_custom_musician_profile_male` / `_female`
+(`scripts\guitar\guitar_band_profile.qb`): `allowed_parts = [drum, Vocals,
+guitar, Bass]`, `appearance` carrying `cas_body` (`GH4_CAR_Male`/`GH4_CAR_Female`),
+`cas_physique` (`MalePhysique`/`FemalePhysique`), the default instrument parts
+(`CAS_Guitar_Body = guitar_body01`, …) and the default intro/win/lose anims, and
+`genre = Rock`. Each slot value is a struct `{ desc_id, cap? }` where the
+optional `cap` array is the per-part **colour / finish / texture-layer** (e.g.
+the default guitar neck's `base_tex` / `material` / `pre_layer` inlay texture —
+this is how colours and tattoo/decal layers ride on a slot).
+
+### (b) The editable slot set [C scripts\game\cas\cas_parts.qb master_editable_list]
+
+The authoritative editable-part list is **`master_editable_list`** (59 parts).
+It holds the common slots (`cas_body`, `cas_physique`, `CAS_Full_Body`,
+`CAS_Eyes`), BOTH genders' body/anim slots (`CAS_Male_*` and `CAS_Female_*`:
+Hair, Hat_Hair, Hat, Facial_Hair, Torso, Legs, Shoes, Acc_Left, Acc_Right,
+Acc_Face, Acc_Ears, Intro_Anim, Win_Anim, Lose_Anim, Age — 15 each), the
+instrument slots (`CAS_Guitar_*` ×9, `CAS_Bass_*` ×9, `CAS_Drums*` ×3,
+`CAS_Mic`/`CAS_Mic_Stand`, `CAS_Full_Instrument`) and `CAS_Band_Logo`. A given
+character is **gender-filtered** by `cas_physique` (`Male`/`FemalePhysique`): the
+editor shows the common slots + its own gender's `CAS_<gender>_*` slots, which
+is **44 slots per gender** (29 common + 15 gendered) — measured by `--castest`.
+(`cas_parts.qb` also carries the gender-neutral aliases `body_specific_parts_list`
+= `CAS_Hair`/`CAS_Torso`/… and `hair_part_sets`/`instrument_part_sets` the UI
+maps onto the gendered arrays.) Each slot's options are the CAS part global
+array (`CAS_Male_Torso`, …), each option `{ desc_id, frontend_desc, mesh, …,
+price?, $locked? }` — the exact arrays Step 7.4's store catalogues.
+
+### (c) Create / name / edit / save model [C guitar_band_profile_scripts.qb]
+
+Created characters live in the savegame's **`custom_profiles`** global array:
+- `new_custom_character_name(savegame)` → the first free `custom_character_%d`
+  (`FormatText … addtostringlookup`, scanned `0..99` via
+  `is_completely_custom_musician`), stored as `new_character_id`.
+- `add_new_custom_profile(savegame, profile)` →
+  `globaltag_addarrayelement array_name=custom_profiles element=profile`.
+- `modify_custom_profile_appearance(id, savegame, appearance)` → finds the
+  element (`is_completely_custom_musician` → `custom_musician_index`) and
+  `globaltag_setarrayelement … element = { <elem> appearance = <appearance> }`.
+- `modify_custom_profile_fullname(id, savegame, fullname)` → the same, setting
+  the element's `fullname` (the display name).
+- `delete_custom_profile(savegame, id)` → `globaltag_removearrayelement`.
+- `get_musician_profile_struct_by_id` / `profile_exists` resolve a character by
+  searching `custom_profiles` first, then
+  `Preset_Musician_Profiles_Modifiable` / `_Locked` / `Net_Musician_Profiles`.
+
+Ownership of a chosen option is Step 7.4's `is_part_unlocked_purchased`
+(`cas_utils.qb`): a `$price`/`$locked` option needs the save's
+`purchased`/`unlocked` flags; a free, unlocked default option is owned by
+construction. So editing a slot = "pick an **owned** option for an editable
+slot, write its `desc_id` into `appearance.<part>`".
+
+### (d) What I implemented (files)
+
+- **`engine/src/game/car.{h,cpp}`** (`namespace car`, rendering-free):
+  `editableSlots(g, female)` / `isEditableSlot` (the gender-filtered
+  `master_editable_list`); `newCharacter(g, savegame, female)` (deep-copies the
+  default profile, assigns the first-free `custom_character_<N>`, appends to
+  `custom_profiles` — `add_new_custom_profile`); `profile` / `customIndex`
+  (`is_completely_custom_musician`) / `count` / `isFemale`; `setPart(g,
+  savegame, id, part, descId, bandInfo)` (`modify_custom_profile_appearance`:
+  validates the slot is editable for the gender, the option exists, and — given
+  a `band_info` — that it is owned via `shop::owned`; returns Ok / NoSuchCharacter
+  / NotEditable / NoSuchOption / NotOwned); `partOf`; `setFullName` / `fullName`
+  (`modify_custom_profile_fullname`); `deleteCharacter` (`delete_custom_profile`).
+  Invents nothing — defaults, slots and options are the disc's data. Reuses
+  `game/shop.h` for ownership (does not duplicate it).
+- **`engine/src/tests/castest.{h,cpp}` + `--castest`** (`main.cpp`,
+  `CMakeLists.txt`): the objective harness.
+- No shared engine file was edited (notably `data/band.cpp` — the other agent's
+  and the instrument half's surface — was only *read*, via `band::memberGh4`).
+
+### (e) Objective test evidence (`--castest <disc>`, headless, exit 0)
+
+Data-derived expected-vs-measured, no eyeballing:
+- **Editable slots**: `male 44, female 44` (= 59 `master_editable_list` − the
+  other gender's 15 parts); each set has `cas_body`/`cas_physique`/the guitar
+  slots, the male set has `CAS_Male_Torso` and not `CAS_Female_Torso` (and the
+  reverse for female).
+- **Create + defaults**: first create is `custom_character_0`, reads male,
+  `cas_physique = MalePhysique`, default `CAS_Guitar_Body = guitar_body01`.
+- **Unique naming**: three creates give `custom_character_0/1/2`; the 3rd is
+  female and reads female.
+- **Edit gates**: a `CAS_Female_Torso` on a male character → `NotEditable`; a
+  bogus `desc_id` → `NoSuchOption`; real male body slots set from real options.
+- **Ownership (reusing shop)**: a priced, free-to-buy option on a female slot
+  (`CAS_Female_Hat/f_pop_hat_bucket`, $75) is **refused (`NotOwned`) until
+  bought**, then accepted and written; a **career-gated** (`$locked`+`$price`)
+  option (`f_bmtl_hat_skullhelmet`) is refused until `grantUnlock` + `purchase`.
+- **Save round-trip**: the savegame struct (holding `custom_profiles`) is
+  `save::write`-n and `save::read` back — 3 characters, the edited slot and the
+  name (`fullname = "Riff Dream"`) all persist.
+- **Used in-game**: the created `custom_character_0` profile fed to
+  `band::memberGh4` builds a **playable guitarist, 12 meshes, skeleton
+  `GH_Rocker_Male_original`** — i.e. a created character shows up as a real band
+  member.
+- **Delete + id reuse**: deleting `custom_character_0` frees the id, and the
+  next create reclaims `custom_character_0` (faithful to the first-free scan).
+- **No regression**: `--uitest` unchanged — **47 flow states, 1181/1181
+  mouse-hittable, 0 dead, 0 UNHANDLED** (the 7.2/7.4 baseline). `--castest`: all
+  checks passed (0 failed).
+
+### (f) Honest remains / flagged
+
+- **Live 3-D editor UI click-wiring** (the biggest remainder, same surface the
+  other steps defer). The CAR screens build and the model is the real
+  create/edit engine, but a mouse/controller click on a part tile in the live
+  `z_soundcheck` board menu is not yet routed into `car::setPart` /
+  `car::setFullName`. The original drives it through its own QScript chain
+  (`cas_queue_*`, `modify_custom_profile_*`, `ss_focus_on_create_new_character`)
+  over the 3-D board menus — the same fragile, not-headlessly-verifiable
+  board-menu live-mouse surface deferred in 7.1/7.2.
+- **Per-part colours / finishes / tattoos (the `cap` layer) and the physique
+  bone sliders (`cas_physique_bone_options`)** are preserved when they ride on a
+  copied default slot, but this pass models **slot → `desc_id`** selection, not
+  the deeper colour/finish/decal sub-editor or the bone-slider morphs (those are
+  a further CAR sub-menu; the data shape — `appearance.<part>.cap` and the bone
+  options — is documented here but not edited by `car::setPart`).
+- **band.cpp does not yet resolve `custom_profiles`.** The original's
+  `get_musician_profile_struct_by_id` searches `custom_profiles` first; the
+  port's `band::findProfileGh4` only searches the preset arrays. Wiring a
+  created character into the live band-build path (so a created rocker can be
+  picked as the player's character) edits `data/band.cpp` (a shared file) and is
+  the integration follow-up — proven feasible here by feeding the profile
+  straight to `band::memberGh4`.
+
+### Uncertain / not fully traced (7.5)
+
+- The save-tag placement of `custom_profiles`: the original keeps it as a
+  savegame-root global array, sibling to `band_info`; the port's flat
+  one-`Struct`-per-tag save map can't key a root-level array directly, so
+  `--castest` round-trips the **savegame root struct** (holding the
+  `custom_profiles` array) under one tag — the JSON save serializes the nested
+  struct→array→struct faithfully either way [I] (same note as 7.4's flag form).
+- `fullname`'s on-disc type (the net profiles store a 32-bit `fullname` number;
+  the port models the user-entered display name as a wide string) was not
+  bit-verified; the create flow's text-entry menu is the deferred UI.
+- The exact `cap`/bone-slider edit semantics (above) were not decoded.
+
 ## Onboarding Step 7.4 — shop (2026-11-24)
 
 Milestone 7.4 (the in-game store, the "Rock Store" / GH Store; gate 68%).

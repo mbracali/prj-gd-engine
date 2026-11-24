@@ -106,6 +106,7 @@ target_sources(gd07 PRIVATE
   src/game/touch_strip.cpp
   src/game/save.cpp
   src/game/shop.cpp
+  src/game/car.cpp
   src/game/song_db.cpp
   src/game/tuning.cpp
   src/script/bytecode.cpp
@@ -123,6 +124,7 @@ target_sources(gd07 PRIVATE
   src/tests/scripttest.cpp
   src/tests/selftest.cpp
   src/tests/shoptest.cpp
+  src/tests/castest.cpp
   src/tests/walk.cpp
   src/tests/selftest_play.cpp
   src/tests/sfxtest.cpp

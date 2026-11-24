@@ -29,6 +29,7 @@
 #include "tests/chartest.h"
 #include "tests/exploretest.h"
 #include "tests/shoptest.h"
+#include "tests/castest.h"
 #include "tests/venuetest.h"
 #include "video/movie_player.h"
 #include "tests/sfxtest.h"
@@ -67,6 +68,8 @@ void usage() {
         "                       venue (60 vs 240 fps, framed by its cameras); GD07_CHARTEST_SHOTS=<dir> saves grids\n"
         "  --shoptest           the World Tour store headless: the real CAS purchase catalog, a purchase deducts cash,\n"
         "                       sets the save's purchased flag + unlocks the item, and persists through a save round-trip\n"
+        "  --castest            Create-A-Rocker headless: build the editable CAS slot set, create/name/edit a character\n"
+        "                       (shop ownership enforced), round-trip the created characters through a save, build a member\n"
         "  --exploretest        the launcher's model explorer headless: every Explore category (Venues / Guitars /\n"
         "                       Bass / Drums / Mics / Chars) loads and render-adds its models (module_explore path)\n"
         "Environment: GD07_KEYS=\"<ms>:<key>,...\" scripted menu keys; GD07_SCREENSHOT=<file.bmp> with\n"
@@ -157,7 +160,7 @@ int run(int argc, char** argv) {
     Options opt;
     std::string movie;
     bool audittest = false, formattest = false, shadertest = false, selftest = false, sfxtest = false, scripttest = false;
-    bool venuetest = false, chartest = false, drumtest = false, exploretest = false, shoptest = false;
+    bool venuetest = false, chartest = false, drumtest = false, exploretest = false, shoptest = false, castest = false;
     std::string songAudio;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -178,6 +181,7 @@ int run(int argc, char** argv) {
         else if (a == "--chartest") chartest = true;
         else if (a == "--exploretest") exploretest = true;
         else if (a == "--shoptest") shoptest = true;
+        else if (a == "--castest") castest = true;
         else if (a == "--drumtest") drumtest = true;
         else if (a == "--sfxtest") sfxtest = true;
         else if (a == "--songaudiotest") songAudio = value();
@@ -198,7 +202,7 @@ int run(int argc, char** argv) {
     if (shadertest) return runShaderTest(opt.dataPath);
     if (drumtest) return runDrumTest();  // data-free: the drum judge + input guard
     if ((!movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest || exploretest ||
-         shoptest || !opt.walk.empty()) &&
+         shoptest || castest || !opt.walk.empty()) &&
         opt.dataPath.empty()) {
         usage();
         return 2;
@@ -210,6 +214,7 @@ int run(int argc, char** argv) {
     if (chartest) return runCharTest(opt.dataPath);
     if (exploretest) return runExploreTest(opt.dataPath);
     if (shoptest) return runShopTest(opt.dataPath);
+    if (castest) return runCasTest(opt.dataPath);
     if (sfxtest) return runSfxTest(opt.dataPath);
     if (!songAudio.empty()) return runSongAudioTest(opt.dataPath, songAudio);
     if (scripttest) return runScriptTest(opt.dataPath);
