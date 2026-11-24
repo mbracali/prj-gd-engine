@@ -1387,3 +1387,192 @@ no `ik_params` / finger / fret / strum fields [C guitar_band_profile.qb].
   hair carries momentum the original would have cleared. This affects all band
   members' hair (a shared subsystem), not only the singer; flagged for the
   orchestrator, not fixed here.
+
+## Controls audit (2026-11-24)
+
+Scope: the INPUT LAYER only (how the raw controller is read and turned into
+frets / strum / whammy / tilt), not the judge (the hit / HOPO / overstrum
+windows are already [C] in "Gameplay rules" §1-3 above and are NOT revisited
+here). Read from the Ghidra export (`ghidra/analysis/`, base 0x82000000);
+REA cannot open the XEX2. Our side: `engine/src/input/input.{cpp,h}`,
+`engine/src/game/controller_mode.h`, `engine/src/game/player.{cpp,h}`,
+`engine/src/ui/song_screen.cpp`. No tracked spec `spec-gamepad-menu.md`
+exists in the repo (the kickoff named it); the port's control model is the
+one in `input.h`. RB numbers below are the kickoff's Rock Band audit, used
+only to reconcile a future universal model. No code was changed this pass
+(rationale at the end).
+
+### A. The original, per input area (binary evidence)
+
+**A1. Per-player input struct and the connected flag [C].**
+`FUN_820e7cd0(p)` returns the per-player input-system struct: for p < 4 it
+is `DAT_82a74a0c[p + 8]` (a pointer table), for p >= 4 a second table
+(`DAT_829b858c`). `FUN_820e7cb0(p)` = the byte `DAT_829b8594[p]`, the
+per-player "this port has a usable controller" flag; the readers bail when it
+is 0. Inside the struct: `+0x18` = the pad record pointer, `+0x1c` = the
+device descriptor.
+
+**A2. Controller TYPE detection: binary guitar-vs-pad [C 0x82100DA0,
+0x82100FC0].** The reader sets a guitar flag by `descriptor[+0x08] == 8`
+(only for p < 4; p >= 4 is always a guitar). There is NO separate X-plorer /
+Les Paul / wireless branch at the gameplay input layer: every guitar model
+is the one "guitar" code path (==8), everything else the "pad" path. The
+descriptor's `+0x08` field is an internal device class, not the raw XInput
+`SubType` (the XInput SubType is only touched by the rumble/caps helper
+0x824ACBF8, which gates vibration on SubType == 2 and the motor caps bits).
+QScript side: `get_musician_instrument_type`, `instrument_type`,
+`get_instrument_from_character` pick the on-screen instrument (Les Paul /
+other guitar skins such as `Instrument_LP_Pro6X`) — cosmetic, separate from
+the play path.
+
+**A3. Pad record layout and the fret read [C 0x82100DA0].** The judge's
+held-fret mask is built nibble-per-fret: green 0x1, red 0x10, yellow 0x100,
+blue 0x1000, orange 0x10000 (so a 5-fret shape is a 20-bit value, not bits
+0-4). The source bytes in the pad record differ by path:
+- guitar path: yellow = pad[+0x08], blue = pad[+0x09], orange = pad[+0x0a],
+  red = pad[+0x0b], green = pad[+0x0c];
+- pad path: the digital button field pad[+0x34] (green/red/yellow/blue/orange
+  from bits 0x40 / 0x02 / 0x08 / 0x04 / 0x01) OR'd with analog bytes
+  orange = pad[+0x0e], blue = pad[+0x0c], yellow = pad[+0x0d], red = pad[+0x0f],
+  green = pad[+0x0a].
+A fret counts as held when its byte is non-zero: the pad record already holds
+a thresholded value, so there is no per-fret dead zone in this layer (any raw
+dead-zone / analog-to-byte conversion lives in the XInput->pad-record fill,
+which is not in the decompiled set — see "Uncertain").
+
+**A4. Strum source [C 0x82100FC0, matches §3].** guitar: a strum is the
+strum-bar bits `0x1000 | 0x4000` set in pad[+0x34]; on a strum the held
+frets (A3 guitar bytes) are latched and a strum flag is raised. pad: a strum
+is any change of the held fret/face set (each new press strums), with a
+QScript rule keyed `0x67e6859a` consulted and a per-player "all buttons
+released" latch at `DAT_829ba034[p]` (a pad chord must release fully before
+the next, cf. §3 chord rule). force_mercury Select is Star Power on both.
+There is no strum-repeat / strum-debounce constant here (RB's "strum <= 52 ms
+repeats" has no GH3 equivalent): repeated strums are governed by the judge's
+`disallow_tolerance_strums` + `strum_before_forming` pending model (§3), not
+by an input-layer timer.
+
+**A5. Tilt / Star Power [C 0x82112EE0-0x82112F90, already §6].** The tilt
+value is pad[+0x01] (the right-stick-Y byte [I]); `v = b - 128`, normalised
+`(v - 50) / 77` for v > 0 and `(v + 50) / 77` for v < 0 (so -127 -> -1.0,
++127 -> +1.0). A frame "counts" when the value is <= the player's
+`star_tilt_threshold`, which `start_gem_scroller` loads from the user option
+`star_power_position_device_<controller>` (default -1.0, the calibration
+screen stores the held value clamped <= 0; guitar_tweaks' 16.0 is only a
+placeholder). `star_power_trigger_frames` (3) consecutive counting frames
+deploy; Select (qbkey 0xB40D153F) deploys at once. Co-op needs both triggers
+inside `star_power_coop_trigger_ms` (1000).
+
+**A6. Whammy [C scripts; §5].** The judge reads a continuous whammy value
+0..1; star whammy requires movement > 0.03 over the last 5 frames
+(`star_power_whammy_add` 3.333 / co-op 2.5 per beat); the pitch shift is
+`1 - 0.057 * bar`. `whammy_units_per_second`, `whammy_shorten` (0.25),
+`whammy_min_hold_pct` (10% / 35% short) are in guitar_tweaks.qb. The raw
+whammy axis -> 0..1 mapping and its dead zone are in the pad-record fill, not
+recovered (see "Uncertain"); a `deadZone` string exists at 0x82056ca0 but has
+no code xref in `refs.tsv` (data / VMX).
+
+### B. What OUR port does (input.cpp / song_screen.cpp / player.cpp)
+
+- Pipeline: SDL event -> `Input::handle` -> `InputEvent` (action, down,
+  per-device player, flags analog / joypad / fretsStrum / tilt) ->
+  `SongScreen::handle` latches `held_` (bits 0 green..4 orange), a `strum_`
+  pulse, `star_`/`tilt_`, `whammyBar_`/`whammyKey_` -> `SongScreen::tick`
+  runs a FIXED 60 Hz step loop building `FrameInput{frets, strum, fretStrum,
+  starPower, tilt, whammy}` once per step -> `Match::frame` / the C judge.
+- TYPE model: 5 pad profiles (XboxGuitar, XboxGuitarOld, Ps2Guitar, RockBand,
+  Joypad) + Keyboard + Midi, chosen by GUID and saved in controllers.json;
+  functionally they collapse to a guitar watcher (strum bar) vs a joypad
+  watcher (every fret press strums, `Require Strum` off) — the same binary
+  split as GH3's A2, with the extra labels only changing the default fret
+  bindings and tilt source. `controller_mode.h` is just {Guitar, Joypad}.
+- Fret read: SDL buttons (digital) and axis-as-button. Axis-as-button
+  (`sourceActive`, input.cpp:943): pressed when `|axis - rest| > 16000`,
+  released below 10000 (hysteresis), i.e. ~0.49 of full range to press,
+  ~0.31 to release. The Joypad profile puts green on LT and blue on RT as
+  AxisPos (input.cpp defaults): a ~half trigger pull registers a fret.
+- Whammy (input.cpp:961-976): a bound axis is normalised from its rest,
+  dead zone 0.08, value `(x-0.08)/0.92`; the discrete Whammy ACTION fires
+  past 0.15; the continuous value goes to the judge via `whammy()`.
+- Tilt (input.cpp:979-989, player.cpp:255-264): Gyro held by an axis source
+  ALONE sets `p.tilt`; `FrameInput::tilt` then deploys after
+  `star_power_trigger_frames` (3) judge steps; a Back/Select button sets
+  `starPower` and deploys at once. The axis uses the generic half-way
+  threshold (16000/10000), NOT a per-controller calibrated tilt position.
+- Connect hygiene: 300 ms settle after plug-in (rest re-read, no actions);
+  buttons held across connect are masked until released (`stuck`); SDL
+  mapping axis-buttons get the same hysteresis. Steam virtual pads taken.
+
+### C. Gaps and errors (original vs port)
+
+1. [I, needs-coordination] Tilt threshold is not calibrated. GH3 fires the
+   tilt per `star_power_position_device_*` (default near full up, -1.0; A5);
+   the port fires at a generic ~0.49 axis deflection. Net: tilt Star Power is
+   easier (or, for a guitar whose rest is off-centre, harder) than the
+   original, and ignores the calibration screen. Already flagged [I] in §6.
+   RB reconciliation: RB's "mercury filter" holds the sign past 0.93 for 12
+   frames; GH3 holds the value past the calibrated threshold for 3 frames.
+2. [I, needs-coordination] Axis-as-button press threshold ~0.49 vs RB's
+   0.75. For frets/strum bound to triggers or a stick (Joypad green=LT,
+   blue=RT; pad strum on LEFTY) a half-pull already registers, which can feel
+   like accidental frets or ghost strums. GH3's own pad frets are the digital
+   d-pad bits (instant) plus raw-thresholded analog bytes (A3), so there is
+   no single number to copy; this is a universal-model tuning decision.
+3. [I, low] The Joypad fret order is GH2's `joypad_guitar` (LT LB RB RT A =
+   green..orange), not GH3's pad mapping (A3/A4: d-pad bits 0x40/0x02/0x08/
+   0x04/0x01). A gamepad is a non-primary path and users can rebind, so this
+   is cosmetic-ish, but it is a documented divergence from GH3's own layout.
+4. [I, low] Whammy dead zone 0.08 and the 0.15 action threshold are port
+   inventions; GH3's raw whammy range / dead zone were not recovered, so
+   there is nothing to verify them against. The continuous value the judge
+   consumes (movement > 0.03 for star whammy) is faithful regardless.
+5. [faithful, note only] The 60 Hz fixed-step quantises strum/fret timing to
+   step boundaries (+-~8 ms) and collapses multiple SDL strums in one step to
+   one pulse. GH3 also samples the controller once per game frame, so this is
+   faithful; it is listed so it is not mistaken for a bug later.
+6. [faithful] guitar-vs-pad binary split, strum-bar = frets latched on the
+   strum edge, "each press strums" for pads, no input-layer strum-repeat
+   timer: all match A2/A4.
+
+### D. Prioritized improvement list
+
+Small-safe (isolated, unit-testable with virtual pads; still gated by the
+owner rule that input BEHAVIOUR changes need real-device logs — none here):
+- [S1] Add input-selftest coverage that pins the current axis-as-button
+  thresholds and the whammy dead zone (regression guard before any tuning).
+  Change: new cases in `input_selftest.cpp` driving a virtual pad trigger to
+  0.4 / 0.5 / 0.8 and asserting fret edges; risk: none (test-only).
+- [S2] Document the 0.49/0.31 and 0.08/0.15 constants as named `constexpr`
+  with the RB/GH3 references beside them (no value change). Risk: none.
+
+Needs-coordination (touch the shared control model; do with the other games):
+- [N1] A per-controller calibrated tilt threshold (wire the existing
+  `star_tilt` / calibration concept into the Gyro axis test) so GH3's A5 and
+  RB's mercury filter become one model. Risk: medium (shared input path,
+  affects every guitar). Concrete: replace the generic Gyro axis threshold
+  with a stored per-GUID tilt position, counting frames past it.
+- [N2] Decide one axis-as-button threshold across games (0.49 vs 0.75) and a
+  release hysteresis, grounded in device logs; GH3 has no single number so
+  this is a product decision. Risk: medium (changes fret/strum feel).
+- [N3] Optionally offer GH3's own pad fret order (A3/A4) as the Joypad
+  default for gd04, leaving rebinding intact. Risk: low-medium.
+
+### Uncertain / not recovered (VMX128 / undecompiled)
+
+- The XInput/XamInputGetState -> pad-record fill is not in the decompiled
+  function set (only the caps/rumble 0x824ACBF8 and keystroke 0x824ACCF8
+  helpers are), so the raw stick/trigger dead zones, the whammy axis->byte
+  scaling, and the exact source of pad[+0x01] (tilt) / pad[+0x34] (buttons)
+  are inferred from how the gameplay layer consumes them, not read at the
+  source. pad[+0x01] as right-stick-Y is [I] (as in §6).
+- `SetMenuAutoRepeatTimes` (menu hold/repeat, referenced in
+  `ui/natives_flow.cpp`) — its GH3 values (RB uses 500 ms hold / 50 ms
+  repeat) were not pulled this pass.
+- The `deadZone` string (0x82056ca0) has no code xref in `refs.tsv`.
+
+No code change was made. Per the owner rule (objective-checks-not-eyeballing:
+input behaviour changes need data-derived expected-vs-measured checks and
+real-device logs) there are no device logs in this pass, and the owner called
+the input engine fragile and asked for analysis-first; every candidate above
+is either test-only (S1/S2, deferred to keep this pass purely documentary) or
+a shared-model change for the orchestrator to coordinate across games.
