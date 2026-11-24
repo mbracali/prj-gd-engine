@@ -1236,3 +1236,86 @@ hypothesis. Sources: `qb.pak.xen` (globals), the eight zone paks'
   port; `lightshow_statenodeflagmapping` groups `performance` 0x7d28697e /
   `mood` 0xfcc65109 and `lightshow_coloroverrides` (8 colours, no black/off)
   match the port's reads.
+## Singer (vocalist) animation audit (2026-11-24)
+
+Full Ghidra/QB audit of the SINGER's movement and animation against the port
+(render/band_anim.cpp, the vocalist path). The vocalist tree is
+`constraintbones( ragdoll( ik(Singer_IK_Params)( partialswitch( face, body ) ) ) )`
+with `state = $ON` [C guitar_anim_tree.qb vocalist_static_tree]. Profiles
+Singer / Singer_Bret / Singer_Alt use `singer_male_animations`, Singer_Female
+uses `singer_female_animations`, all `Type = $vocalist`, `stance = $Stance_A`,
+no `ik_params` / finger / fret / strum fields [C guitar_band_profile.qb].
+
+- **FIXED - female singer stance transitions skipped.** The singer alternates
+  Stance_A (not singing, `*_nosingidle*`) and Stance_B (singing, `*_singidle*`,
+  `*_singsolo*`), switched by the song's `Band_ChangeStance` events, with a
+  transition clip between (nosing_to_sing / sing_to_nosing)
+  [C guitar_animation_data_singer_male/female.qb; welcometothejungle_performance
+  vocalist Stance_B at 4766, barracuda 4 switches]. `anim_set.<old>.transitions.
+  <new>` is a clip key for the **male** singer and the guitarists, but the
+  **female** singer stores it as a skill/speed tree
+  `transitions.<new>.<skill>.<speed>` (the `good` skill using `_hop` variants),
+  resolved by play_stance_transition_cfunc (0x821138D8) like a tempo anim
+  [C guitar_animation_data_singer_female.qb; it is the only character with this
+  form]. band_anim.cpp's bodyFinished read the entry as a plain key
+  (`keyOf(trs->find(new))`), which is 0 for a struct, so the female singer
+  played NO transition and snapped between stances. Fix: `Animator::
+  transitionClip` resolves either form (skillKey / speedKey shared with
+  tempoAnim). Objective (barracuda, Singer_Female, z_dive, GD04_ANIMLOG):
+  before, Stance_A idle ended 30567 ms and the Stance_B idle began at 30567 ms
+  (gap 0, no Trans clip); after, GH3_Singer_Fem_Trans_NoSngSng (2.87 s) plays
+  30567->33433 ms, then the Stance_B idle (measured 2866 ms gap = the clip's
+  data duration). sing->nosing at 151900 ms resolved GH3_Singer_Fem_Trans_
+  SngNoSng_hop (good skill). Male singer (welcometothejungle) unchanged:
+  GH3_Singer_Male_nosing_to_sing 1.63 s / sing_to_nosing 2.40 s still resolve.
+  chartest 60/240 fps: 1097 checkpoints identical, 0 off screen (frame-rate
+  independent). Files: render/band_anim.cpp (transitionClip, skillKey,
+  speedKey, bodyFinished), render/band_anim.h.
+
+- **Faithful - body loop.** `bandmember_idle` spawns `hero_play_adjusting_
+  random_anims {Anim = idle}`; the singer's event table
+  (BandMember_Idle_EventTable) routes only `play_anim` -> handle_play_anim and
+  `change_stance` -> handle_change_stance (no strum/fret/star-power) [C
+  guitar_character.qb]. The port's bodyIteration / playAnimEvent /
+  changeStanceEvent match; anim_set.<stance>.<idle|special|Jump>.<skill>.<speed>
+  random no-repeat [C].
+
+- **Faithful - facial / lip-sync.** `facial_anim_loop` plays
+  `anim_set.facial_anims.idle` at random (+1 gameframe) [C]; `Band_PlayFacialAnim`
+  (guitar_midi_anim_funcs.qb) spawns `play_special_facial_anim {Anim}` on the
+  member, which kills the loop, plays the lip-sync clip, then respawns the loop
+  [C]. The lip-sync clips live in the song pak (e.g. gh3_singer_Male_Welcome_1,
+  .ska flags 0x068b5000 = masked partial, 30 face bones) and gd04 loads them
+  (data/band.cpp:458). The port's facial() + the Perf band_playfacialanim case
+  match; song clips drive the mouth/face over the body via the face partial.
+
+- **Faithful - win / lose.** play_win_anims / play_lose_anims call
+  `play_special_anim {stance = win|lose, Anim = idle, blendduration = 0.0}` on
+  the vocalist (always `win` / `lose`, not the small-stage variants) [C
+  guitar_character.qb]; play_special_anim excludes the vocalist from
+  hero_disable_arms (Guitarist/Bassist/Drummer only), plays the win/lose idle
+  once, then Stance_A + bandmember_idle. venue_stage.cpp outro + playSpecial
+  (vocalist not guitarLike, so no arm toggle) match.
+
+- **Faithful - IK is legs-only.** Singer_IK_Params has only the two leg chains
+  (bone_thigh/knee/ankle -> Bone_IK_Foot_Slave_L/R); the singer has NO arm IK
+  (unlike the drummer's two hand-slave chains), the arms come straight from the
+  body/face clips [C guitar_anim_tree.qb]. The port builds chains from the data,
+  so the behaviour was already correct; only the band_anim.cpp / band.md
+  comments (which claimed hand-slave IK for the singer) were wrong and are
+  corrected.
+
+- **Faithful - the singer never walks.** All 79 Band_WalkToNode performance
+  entries across every song target the Guitarist; none target the vocalist, so
+  the port's un-done Band_WalkToNode does not affect the singer [C: scan of
+  every SONGS/*_song.pak.xen].
+
+- **Out of scope / cross-member - ragdoll_markforreset not reproduced.**
+  handle_change_stance, handle_play_anim and play_special_anim (win/lose) all
+  call `ragdoll_markforreset` [C guitar_hand_events.qb / guitar_character.qb],
+  which snaps the hair ragdoll to the animated pose at rest on each such event.
+  render/band_ragdoll.cpp only resets on start or a > 2 s song-time jump
+  (band_ragdoll.cpp:422), so after a hard stance/anim/win-lose pose change the
+  hair carries momentum the original would have cleared. This affects all band
+  members' hair (a shared subsystem), not only the singer; flagged for the
+  orchestrator, not fixed here.

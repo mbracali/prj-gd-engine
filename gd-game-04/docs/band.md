@@ -135,10 +135,14 @@ solve as documented]. Targets: `Bone_IK_Hand_Guitar_R` (child of
 `Bone_IK_Foot_Slave_L/R`. The difference clips compose before the pose below
 (the flags 0x200 note above); with the other order the target, and the fret hand
 on it, turned about the wrong axes (owner 2026-11-04: the left hand twisted,
-off the neck). The drummer (`Drummer_IK_Params`) and the singer
-(`Singer_IK_Params`) solve the same way onto `Bone_IK_Hand_Slave_L/R` and the
-foot slaves, always at full strength [C data: their trees' ik nodes; I: no arm
-toggles of theirs]. The hinge limits are the cosines above.
+off the neck). The drummer (`Drummer_IK_Params`) solves the same way, both
+arms onto `Bone_IK_Hand_Slave_L/R` and the two legs onto the foot slaves,
+always at full strength. The singer (`Singer_IK_Params`) has **only the two
+leg chains** (bone_thigh / knee / ankle onto `Bone_IK_Foot_Slave_L/R`): the
+singer has no arm IK at all, the arms come straight from the body / face clips
+[C data guitar_anim_tree.qb: Singer_IK_Params = two foot-slave entries only,
+Drummer_IK_Params = two hand slaves + two foot slaves; I: no arm toggles of
+theirs]. The hinge limits are the cosines above.
 
 `hero_ConstraintBones` (the root of the guitarist's, singer's and drummer's
 trees) [C data; I: the operations]: after the IK, `twist` bones (children of
@@ -160,10 +164,19 @@ clips' own poses already come close (89 pixels changed in the chartest grid).
   [I: the beat time is the fretbar spacing at that time]. Clips play at
   speed 1.
 - Stances: `Band_ChangeStance` sets `next_stance`; when the body clip ends
-  the transition `anim_set.<old>.transitions.<new>` plays first [I: the
-  C function's lookup]; `no_wait` does it at once.
+  the transition `anim_set.<old>.transitions.<new>` plays first
+  (play_stance_transition_cfunc 0x821138D8, the resolver
+  hero_play_tempo_anim_cfunc shares) [C]; `no_wait` does it at once.
   `Band_PlayAnim` queues `next_anim` (repeat_count, Cycle, disable_auto_arms /
   disable_auto_strum) or, with `no_wait`, restarts the loop with it.
+  The transition entry is usually a clip key (the male singer's
+  `nosing_to_sing`, the guitarists' `Trans_AtoB`), but the **female singer**
+  stores it as a skill/speed tree `transitions.<new>.<skill>.<speed>` resolved
+  like a tempo anim (the `good` skill uses the `_hop` variants); this is the
+  only character that does [C data guitar_animation_data_singer_female.qb].
+  The singer spends a song alternating Stance_A (not singing: `*_nosingidle*`)
+  and Stance_B (singing: `*_singidle*` / `*_singsolo*`), switched by the song's
+  Band_ChangeStance events; the transition clips bridge the two [C data].
 - Song events: `<song>_performance` {time, scr, params} at their time
   (event_iterator, lead 0) [C]. On the disc: Band_ChangeStance (1027),
   Band_PlayAnim (839), Band_PlayFacialAnim (316), Band_WalkToNode (79, not

@@ -381,8 +381,11 @@ bool Animator::init(const Setup& s, std::string& error) {
     // IK chains: the tree's ik node's two_bone_chains: the guitarist's
     // `$ik_params` (the profile's, else Hero_Ik_params: the arms onto the
     // guitar's hand bones, the legs onto the foot slaves), the drummer's
-    // Drummer_IK_Params and the singer's Singer_IK_Params (the hands onto
-    // Bone_IK_Hand_Slave_L/R, the feet onto the foot slaves) [C data
+    // Drummer_IK_Params (both arms onto Bone_IK_Hand_Slave_L/R and the legs)
+    // and the singer's Singer_IK_Params, which has ONLY the two leg chains
+    // (bone_thigh/knee/ankle onto Bone_IK_Foot_Slave_L/R): the singer has no
+    // arm IK, her arms come straight from the body / face clips [C data
+    // guitar_anim_tree.qb Singer_IK_Params / Drummer_IK_Params;
     // guitarist / drummer / vocalist_static_tree]. Owner 11-04 doc 1.2 / 2:
     // the drummer and the singer had none.
     chains_.clear();
@@ -505,6 +508,26 @@ bool Animator::init(const Setup& s, std::string& error) {
 // speed from the song tempo (0x82108B60: below the mean of slow_tempo and
 // med_tempo slow, below the mean of med_tempo and fast_tempo med, else
 // fast; the tempo is 60000 / current_song_beat_time) [C].
+// get_skill_level (0x82108C90): player 1's health < 0.66 bad, > 1.33 good [C].
+uint32_t Animator::skillKey(double t) const {
+    const venue::Performance p = perf_ ? perf_->at(t) : venue::Performance::Medium;
+    return p == venue::Performance::Poor ? K("bad") : p == venue::Performance::Good ? K("good") : K("normal");
+}
+
+// The tempo band (0x82108B60): slow below the mean of slow_tempo / med_tempo,
+// med below the mean of med_tempo / fast_tempo, else fast; the tempo is
+// 60000 / current_song_beat_time, the fretbar spacing at t [I] [C].
+uint32_t Animator::speedKey(double t) const {
+    double beat = 500;
+    if (fretbars_.size() >= 2) {
+        size_t i = size_t(std::upper_bound(fretbars_.begin(), fretbars_.end(), int32_t(t)) - fretbars_.begin());
+        i = std::clamp<size_t>(i, 1, fretbars_.size() - 1);
+        beat = std::max(1, fretbars_[i] - fretbars_[i - 1]);
+    }
+    const double bpm = 60000.0 / beat;
+    return bpm < (slowTempo_ + medTempo_) * 0.5 ? K("slow") : bpm < (medTempo_ + fastTempo_) * 0.5 ? K("med") : K("fast");
+}
+
 const anim::Clip* Animator::tempoAnim(uint32_t animKey, double t, uint32_t& key) {
     key = 0;
     const qb::Value* set = animSet();
@@ -513,20 +536,9 @@ const anim::Clip* Animator::tempoAnim(uint32_t animKey, double t, uint32_t& key)
     const qb::Struct* stance = structOf(g_->field(*st, stance_));
     const qb::Struct* anims = stance ? structOf(stance->find(animKey)) : nullptr;
     if (!anims) return nullptr;
-    const venue::Performance p = perf_ ? perf_->at(t) : venue::Performance::Medium;
-    const qb::Struct* bySkill = structOf(anims->find(p == venue::Performance::Poor ? K("bad") : p == venue::Performance::Good ? K("good")
-                                                                                                                             : K("normal")));
+    const qb::Struct* bySkill = structOf(anims->find(skillKey(t)));
     if (!bySkill) return nullptr;
-    // The beat at t (the fretbars around it) [I: current_song_beat_time is the fretbar spacing].
-    double beat = 500;
-    if (fretbars_.size() >= 2) {
-        size_t i = size_t(std::upper_bound(fretbars_.begin(), fretbars_.end(), int32_t(t)) - fretbars_.begin());
-        i = std::clamp<size_t>(i, 1, fretbars_.size() - 1);
-        beat = std::max(1, fretbars_[i] - fretbars_[i - 1]);
-    }
-    const double bpm = 60000.0 / beat;
-    const uint32_t speed = bpm < (slowTempo_ + medTempo_) * 0.5 ? K("slow") : bpm < (medTempo_ + fastTempo_) * 0.5 ? K("med") : K("fast");
-    const qb::Value* arr = bySkill->find(speed);
+    const qb::Value* arr = bySkill->find(speedKey(t));
     if (!arr || arr->type != qb::Type::Array || !arr->arr || arr->arr->values.empty()) return nullptr;
     const auto& v = arr->arr->values;
     size_t pick = 0;
@@ -540,6 +552,31 @@ const anim::Clip* Animator::tempoAnim(uint32_t animKey, double t, uint32_t& key)
     }
     key = keyOf(&v[pick]);
     lastAnim_ = key;
+    return clip(key);
+}
+
+// play_stance_transition_cfunc (0x821138D8 -> the resolver that
+// hero_play_tempo_anim_cfunc also uses, both passing `anim_set`): the entry
+// anim_set.<stance_>.transitions.<toStance> is either a clip key (the male
+// singer's nosing_to_sing, the guitarists' Trans_AtoB) or, for the female
+// singer, a skill/speed tree resolved like a tempo anim
+// (transitions.<new>.<skill>.<speed>, the good level using the "_hop"
+// variants) [C data guitar_animation_data_singer_female.qb]. Read as a plain
+// key before, the female singer's struct resolved to 0 and she snapped
+// between the not-singing and singing stances with no transition clip.
+const anim::Clip* Animator::transitionClip(uint32_t toStance, double t, uint32_t& key) {
+    key = 0;
+    const qb::Struct* st = structOf(animSet());
+    const qb::Struct* old = st ? structOf(g_->field(*st, stance_)) : nullptr;
+    const qb::Struct* trs = old ? structOf(old->find(K("transitions"))) : nullptr;
+    if (!trs) return nullptr;
+    const qb::Value* e = trs->find(toStance);
+    if (!e) return nullptr;
+    if (e->type == qb::Type::Key || e->type == qb::Type::KeyPtr) {
+        key = e->key;
+    } else if (const qb::Struct* bySkill = structOf(e)) {
+        if (const qb::Struct* bySpeed = structOf(bySkill->find(skillKey(t)))) key = keyOf(bySpeed->find(speedKey(t)));
+    }
     return clip(key);
 }
 
@@ -633,11 +670,14 @@ void Animator::bodyFinished(double t) {
         return;
     }
     if (nextStance_ != stance_) {
-        // play_stance_transition_cfunc: anim_set.<old>.transitions.<new> [I: the C function's lookup].
-        const anim::Clip* tr = nullptr;
-        if (const qb::Struct* st = structOf(animSet()))
-            if (const qb::Struct* old = structOf(g_->field(*st, stance_)))
-                if (const qb::Struct* trs = structOf(old->find(K("transitions")))) tr = clip(keyOf(trs->find(nextStance_)));
+        // play_stance_transition_cfunc: anim_set.<old>.transitions.<new>, a clip
+        // key or the female singer's skill/speed tree (transitionClip) [C data].
+        uint32_t trKey = 0;
+        const anim::Clip* tr = transitionClip(nextStance_, t, trKey);
+        static const bool animLog = std::getenv("GD04_ANIMLOG") != nullptr;
+        if (animLog)
+            SDL_Log("trans: %.0f ms role %d %s -> %s clip %s (%.2f s)", t, int(role_), qbkey::name(stance_).c_str(),
+                    qbkey::name(nextStance_).c_str(), tr ? qbkey::name(trKey).c_str() : "(none)", tr ? double(tr->duration) : 0.0);
         if (tr) {
             body_.play(tr, t, 0.2f);
             ++bodyGen_;
@@ -1032,8 +1072,9 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
     if (!chains_.empty()) {
         bool changed = false;
         for (const Chain& c : chains_) {
-            // The legs and the drummer's / singer's arms always; the guitarists'
-            // arms by hero_toggle_arms' strength [I: the others' toggles].
+            // The legs and the drummer's arms always (the singer has only leg
+            // chains); the guitarists' arms by hero_toggle_arms' strength [I:
+            // the others' toggles].
             const float s = c.leg || !guitarLike() ? 1.0f : c.right ? rightStrength_.at(ms) : leftStrength_.at(ms);
             if (s <= 0) continue;
             const Vec A = posOf(world[size_t(c.b0)]), B = posOf(world[size_t(c.b1)]), C = posOf(world[size_t(c.b2)]);
