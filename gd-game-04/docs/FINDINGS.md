@@ -723,6 +723,74 @@ the song is thrufireandflames; with it set CrowdDecrease takes no health
 - Back-face culling fixes the M5 stage-rear cameras (they stand behind
   walls) [I: Direct3D's default CCW, the templates' own states not decoded].
 
+## Character roster, selection and the store (audit, 2026-11-24)
+
+GH3 has **no Create-A-Rocker / appearance creator** (that arrives in GHWT /
+Metallica). "Character creation" in GH3 = a fixed + unlockable character
+**roster**, character **selection** (career / quick play / multiplayer band
+setup), and a **store** that buys characters, guitars, finishes, outfits,
+styles, songs and videos with career cash. All of it is **GH3's own QScript
+running on the port's VM** (ui.md): the port supplies the screen-element /
+menu-object natives and persists the globals; the roster / unlock / price /
+cash logic is the original scripts' [C scripts]. **Audited faithful; no code
+change.**
+
+- **Unlock model** [C scripts guitar_globaltags.qb]: every character body,
+  guitar, finish, outfit, style and video is a GlobalTag keyed by its
+  `desc_id` with `unlocked` 0/1 (and `unlocked_for_purchase`); band cash is
+  the GlobalTag `band_info`'s `cash` field. `setup_globaltags` (called at
+  new-save setup) runs `setup_unlocks` (Secret_Guitars / Secret_Basses
+  `unlocked_for_purchase = 0`; Bonus_Guitars / _Finishes / Bonus_Basses
+  `unlocked_for_purchase = 1`; Secret_Characters `default_charactertags` =
+  unlocked 0; Bonus_Outfits unlocked 0; Bonus_Styles every 6th (one per
+  character) unlocked 1), `setup_character_tags` (Secret_Characters[0..2] =
+  Slash / Morello / Satan `unlocked_for_purchase = 0`, boss-gated),
+  `setup_characterguitar_tags` (per profile x player, default guitar /
+  bass, falls back to Les Paul Black / LP VBRST), `setup_store_tags`
+  (videos). Secret_Characters = Slash 10000, Tom Morello 10000, Satan (Lou)
+  15000, RockGod 20000, Grim Ripper 10000 [C data Secret_Characters].
+- **Store** [C scripts menu_store.qb]: `store_buy_character` guards on
+  `unlocked = 0` (no re-buy), special-cases Satan Outfit2 needing Satan
+  Outfit1 first, checks `cash >= price`, deducts cash into `band_info`,
+  sets the body **and** its musician_instrument's tag `unlocked = 1`,
+  autosaves. `Progression_AwardCash` (guitar_progression.qb) adds
+  Cash_System_rules cash (by difficulty / new-vs-old stars) to `band_info`.
+  Pages: create_store_{characters,guitars,guitar_finishes,outfits,styles,
+  songs,videos}_menu. The Vault is these tags read back.
+- **Selection** [C script menu_character_select.qb]: `get_valid_character_index`
+  — a profile is valid iff downloaded, not `debug_only`, `Type = Guitarist`,
+  and (its body tag exists with `unlocked = 0` -> invalid); the main roster
+  carries no such tag so it is always selectable, secret characters are
+  gated by their bought tag. `cs_scroll_up_or_down` (no wrap) / paging via
+  `cs_check_if_new_page`.
+- **Appearance customisation that does exist**: per-character outfit + style
+  + selected guitar / bass (player_status.outfit / style,
+  `current_selected_guitar` / `_bass`), bought in the store. No freeform
+  editor.
+- **Port backing, verified faithful**: GetGlobalTags / SetGlobalTags
+  (natives_core.cpp:330 / 356), Push/PopGlobalTags sections
+  (natives_core.cpp:371 / 380), SaveToMemoryCard / LoadFromMemoryCard ->
+  save.json tags + sections (natives_flow.cpp:94 / 102, game/save.cpp). The
+  lookups the scripts use (get_musician_profile_size / _struct,
+  is_musician_profile_downloaded, find_instrument_index,
+  is_musician_instrument_downloaded, get_current_band_info,
+  find_profile_by_id) are GH3 **scripts**, run as-is. The port adds only:
+  the neighbour-prefetch heuristic (natives_game.cpp:95, mirrors
+  get_valid_character_index's Guitarist / not-debug_only / body-tag-unlocked
+  filter), `cs_check_if_new_page` for retail's 13-icon page (GD04-094,
+  natives_flow.cpp:182), the store character-name layout fix (GD04-099), and
+  The Glitches Vault isolation (ui/glitches, GD04-026 / 096).
+- **Objective evidence** (bl04 build, headless `--walktest`, isolated
+  XDG_DATA_HOME): `store` passes all six pages (finishes / songs / characters
+  / outfits / styles / videos) with their models and character_name_text
+  centred at x 897.5 (GD04-099 check); `vault` passes — The Glitches' band 5
+  reads Instrument_focus01.unlocked = 1 while the save view and band 1 read
+  0 (GD04-026 / 096 isolation); `career` passes (character -> hub -> song ->
+  newspaper mag_photo = Guitarist_Axel_Outfit1_Style1 from axel_1 ->
+  cash_reward); `faceoff` passes (character select scrolls Axel / Casey /
+  Izzy / Judy); `cutcontent` passes (paging `cs: jumped 0 icon 12 total 13
+  name "GRIM RIPPER"`).
+
 ## The band (M6; details in `band.md`)
 
 - `create_band` (one player): guitarist from `player1_status`
