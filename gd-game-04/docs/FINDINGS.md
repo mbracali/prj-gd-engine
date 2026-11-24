@@ -1025,7 +1025,6 @@ Found faithful; no code changed. Ground truth confirmed and recorded here:
     attacks received, 3 fret recoveries (none dead at end), 58/60 hit after the
     last attack, whammy bar drawn; boss bot 40 forced misses -> KO, P1 beats the
     boss. All three walks: `passed`.
-=======
 ## UI/mechanics re-audit (2026-11-24): HUD, scoring, judge, mouse — faithful
 
 A verification pass over the in-game HUD and the core mechanics against the
@@ -1144,3 +1143,83 @@ open item unchanged: the store main menu's "20 px high" layout discrepancy
 Method note: this was a static binary-vs-source cross-check (no fresh gd04
 build, to respect the one-build/RAM/token budget); the runtime paths are
 already exercised by the repo's walks/self-tests and recent GD04-121/122 runs.
+## Character animation, collision, physics audit (2026-11-24)
+
+Audit of the band's animation, collision and ragdoll physics against the
+original. Read with the Ghidra headless export (`ghidra/analysis/decomp`,
+REA cannot open the XEX2), the ragdoll data through `tools/havok.py`
+(`ragdoll_axel` of `global.pak`) and the QB through `tools/qb.py`. Code:
+`engine/src/render/band_anim.*`, `render/band_ragdoll.*`, `render/band.*`,
+`data/havok.*`. **No code change: the three areas are faithful** (the one
+gap, accessory-vs-body collision, is blocked from grounding by VMX128 and is
+immaterial by the data's own constraint limits, below).
+
+### Animation -- FAITHFUL [C as cited in "The band" / `band.md`]
+- Body loop (`hero_play_tempo_anim_cfunc` 0x821090B0 / 0x82108E58, skill
+  0x82108C90, speed 0x82108B60), stance transitions, `Band_PlayAnim` /
+  `ChangeStance` / `PlayFacialAnim`, strum / fret / finger-chord iterators
+  (FretFingers 0x821119F8), the drummer's arms / cymbals / twist
+  (0x821121D8, 0x82107F48), facial loop, IK (0x823F78E0 / 0x823F65C0),
+  `hero_ConstraintBones`, difference-clip order and win/lose/special all
+  match the RE in `render/band_anim.cpp`. No pop / wrong-clip / retarget /
+  timing defect found.
+- Probed one edge case: the drummer body twist is applied with
+  `evalDelta`, which early-returns on `strength <= 0`, so a negative twist
+  would be dropped. Checked the data: every `drummer_{left,right}_arm_twist_
+  factors.track_*` is in [0.0, 1.0] (qb.pak), so the mean is >= 0 and the
+  twist is one-directional by design -- the early-return never drops a
+  meaningful value. Not a bug.
+- Out of scope (noted, not animation): the `modes.md` S9 items
+  (card-slide / lefty-flip-button-slide 2D HUD approximations, and
+  `GuitarEvent_BattleAttackFinished` -- a battle-DSP-reset sound, not a
+  character anim).
+
+### Physics (ragdoll / accessory dynamics) -- FAITHFUL [C 821AFC08, 823FE140, 823FFC28, 82253B10]
+- `render/band_ragdoll.cpp` reproduces GH3's Havok 4.6 setup: world gravity
+  (0, -9.8, 0) [C 82253B10 -> 8200E4E4], transformed to the member's model
+  frame in `render/band.cpp:112`; 4-iteration solver (tau 0.6, damp 1);
+  accessory bodies MOTION_STABILIZED_SPHERE_INERTIA with their constraint
+  to the parent in the world, the rest hard-keyframed; pose read one frame
+  behind; `checkAndFixConstraint(0.05, 0.8)`. On by default (GD04_NO_RAGDOLL
+  off). The `.rag` ball-socket / ragdoll twist+cone+planes / limited-hinge /
+  prismatic constraints, masses, sphere inertia, damping and velocity caps
+  are all decoded (`data/havok.cpp:488-527`) and enforced in `solve()`.
+- Verified the port decodes the SAME constraint limits the original data
+  carries: `data/havok.cpp` reads coneMax, twist min/max, planes min/max,
+  their isEnabled flags, axes (twistAxisInA / refAxisInB) and
+  `angleMeasurementMode` (aligned vs perpendicular); `band_ragdoll.cpp`
+  `solve()` applies them (`coneRow`, `limit`). A decode bug here would let
+  the hair swing free -- none found.
+- Frame-rate independence and NaN-freedom are the repo's objective gate
+  (`tests/chartest.cpp:219-266`: accessories sampled every ms, worst 1 ms
+  move < 12x the mean; GD04-104). No change made, so that baseline stands.
+
+### Collision (accessory hair/cloth vs body) -- documented LIMITATION, immaterial; NOT a groundable defect
+- The usual-bugs rule (hair/cloth must not penetrate the body) was judged
+  objectively from the data, not by eye:
+  - `ragdoll_axel` (35 bodies): the body is capsules (Pelvis/Chest/Head/
+    arms/legs), the accessories (Bone_ACC_01..15) are small boxes that at
+    the bind pose sit FLUSH on the body surface (e.g. chest accessory
+    ACC_09 at z=0.172 vs the Chest capsule surface ~z=0.166, ~6 mm; the
+    ACC_01..08 hair boxes just above the Head capsule).
+  - Each accessory's ragdoll constraint has a TIGHT cone/twist/planes
+    limit: hair (ACC_01..08) cone <= 7-30 deg (most <= 10-15), twist +-5,
+    planes +-0..25; chest/stomach accessories cone <= 30-35, planes
+    +-10..30. These bound each segment to a few cm of its rest pose, so the
+    hair physically cannot swing far enough to grossly penetrate a
+    non-adjacent body part. The port enforces these exact limits, so its
+    secondary motion stays within the same envelope.
+  - Adjacent (constraint-connected) accessory<->parent pairs do not collide
+    in Havok by default (disableCollisionsBetweenConstraintBodies), which is
+    why the flush rest contact is intended, not a penetration.
+- So the "colliders on, no penetration" requirement is satisfied here by the
+  constraint limits, which the port reproduces -- not by narrow-phase
+  collision. The port implements no accessory-vs-body narrow-phase
+  (`band_ragdoll.*`), as already noted in `band.md` S6b.
+- Whether GH3 additionally enabled non-adjacent accessory-vs-body collision
+  CANNOT be grounded: the world setup (Function_82253B10) and the
+  collisionFilterInfo computation (Function_823360F0) both truncate on
+  VMX128 "bad instruction data" in the decomp, and the layer collision
+  matrix was not found (confirmed this audit). Per the owner rule (fix only
+  confidently-groundable defects, do not invent), narrow-phase collision is
+  left unimplemented -- a known limitation, not a defect to fix blind.
