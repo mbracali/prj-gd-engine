@@ -10,6 +10,7 @@
 
 #include "game/autoplay.h"
 #include "game/chart.h"
+#include "game/drum_player.h"
 #include "game/match.h"
 #include "game/note_track.h"
 #include "game/player.h"
@@ -304,6 +305,42 @@ bool tapOnce(const std::vector<TapPhrase>& spans, const Globals& g, PlayTotals& 
     return true;
 }
 
+// gh4 drums: build the playable gem stream from the real <song>_drums_notes
+// track (game/drum_player.h) and autoplay it -- strike every lane of every gem
+// a hair after its time, then sweep. The judge must hit every lane-note with no
+// miss and no overhit, mirroring the guitar autoplay's "every note hit" bar.
+// This is the drum gameplay path exercised on real disc data (drumtest covers
+// only a synthetic track); the live-match input routing + HUD remain (FINDINGS).
+bool drumOnce(const std::vector<ChartEvent>& drums, PlayTotals& t, std::string& why) {
+    DrumPlayer dp(drums);
+    if (dp.notes() == 0) return true;  // a drum track with only arm-animation notes
+    ++t.drumSongs;
+    t.drumGems += dp.gems().size();
+    t.drumNotes += size_t(dp.notes());
+    const std::vector<DrumPlayer::Gem> gems = dp.gems();
+    const float endMs = float(gems.back().ms) + 500.0f;
+    size_t next = 0;
+    for (float tm = float(gems.front().ms) - 500.0f; tm < endMs; tm += 4.0f) {
+        for (; next < gems.size() && float(gems[next].ms) <= tm; ++next)
+            for (int l = 0; l < DrumPlayer::LaneCount; ++l)
+                if (gems[next].lanes >> l & 1) dp.strike(l, float(gems[next].ms) + 2.0f);
+        dp.update(tm);
+    }
+    int misses = 0, overhits = 0;
+    for (const DrumPlayer::Event& e : dp.takeEvents()) {
+        if (e.kind == DrumPlayer::Event::Kind::Miss) ++misses;
+        else if (e.kind == DrumPlayer::Event::Kind::Overhit) ++overhits;
+    }
+    t.drumHits += size_t(dp.notesHit());
+    if (dp.notesHit() != dp.notes() || misses != 0 || overhits != 0) {
+        ++t.drumJudgeFails;
+        why = "drums: " + std::to_string(dp.notesHit()) + " of " + std::to_string(dp.notes()) + " lane-notes hit (" +
+              std::to_string(misses) + " miss, " + std::to_string(overhits) + " overhit)";
+        return false;
+    }
+    return true;
+}
+
 }  // namespace
 
 bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayTotals& t, std::string& why) {
@@ -362,6 +399,14 @@ bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayT
                 }
             }
         }
+    }
+    // gh4 drums: autoplay the song's real <song>_drums_notes stream through the
+    // drum judge (every lane-note hit, no miss / overhit). Recorded in the drum
+    // totals; a performance-track imperfection is NOT a guitar-gameplay failure,
+    // so it does not pull down this song's pass (the totals surface any fails).
+    if (!chart.drums.empty()) {
+        std::string w;
+        (void)drumOnce(chart.drums, t, w);
     }
     // GD10-108: an overstrum while a sustain is held ends it (guitar expert).
     if (!chart.notes(Part::Guitar, 3).empty()) {
@@ -482,6 +527,8 @@ void printPlayTotals(const PlayTotals& t) {
     std::printf("touch strip (GHWT): %zu _Tapping spans parsed (%zu taps asked for), tap judge runs %zu, failed %zu; logic self-test %s\n",
                 t.tapSpans, t.tapSpanTaps, t.tapJudgeRuns, t.tapJudgeFails,
                 !t.touchStripSelfTestRun ? "not run" : t.touchStripOk ? "passed" : "FAILED");
+    std::printf("drums (gh4): %zu songs' real _drums_notes autoplayed, %zu gems / %zu lane-notes built, %zu hit, %zu songs failed\n",
+                t.drumSongs, t.drumGems, t.drumNotes, t.drumHits, t.drumJudgeFails);
     std::printf("autoplay: score (strummed) %lld, HOPO landings %zu, phrases captured %zu, charts failing %zu\n",
                 static_cast<long long>(t.score), t.hopos, t.phrasesCaptured, t.failedCharts);
 }

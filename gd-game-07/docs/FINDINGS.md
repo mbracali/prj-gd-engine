@@ -1010,3 +1010,122 @@ linear depth, with the `m_vInvProjMatT` / `m_vDepthOfFieldParams` registers
   shot's authored composition is [C]); the gh4 SH/light-selection core is VMX128
   and does not decompile (reconstruction followed, per gd10); overbright has no
   hard engine gate (checked only by screenshot luminance).
+
+## Onboarding Step 6 — gameplay (2026-11-24)
+
+Aggregate-first confirmation of the onboarding spec's Step 6 (gate 50% — "confirm
+gameplay is working") for World Tour's four instruments and same-screen
+multiplayer, with the one safe, objectively-testable increment taken (real-disc
+drum autoplay evidence). The gameplay judgment layer (`game/rules*.h`,
+`game/player.cpp` timing) was **not touched** — it is pinned by the autoplay
+tests, which stay green (charts failing 0). Ghidra evidence is from the XEX
+symbol/string export `ghidra/analysis/strings.tsv` (the shipped import/symbol
+names) + the decoded QB; the XEX still cannot be opened live by REA.
+
+### Guitar + Bass (Rhythm) — confirmed faithful, playable, 0 failing
+
+- **Mechanics (port):** the five-fret judge (`game/player.cpp` + `game/rules*.h`)
+  reproduces the gh4 numbers already pinned by the Controls audit above — hit
+  window, strum refractory (guitar-mode, in the judge), HOPO ticks/window,
+  overstrum, sustains + whammy, Star Power phrases/deploy/tilt. Bass is the
+  `Rhythm` / `RhythmCoop` part through the **same** judge (there is no separate
+  bass judge in the original either). The WT touch-strip `_Tapping` tap/slide
+  path is parsed + judged as a separate model (Controls Phase B above).
+- **Evidence (`--selftest <disc>`, headless):** `autoplay: score (strummed)
+  205,469,430, HOPO landings 51,999, phrases captured 13,963, charts failing 0`
+  over every song × part (Guitar/Rhythm/GuitarCoop/RhythmCoop) × 4 difficulties,
+  plus calibration 792/0 failed, easy-chords 44/0, overstrum-cut, face-off
+  269,686 notes split. The touch strip: 424 `_Tapping` spans, tap judge 0 failed.
+  **Verdict: guitar + bass gameplay matches the original — met.**
+
+### Drums (gh4, per-pad velocity) — judge proven on real data; live-wiring remains
+
+- **Mechanics (original):** drums are a first-class controller — `IsDrumController`
+  / `IsRBDrum` (descriptor type 10 GH kit / 11 RB kit), and `ProcessDrumVelocity`
+  → `GetDrumHitVelocity` read the per-pad velocity bytes (six, max taken for a
+  type-10 kit). The playable stream comes from `%s_drums_notes` (kit-piece notes
+  73..85). [All four symbols confirmed in `strings.tsv`.]
+- **Port status:** the input layer **detects** a drum kit and **guards** the
+  guitar part from it (`Input::isDrumKit`, `drumKitSuppressesPlay`,
+  `Pad::drum`), so a kit no longer scramble-plays guitar (Controls Phase B
+  above). The judge `game/drum_player.{h,cpp}` (`DrumPlayer`) builds a playable
+  5-lane gem stream (kick/red/yellow/blue/green) from `Chart::drums` with the
+  recorded per-lane velocity, and scores with the five-fret streak multiplier.
+- **What I wired this step (objective, verifiable, zero touch to the pinned
+  judge / fragile input constants):** real-disc **drum autoplay** in the
+  self-test harness — `drumOnce()` in `engine/src/tests/selftest_play.cpp` builds
+  a `DrumPlayer` from every song's *real* `<song>_drums_notes` and autoplays it
+  (strike each gem's lanes at its time, then sweep), asserting every lane-note is
+  hit with no miss/overhit. New `PlayTotals` drum counters are printed by
+  `--selftest`. Previously only a *synthetic* track (`--drumtest`) exercised the
+  judge; this proves it on the shipped data.
+- **Evidence (`--selftest`):** `drums (gh4): 89 songs' real _drums_notes
+  autoplayed, 100,885 gems / 151,156 lane-notes built, 151,156 hit, 0 songs
+  failed` — 100% of real drum lane-notes judged correctly. `--drumtest`: all
+  checks pass (lane map, velocity capture, chord merge, streak, live-velocity
+  override, input guard).
+- **Honest remains (the fragile live path, not taken here):**
+  1. **Live input routing.** Map an SDL drum kit's pad/cymbal/kick buttons to the
+     five `DrumPlayer` lanes and step `DrumPlayer` beside `Player` in
+     `SongScreen::tick` for a drum seat. This touches the Phase-A-owned SDL→action
+     layer; per the owner's objective-checks rule a pad→lane mapping must be set
+     from **real-device logs**, not invented constants, so it is deferred to the
+     controls wave rather than guessed.
+  2. **Real per-pad velocity.** SDL's gamepad API exposes only buttons on PC, not
+     gh4's six velocity bytes (that needs raw HID / the USB descriptor). Live
+     strikes therefore fall back to the chart's recorded velocity today.
+  3. **HUD drum lanes.** No drum-lane highway renderer yet (the guitar HUD is
+     5-fret). Not added blind — it cannot be verified headlessly, and the owner's
+     rule forbids eyeballed visual changes.
+  4. `_drums_notes` is the drummer's single **performance/animation** track, not
+     gh4's per-difficulty gameplay drum chart (no difficulty reduction) — the
+     same honest scope noted for gd10.
+
+### Vocals — AI-only in the port; a mic path is a dedicated later wave
+
+- **Mechanics (original):** gh4 has a full mic/pitch subsystem — confirmed
+  symbols: `Vocals_ControllerHasUsableHeadset`, `Vocals_GetAvailableMics`,
+  `Vocals_GetMicType`, `Vocals_SetMicGain`, `Vocals_MuteOutput`,
+  `VocalDSPSetParams`, `VocalsHighway_*`, and the per-song data `%s_vocals_phrases`,
+  `%s_vocals_freeform`, `%s_vocals_note_range`, `%s_lyrics`, `%s_song_vocals`
+  (all in `strings.tsv`). Scoring is phrase-based against a pitch track with a
+  freeform (talky) mode; `BandManager_AddVocalist` seats a vocalist.
+- **Port status:** vocals are **AI-only** — there is no `VocalPlayer`, no vocals
+  parse (`Chart` has no vocal phrase/lyric/note-range tracks), and no mic
+  instrument in the input engine (the universal `Instrument` set is
+  Guitar/Gamepad/Midi/Drums). The band's vocalist animates, but the human cannot
+  sing.
+- **Verdict (honest):** a minimal playable mic path is **NOT feasible as a Step-6
+  increment and should not be faked.** It needs, as net-new first-class
+  subsystems: (a) a vocals data parse (`_vocals_phrases` / `_vocals_note_range` /
+  `_lyrics` / `_vocals_freeform`), (b) a mic instrument owned by the shared input
+  engine with a real pitch detector (the original runs DSP at a fixed rate), (c)
+  a vocals highway renderer, (d) a phrase/pitch judge. This is a dedicated wave
+  (it matches the controls plan's Phase B2 "mic instrument owned by the shared
+  engine"), not a bolt-on. Deferred, documented, not stubbed.
+
+### Multiplayer — same-screen 2-player confirmed; mixed-instrument band is the gap
+
+- **Original:** `CreatePlayerServer` + `BandManager_Add{Guitarist,Bassist,
+  Drummer,Vocalist,Rhythmist}` seat a band; co-op / face-off / pro-face-off /
+  battle / boss are the GH3-family modes (`use_coop_notetracks`).
+- **Port status:** `game/match.h`/`match.cpp` already instantiate **2 local
+  players same-screen** (`sides_[2]`, `n_`, `GameMode::{Coop,FaceOff,ProFaceOff,
+  Battle,Boss}`), with the 2-player HUD (`Hud2P`), two highways and the shared /
+  face-off / battle rules. The app flow already drives `twoPlayers_` in
+  `SongScreen`.
+- **Evidence (`--selftest`, real charts through `Match`):** `two players: co-op
+  400 charts (471,229 notes, Star Power raised together 2,436 times), battles 132
+  (224 attacks, 89 KOs)` — both autoplayed players hit every note; counters rise
+  together. **Verdict: same-screen MP works for guitar + bass/rhythm (co-op,
+  face-off, battle, boss).** The gap is a **mixed-instrument band** (a drum seat
+  and a vocal seat as distinct players), which is blocked by the drum live-wiring
+  (above) and the vocal instrument (above), not by the `Match` 2-player core.
+
+### Step 6 status
+
+**Met for the core** — guitar + bass gameplay is faithful and 0-failing, the drum
+judge is now proven on 100% of real disc drum data, and same-screen 2-player MP
+is confirmed. **Partial** on the two large, honestly-deferred pieces: live drum
+controller + HUD wiring (fragile input layer + an unverifiable renderer) and a
+playable vocal mic path (a net-new subsystem = its own wave).
