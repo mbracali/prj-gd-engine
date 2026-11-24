@@ -22,6 +22,41 @@ See `formats.md` (CHNK, padded paks, QB struct items, type 0x1C).
   xenon_gem_offset / input_offset were -66) [C data].
 - Health tables per instrument and difficulty (beginner .. expert) [C data].
 
+## Controls
+
+- Drum kit: a first-class controller in the original (the joypad descriptor's
+  type enum = 10 GH drum kit / 11 RB drum kit; `GetDrumHitVelocity` 0x82192350
+  reads six per-pad velocity bytes at record+0x18+0x43..+0x48) [C]. This port
+  grew from gd01's five-fret guitar engine, so it had no drum instrument and a
+  drum kit fell through to the gamepad (`Joypad`) profile and played the guitar
+  part on scrambled buttons. Fixed: `input.cpp` `isDrumKit` (SDL joystick type
+  DRUM_KIT, or "drum" in the name) flags the pad; `Input::drumKitSuppressesPlay`
+  drops the guitar play actions (frets, strum, whammy) for that seat, so a drum
+  kit no longer scrambles the guitar (the menus, Start and Star Power still
+  work). The kit is surfaced as `Instrument::Drums` ("Drum Kit") in the Gamepads
+  menu. [I] SDL exposes only the joystick type and the name on PC, not the USB
+  descriptor's type enum.
+
+## Drums (gh4)
+
+- The drum judge `game/drum_player.{h,cpp}` (rendering-free, adapted from
+  gd05's Rock Band `DrumPlayer`) builds a playable gem stream from the
+  `<song>_drums_notes` kit-piece events (parsed into `Chart::drums`): note 73
+  kick, 75/76 toms, 77 snare, 78/79/84 hi-hat, 80/81/82/85 cymbals, mapped onto
+  the five GH drum lanes (kick / red / yellow / blue / green; the mapping is
+  [I]). The arm-animation notes (37..57) in the same array are skipped. Each
+  gem carries the recorded per-pad velocity (`ChartEvent::value`, the packed
+  `velocity << 24` field; `GetDrumHitVelocity` semantics), surfaced on the Hit
+  event for feel/anim. The judge scores hits on the right lanes with a streak
+  multiplier and is covered by `--drumtest` (data-free).
+- NOT yet done (honest scope): `_drums_notes` is the drummer's single
+  performance/animation track, not gh4's per-difficulty gameplay drum chart, so
+  this stream has no difficulty reduction. The judge is a tested component and
+  is NOT wired into the live match loop (no HUD drum lanes, no routing of a live
+  drum controller's pad/cymbal/kick inputs into it, no Overdrive/fill deploy).
+  Wiring it in is the remaining increment; it must keep the guitar path
+  untouched for a guitar seat.
+
 ## Audio
 
 - Song banks: key generator [C 0x820E24F8], called for "%s_%d", n = 1..3,

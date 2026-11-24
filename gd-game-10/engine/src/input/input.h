@@ -125,9 +125,17 @@ public:
         std::string id, name, profile;
         int player = 0;  // 0 or 1, -1: none (the menus only)
     };
-    // The instrument types of the Gamepad menu (GH2 has neither drums nor vocals).
-    enum class Instrument { Guitar, Gamepad, Midi };
+    // The instrument types of the Gamepad menu. Drums: a gh4 drum kit, a
+    // first-class controller in the original (descriptor type 10 GH / 11 RB)
+    // but not yet a playable seat in this five-fret port -- detected so its
+    // pads are not routed as scrambled guitar frets (see drumKitSuppressesPlay).
+    enum class Instrument { Guitar, Gamepad, Midi, Drums };
     static const char* instrumentName(Instrument i);
+    // A drum kit must never feed the guitar judge: these play actions are
+    // dropped for a drum-kit seat (the menus, Start and Star Power still work).
+    // The single source of truth for the guard, so tests/drumtest.cpp can
+    // check it directly without a live device.
+    static bool drumKitSuppressesPlay(Action a) { return isFret(a) || a == Action::Strum || a == Action::Whammy; }
 
     // ---- Input calibration (controls-improvement Phase A, 2026-11-24 audit;
     // docs/FINDINGS.md "Controls audit", propagated from the gd01 anchor).
@@ -388,6 +396,7 @@ private:
         SDL_Gamepad* pad = nullptr;
         Profile profile = Profile::Joypad;
         Profile detected = Profile::Joypad;  // what the game guessed (type Auto)
+        bool drum = false;  // a drum kit (gh4 type 10/11): never routed as guitar
         std::string guid, name;
         int slot = 0;
         bool chosenSlot = false;  // from controllers.json
@@ -432,9 +441,9 @@ private:
         std::array<bool, size_t(Action::Start) + 1> on{};
         int strums = 0;  // strum controls held
     };
-    ActionSet actionsOf(const std::array<bool, size_t(Control::Count)>& held, bool joypad, int player) const;
+    ActionSet actionsOf(const std::array<bool, size_t(Control::Count)>& held, bool joypad, int player, bool drum) const;
     void controlEdges(const std::array<bool, size_t(Control::Count)>& was, const std::array<bool, size_t(Control::Count)>& now,
-                      ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out);
+                      ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out, bool drum = false);
     bool slotTaken(int slot, const Pad* except) const;
     void keyEvent(const SDL_KeyboardEvent& k, std::vector<InputEvent>& out);
     std::string savePath(const char* file) const;
