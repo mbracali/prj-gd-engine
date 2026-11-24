@@ -698,3 +698,165 @@ rule).
   `hud_widgets.cpp` (written from the desc parameters, the C's rules not
   decoded); they produce correct-looking output and 0 UNHANDLED, but were not
   bit-verified against the native widget code.
+
+
+## Onboarding Step 4 — animations & physics (2026-11-24)
+
+Aggregate-first pass over the port's character/venue/menu **animations** and its
+**physics** (collision, rigid bodies, ragdoll, anim↔physics). World Tour runs
+the **gh4 engine shared with gd10 (Metallica)**, so this reuses the gd10 gh4
+animation/physics audits rather than redoing them. The port already reimplements
+the gh4 animation tree and the Havok ragdoll faithfully; this pass **confirmed
+that in code + headless dev-hook runs** and **closed the two gd10-proven gaps
+that had not been carried over to World Tour**. Evidence: the port source read in
+this worktree, `extracted/names.tsv` (QB keys), and fresh headless runs of
+`--chartest` / `--drumtest` on our disc (`gd-game-07/extracted`).
+
+### (a) Character animation inventory (every class, trigger, port status)
+
+Driver: `render/band_anim.{h,cpp}` (`bandanim::Animator`) — GH3's anim tree
+(guitarist/drummer/vocalist `_static_tree`) + the iterators, evaluated as a
+function of the song clock (frame-rate-independent, per-member seed).
+
+| Animation class | Trigger | Port status | Evidence |
+|---|---|---|---|
+| Body idle / adjusting random anims | song clock, per-member RNG (`hero_play_adjusting_random_anims`) | ✅ plays | `--chartest`: 26/26 bodies animated, `stats.bodyAnims>0` each |
+| Strum (short/med/long) | guitar note (`Strum_iterator`) | ✅ | `Ev::Strum`→`strum()`; chartest |
+| Fret position / fingers | `FretPos_iterator` / `FretFingers_iterator` | ✅ | `Ev::Fret`/`Ev::Chord`, IK onto guitar bones |
+| Chord / chord-release | note on/off | ✅ | `Ev::Chord`/`Ev::ChordRelease` |
+| GH3 drummer arms + cymbal hits | `Drum_iterator` / `Drum_cymbal_iterator` (`!gh4` only) | ✅ | `Ev::DrumArm`/`Ev::Cymbal`, `cymbal_anims` |
+| **gh4 DrumKit piece wobble** (cymbals/toms/snare per hit) | `Drumkit_anim_iterator` (`drums_notes 73-85→drumkit_anims[i]`) | ✅ **FIXED this pass** (was absent for gh4) | `--chartest`: **320 DrumKit difference-anims fired** (was 0) |
+| Mocap / choreographed (`Band_PlayClip`) | `<song>_performance` array | ✅ | `Ev::Mocap`, `mocaps_`, start-node teleport |
+| Facial / lip-sync | `facial_anim_loop`, `Band_PlayFacialAnim` | ✅ | `--chartest`: **26/26 gh4 talents move their face** |
+| Stance change / play_anim | `handle_change_stance` / `handle_play_anim` (menus + perf) | ✅ | `changeStance`/`playAnim` |
+| Star Power (special anim) | `handle_star_power` `play_special_anim Stance_A Starpower` | ✅ (non-gh4 playables verified; gh4 talents' SP clip not in their song anim sets [I], not checked — same as gd10) | `playSpecial`; chartest SP pass |
+| Win / lose anims | `play_win_anims` / `play_lose_anims` (blend 0) | ✅ | `playSpecial(...,blend)` |
+| Missed-note (Bad_Strums) | `handle_missed_note` until next hit | ✅ | `playerNote(ms,hit)` |
+| Drummer auto-twist | `drummer_autotwist` per frame | ✅ | `Ev::Twist` |
+| ped_animevents | clip `animevents` fire scripts | ✅ | `clipEvents()` |
+| Accessory bones (hair/coat/chains) | Havok ragdoll over the pose | ✅ (see physics) | `AccessorySim` |
+
+**Result: every character animation class the gh4 engine drives is reproduced.**
+The one World-Tour gap vs. the shared gh4 engine was the **DrumKit
+difference-animation** (below), now closed. Crowd-interaction anims are venue/ped
+driven (next).
+
+### (b) Venue animations — reproduced
+
+Confirmed in code + the venue dev hooks; no gap found (venue **lighting/cameras**
+are Step 5's lane and excluded here):
+- **Stage element / prop mocap + transitions:** `render/venue_stage.cpp`
+  (`introAnims`, `mocap_.addTransition`, `setFollow`, `starPowerAnim`, the
+  particle `setAnimHook`), driven by the venue scene's clips.
+- **Background peds / crowd actors:** `render/stage_peds.cpp` (`StagePeds::play`
+  evaluates each ped's `bandanim` body over the song clock) and
+  `render/crowd.cpp` (crowd cards — matched to the original per the crowd rule).
+- Exercised headless by `--venuetest` and by `--chartest`'s per-venue stage pass
+  (the band renders and animates in every venue stage).
+
+### (c) Physics — collision, rigid bodies, ragdoll (the main fix)
+
+Decoder: `data/havok.{h,cpp}` (Havok 4.6 reflected packfiles + a fixed-offset
+**`Pack55`** reader for the gh4 **Havok 5.5.0-r1** `.rag`). Solver:
+`render/band_ragdoll.{h,cpp}` (`AccessorySim`) — the band's accessory bones as
+rigid bodies with ragdoll/hinge/prismatic constraints, Gauss-Seidel in 4
+sub-steps at a fixed 60 Hz, plus capsule-capsule contact against the keyframed
+body capsules so hair/chains/coat tails stay outside the character.
+
+**Gap found and fixed (the gd10 hair-ragdoll-collision fix, not yet carried to
+World Tour):** gd07's `Pack55` read the body's shape class name but hardcoded
+`shape.kind = Shape::Other` — so **every World Tour `.rag` collision shape
+decoded as "Other" and the ragdoll's capsule-collision loop (which requires
+`Shape::Capsule`) never ran**: hair, chains and coat tails could clip the body
+(the gd10 bug class). Ported gd10's `Pack55::readShape` (decode
+`hkpConvexTranslateShape`→`hkpCapsuleShape`/`hkpBoxShape`; a thin accessory box
+becomes a capsule along its longest axis) and bumped the ragdoll contact
+relaxation 2→4 passes to match gd10's deep-overlap handling [GD10-044].
+
+**Objective evidence (`--chartest`, data-derived, no eyeballing):**
+- **Collision shapes now decode:** 22 band bodies carry **207 accessory + 607
+  body `.rag` collision capsules** (expected >0; **was 0** before the fix — the
+  collision path was provably dormant).
+- **Anim + physics together, no clipping/explosion:** worst residual
+  accessory-into-body-capsule overlap over the settled seconds = **0.0002 m**
+  (0.2 mm) across the whole band (assert <0.10 m passes); the per-ms accessory
+  stutter check (worst 1 ms move <12× mean) still passes — the hair follows the
+  animation smoothly and stays off the body. The data-free ragdoll self-test (a
+  hair segment keeps its cone + joint for 3 s) still passes.
+- `.hkc` zone collision (7,254 rigid bodies) and `.rag` (196 files) all parse
+  (Step 2 `--formattest`); this pass makes the `.rag` **shapes** usable, not just
+  parseable.
+
+### (d) DrumKit difference-animation (the gd10 gh4-cymbal fix, carried over)
+
+World Tour's data has `drumkit_anims` (qb 0x88439652), `drum_kit_blend_time`
+(0xdc170e85) and `applydrumkitdifference_playanim` (0x214d7b3b) — confirmed in
+`names.tsv` — so the shared gh4 `Drumkit_anim_iterator` applies to World Tour.
+gd07 only ran the **`!gh4`** song cymbal iterator, so a **gh4 (World Tour)
+drummer's kit pieces did not wobble per hit** (arms are mocap, pieces were
+static). Ported gd10's DrumKit path surgically: `drumKitIndex(note)`
+(`drums_notes 73-85 → drumkit_anims[0..13]`), `Ev::DrumKit`, `drumKit_[14]` delta
+nodes composed onto the drummer pose in `evaluate`, `drumKitBlend_` from
+`drum_kit_blend_time`. Note 85 (Cymbal_4, idx 13) stays gated on
+`is_current_band_metallica`, which is always false on World Tour (no Metallica
+band), matching the shared iterator. **Evidence:** `--chartest` reports **320
+DrumKit difference-anims fired** (cymbals/toms/snare wobble per hit) on the gh4
+drummers over the test song — **was 0**. `--drumtest` (the drum *judge*,
+unrelated) still passes 20/20.
+
+### (e) Menu / widget animations
+
+Confirmed complete as an animation *system* (Step 3 already captured the UI):
+screen-element **morph** (4 ease motions), **anim-in** spawn
+(`ui_task_menu_default_anim_in_script`), scrolling menus, help pills, 2D
+particles — all data-driven and faithful (`ui/ui_system.cpp`, `ui/ui_states.cpp`;
+`--uitest` 0 UNHANDLED). On Step 3's **anim-out** follow-up: `ui_states.cpp`
+treats `menu_anim_out_done` as a no-op notification and spawns no explicit exit
+script. This is a **UI-flow** question (does the original's flow manager spawn an
+`anim_out` script before leaving a task state?), **not an animation-system
+capability gap** — the system can already spawn an anim-out script by the same
+path as anim-in once the flow is confirmed. Left to the UI lane (Step 3/5) to
+avoid touching the pinned `--uitest` flow without the decoded exit sequence.
+
+### (f) What I changed
+
+- `data/havok.cpp`: `Pack55::readShape` (capsule/box/convex-translate decode);
+  `#include <algorithm>`. (The dormant `Shape::Other` hardcode removed.)
+- `render/band_ragdoll.{h,cpp}`: ragdoll contact 2→4 passes; new public
+  `AccessorySim::metrics()` (decoded-capsule counts + worst residual penetration)
+  for objective chartest evidence.
+- `render/band_anim.{h,cpp}`: the gh4 **DrumKit** difference-animation
+  (`drumKitIndex`, `Ev::DrumKit`, `drumKit_[14]`, `drumKitBlend_`, iterator +
+  handler + `evaluate` compose).
+- `tests/chartest.cpp`: measure and print the ragdoll collision-capsule counts /
+  worst hair-body overlap and the DrumKit anim-event count (assert overlap
+  <0.10 m). Test-only.
+- No change to the gameplay **judgment** layer (`game/rules*`, `player.cpp`
+  timing) or the input layer.
+
+### (g) What remains (honest)
+
+- **Pre-existing, NOT Step-4, NOT a regression:** `--chartest` still reports the
+  **same 4 venue camera-framing FAILs** (z_Goth, z_Recordstore, z_Harbor,
+  z_Tool — a framed band member leaves a song-camera cut), identical to the
+  Step-2 baseline (this file, Step-2 §(d)). These are **camera framing**
+  (Step 5's lane); my ragdoll/DrumKit changes move accessory/kit bones, never a
+  member's root/chest, so framing is unaffected.
+- **Menu anim-out** (above) — UI lane, pending the decoded flow-exit sequence.
+- **gh4 talents' Star Power clip** not verified in their song anim sets [I]
+  (same open item as gd10).
+- A handful of `.rag` accessories tie to a non-parent bone (`Bone_ACC_*` → an
+  ankle/thigh) and are **animated, not simulated** (logged by `AccessorySim`);
+  this is the original's own skeleton wiring, unchanged.
+
+### Uncertain / not fully traced (Step 4)
+
+- The World-Tour `Drumkit_anim_iterator`'s exact **note-85 gate** was taken from
+  the shared gh4 script via gd10 (`is_current_band_metallica`, always false on
+  WT); WT's `guitar_hand_events.qb` was not re-decoded bit-for-bit this pass, and
+  whether any WT chart even uses note 85 was not dumped. Worst case a 4th-cymbal
+  hit would not wobble — low impact.
+- The `Pack55` shape offsets are `[I]` (inferred from the gh4 bands' `.rag`
+  values, shared with gd10); every World Tour `.rag` parses and the decoded
+  capsules give a 0.2 mm worst overlap, which corroborates them, but they were
+  not reflected from a `__types__` section (the 5.5 `.rag` has none).

@@ -448,8 +448,11 @@ void AccessorySim::step(State& s, const std::vector<Mat34>& world, const Vec& gr
     // The original Havok world also resolves contacts. The accessory-only
     // solver above handles its joints; now resolve the capsule contacts
     // against the keyframed body capsules in the same .rag. This keeps hair,
-    // chains and coat tails outside the character collision proxies.
-    for (int pass = 0; pass < 2; ++pass) {
+    // chains and coat tails outside the character collision proxies. A few
+    // relaxation passes: a deep overlap pushed out of one body capsule can land
+    // in another, so more passes resolve the common cases (capsule pairs only,
+    // negligible cost), matching gd10's solver [GD10-044].
+    for (int pass = 0; pass < 4; ++pass) {
         for (size_t i = 0; i < bodies_.size(); ++i) {
             const Body& aBody = bodies_[i];
             if (!aBody.dynamic || aBody.shape.kind != havok::Shape::Capsule) continue;
@@ -605,6 +608,33 @@ void AccessorySim::apply(double ms, std::vector<Mat34>& world, const std::functi
         mix.b[i].x = {bandanim::nlerp(x0.q, x1.q, frac), add(x0.t, mul(sub(x1.t, x0.t), frac))};
     }
     pose(mix, world);
+}
+
+AccessorySim::Metrics AccessorySim::metrics() const {
+    Metrics m;
+    for (const Body& b : bodies_)
+        if (b.shape.kind == havok::Shape::Capsule) ++(b.dynamic ? m.accessoryCapsules : m.bodyCapsules);
+    if (cur_.b.size() != bodies_.size()) return m;
+    for (size_t i = 0; i < bodies_.size(); ++i) {
+        const Body& aBody = bodies_[i];
+        if (!aBody.dynamic || aBody.shape.kind != havok::Shape::Capsule) continue;
+        Vec a0, a1;
+        capsuleWorld(aBody.shape, cur_.b[i].x, a0, a1);
+        for (size_t j = 0; j < bodies_.size(); ++j) {
+            const Body& bBody = bodies_[j];
+            if (bBody.dynamic || bBody.shape.kind != havok::Shape::Capsule) continue;
+            bool linked = false;
+            for (const Con& c : cons_)
+                if (c.active && c.a == int(i) && c.b == int(j)) { linked = true; break; }
+            if (linked) continue;
+            Vec b0, b1, ca, cb;
+            capsuleWorld(bBody.shape, cur_.b[j].x, b0, b1);
+            closestSegments(a0, a1, b0, b1, ca, cb);
+            const float d = len(sub(ca, cb)), minD = aBody.shape.radius + bBody.shape.radius;
+            if (minD > 0 && minD - d > m.worstPenetration) m.worstPenetration = minD - d;
+        }
+    }
+    return m;
 }
 
 std::string AccessorySim::selfTest() {

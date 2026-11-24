@@ -51,6 +51,18 @@ public:
     // joint stays together, else what went wrong (chartest).
     static std::string selfTest();
 
+    // Objective ragdoll metrics for the CURRENT simulated state (chartest).
+    // Before the Havok 5.5 capsule/box decode every .rag shape was "Other", so
+    // no body was a collision capsule (both counts 0) and the accessory solver
+    // could not keep hair off the body; `worstPenetration` is the deepest a
+    // dynamic accessory capsule still overlaps a keyframed body capsule (metres,
+    // the linked anchor pair excluded), the measured anim+physics clipping.
+    struct Metrics {
+        int accessoryCapsules = 0, bodyCapsules = 0;
+        float worstPenetration = 0;
+    };
+    Metrics metrics() const;
+
     struct Rt {  // a rigid transform: rotation then translation
         bandanim::Quat q;
         bandanim::Vec t;

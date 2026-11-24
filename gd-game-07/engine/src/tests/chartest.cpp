@@ -179,6 +179,11 @@ Grid* g_faces = nullptr;
 int g_faceMoves = 0, g_faceBodies = 0;
 int g_gh4MissingTex = 0;
 std::vector<std::string> g_spMissing;
+// Ragdoll collision (the Havok 5.5 .rag capsule/box decode): the band's decoded
+// collision capsules and the worst residual hair/chain-into-body overlap.
+int g_ragAccessoryCapsules = 0, g_ragBodyCapsules = 0, g_ragBodiesWithColliders = 0;
+float g_ragWorstPenetration = 0;
+int g_drumKitAnims = 0;
 
 // Loads, checks, animates (and draws) one member.
 BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, const Chart& chart, const band::Member& m, int frames,
@@ -247,6 +252,10 @@ BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, co
         std::vector<bandanim::Vec> prev;
         double sum = 0, worst = 0;
         int n = 0;
+        // The Havok 5.5 capsule/box decode activates the ragdoll's capsule
+        // collision; measure the worst residual hair/chain-into-body overlap
+        // across the settled seconds (0 before the decode: no capsule colliders).
+        AccessorySim::Metrics worstMetrics;
         for (int ms = 0; ms <= 500; ++ms) {
             const double t = t1 + ms;
             a.advance(t);
@@ -255,6 +264,10 @@ BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, co
                 std::vector<bandanim::Mat34> sk;
                 a.evaluate(ts, w, sk);
             }, {0, -9.8f, 0});
+            const AccessorySim::Metrics rm = acc->metrics();
+            worstMetrics.accessoryCapsules = rm.accessoryCapsules;
+            worstMetrics.bodyCapsules = rm.bodyCapsules;
+            worstMetrics.worstPenetration = std::max(worstMetrics.worstPenetration, rm.worstPenetration);
             std::vector<bandanim::Vec> cur;
             for (size_t b = 0; b < world.size(); ++b)
                 if (acc->isDynamic(int(b))) cur.push_back(bandanim::xform(world[b], {0.1f, 0, 0}));
@@ -272,10 +285,26 @@ BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, co
         // (21..66x before GD10-104), the interpolated steps 3..10x.
         if (mean > 1e-5 && worst > 12.0 * mean)
             return {false, "the accessories jump between frames (worst 1 ms move " + std::to_string(worst / mean) + "x the mean)"};
+        g_ragAccessoryCapsules += worstMetrics.accessoryCapsules;
+        g_ragBodyCapsules += worstMetrics.bodyCapsules;
+        if (worstMetrics.accessoryCapsules > 0 && worstMetrics.bodyCapsules > 0) ++g_ragBodiesWithColliders;
+        g_ragWorstPenetration = std::max(g_ragWorstPenetration, worstMetrics.worstPenetration);
+        if (std::getenv("GD07_CHARTEST_VERBOSE") && worstMetrics.accessoryCapsules)
+            std::printf("  %s: ragdoll %d accessory + %d body collision capsules, worst hair/body overlap %.4f m\n", label(m).c_str(),
+                        worstMetrics.accessoryCapsules, worstMetrics.bodyCapsules, worstMetrics.worstPenetration);
+        // A deep residual overlap (an accessory capsule tunnelling a body
+        // capsule) means the collision broke: anim+physics must not clip or
+        // explode. 10 cm is well past the small overlaps Havok itself tolerates.
+        if (worstMetrics.worstPenetration > 0.10f)
+            return {false, "ragdoll accessory clips the body by " + std::to_string(worstMetrics.worstPenetration) + " m"};
     }
     if (!skinBounds(*model, skin, lo, hi)) return {false, "a NaN in the skinned vertices"};
     const float height = hi[1] - lo[1];
     if (a.stats().bodyAnims == 0) res = {false, "no body animation played"};
+    // gh4: the DrumKit's cymbals/toms/snare wobble per hit via the drumkit_anims
+    // difference clips (Drumkit_anim_iterator). For a gh4 drummer the song's
+    // Cymbal iterator is off (!gh4), so stats().cymbals here == DrumKit hits.
+    if (m.gh4 && m.role == band::Role::Drummer) g_drumKitAnims += a.stats().cymbals;
     // handle_star_power: play_special_anim stance = Stance_A Anim = Starpower
     // on the player's member, the same for every character: each playable
     // body's anim set has the clip (the band's own bassist plays no Star
@@ -539,6 +568,9 @@ int runCharTest(const std::string& discPath) {
         }
         std::printf("chartest: %zu bodies: %d loaded, skinned and animated, %d not on the disc\n", all.size(), loaded, notOnDisc);
         std::printf("chartest: %d playable guitarist bodies play the Star Power anim (handle_star_power)\n", g_spAnims);
+        std::printf("chartest: ragdoll collision: %d bodies with %d accessory + %d body .rag capsules decoded (Havok 5.5), worst hair/body overlap %.4f m (was: 0 capsules, no collision)\n",
+                    g_ragBodiesWithColliders, g_ragAccessoryCapsules, g_ragBodyCapsules, g_ragWorstPenetration);
+        std::printf("chartest: gh4 DrumKit difference-anims fired (cymbals/toms/snare wobble per hit): %d\n", g_drumKitAnims);
         if (g_faceBodies) {
             std::printf("chartest: %d of %d gh4 talents move their face (facial clips, lip sync); %d material textures no pak has\n", g_faceMoves,
                         g_faceBodies, g_gh4MissingTex);
