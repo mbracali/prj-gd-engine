@@ -80,4 +80,14 @@ Buy purchase(qb::Struct& bandInfo, const Item& item);
 // career that awards these is a later onboarding step.
 void grantUnlock(qb::Struct& bandInfo, const Item& item);
 
+// The same by raw (part, desc_id) — set_current_band_part_flags(part, desc_id,
+// unlocked), the exact call progression_add_new_unlocks makes for every car_piece
+// in a career reward. Lets the career (Step 7.6) grant the 76 career-gated CAS
+// items straight into the band_info the store reads. Idempotent.
+void grantUnlockPart(qb::Struct& bandInfo, uint32_t part, uint32_t descId);
+
+// is_part_unlocked(part, desc_id) against the save flags (ignoring price): a raw
+// query the career uses to see whether a reward is already granted.
+bool partUnlockedFlag(const qb::Struct& bandInfo, uint32_t part, uint32_t descId);
+
 }  // namespace shop

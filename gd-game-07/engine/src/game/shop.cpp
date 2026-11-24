@@ -165,4 +165,11 @@ Buy purchase(qb::Struct& bandInfo, const Item& item) {
 
 void grantUnlock(qb::Struct& bandInfo, const Item& item) { addFlag(ensureEntry(bandInfo, item.part, item.descId), K("unlocked")); }
 
+void grantUnlockPart(qb::Struct& bandInfo, uint32_t part, uint32_t descId) { addFlag(ensureEntry(bandInfo, part, descId), K("unlocked")); }
+
+bool partUnlockedFlag(const qb::Struct& bandInfo, uint32_t part, uint32_t descId) {
+    const qb::Struct* f = entryFlags(bandInfo, part, descId);
+    return f && hasFlag(*f, K("unlocked"));
+}
+
 }  // namespace shop

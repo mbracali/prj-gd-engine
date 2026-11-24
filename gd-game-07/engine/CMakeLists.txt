@@ -108,6 +108,7 @@ target_sources(gd07 PRIVATE
   src/game/save.cpp
   src/game/instrument.cpp
   src/game/shop.cpp
+  src/game/career.cpp
   src/game/car.cpp
   src/game/tutorial.cpp
   src/game/song_db.cpp
@@ -131,6 +132,7 @@ target_sources(gd07 PRIVATE
   src/tests/instrtest.cpp
   src/tests/jamtest.cpp
   src/tests/tuttest.cpp
+  src/tests/careertest.cpp
   src/tests/walk.cpp
   src/tests/selftest_play.cpp
   src/tests/sfxtest.cpp

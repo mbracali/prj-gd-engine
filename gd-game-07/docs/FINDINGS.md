@@ -1965,3 +1965,203 @@ remainder flagged for 7.3/7.5 and belong with the gameplay-screen wiring wave.
 **Files.** New: `engine/src/game/tutorial.{h,cpp}`,
 `engine/src/tests/tuttest.{h,cpp}`. Wiring: `engine/src/main.cpp` (`--tuttest`),
 `engine/CMakeLists.txt`. No decoder / engine / UI / judge / input change.
+
+## Onboarding Step 7.6 — career (2026-11-24)
+
+Milestone 7.6 (Career, the main mode; gate 85%). Aggregate-first: the career
+UI screens, the venue/light/anim stack and the gameplay judge already exist and
+are reached by the flow manager; the mode's *progression spine* — the tier/gig
+structure, star gating, cash earning, gig→gig unlock, and the content rewards —
+was not modelled. This pass REs that spine on our disc (Ghidra static export +
+decoded QB/QScript) and ships it as a faithful, rendering-free, objectively
+tested module, reusing `shop.cpp` for the reward unlocks so it closes the cash +
+`unlocked` loop that Step 7.4 flagged as a career dependency. The judge/input/UI
+were not touched; `--uitest` stays pinned.
+
+### (a) The progression structure [C scripts guitar_progression*.qb]
+
+Five careers share one structure (`scripts\guitar\guitar_progression_{band,
+guitar,bass,drum,vocals}.qb`): `GH4_Career_<Part>_Songs` and
+`GH4_Career_<Part>_Progression_Unlock_Order`. Measured by `--careertest`:
+
+| Career | num_tiers | tiers with songs | career songs | unlocksets | intro / outro movie |
+|---|---|---|---|---|---|
+| band   | 20 | 20 | 87 | 11 | band_intro / band_outro |
+| guitar | 20 | 20 | 90 | 11 | guitarist_intro / guitarist_outro |
+| bass   | 20 | 20 | 88 | 11 | bass_intro / bass_outro |
+| drums  | 20 | 20 | 88 | 11 | drummer_intro / drummer_outro |
+| vocals | 20 | 20 | 87 | 11 | singer_intro / singer_outro |
+
+Each `GH4_Career_<Part>_Songs` carries `prefix` (the gig-name prefix,
+`career_band`…), `part`, `num_tiers = 20`, `initial_movie`, `end_movie`, and
+`tier1..tier20`. A tier = `{ songs[], encorep1, level (load_z_<zone>),
+poster_texture, genre, defaultunlocked, paytoplay }`. Gig N plays tier N. The
+first 13 tiers are the main career (venue gigs); tiers 14–18 are **pay-to-play
+bonus gigs** (`paytoplay = 8000/2000/2000/2000/3000` — the "special
+performances"): Tool (parabola/schism/vicarious $8000), Hotel/Tiki, Studio,
+Scifi, WOW. Tier 19 is `$createagig` (Create-a-Gig), tier 20 is `$debug_gig`.
+The **finale**: band tier 13 (`load_z_NewYork`, Times Square) carries
+`$end_with_credits` and `play_finalbandintro_transition_type =
+finalbandintro_transition_played_guitar`.
+
+`GH4_Career_<Part>_Progression_Unlock_Order` = `freegigs` (gigs 1,2,3 unlocked
+at start; a 4th entry = the debug gig 20 with `$DEBUG_DONT_UNLOCK`),
+`freegigs_last` (gig 19, a free bonus gig), and `unlockset1..11`. Each set lists
+`gig%d` / `special_event%d` / `pay_to_play%d` entries `{ name='gigN', num=N,
+forced_pos }`. Completing a gig opens the next set.
+
+### (b) Gig completion + star gating [C Progression_Career_Check_Gig_Complete, SaveGigComplete]
+
+`Progression_Career_Check_Gig_Complete` (526 B): a tier's gig is complete when
+**every song in the tier has > 2 stars** at some difficulty index (0–4). Stars
+come from `update_song_star_rating`: `new_stars = 3`, `4` if `Score >=
+base_score * star_rating_cutoffs.star4[n]`, `5` if `>= star5[n]`.
+`SaveGigComplete` (726 B) sets the gig's `started=1` / `completed=1` global tag,
+flips `allow_career_progression_check=1`, and unlocks the venue
+(`venue_<zone>.unlocked=1` and `<zone>_<part>.unlocked=1`, zone from
+`LevelZones.<level>.name`), then `UpdateAtoms { name=$Progression }`.
+
+### (c) Gig → gig unlock [C Progression_Career_Gig_Complete, atom graph]
+
+`GH4_Career_<Part>_Progression` is an atom list: `band_career_gigN_complete`
+atoms depend on `Progression_Career_Check_Gig_Complete(gig=N)`; when one fires it
+runs `Progression_Career_Gig_Complete` (1890 B), which walks the unlocksets and
+opens the **first not-yet-unlocked set** — setting its gigs `unlocked=1
+first_time_unlocked=1` and unlocking those tiers' songs — then returns
+(`set_got_unlocked`). Net effect: one set opens per completed gig. For band,
+completing gig 1 opens `unlockset1` = gig 4.
+
+### (d) Cash earning → band_info.cash (the store currency) [C cash_milestones.qb]
+
+World Tour earns cash through the **cash-milestones** system (not GH3's
+`Cash_System_rules`, which is legacy data still present). On every song won
+(`Progression_SongWon` → `Progression_CashMilestonesSongWon` →
+`evaluate_individual_cash_milestones` → `Progression_SetCashMilestone` →
+`Progression_AwardCashMilestones`), each earned milestone pays
+`cash_milestones.<milestone>.cash[difficulty_index] * multiplier` (floored,
+dropped if ≤0) and the sum is added to **`band_info.cash`** (and
+`career_earnings`) via the same path `increase_band_money` writes — i.e. the
+exact wallet the Step 7.4 store spends. The milestone table (verbatim, cash per
+difficulty 0–4): `stars_3/4/5_bonus = [5,10,15,20,25]/[10,20,30,40,50]/[15,30,
+45,60,75]`, `perfect_bonus = [20,40,60,80,100]`, `Score = [5,10,15,20,25]`,
+`never_in_red`, `never_used_star_power`, `full_star_power`, `note_streak`
+(multiplier `best_run/25`), `band_note_streak`, `hot_start`, `strong_finish`,
+`percent_hit`, `decade`, `jam`, `got_sponsored`.
+
+### (e) Content rewards → the Step 7.4 loop [C guitar_progression_unlock.qb, unlockable_content.qb]
+
+`setup_unlock_atoms_generic` builds reward atoms `<part>_gig<i>_reward`
+(depends on the count of completed gig atoms ≥ i), `<part>_every_gig_reward`,
+`<part>_five_star_reward`, plus `band_Today_reward`; atom i grants
+`progression_<part>_rewards[i-1]`. `progression_add_new_unlocks` for a reward's
+`car_pieces` calls **`set_current_band_part_flags(part, desc_id, unlocked)`** —
+exactly `shop::grantUnlock` — writing the `unlocked` flag into
+`band_info.unlock_purchased.<part>`. So completing a gig grants the 76
+career-gated CAS items the store flagged as a dependency. The reward arrays
+(182 unique desc_ids across the five careers, gender-paired) also unlock guest
+**characters** as band-member rewards: `billy`, `zakkwylde`, `tednugent`,
+`sting`, `rockbot`, `Travis`, `skeleton`, `Hayley`, `ozzy`. Band gig 1's reward
+is `f_bmtl_acc_lstichband` / `m_bmtl_acc_lstichband` — `price=150 $locked` in the
+catalog — so completing gig 1 makes that `$locked` store item buyable.
+
+### (f) Movies / cutscenes inventory [C Bonus_Videos, DATA/MOVIES/BIK]
+
+23 `.bik` on disc. `Bonus_Videos` (15 entries) registers the career cutscenes
+and credits; `--careertest` confirms all **10 career cutscenes** present:
+`band_intro`/`band_outro`, `guitarist_intro`/`guitarist_outro`,
+`drummer_intro`/`drummer_outro`, `bass_intro`/`bass_outro`,
+`singer_intro`/`singer_outro` (the `<part>_intro` plays at career start,
+`<part>_outro` on finishing that career — `end_movie` unlocked in
+`Progression_SongWon` when `Progression_Career_Check_Gig_Complete` passes on an
+`$end_with_credits` tier), plus `In-GameMontage` (the end-credits montage,
+`Progression_EndCredits` / `PlayMovie_EndCredits` → `end_credits=1`),
+`GHMetallica`, `credits`, `what_is_pod`, `Line_6_Guitar_101`. Only `band_intro`
+and `In-GameMontage`/`GHMetallica`/`credits`/`line6` are `$unlocked` by default;
+the other intros/outros unlock through the career. The port already has the Bink
+player (`video/movie_player.cpp`, `PlayMovie`/`PlayMovieAndWait` natives, Step 2)
+and plays these files; `--playmovie <name>` plays any of them. Enumerating-vs-
+playing the scripted beat placement in the live career flow is the UI remainder.
+
+### (g) Events + "special corks"
+
+Boss/devil beats (`Progression_IsBossSong`, `boss_devil_score`,
+`is_boss_battle_song`) exist in the SongWon path but **no band career tier marks
+a boss song** on this disc (boss battles are a quickplay/battle mode, not the WT
+career spine). The scripted career "corks" are: the **pay-to-play bonus gigs**
+(tiers 14–18, cash-gated entry), the **guest-character unlocks** (reward atoms,
+above), the **Create-a-Gig** (tier 19) and **debug** (tier 20) gigs, and the
+**finale/credits** (band tier 13 `$end_with_credits` → `end_movie` +
+`In-GameMontage`). `special_event%d` unlock slots are supported by
+`Progression_Career_Gig_Complete` but unused by the band unlock order on disc.
+
+### (h) What I implemented (files)
+
+- **`engine/src/game/career.{h,cpp}`** (`namespace career`, rendering-free): the
+  faithful port of (a)–(e). `load(Globals)` reads all five careers (tiers/songs/
+  encore/venue/poster/genre/paytoplay/flags, the freegigs + unlocksets, and
+  `progression_<part>_rewards`); `movies(Globals)` reads `Bonus_Videos`.
+  State over a `TagStore` (named global tags, == `save::Tags`): `startCareer`
+  (free gigs + their songs unlocked), `isGigComplete` (all tier songs > 2 stars),
+  `cashForSong` (the real cash_milestones sum), `recordSongResult`
+  (Progression_SongWon: better stars/score, award cash to `band_info.cash`),
+  `completeGig` (SaveGigComplete + Progression_Career_Gig_Complete + the reward
+  unlock). Invents nothing — the structure is the disc's data.
+- **`engine/src/game/shop.{h,cpp}`**: added `grantUnlockPart(bandInfo, part,
+  desc_id)` and `partUnlockedFlag(...)` (the raw `set_current_band_part_flags
+  ... unlocked` / `is_part_unlocked` the career reward uses), so the career grants
+  straight into the band_info the store reads.
+- **`engine/src/tests/careertest.{h,cpp}` + `--careertest`** (`main.cpp`,
+  `CMakeLists.txt`): the objective harness.
+- No engine/UI/judge/input/decoder code changed; `--uitest` byte-identical below.
+
+### (i) Objective test evidence (`--careertest <disc>`, headless, exit 0)
+
+Data-derived expected-vs-measured, no eyeballing:
+- **Structure**: five careers load; each `num_tiers=20` with 20 tiers of songs,
+  11 unlocksets, a reward array, and the correct intro/outro movie names.
+- **Movies**: `Bonus_Videos` = 15, **career cutscenes present 10/10**.
+- **Start**: band free gigs 1,2,3 unlocked, gig 4 locked, fresh cash = 0.
+- **Cash earned**: a 5-star, 100%, expert song pays exactly **$200**
+  (`stars_5_bonus[4] 75 + perfect_bonus[4] 100 + Score[4] 25`, from the real
+  `cash_milestones`); gig 1's 3 songs award **$600**, `band_info.cash 0 → 600`
+  (measured == table). Every tier-1 song then reads 5 stars and the gig reads
+  complete.
+- **Gig complete**: `completeGig(1)` → gig 1 `completed`, venue `venue_z_hob`
+  unlocked, **gig 4 unlocked** (unlockset1) with its tier songs, **2 CAS reward
+  pieces granted**.
+- **7.4 loop closed**: the reward piece `CAS_Female_Acc_Left/f_bmtl_acc_lstichband`
+  (`price=150 $locked`) is `NotUnlocked` for a band that has not done the career,
+  and `unlocked` (store-buyable) for the band that completed gig 1.
+- **Persists**: the whole `TagStore` + `band_info` survive a `save::write`/`read`
+  round-trip — cash 600, gig 1 complete, gig 4 unlocked, and the reward `unlocked`
+  flag all read back.
+- **No regression**: `--uitest` still **47 flow states, 1181/1181 mouse-hittable,
+  0 UNHANDLED** (identical to the 7.2–7.5 baseline). `--careertest`: **all career
+  checks passed (0 failed)**.
+
+### (j) Honest remains / flagged
+
+- **Live UI flow wiring (the main remainder).** The model is the real progression
+  engine and the career screens/venues/judge already run, but a live "play a
+  career gig" does not yet route the results back into `career::recordSongResult`
+  / `completeGig` through the game's own atom chain. The original drives it with
+  `UpdateAtoms`/`Progression_SongWon` natives over the career menus — the same
+  native/board-menu substrate deferred in 7.1–7.5. Wiring the results screen to
+  the model (or implementing the progression natives against it) is the next
+  increment; the model is ready.
+- **Star computation inputs.** `recordSongResult` takes the judged stars/score as
+  input (the results layer's output via `update_song_star_rating`), rather than
+  re-deriving from `star_rating_cutoffs`; the cash milestones beyond stars/perfect/
+  score (streak/health/star-power) are modelled but driven by the `Performance`
+  flags the harness sets.
+- **Venue zone name** is taken by stripping `load_` off the level key
+  (`load_z_hob → z_hob`) rather than reading `LevelZones.<level>.name` — [I], the
+  flag shape (`venue_<zone>.unlocked`) is faithful.
+- **Song-checksum tag keys** use the disc's `'%s%p%d'` form with the port's part/
+  difficulty tokens (the console's exact localized `text_nl` is [I]); the port's
+  save is its own JSON format, so byte-matching the console tag name is not
+  required — the mechanic and persistence are.
+- **Pay-to-play / Create-a-Gig / debug gigs** are parsed (`paytoplay`,
+  `$createagig`, `$debug_gig`) but their entry flow (spending cash to unlock a
+  bonus gig, the Create-a-Gig editor) is not yet driven — flagged for the live-UI
+  increment.
