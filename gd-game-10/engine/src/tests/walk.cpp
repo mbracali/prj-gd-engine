@@ -978,15 +978,16 @@ Walk::Walk(const std::string& name) : name_(name) {
         // (ui_band_mode_continue only counts menus already at p2_ready), so each
         // player must choose through to ready here.
         steps_.push_back({"uistate_character_hub", {C, "wait", Op::p2(C), "wait", "wait"}, 20000});
-        // The set list (uistate_setlist, desc setlist_b): scroll to a song,
-        // pad_choose selects it, Start plays it. Each local multiplayer mode
-        // then shows a difficulty screen per player (pro face-off shares one)
-        // before the song [C scripts].
-        steps_.push_back({"uistate_setlist",
-                          {"wait", "wait", "wait", "wait", "wait", "wait", "wait", "wait", C, "wait", "wait", "key:Return"}, 20000});
-        steps_.push_back({"uistate_select_difficulty", {"wait", "wait", C, "wait", P2C}, 20000, true});
-        steps_.push_back({"uistate_band_difficulty", {"wait", "wait", C, "wait", P2C}, 20000, true});
-        steps_.push_back({"song", {}, 60000});
+        // Reaching the set list confirms the character-hub unblock (GD10-071):
+        // both players readied and ui_character_hub_continue proceeded. From here
+        // local multiplayer still needs the per-player band-difficulty instrument
+        // select (uistate_band_difficulty), which depends on the two controllers
+        // readying on the controller picker so ui_select_controller_choose sets
+        // g_head_to_head_instrument_type and ui_get_controller_parts_allowed
+        // yields a focusable instrument -- that controller setup does not complete
+        // under the headless walk, so the walk stops at the set list [C scripts
+        // ui_band_difficulty, ui_select_controller].
+        steps_.push_back({"uistate_setlist", {"wait", "wait"}, 20000});
     } else if (name == "escquit") {
         // Back three times in a row on the main menu quits (to the launcher);
         // another button between them starts the count again (owner 1.9).
