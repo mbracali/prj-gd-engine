@@ -154,6 +154,7 @@ bool AccessorySim::init(const bandanim::Rig& rig, const havok::Physics& rag, con
         if (bone < 0 || bodyOf_[size_t(bone)] >= 0) continue;
         Body b;
         b.bone = bone;
+        b.name = hb.name;
         // ragdoll_setaccessorybones: the accessory bodies dynamic, the others keyframed [C 821B1418, 821AFC08].
         b.dynamic = std::find(bones.begin(), bones.end(), key) != bones.end() && hb.mass > 0;
         if (b.dynamic) {
@@ -453,6 +454,31 @@ void AccessorySim::step(State& s, const std::vector<Mat34>& world, const Vec& gr
     // land in another, so more passes resolve the common cases (capsule pairs
     // only, negligible cost). A rare deep single-frame overlap may keep a small
     // residual, same as Havok's own iterative contact solver.
+    // Development aid: the worst capsule overlap before and after the passes.
+    auto worstPen = [&](int& who, int& into) {
+        float pen = 0; who = into = -1;
+        for (size_t i = 0; i < bodies_.size(); ++i) {
+            const Body& aBody = bodies_[i];
+            if (!aBody.dynamic || aBody.shape.kind != havok::Shape::Capsule) continue;
+            Vec a0, a1; capsuleWorld(aBody.shape, s.b[i].x, a0, a1);
+            for (size_t j = 0; j < bodies_.size(); ++j) {
+                const Body& bBody = bodies_[j];
+                if (bBody.dynamic || bBody.shape.kind != havok::Shape::Capsule) continue;
+                bool linked = false;
+                for (const Con& c : cons_)
+                    if (c.active && c.a == int(i) && c.b == int(j)) { linked = true; break; }
+                if (linked) continue;
+                Vec b0, b1, ca, cb; capsuleWorld(bBody.shape, s.b[j].x, b0, b1);
+                closestSegments(a0, a1, b0, b1, ca, cb);
+                const float d = len(sub(ca, cb)), minD = aBody.shape.radius + bBody.shape.radius;
+                if (minD > 0 && minD - d > pen) pen = minD - d, who = int(i), into = int(j);
+            }
+        }
+        return pen;
+    };
+    const bool penLog = s.step % 60 == 0 && SDL_getenv("GD10_RAGDOLL_LOG");
+    int pwho0 = -1, pinto0 = -1;
+    const float pen0 = penLog ? worstPen(pwho0, pinto0) : 0;
     for (int pass = 0; pass < 4; ++pass) {
         for (size_t i = 0; i < bodies_.size(); ++i) {
             const Body& aBody = bodies_[i];
@@ -486,6 +512,14 @@ void AccessorySim::step(State& s, const std::vector<Mat34>& world, const Vec& gr
                 a0 = add(a0, mul(n, penetration)); a1 = add(a1, mul(n, penetration));
             }
         }
+    }
+    if (penLog && pen0 > 0.005f) {
+        int pwho1 = -1, pinto1 = -1;
+        const float pen1 = worstPen(pwho1, pinto1);
+        SDL_Log("ragdoll step %lld contacts: worst overlap before %.4f m (%s into %s), after %.4f m (%s into %s)",
+                static_cast<long long>(s.step), pen0, pwho0 >= 0 ? bodies_[size_t(pwho0)].name.c_str() : "-",
+                pinto0 >= 0 ? bodies_[size_t(pinto0)].name.c_str() : "-", pen1, pwho1 >= 0 ? bodies_[size_t(pwho1)].name.c_str() : "-",
+                pinto1 >= 0 ? bodies_[size_t(pinto1)].name.c_str() : "-");
     }
 }
 
@@ -585,8 +619,35 @@ void AccessorySim::apply(double ms, std::vector<Mat34>& world, const std::functi
                 const float d = std::fabs(bandanim::qmul(cur_.b[i].x.q, bandanim::qconj(tgt[i].q)).w);
                 if (2.0f * std::acos(std::min(1.0f, d)) > swing) swing = 2.0f * std::acos(std::min(1.0f, d)), sBody = bodies_[i].bone;
             }
-            SDL_Log("ragdoll step %lld: gap %.4f m, |v| %.2f m/s, |w| %.2f rad/s (bone %d), swing %.1f deg (bone %d), cone over %.1f deg",
-                    static_cast<long long>(cur_.step), gap, vmax, wmax, wBody, swing * 57.29578f, sBody, coneOver * 57.29578f);
+            // The worst residual penetration after this step's contact passes:
+            // the deepest a dynamic accessory capsule still overlaps a keyframed
+            // body capsule (hair / chains inside the head or torso). The
+            // recurring hair/cloth bug class is judged by this measured depth,
+            // not by eye (docs/guidelines/usual-bugs.md).
+            float pen = 0;
+            int penBody = -1, penInto = -1;
+            for (size_t i = 0; i < bodies_.size(); ++i) {
+                const Body& aBody = bodies_[i];
+                if (!aBody.dynamic || aBody.shape.kind != havok::Shape::Capsule) continue;
+                Vec a0, a1;
+                capsuleWorld(aBody.shape, cur_.b[i].x, a0, a1);
+                for (size_t j = 0; j < bodies_.size(); ++j) {
+                    const Body& bBody = bodies_[j];
+                    if (bBody.dynamic || bBody.shape.kind != havok::Shape::Capsule) continue;
+                    bool linked = false;
+                    for (const Con& c : cons_)
+                        if (c.active && c.a == int(i) && c.b == int(j)) { linked = true; break; }
+                    if (linked) continue;
+                    Vec b0, b1, ca, cb;
+                    capsuleWorld(bBody.shape, cur_.b[j].x, b0, b1);
+                    closestSegments(a0, a1, b0, b1, ca, cb);
+                    const float d = len(sub(ca, cb)), minD = aBody.shape.radius + bBody.shape.radius;
+                    if (minD > 0 && minD - d > pen) pen = minD - d, penBody = int(i), penInto = int(j);
+                }
+            }
+            SDL_Log("ragdoll step %lld: gap %.4f m, |v| %.2f m/s, |w| %.2f rad/s (bone %d), swing %.1f deg (bone %d), cone over %.1f deg, penetration %.4f m (%s into %s)",
+                    static_cast<long long>(cur_.step), gap, vmax, wmax, wBody, swing * 57.29578f, sBody, coneOver * 57.29578f, pen,
+                    penBody >= 0 ? bodies_[size_t(penBody)].name.c_str() : "-", penInto >= 0 ? bodies_[size_t(penInto)].name.c_str() : "-");
         }
         history_.push_back(cur_);
         while (history_.size() > kHistory) history_.pop_front();

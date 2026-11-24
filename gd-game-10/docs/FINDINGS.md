@@ -228,3 +228,87 @@ intensity=0.25 specularintensity=0.25 only in z_soundcheck(_practice) /
 z_training / z_viewer (non-quickplay venues) [C lightshow.qb]; the port does
 not, so those venues go fully dark on those moods. `resetcycleonmoodchange`
 (notes 87/88) is not modelled.
+## Character animation / collision / physics audit (2026-11-23)
+
+Deep RE + objective re-verification of the band performance animation,
+accessory collision and ragdoll physics. **Verdict: faithful; no groundable
+behavioural defect found.** One instrumentation addition (penetration
+measurement). Details and evidence below.
+
+### Collision shapes — faithful, no "Other", no gap
+
+Parsed the virtual fixups of every shipped Havok-5.5 ragdoll in
+`PAK/global_rag_skel` (20+ `.rag`, LZSS-unpacked). **Every rigid body's shape
+is `hkpCapsuleShape` or `hkpConvexTranslateShape -> hkpBoxShape`** — no body
+decodes as `Shape::Other`, so no accessory loses its collision proxy. The box
+-> capsule conversion in `data/havok.cpp` `Pack55::readShape` is faithful for
+the thin accessory rods (e.g. box half-extents (0.089, 0.010, 0.010) -> capsule
+r = 0.011 ≈ the box thickness); it is not inflating flat panels. The 4.6 path
+(`Pack`) keeps real `Shape::Box`, but gh4 uses only the 5.5 path. [C: data,
+`rag55.py` enumeration of the object classes/shapes across all band `.rag`.]
+
+### Ragdoll constraint parse — correct (self-consistent)
+
+Some `.rag` genuinely tie an accessory body to a non-skeleton-ancestor anchor
+(`Rob_original`: `Bone_ACC_Head_09` -> `Bone_Ankle_R`; the generic
+`Rocker_Male`: every ACC bone -> `Bone_Ankle_R`), while others are sensible
+chains (`Kirk_original`: `Bone_ACC_Head_09` -> `_08` -> `_07`). Because the
+**same** `Pack55` entity offsets (ci+0x14 / ci+0x18) yield Kirk's correct
+chain, the parse is proven correct and the odd parents are genuine shipped
+data, not a mis-read. `band_ragdoll.cpp init()` deliberately keeps such a body
+animated (not simulated) so the solver does not drag it to the ankle
+(commit 9ea5f13 / GD10-044). The keyframed tip then rigidly rides its simulated
+parent via `pose()` re-parenting — a benign result. **[I] UNCERTAIN:** the
+original Havok runtime's exact handling of these constraints is VMX128/SIMD and
+not decompilable from the static export; the port's choice is reasonable and
+left unchanged.
+
+### Physics — faithful and stable (objective runtime evidence)
+
+`--walktest band_motion` (offscreen, real Quickplay song, Metallica band) and
+`--chartest` both pass:
+- **Penetration (the recurring hair/cloth bug class) is zero during play.** A
+  new measured residual-penetration trace (deepest overlap of a dynamic
+  accessory capsule in a keyframed body capsule, after the contact passes)
+  reads **0.0000 m at every continuously-simulated step**. The only non-zero
+  readings are at `ragdoll_markforreset` frames (song start / mocap-clip
+  boundaries; |v|=|w|=0): the accessory is placed at its animated rest pose
+  without a contact solve (Havok `setPoseModelSpace` at rest [C 823FE8C8 /
+  826BCEE0]), so a thin accessory that lies on the body (e.g.
+  `Bone_ACC_Head_05` resting on `Bone_Chest`, or `Bone_ACC_Legs_04` at
+  `Bone_Knee_L`) shows up to ~0.11 m overlap against the fat body capsule
+  (Rob's chest r=0.19) for that one frame, then the next step resolves it to 0.
+  This matches the original (setPoseModelSpace + contact solver on following
+  frames). The contact resolver itself takes the worst steady-state overlap
+  from ≤0.017 m (before passes) to 0.0000 m (after).
+- Band poses **plausible** (limbs within bind length, accessories on joints,
+  hands within 10 cm of IK targets) at 6.2 s and 12.1 s, and **identical at 60
+  vs 240 fps** (frame-rate-independent).
+- Ragdoll self-test passes (a segment hung from a keyframed head keeps its cone
+  and joint).
+- Physics state healthy: |v| < 1 m/s, |w| ≲ 7.5 rad/s, constraint gap < 0.035 m,
+  cone exceeded by ≤6° transiently (one-step-solve tolerance) — no overshoot /
+  explosion (contrast the pre-GD10-044 176 rad/s bug).
+- Gravity is correct: model-space `R^T·(0,-9.8,0)/scale` [C 82253B10:8200E4E4,
+  823FF100]; solver params `4ITERS_MEDIUM` (tau 0.6, damp 1, 4 iterations,
+  checkAndFixConstraint 0.05/0.8) grounded to the XEX addresses in
+  `band_ragdoll.h`.
+
+### Animation — faithful
+
+Sampler (`data/anim.cpp`): nlerp rotation + linear translation with correct
+`upper_bound` key search; clip selection (tempo/skill/speed), blend nodes,
+difference anims, IK (two-bone + hinge), twist/split helper constraints,
+facial loop and gh4 DrumKit per-hit difference anims are all grounded to prior
+addresses and produce the plausible, frame-rate-independent poses above. No
+pops / wrong-clip / retarget / timing defects surfaced objectively.
+
+### Change made
+
+`render/band_ragdoll.cpp` + `.h`: added a **measured penetration trace** to the
+`GD10_RAGDOLL_LOG` diagnostic (worst dynamic-vs-keyframed capsule overlap per
+step; before/after the contact passes; with `.rag` body names). Logging only,
+gated behind the env var — no behaviour change. It is the objective instrument
+`docs/guidelines/usual-bugs.md` requires for the hair/cloth bug class, which was
+previously absent. Build: Linux video build (`GD10_FFMPEG_DIR`), `band_motion`
+walk + chartest pass.
