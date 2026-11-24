@@ -1322,21 +1322,18 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         // empty gem chart and carries the judge's numbers.
         if (part0 == Part::Vocals && song_->vocals.empty()) part0 = Part::Guitar;
         parts_[0] = part0 == Part::Drums ? "drum" : part0 == Part::Bass ? "bass" : part0 == Part::Vocals ? "vocals" : "guitar";
-        // The drums, wave 01 (DECISIONS D6): GH2's joypad watcher on the
-        // drum chart, the pads as frets: kick = the orange fret, red, yellow,
-        // blue = their frets, the green pad = the green fret (an Xbox 360
-        // drum kit's LB, B, Y, X, A) [I: RB's drum watcher is DrumPlayer,
-        // not wired yet]. The chart's lanes are permuted to those frets.
+        // The drums, wave 02 (controls B1): the drum chart keeps its native
+        // lanes (0 kick, 1 red, 2 yellow, 3 blue, 4 green) and is split so
+        // every pad of a chord is its own gem; a drum Player feeds its pad /
+        // kick strikes to the faithful DrumPlayer (Player::drumStrike /
+        // setDrumMode) rather than permuting the lanes onto the guitar frets
+        // and judging with the joypad watcher (the old fret-collapse path).
         bool anyDrums = part0 == Part::Drums;
         for (const auto& m : rbBandSetup_) anyDrums |= m.part == "drum" || m.part == "drums";
         if (anyDrums)
             for (Chart& c : song_->charts[size_t(Part::Drums)]) {
-                for (Gem& g : c.gems) {
-                    const uint8_t f = g.frets;
-                    g.frets = uint8_t(((f & 1) << 4) | (f & 0x0E) | ((f >> 4) & 1));
-                    g.hopo = false;
-                }
-                splitDrumChords(c);  // RB's drum watcher: a gem per pad (wave 02)
+                for (Gem& g : c.gems) g.hopo = false;  // drums have no hammer-ons
+                splitDrumChords(c);  // a gem per pad (wave 02); DrumPlayer judges native lanes
             }
         const Part part1 = partFor(*song_, parts_[1], coop);
         // Two players never fail on their own meters: competitive modes
@@ -2109,6 +2106,20 @@ void App::playerAction(const InputEvent& a) {
         return;
     }
     p->update(t);
+    // Rock Band's drums (controls B1): the pads / kick feed the faithful
+    // DrumPlayer (lanes 0 kick .. 4 green), not the guitar frets / strum. The
+    // input layer still delivers a drum kit's pads as frets (kick = fret 4,
+    // green = fret 0, red / yellow / blue = frets 1..3); map each to its drum
+    // lane. Pads are momentary, so only the down edge is a strike.
+    if (p->drumMode()) {
+        if (isFret(a.action) && a.down) {
+            static constexpr int kFretToLane[5] = {4, 1, 2, 3, 0};  // green, red, yellow, blue, kick
+            const int lane = kFretToLane[fretOf(a.action)];
+            if (rbBonus_ && p == player_.get()) rbBonus_->codaStrike(lane, t);  // Big Rock Ending / fill count
+            p->drumStrike(lane, t);
+        }
+        return;
+    }
     // One player, every device (D35): a press of another kind of device
     // (a gamepad after the keyboard worked the menus) switches the watcher.
     if (a.down && (isFret(a.action) || a.action == Action::Strum) && !player2_ && seats_.size() <= 1 && a.mode != p->controllerMode())
@@ -2427,7 +2438,8 @@ void App::drawSeats(float t, float speed) {
         pv.baseMultiplier = p->baseMultiplier();
         pv.struck = [p](int i) { return p->gemHit(i); };
         pv.soloActive = st.bonus && st.bonus->soloShare(t) >= 0;
-        if (st.part == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
+        // Drums now keep native lanes (0 kick .. 4 green), so the gem bit is
+        // the track lane directly (laneOfBit's default identity).
         st.track->setIntroAt(rbIntroAt(gemTrack++));
         st.track->draw(canvas_.renderer(), *sceneCache_, *song_, pv, t + float(videoOffsetMs_), speed);
     }
@@ -4810,8 +4822,8 @@ void App::drawRbTrack0(float t, float speed) {
     pv.baseMultiplier = p->baseMultiplier();
     pv.struck = [p](int i) { return p->gemHit(i); };
     pv.soloActive = rbBonus_ && rbBonus_->soloShare(t) >= 0;
-    // The drums' permuted lanes back to the chart's (kick = lane 0).
-    if (parts_[0] == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
+    // Drums keep native lanes (0 kick .. 4 green): the gem bit is the track
+    // lane directly (laneOfBit's default identity).
     rbTrack_->setLefty(input_.lefty(0));
     rbTrack_->setIntroAt(rbIntroAt(0));
     rbTrack_->draw(canvas_.renderer(), *sceneCache_, *song_, pv, t + float(videoOffsetMs_), speed);
