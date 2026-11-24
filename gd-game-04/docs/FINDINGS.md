@@ -907,3 +907,52 @@ matches the binary. No code change.
   career_sponsored_fs; 4 songs) -- the atom-driven tier -> encore ->
   tier-complete -> sponsor chain; walk `boss_devil` passed (the devil beaten,
   the song restarts at 336682 ms "Lou's finish", then the newspaper; 2 songs).
+## Multiplayer audit (2026-11-24): faithful, no change
+
+A full re-audit of local multiplayer (face-off, pro face-off, battle, co-op
+career, boss battle) against the disc's QB and scripts (`qb.py` / `qbscript.py`
+on `COMPRESSED/PAK/qb.pak.xen`) and the XEX addresses already in this file.
+Found faithful; no code changed. Ground truth confirmed and recorded here:
+
+- **Battle power-ups (`battlemode_powerups`, scripts\guitar\guitar_battle.qb)**
+  are exactly **8**, in this order: Lightning / DifficultyUp / DoubleNotes /
+  PowerUpSteal / LeftyNotes / BrokenString / WhammyAttack / DeathLick [C data].
+  Weights: all `weight 10` except DeathLick `0`; `weight_low 0` throughout;
+  `weight_losing 10` only for PowerUpSteal / LeftyNotes / WhammyAttack (else 0).
+  drain_time 7500 Lightning, 10000 DeathLick, 5000 rest. flicker 2/2/3/3
+  (Lightning); repair 6/8/10/12 (BrokenString), 3/4/5/6 (Whammy); kill_rate
+  0.4/0.3/0.25/0.2 (DeathLick). `immediate` Lightning / BrokenString / Whammy;
+  `no_ai_damage` Whammy; `fire_bolt` all but PowerUpSteal / DeathLick.
+  `max_num_powerups 3`; `battle_{easy,medium,hard,expert}_drain_offset`
+  0/1500/3000/4500. This is GH3's canonical 8-card set (incl. Death Lick and
+  sudden death), the opposite of Metallica/gd10's 9 -- the port matches it
+  exactly: game/match.h `enum Attack` and `BattleData::load` require size 8,
+  game/match.cpp reads every field [C].
+- **battlemode_select / bossbattle_select** (disassembled): weight-sum roll,
+  skip DifficultyUp vs an expert victim, `weight_low` for the last-selected and
+  the top-of-hand cards, `weight_losing` when health <= 0.5 (human only; the
+  boss path has no health gate and filters by `current_boss.PowerUps`),
+  sudden death forces DeathLick (index 7). game/match.cpp `select()` matches,
+  incl. the bossRules branch for both the human's and the boss's cards [C].
+- **battlemode_ready**: a full hand destroys the top card (index
+  current_num_powerups-1), then stores the new card there -- i.e. the new card
+  replaces the top, older cards kept. game/match.cpp `award()`
+  (`cards.pop_back(); cards.push_back(card)`) matches [C].
+- Face-off section filter + `last` from the full chart (GD04-004) intact
+  (game/note_track.cpp `faceOffTrack`); score scale, co-op shared run / shared
+  SP / fail-on-average, the 2P HUDs (co-op sum score + 74x(avg-1) needle,
+  face-off +-65 score-gap needle, battle +-42 per-player needle) all as in
+  `modes.md` [C].
+- **gd10-lesson check (local-MP setup reaching a playable song): PASSES.**
+  Unlike Metallica's unimplemented band-mode lobby, GH3's local-MP hubs advance:
+  the `battle`, `coop` and `boss_keys` walks (dev_ff build, FFmpeg prefix,
+  offscreen) all reach `song` -> `song_over` -> newspaper. Evidence (walk logs):
+  - battle: 2 songs; song 1 both perfect (70/70, 64/64) -> tie -> sudden death;
+    song 2 Death-Drain-only, P2 drained to health 0 -> KO, `outcome 2` P1 wins,
+    UI_1stPlayerWins_SFX; all 8 attacks observed (SFX log), dead frets repaired.
+  - coop: both parts 38/38 notes (shared total), separate scores 3652 / 2738,
+    streaks 24 / 14, health 1.644 / 1.397.
+  - boss_keys (real key input): 178/181 keys hit, 10 cards got + fired, 6 boss
+    attacks received, 3 fret recoveries (none dead at end), 58/60 hit after the
+    last attack, whammy bar drawn; boss bot 40 forced misses -> KO, P1 beats the
+    boss. All three walks: `passed`.
