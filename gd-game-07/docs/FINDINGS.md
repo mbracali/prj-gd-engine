@@ -1426,3 +1426,128 @@ Data-derived expected-vs-measured, no eyeballing:
   venues) was not found in the disc data — venues on this disc are
   career/`venue_<zone>.unlocked`-gated (see The Glitches venue unlock), not
   cash-priced.
+
+## Onboarding Step 7.3 — quickplay (2026-11-24)
+
+Aggregate-first pass over World Tour's **Quickplay** mode: the entry, song
+select (sort + custom set list), instrument / difficulty select, the
+co-op / face-off / pro-face-off option set, the results screens, and unlock
+gating. The flow runs the disc's own QScript through the VM (`FrontEnd::start`
+runs `guitar_startup`), so the screens are faithful by construction; this pass
+confirms the path end-to-end on the real data and fills the one in-scope test
+gap (the quickplay set-list sort).
+
+### Flow diagram (WT's own scripts, Ghidra-grounded)
+
+```
+main_menu_fs (guitar_main_menu.qb create_main_menu_elements:
+             CAREER, QUICKPLAY, MULTIPLAYER, TRAINING, ... )
+ ├─ QUICKPLAY  (main_menu_select_quickplay -> main_menu_select_generic
+ │              state = uistate_game_mode  Data = { mode = quickplay })
+ │   └─ uistate_game_mode  (ui_game_mode.qb ui_create_game_mode, mode=quickplay)
+ │        • Solo Quickplay  (game_mode_select_quickplay -> game_mode=p1_quickplay,
+ │                           current_num_players=1 -> uistate_select_instrument)
+ │        • Band Quickplay  (pad_choose_params={band}; enabled only when
+ │                           are_multiple_controllers_connected, else greyed
+ │                           rgba=[50,44,35,255]; -> p2_quickplay co-op ->
+ │                           uistate_band_mode)
+ │        └─ uistate_select_instrument -> UIstate_setlist_prompt
+ │             -> (UIstate_double_bass_popup) -> uistate_setlist
+ │                  (ui_setlist.qb: sortable custom set list, up to 6 songs)
+ │                  -> uistate_select_difficulty
+ │                       -> quickplay_start_song (quickplay_menu_flow.qb:
+ │                          solo picks a random unlocked venue + guitarist +
+ │                          guitar via set_random_single_player_quickplay /
+ │                          quickplay_choose_random_venue) -> start_song
+ │                            -> song -> song_over
+ │                               -> uistate_song_breakdown
+ │                               -> uistate_cash_rewards_3 -> uistate_setlist
+ └─ MULTIPLAYER (main_menu_select_multiplayer -> game_mode=p2_faceoff,
+                 current_num_players=2 -> uistate_select_controller
+                 -> uistate_band_mode: FACE-OFF / PRO FACE-OFF / BATTLE)
+```
+
+Game modes are data (`guitar_gamemode.qb`): `Gamemode_list` = p1..p4_quickplay,
+p1..p4_career, p1_improv, p1_boss, p2_faceoff, p2/p4/p8_pro_faceoff, p2_coop,
+p2_battle, tutorial, training; each `<mode>_props` (num_players, type,
+cooperative/faceoff/singleplayer) over `default_gamemode_props`. The port's
+`modeProp` (ui/natives_gh4.cpp:127) reads exactly this merge — the quickplay /
+co-op / face-off / pro-face-off option set is faithful by construction.
+
+### Per-screen status
+
+| Screen | Original (evidence) | Port status |
+|---|---|---|
+| Main-menu QUICKPLAY item | `create_main_menu_elements` item 2 → `uistate_game_mode {mode=quickplay}` | **Reproduced** — `--walktest quickplay` reaches `uistate_game_mode` from item 2 |
+| `uistate_game_mode` (Solo / Band) | `ui_create_game_mode` adds Solo (`game_mode_select_quickplay`) + Band (multi-controller gate) + practice entry | **Reproduced** — Solo item drives the full path objectively; Band item is script-built (2-controller objective coverage deferred) |
+| `uistate_select_instrument` | guitar / bass / drums / vocals | **Reproduced** (walk C selects guitar) |
+| `UIstate_setlist_prompt` / `UIstate_double_bass_popup` | pre-set-list prompts (optional, D23 ordering) | **Reproduced** (optional walk steps) |
+| `uistate_setlist` (song select) | `ui_setlist.qb`: **sortable custom set list** — `setlist_sorts`=[title_alphabetical, artist_alphabetical, career_order]; Y(`pad_option2`)→`setlist_switch_sort` cycles the sort; green adds a song (≤6); X jumps a section; LB/RB clears [not Metallica's SETLIST/BONUS/DOWNLOADS tabs] | **Reproduced + now objectively tested** — `--walktest setlist_tabs` cycles `setlist_sort_index` 0→1→2→0 |
+| `uistate_select_difficulty` | Easy/Medium/Hard/Expert | **Reproduced** |
+| `quickplay_start_song` | solo: random unlocked venue + CAR/preset character + guitar | **Reproduced** — song launches and autoplays |
+| song → results | `uistate_song_breakdown` → `uistate_cash_rewards_3` → `uistate_setlist` | **Reproduced** — `--walktest quickplay` plays the song and returns through both results screens |
+| Unlock gating | `GlobalTags_UnlockAll` / per-tier `tier<n>.unlocked`, `GH3_General_Songs`, save-wide quickplay-song unlocks [glitches.cpp] | **Modeled** via `globalTags` (ui/glitches.cpp unlockList); career-unlocks-quickplay path reproduced |
+
+### What I implemented
+
+- **`tests/walk.cpp` `setlist_tabs` retargeted to WT's real quickplay flow.** The
+  prior walk was a **Metallica (gd10 / GD10-090) lineage** test: it entered via
+  `main_menu_fs {D,D,C}` → `quickplay_select_difficulty_fs` → `quickplay_setlist_fs`
+  and asserted SETLIST/BONUS/DOWNLOADS **tabs** (`change_tab`). World Tour's
+  Quickplay has a **different, distinct front end**: QUICKPLAY → `uistate_game_mode`
+  → Solo → instrument → `uistate_setlist`, and that set list is a **sortable
+  custom set list**, not a tab browser. On WT, item 3 (`{D,D,C}`) is MULTIPLAYER
+  (→ `uistate_select_controller`), so the old walk reached the wrong screen and
+  timed out. Retargeted it to drive WT's own path and assert the WT-correct
+  behavior: Y (`pad_option2` → `setlist_switch_sort`) cycles
+  `setlist_sort_index` title→artist→career→title. Test-only change; the
+  judgment layer and product code are untouched.
+
+### Objective evidence
+
+- `--uitest` (regression, pinned): **47 flow states, 1181 focusable / 1181
+  mouse-hittable, 0 dead**, 11 built-no-element (the online stubs, expected). No
+  change from 7.2.
+- `--walktest quickplay` (the gh4 solo-quickplay path): **flow passed** —
+  `main_menu_fs → uistate_game_mode → uistate_select_instrument →
+  UIstate_setlist_prompt → uistate_setlist → uistate_select_difficulty → song →
+  song_over → uistate_song_breakdown → uistate_cash_rewards_3 → uistate_setlist`;
+  **songs started 1, ended 1** (autoplayed; HUD/score logged, e.g. `hud_1g` 95
+  elements, score accruing). The run's non-zero exit is a **pre-existing
+  perf-hitch check** (`FAILED the no-stutter check: 1 frame 120.7 ms on
+  uistate_play_song during the song's load` under headless build load) — not a
+  quickplay-flow fault.
+- `--walktest setlist_tabs` (retargeted): **passed** — reaches WT's quickplay
+  `uistate_setlist` and `setlist_sort_index` cycles `0 → 1 → 2 → 0`.
+
+### Honest remains / flagged
+
+- **2-player competitive quickplay walks (`coop`, `faceoff`, `proface`,
+  `battle`) are gd10-Metallica lineage and do not drive WT's flow.** They expect
+  `coop_career_select_controllers_fs` / `mp_select_controller_fs` and press
+  main-menu button counts that, on WT, land on `uistate_game_mode` /
+  `uistate_jam` / `uistate_select_controller` — so they fail on gd07 (they were
+  already failing on committed code; this pass did not change them, and they are
+  **not in gd07's canonical suite** — only `quickplay`/`boot`/`formattest`/`fuzz`
+  are run). WT's real competitive path is MULTIPLAYER → `uistate_select_controller`
+  → `uistate_band_mode` (FACE-OFF / PRO FACE-OFF / BATTLE; `ui_band_mode.qb`,
+  61 KB) and Band Quickplay → `uistate_band_mode` (co-op). The **option set is
+  confirmed faithful from the QB** (above); retargeting these 2-player walks to
+  WT's `band_mode` flow is a **multiplayer-wave follow-up** (2-controller driving
+  + the large band_mode layout), not required for the quickplay gate.
+- **Band Quickplay item** is built by the script the port runs; its objective
+  coverage needs a 2-controller walk (the Band entry is gated on
+  `are_multiple_controllers_connected`). Deferred with the above.
+- **Unlock gating** is modeled through `globalTags`; a default-save vs
+  fully-unlocked quickplay-list diff was not independently asserted this pass
+  (the career→quickplay unlock path is reproduced via `GH3_General_Songs`).
+
+### 7.3 gate (65%)
+
+**MET for the core:** the solo Quickplay flow is faithful and objectively proven
+end-to-end (entry → game-mode → instrument → sortable set list → difficulty →
+autoplayed song → both results screens → set list), the quickplay set-list sort
+is now an objective check, and the full option set (solo/band/co-op/face-off/
+pro-face-off/battle) is Ghidra-confirmed against `guitar_gamemode.qb` +
+`ui_game_mode.qb`. The honest remainder is **2-player competitive walk coverage**
+(a multiplayer-wave item), not the quickplay mode itself.

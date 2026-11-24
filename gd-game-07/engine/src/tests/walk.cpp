@@ -461,20 +461,29 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_character_hub_fs", {}, 20000});
 
     } else if (name == "setlist_tabs") {
-        // GD10-090: quick play's set list tabs: blue BONUS (the bonus songs),
-        // orange DOWNLOADS (none on the disc), yellow SETLIST [C data
-        // setlist_event_handlers, change_tab].
+        // World Tour's Quickplay set list is a *sortable custom set list* (not
+        // Metallica's SETLIST/BONUS/DOWNLOADS tabs): QUICKPLAY ->
+        // uistate_game_mode -> Solo -> instrument -> uistate_setlist, whose Y
+        // button (pad_option2 -> setlist_switch_sort) cycles the sort through
+        // setlist_sorts = [title_alphabetical, artist_alphabetical,
+        // career_order]; green adds a song (up to 6), X jumps a section, LB/RB
+        // clears [C scripts ui_setlist.qb ui_create_setlist_spawned,
+        // setlist_switch_sort; data setlist_sorts]. Reach the set list via WT's
+        // own flow and prove the sort cycles (fast: no song launch; qp4 covers
+        // the add-song + launch path).
         steps_ = boot;
-        steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
-        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
-        steps_.push_back({"quickplay_setlist_fs",
-                          {"wait", "check:global:current_tab=tab_setlist", Action::Fret3, "wait", "wait", "check:global:current_tab=tab_bonus",
-                           "check:text:sl_text_1!=", "log:focus", Action::Down, "log:focus", Action::Fret4, "wait", "wait",
-                           "check:global:current_tab=tab_downloads", Action::Fret2, "wait", "wait", "check:global:current_tab=tab_setlist",
-                           // A bonus song bought (its save tag unlocked): listed and played.
-                           "set:tag:avalancha.unlocked=1", Action::Fret3, "wait", "wait", C},
-                          20000});
-        steps_.push_back({"song", {"check:global:current_tab=tab_bonus", "check:global:current_song=avalancha"}, 30000});
+        steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", D, C}, 10000});
+        steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
+        steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"uistate_setlist",
+                          {"wait", "check:global:setlist_sort_index=0",
+                           // Y (pad_option2) cycles title -> artist -> career -> title.
+                           Action::Fret2, "wait", "wait", "check:global:setlist_sort_index=1",
+                           Action::Fret2, "wait", "wait", "check:global:setlist_sort_index=2",
+                           Action::Fret2, "wait", "wait", "check:global:setlist_sort_index=0"},
+                          30000});
 
     } else if (name == "cutcontent") {
         // GD10-110: Enable Cut Content removed from Enhanced Options: a saved
