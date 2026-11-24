@@ -856,6 +856,7 @@ data sound_buss.qb]; the port's audio/sound_buss.h:
   the song mixer while no song is (Mixer::play at the song's start resets the
   speed); walk practice checks it (check:preview).
 
+<<<<<<< ours
 ## Career mode audit (2026-11-24): faithful, no fix
 
 A full career audit (tier/setlist progression and the gating, boss battles,
@@ -956,3 +957,122 @@ Found faithful; no code changed. Ground truth confirmed and recorded here:
     attacks received, 3 fret recoveries (none dead at end), 58/60 hit after the
     last attack, whammy bar drawn; boss bot 40 forced misses -> KO, P1 beats the
     boss. All three walks: `passed`.
+=======
+## UI/mechanics re-audit (2026-11-24): HUD, scoring, judge, mouse — faithful
+
+A verification pass over the in-game HUD and the core mechanics against the
+XEX (Ghidra analysis export; REA cannot open the XEX2). Each subsystem was
+cross-checked binary-vs-port source; verdict **faithful** for every area
+below. No code changed.
+
+- **Scoring / multiplier** [C 0x8210BB40, re-read]: the fret count is bits
+  0x10000 / 0x1000 / 0x100 / 0x10 / 0x1 of the pattern; the run multiplier is
+  `iVar6 < 10 -> 1, < 0x14 -> 2, < 0x1e -> 3, else 4`; star_power_used
+  (key 0x92be3d33) shifts it left once (x2); score += scale (0x829ba010) x
+  points_per_note (0x829cd708 = 50) x multiplier x fretcount. game/player.cpp
+  `PlayerStats::multiplier()` (run < 10/20/30, x2 on Star Power) and `hit()`
+  (`kPointsPerNote * multiplier() * fretCount()`) match; the face-off scale
+  `(base_p1 + base_p2) x 0.5 / base_p` is applied in `addScore` via
+  rules_.scoreScale (match.cpp:204) [C 0x8210B9A0]. Co-op (both runs,
+  both notes_hit/total_notes, both runs reset on a miss) match [C 0x8210A748].
+- **Judge** (window / HOPO / tap / chord / overstrum / sustain): game/player.cpp
+  `frame()` / `updateSustain()` match the rules already confirmed in
+  §§1-5 above (hit window, split_late cap, tap candidate = highest held fret
+  != last-hit mask, post-tap ignore window, overstrum-kills-sustain, sustain
+  points in chunks of >= 2). No deviation found on re-read.
+- **In-game HUD numeric drivers** (UpdateScoreFastPerFrame 0x821167B0, the
+  per-part updates read into agents/scratch/hud_spec.md §1.3):
+  - Score text, Star Power tubes (per = 100/6 [C 0x82007A78]).
+  - Multiplier progress lights [C jump table 0x821172D8]:
+    `L = run>30 ? 10 : run>20 ? run-20 : run>10 ? run-10 : run`, `full = L/2`;
+    L<=1 -> all off, L odd -> halflit[full], allwaylit[0..full-1].
+    render/hud2d.cpp line 269 / 370-383 reproduce this exactly (including the
+    full-at-the-boundary note, which is the binary's own behaviour).
+  - Nixie digits (list {1,2,3,4,6,8}, 'b' in Star Power).
+  - Rock-meter needle (1P) [C 0x82116D08, 0x82007A5C/58/68/6C]:
+    `ang = (S-h)/S x -84 + 42`, zones T1 14 / T2 31.5; red/green health
+    multipliers 1.35 / 0.85 [C 0x821062A8]. render/hud2d.cpp lines 184-202
+    match.
+- **Two-player / co-op / face-off HUD** (render/hud2p.cpp): the co-op needle
+  uses `ang = 74 x (havg - 1)` = `((d1+d2) x 0.5 / S) x -148 + 74` with zones
+  T1 24.6667 / T2 55.5 [C 0x82007A60..74]; face-off needle
+  `clamp(diff x -0.0065, +-65)` [C 0x82116AC4]; the single-player fallback
+  `-84/+42`. All three match the binary; the co-op wider gauge is correctly
+  switched by mode (hud2p.cpp:114-115, 306-316).
+- **Mouse-clickability** (the recurring bug class, docs/guidelines/usual-bugs.md):
+  app.cpp `menuMouse` + ui_system.cpp `menuAt` hit-test **every** focusable,
+  non-hidden child of every focused menu generically by its drawn bounds
+  (empty items resolve to the text their focus handler highlights), and
+  `helperPills` / `helperAt` cover the whole visible help-bar pill (glyph,
+  text and backing). No menu depends on a hardcoded hit list. Faithful to the
+  universal rule.
+
+Not re-covered here (other agents / earlier passes): career mode, multiplayer
+rules, character select/roster, venue lighting, character animation. Known
+open item unchanged: the store main menu's "20 px high" layout discrepancy
+(ui.md §10) is still not root-caused in the VMenu/VScrollingMenu layout code
+[C 0x82315FB0 / 0x82317640 read]; left for a future pass, not a confident fix.
+
+Method note: this was a static binary-vs-source cross-check (no fresh gd04
+build, to respect the one-build/RAM/token budget); the runtime paths are
+already exercised by the repo's walks/self-tests and recent GD04-121/122 runs.
+>>>>>>> theirs
+
+## UI/mechanics re-audit (2026-11-24): HUD, scoring, judge, mouse — faithful
+
+A verification pass over the in-game HUD and the core mechanics against the
+XEX (Ghidra analysis export; REA cannot open the XEX2). Each subsystem was
+cross-checked binary-vs-port source; verdict **faithful** for every area
+below. No code changed.
+
+- **Scoring / multiplier** [C 0x8210BB40, re-read]: the fret count is bits
+  0x10000 / 0x1000 / 0x100 / 0x10 / 0x1 of the pattern; the run multiplier is
+  `iVar6 < 10 -> 1, < 0x14 -> 2, < 0x1e -> 3, else 4`; star_power_used
+  (key 0x92be3d33) shifts it left once (x2); score += scale (0x829ba010) x
+  points_per_note (0x829cd708 = 50) x multiplier x fretcount. game/player.cpp
+  `PlayerStats::multiplier()` (run < 10/20/30, x2 on Star Power) and `hit()`
+  (`kPointsPerNote * multiplier() * fretCount()`) match; the face-off scale
+  `(base_p1 + base_p2) x 0.5 / base_p` is applied in `addScore` via
+  rules_.scoreScale (match.cpp:204) [C 0x8210B9A0]. Co-op (both runs,
+  both notes_hit/total_notes, both runs reset on a miss) match [C 0x8210A748].
+- **Judge** (window / HOPO / tap / chord / overstrum / sustain): game/player.cpp
+  `frame()` / `updateSustain()` match the rules already confirmed in
+  §§1-5 above (hit window, split_late cap, tap candidate = highest held fret
+  != last-hit mask, post-tap ignore window, overstrum-kills-sustain, sustain
+  points in chunks of >= 2). No deviation found on re-read.
+- **In-game HUD numeric drivers** (UpdateScoreFastPerFrame 0x821167B0, the
+  per-part updates read into agents/scratch/hud_spec.md §1.3):
+  - Score text, Star Power tubes (per = 100/6 [C 0x82007A78]).
+  - Multiplier progress lights [C jump table 0x821172D8]:
+    `L = run>30 ? 10 : run>20 ? run-20 : run>10 ? run-10 : run`, `full = L/2`;
+    L<=1 -> all off, L odd -> halflit[full], allwaylit[0..full-1].
+    render/hud2d.cpp line 269 / 370-383 reproduce this exactly (including the
+    full-at-the-boundary note, which is the binary's own behaviour).
+  - Nixie digits (list {1,2,3,4,6,8}, 'b' in Star Power).
+  - Rock-meter needle (1P) [C 0x82116D08, 0x82007A5C/58/68/6C]:
+    `ang = (S-h)/S x -84 + 42`, zones T1 14 / T2 31.5; red/green health
+    multipliers 1.35 / 0.85 [C 0x821062A8]. render/hud2d.cpp lines 184-202
+    match.
+- **Two-player / co-op / face-off HUD** (render/hud2p.cpp): the co-op needle
+  uses `ang = 74 x (havg - 1)` = `((d1+d2) x 0.5 / S) x -148 + 74` with zones
+  T1 24.6667 / T2 55.5 [C 0x82007A60..74]; face-off needle
+  `clamp(diff x -0.0065, +-65)` [C 0x82116AC4]; the single-player fallback
+  `-84/+42`. All three match the binary; the co-op wider gauge is correctly
+  switched by mode (hud2p.cpp:114-115, 306-316).
+- **Mouse-clickability** (the recurring bug class, docs/guidelines/usual-bugs.md):
+  app.cpp `menuMouse` + ui_system.cpp `menuAt` hit-test **every** focusable,
+  non-hidden child of every focused menu generically by its drawn bounds
+  (empty items resolve to the text their focus handler highlights), and
+  `helperPills` / `helperAt` cover the whole visible help-bar pill (glyph,
+  text and backing). No menu depends on a hardcoded hit list. Faithful to the
+  universal rule.
+
+Not re-covered here (other agents / earlier passes): career mode, multiplayer
+rules, character select/roster, venue lighting, character animation. Known
+open item unchanged: the store main menu's "20 px high" layout discrepancy
+(ui.md §10) is still not root-caused in the VMenu/VScrollingMenu layout code
+[C 0x82315FB0 / 0x82317640 read]; left for a future pass, not a confident fix.
+
+Method note: this was a static binary-vs-source cross-check (no fresh gd04
+build, to respect the one-build/RAM/token budget); the runtime paths are
+already exercised by the repo's walks/self-tests and recent GD04-121/122 runs.
