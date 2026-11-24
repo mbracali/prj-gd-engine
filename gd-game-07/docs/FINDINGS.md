@@ -260,3 +260,120 @@ success, so this pass stops at analysis.
 - No controller/XInput reading below `FUN_8212e700` was disassembled
   instruction-by-instruction; none of the functions read appeared to be
   VMX128.
+
+## Controls Phase B: World Tour touch strip (2026-11-24)
+
+Phase B took the audit's item (4) and shipped the **safe, tested increment**:
+the `_Tapping` data is now parsed into the chart model, and a self-contained
+**touch-strip input model + tap judge** mirrors the original's slider/zone
+logic and is objectively tested. **Normal strummed / HOPO guitar play is
+unchanged** - none of the Player/Match judge code was touched; the tap path is
+new, separate code. The full hardware-slider gameplay wiring is documented as
+remaining (part (e) below).
+
+### (a) The `_Tapping` track format (confirmed on the disc)
+
+Dumped from the World Tour disc with `tools/qb.py`/`pak.py`/`xdvdfs.py`
+(song paks `DATA/COMPRESSED/SONGS/<song>_song.pak.xen`):
+
+- Each `<song><infix>_<Diff>_Tapping` section is a **type-0xC array of
+  `[time, length, count]` int triples** (one span per row). Present (usually
+  empty) for every part infix (``/`_rhythm`/`_guitarcoop`/`_rhythmcoop`) and
+  difficulty, exactly alongside the `_Star` phrases.
+- `time`/`length` are ms; `count` is the taps in the span: **1, 2 or 4**
+  observed across the disc. These are **tap spans**, not per-fret gems (a
+  handful per song: e.g. satchboogie 4 spans, lazyeye/hotforteacher 4-6,
+  purplehaze 2). goyourownway's `_Tapping` sections exist but are **empty** -
+  the audit cited the name, not non-empty data; non-empty tap songs include
+  satchboogie, hotforteacher, beatit, crazytrain, purplehaze, schism, parabola,
+  lazyeye.
+
+### (b) `guitar_touch_patterns` (dumped, now data-driven in the port)
+
+`guitar_touch_patterns` (qb 0xe52dcb67) in `PAK/qb.pak.xen` is **9 zones**,
+each `{touch_value (0x80eb06d4), touch_pattern (0x30c8fcf2), pattern_string
+(0xa8e2b1e6)}`:
+
+| touch_value | touch_pattern |
+|-------------|---------------|
+| -107 | 0x10000 |
+| -80  | 0x11000 |
+| -51  | 0x1000  |
+| -26  | 0x1100  |
+|  26  | 0x100   |
+|  46  | 0x110   |
+|  72  | 0x10    |
+|  99  | 0x11    |
+| 127  | 0x1     |
+
+Five single-finger zones (0x1 / 0x10 / 0x100 / 0x1000 / 0x10000 - one nibble a
+fret) and the four two-finger zones between them. `touch_pattern_switch_frames`
+(qb 0x780da03d) is **0** on the disc (a change commits at once).
+`enable_touch_strip` (qb 0x09383b1b) is **not a data section** - the game sets
+it from a script, so the port defaults it on and lets a present 0 turn it off.
+
+### (c) What Phase B implemented (files:line)
+
+- **`_Tapping` parse** - `engine/src/game/chart.h` (`struct TapPhrase`,
+  `PartChart::tapping`) and `engine/src/game/chart.cpp` (in `loadChart`, the
+  `<base>_Tapping` rows parsed with the existing `rows()` helper, right beside
+  the `_Star` phrases). Purely additive: the note/star/event tracks are
+  untouched, and the parse runs unconditionally (data present; the
+  `enable_touch_strip` gate governs *use*, below).
+- **Touch-strip input model** - `engine/src/game/touch_strip.{h,cpp}`,
+  `class TouchStrip`: loads `guitar_touch_patterns` + `touch_pattern_switch_frames`
+  + `enable_touch_strip` from the globals (nine-zone disc fallback when absent),
+  `nearestZone()` = the nearest zone within +/-16 units [C 0x8213e4b8], and
+  `frame(slider, down)` runs the per-frame commit with the switch-frame debounce
+  and **slide detection** (a committed zone change while the finger stays down)
+  [C 0x8213e830]. SDL-free; fed 60 Hz like `Player`.
+- **Tap judge** - `class TapJudge` (same files): judges committed taps/slides
+  against the `_Tapping` spans ([time, time+length] window, +/-100 ms grace),
+  clears a span after its `count` taps, and scores each tap 50 pts (a note's
+  base, one finger). **Kept entirely apart from `Player`**, so the strummed
+  score is never affected.
+- **Objective tests** - `engine/src/game/touch_strip.cpp` `touchStripSelfTest()`
+  (data-independent: nearest-zone, dead-band, tap-vs-slide, debounce, and a
+  three-tap span judged to 150 pts with a pre-span tap rejected), run once from
+  `engine/src/tests/selftest_play.cpp`; plus `tapOnce()` there, which plays the
+  real `_Tapping` spans of every WT song through `TouchStrip`+`TapJudge` and
+  asserts every span clears. New totals in `PlayTotals` (spans parsed, taps,
+  judge runs/fails, self-test) are printed by `--selftest`.
+
+### (d) Objective test evidence
+
+`gd07 --selftest "<World Tour disc>"` prints a `touch strip (GHWT): N _Tapping
+spans parsed ... tap judge runs ... logic self-test passed` line and keeps
+`autoplay: ... charts failing 0` (normal strummed/HOPO play unaffected). See
+the commit message / the agent report for the measured line.
+
+### (e) What remains for full hardware touch-strip play (honest)
+
+Phase B delivers **data + a tested judge for synthetic/fallback input**. Not
+done (the fragile live-input + UI wiring, to be integrated as one control
+model, never piecemeal):
+
+1. **Live slider wiring.** Map a real World Tour guitar's analog slider /
+   touch flag (the SDL axis + the `record+0x18 + 0x4a` equivalent) into
+   `TouchStrip::frame`, and a sensible fallback for players without the
+   hardware (e.g. a key/axis). This touches the fragile `input/` layer that
+   Phase A owns - do not change the shared SDL->action axis/tilt constants.
+2. **Feeding the judge in a real song.** Construct `TapJudge` from
+   `chart.parts[part].tapping[diff]` at match start when `enable_touch_strip`
+   is on, step it each frame beside `Player`, and fold its score into the HUD.
+3. **The per-gem zone meaning.** Phase B treats a span as "`count` taps in the
+   window". Whether each tap must land on a *specific* zone (the HOPO gem's
+   fret within the span, via `touch_pattern`) was not fully traced - the
+   `_Tapping` data is only `[time, length, count]`, and the per-gem zone would
+   come from the main note track's HOPO gems inside the span. Confirm against
+   `Function_8213e830`'s use of `touch_pattern` before judging per-zone.
+4. **Slide tutorials / `guitar_touch_update_hilite` UI** (the touched-zone
+   highlight) and the `tut_gtr_slide_*` tutorial songs.
+
+### Uncertain / not fully traced (Phase B)
+
+- The exact `count` semantics (taps vs. zones vs. a bitmask) - 1/2/4 look like
+  tap counts but were not cross-checked against `Function_8213e830`.
+- Whether `enable_touch_strip` is ever 0 in shipped play (it is script-set; the
+  port defaults it on).
+- Whether a real tap must match the HOPO gem's zone (see (e).3).

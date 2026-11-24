@@ -102,6 +102,7 @@ target_sources(gd07 PRIVATE
   src/game/note_track.cpp
   src/game/player.cpp
   src/game/match.cpp
+  src/game/touch_strip.cpp
   src/game/save.cpp
   src/game/song_db.cpp
   src/game/tuning.cpp

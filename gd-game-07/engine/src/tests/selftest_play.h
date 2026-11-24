@@ -28,6 +28,11 @@ struct PlayTotals {
     size_t calibrationRuns = 0, calibrationFails = 0;
     // GDALL-039: Enhanced > Accessibility > Easy Chords, off and on (charts checked, failed).
     size_t easyChordRuns = 0, easyChordFails = 0;
+    // GHWT guitar touch strip: the _Tapping spans parsed and the taps they ask
+    // for; synthetic tap-judge runs against real spans (and how many missed the
+    // span's count); whether the TouchStrip / TapJudge logic self-test passed.
+    size_t tapSpans = 0, tapSpanTaps = 0, tapJudgeRuns = 0, tapJudgeFails = 0;
+    bool touchStripSelfTestRun = false, touchStripOk = false;
 };
 
 // Plays every part and difficulty of a chart with the autoplayer; false and
