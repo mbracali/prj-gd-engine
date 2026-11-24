@@ -51,7 +51,7 @@
 |---|---|---|---|---|
 | 1 Boot | 8 | ✅ done (pre-existing) | — | ready_to_play, renders, plays |
 | 2 Encoders + model explorer | 16 | ✅ | agent (11-24) | `--formattest` all 31,554 files parse; model/song/venue/texture types 100% decoded (.qs/.jam out of scope); `--exploretest` 48 models across Venues/Guitars/Bass/Drums/Mics/Chars, 0 fail; `--selftest` 133 songs; `--chartest` 26 bodies skinned |
-| 3 UI elements (bg/font/anim/widget/menu/HUD) | 26 | ⏳ | — | |
+| 3 UI elements (bg/font/anim/widget/menu/HUD) | 26 | ✅ | agent (11-24) | UI is data-driven (QScript+descinterface via ui_system.cpp) — faithful by construction; `--uitest` 47 flow states, 912 elements, 0 UNHANDLED UI/HUD, 0 missing fonts; full-song 0 unhandled HUD widgets. 4 follow-ups (fire overlay, anim-out, nxgui desc, 2P band HUD) |
 | 4 Animations & physics | 32 | ⏳ | — | |
 | 5 Lights & effects | 40 | ⏳ | — | |
 | 6 Gameplay (gtr/bass/drums/vocals + MP) | 50 | ⏳ | — | |

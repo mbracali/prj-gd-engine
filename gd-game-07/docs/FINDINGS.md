@@ -547,3 +547,154 @@ gap is exactly what `--exploretest` closes by using `everyInstrumentGh4`.)
   Explore previews (`clip_count`/`clip_name`) are not wired for gd07 (optional
   ABI fields, same as gd10).
 
+
+## Onboarding Step 3 — UI elements (2026-11-24)
+
+Exhaustive capture of World Tour's UI/UX (backgrounds, fonts, menu
+animations, gameplay widgets, menus, HUD), **aggregating what the port
+already renders** against the original, with Ghidra/QB/disc evidence. The
+driving fact: the port is **not a hand-built UI** — it runs the game's own
+QScript + `descinterface` data through a faithful screen-element engine
+(`ui/ui_system.cpp`, 143 KB, base element [C 0x8221DDB8], props [C 0x8221A738],
+transforms [C 0x8221BF88], morphs [C 0x8221CEC8], menus [C 0x823164E0]). The
+original's `CreateScreenElement` [C 0x823e2750], `SetScreenElementProps`
+[C 0x823e2a70], `DoScreenElementMorph`, `AttachHudWidget` [C 0x82159878 /
+native 0x828134a8], `CreateViewport` [C 0x823e5d40] all exist as port natives
+(confirmed in `ghidra/analysis/cfuncs.tsv`). So menu layouts, positions, font
+sizes and HUD widgets are **data-driven and faithful by construction** — what
+is captured below is which data the port consumes and where it stops.
+
+**Objective evidence captured this pass** (headless, `SDL_VIDEO_DRIVER=offscreen
+SDL_AUDIO_DRIVER=dummy`, build `build/gd07-step3`, prebuilt ffmpeg prefix):
+- `gd07 --uitest <disc>` with `GD07_UIDUMP=walk GD07_HUDLOG=1 GD07_WALKLOG=1`:
+  **47 flow states started, 36 built render elements, 11 built no element**
+  (all `online_*`/`leaderboard_*`/`view_leaderboard_fs` — online is stubbed,
+  disabled in Step 7.8, so "no element" is expected). "**every screen was
+  started through the flow manager.**" **912 ui-dump element lines** across the
+  reached screens. **0 `UNHANDLED ui state/event/member`, 0 missing fonts.**
+- `gd07 --song beatit --difficulty 3 --autoplay <disc>`: full song, **815
+  notes**, venue `z_Metalfest` 107 textures **0 missing**, star-power on/off
+  tracked, 113 drum-kick particles, **0 `UNHANDLED` HUD widget output types**.
+
+### Backgrounds (menu/scene)
+
+| Background | Original evidence | Port status | Action |
+|---|---|---|---|
+| Front end / main menu | `z_frontend` / `Z_Frontend` zone shown through `bg_viewport` (`setup_bg_viewport`), camera `PlayIGCCam` [C names.tsv; script] | **Reproduced.** `MenuScene` draws the current zone through `bg_viewport`, `PlayIGCCam` gated on `vp==bg_viewport` (`menu_scene.cpp:447`) | none |
+| Store / character hub / select | `z_soundcheck` zone, camera morph (`store_camera_script`, `ch_view_cam`), crowd/menu boards drop in (`obj_movetorelpos`) | **Reproduced.** `menu_scene.cpp` handles `z_soundcheck`, node moves (`NodeMove`), camera morphs, light groups | none |
+| Other zones | `z_viewer`, `z_tushino`, `z_harbor`, `z_credits` [C names.tsv] | **Reproduced.** generic zone loader (`ensureVenue`/`VenueView`) | none |
+| UI viewport textures (WT-specific) | `create_viewport_ui` / `CreateViewportTextureOverride` [C 0x823e6000]: a viewport's windows drawn into a texture that overrides a zone texture (sound-stage `Alpha_texture*.dds`) | **Reproduced.** `MenuScene::uiTargets_` + `UiSystem::overrides_` (`drawUiViewports`) | none |
+| Loading screen | `DisplayLoadingScreen <img> [spin_texture spin_x spin_y]` [C 0x8218DDE8], `HideLoadingScreen` [C 0x8218E0A0] | **Reproduced.** `UiSystem::loadingTex_`/`loadingSpin_`, full-screen over everything (`ui_system.cpp:2438`) | none |
+| `bg_viewport` screen FX | `enable_bg_viewport_properties`: DOF_Off, TOD BnS + sbloom, character shadow | **Reproduced.** `MenuScene::fx_`/`fxParams_` + shadow pass | none |
+
+### Fonts
+
+Font families on the disc (`names.tsv`, `tools/pak.py list`): `fontgrid_text_a1,
+a3, a6, a8, a10, a11`; `fontgrid_title_a1, a2`; the flaming variant
+`fontgrid_text_a6_fire`; `buttons_x360` (button glyphs). Sizes/usage are
+**data-driven** (each element's `dims` / `internal_scale` / `font_spacing` /
+fit modes [C TextElement ctor 0x8231B788; fit data per desc]) — there is no
+hard-coded size table to get wrong.
+
+| Font asset | Original evidence | Port status | Action |
+|---|---|---|---|
+| `fontgrid_text_a6` and family | `ui_shared.pak.xen` `.fnt` entry; menus/HUD reference by name | **Loaded.** `loadFonts("DATA/COMPRESSED/PAK/ui_shared.pak.xen")` + `global.pak`, `text_a1.pak`, `debug.pak` (`ui_system.cpp:126-131`) | none |
+| `fontgrid_text_a6_fire` (flaming) | `.fnt` in `ui_shared.pak.xen`; `.dds` `fonts\fontgrid_text_A6_fire.dds` | **Font loaded** (flaming glyphs available). Its animated fire **sprite overlay material** (`fire_2D_*`) is not drawn — see HUD follow-up | follow-up (GD10-068) |
+| `buttons_x360` glyphs | `\bN`/`\mN` meta-button codes in text → buttons-font glyph [C 0x8228E0B0] | **Reproduced.** `UiSystem::setText`/`buttonsFont` | none |
+| `\cN` colour codes | `Default_Font_Colors` table [C data] | **Reproduced.** `colorTab_` loaded, applied in text draw (`ui_system.cpp:132-138, 1632`) | none |
+
+### Menu animations / transitions
+
+| Animation | Original evidence | Port status | Action |
+|---|---|---|---|
+| Screen-element morph | `DoScreenElementMorph`/`List` [C 0x8218c1d0], 4 motions: linear / smooth / ease_in / ease_out [C 0x822A6B28] | **Reproduced + objectively correct.** `ease()` = `t`, `t²(3−2t)`, `t²`, `2t−t²` (`ui_system.cpp:92-98`); `startMorph` maps `motion` keys | none |
+| State anim-in | state `anim_in_script`, else `ui_task_menu_default_anim_in_script`, spawned on enter [I] | **Reproduced.** `UiStates::enter` spawns it (`ui_states.cpp:84-88`) | none |
+| State anim-out | `menu_anim_out_done` notification [I] | **Partial.** The port treats `menu_anim_*_done` as a no-op notification (`ui_states.cpp:160`); whether task states play an explicit exit anim before leaving not confirmed | follow-up |
+| Scrolling menu | `VScrollingMenu` scroll / `scroll_speed` 10000 / `num_items_to_show` [C 0x82316E58, 0x82317348, 0x82317640] | **Reproduced.** `Element::scroll/scrollSpeed`, `scrollMenu` | none |
+| Help bar (pills) | `helper_pills` / `helper_pill` descs (GD10-062) | **Reproduced.** `helperPills`/`helpBarLayout` from the descs | none |
+| 2D particle FX (highway) | `Create2DParticleSystem` [C 0x8210EEB8] / `Destroy2DParticleSystem` [C 0x8211AA28] | **Reproduced.** `Fx2D` (`fx2d.{h,cpp}`); 113 particles in the beatit run | none |
+| Enhanced menu open | port-added; opens next frame, no transition (`spec-enhanced-menu.md`) | **Reproduced (port-added).** `PortScreens` | none |
+
+### Gameplay widgets (HUD)
+
+The port's `HudWidgets` implements `AttachHudWidget` [C scripts `guitar_hud.qb`,
+`hud_widgets.qb`] and drives every widget each frame from the judge's values.
+**11 output types handled** (0 UNHANDLED in the full-song run):
+
+| Widget / output type | Original evidence | Port status | Action |
+|---|---|---|---|
+| Score nixie | `HUD2D_score_nixie_%d` [C Function_821570E8] | **Reproduced** (`descpropertyfloat` / text) | none |
+| Note-streak bulbs | `HUD2D_Note_Streak_Text` [C Function_821136C0]; GH3 lights [C 0x82117204], colours [C 0x821172D8] | **Reproduced** (`senotestreaklights`) | none |
+| Multiplier nixie | x1–x4, SP x2/x4/x6/x8 [I gh4 widget] | **Reproduced** (`semultipliernixie`) | none |
+| Star-power tubes | `HUD2D_rock_tube_%d...tube/full` [C Function_821570E8]; GH3 tubes [C 0x821164D0] | **Reproduced** (`setubes`, `_b` blue in SP) | none |
+| Rock meter (health) | needle pos [I], red lights/backgrounds, red blink | **Reproduced** (`descpropertypair`/`individualhealthneedlepos`, `screenelementconditionalfloat`, `screenelementplayerhealthblink`) | none |
+| Projected song stars | `projected_song_stars` star meter [I] | **Reproduced** (`sestarmeter`) | none |
+| Missed-note alpha | `has_missed_note` [I] | **Reproduced** (`screenelementalphatoggle`, `screenelementrgbaswitch`) | none |
+| Vocalist streak text | `divide_by_10` int-to-string [I] | **Reproduced** (`seinttostring`) | none |
+| Band / face-off (2+ players) | `band1_*`/`band2_*`/`faceoff_ratio` [I: C's band values not decoded] | **Reproduced from the port's own band values**; exact C sourcing uncertain (`hud_widgets.cpp:181`) | follow-up |
+
+### Menus (each screen)
+
+QScript-driven; the port runs the game's own `create_*_menu` scripts. The
+`--uitest` walk started **47 flow states**:
+
+| Menu group | Screens reached | Port status |
+|---|---|---|
+| Boot | `boot_movie_atvi/red_octane/neversoft/intro`, `boot_iis`, `band_name_logo`, `boot_guitar`, `optimal_drum` | built / movies played |
+| Main flow | `main_menu_fs`, `game_mode`, `select_instrument`, `setlist_prompt`, `double_bass_popup`, `setlist`, `select_difficulty`, `pausemenu` | built, 912 ui-dump elements, 0 UNHANDLED |
+| Hubs / shop | `create_character_hub_menu`, `create_store_menu`, `create_newspaper_menu`, `create_select_venue_menu`, `create_enter_band_name_menu`, practice section/part, `popup_warning` | built |
+| Online (stubbed) | `online_character_hub/select/play_song/select_guitar/outfit/style`, `leaderboard_filter`, `net_achievement_tracker`, `view_leaderboard` (11) | **built no element** — expected (Step 7.8 disables online) |
+| Port-added | `port_gamepads` (GAMEPADS), `port_enhanced` (ENHANCED) | native pages, reached from GH3 help bars |
+
+### HUD elements
+
+| HUD element | Original evidence | Port status | Action |
+|---|---|---|---|
+| HUD root / layout | `setup_band_hud` picks `uidesc_hud_1g/1g1v/2g/2g1v/3g1v/band_battle/boss_battle/gamertag` (+`_nxgui`) via `update_hud_layout` | **Reproduced.** `hud_window` container present in the walk's ui-dump; the game script selects the desc, port builds it via `descinterface` | confirm nxgui pick (follow-up) |
+| HUD messages | `GetHUDMessageParent`, `hud_messages.qb`, `uidesc_hud_message_fire` | **Reproduced** (parent lookup); flaming overlay not drawn (below) | follow-up |
+| Loading screen / spinner | [C 0x8218DDE8 / 0x8218E0A0] | **Reproduced** | none |
+| Score / streak / multiplier / SP / health / stars | see Widgets table | **Reproduced** | none |
+
+### Mismatches fixed
+
+**None.** No clear, low-risk, objectively-verifiable mismatch was found: across
+47 menu screens (`--uitest`) and a full-song gameplay run (`--song beatit
+--autoplay`) the UI engine produced **0 `UNHANDLED` UI states, events, members
+or HUD widget output types** and **0 missing fonts / venue textures**. Font
+sizes, menu positions and HUD layouts are consumed from the original's own
+`descinterface`/QScript data, so they match by construction. The remaining gaps
+are genuinely larger than "low-risk one-liners" and are documented below rather
+than patched blindly (per the controls-audit precedent and the fragile-layer
+rule).
+
+### Follow-ups (documented, not changed)
+
+1. **Flaming HUD-message overlay (GD10-068).** The HUD "fire" messages
+   (`fire_2D_Notestreak_Small/Large`, `fire_2D_Starpower`; material
+   `sys_fontgrid_text_a6_fire_sys_fontgrid_text_a6_fire`) are **not drawn** —
+   the animated fire sprite material is on a pak the port does not load, so the
+   port shows nothing (was a white rectangle) [C `uidesc_hud_message_fire.qs`,
+   `hud_messages.qs`]. The `fontgrid_text_a6_fire` **font is loaded**
+   (`ui_shared.pak.xen`), so the flaming glyphs' shapes are available; only the
+   animated fire material overlay is missing. 25 `GD07_HUDLOG` "material … has
+   no texture" lines in the walk. Fix = load the fire material's texture + wire
+   the material animation (shared with gd10).
+2. **Menu anim-out.** Confirm whether task states play an explicit exit
+   animation before leaving (`menu_anim_out_done` is a no-op notification in
+   `ui_states.cpp:160`); if so, add the anim-out spawn mirroring anim-in.
+3. **nxgui HUD desc.** Confirm which desc `update_hud_layout` selects on World
+   Tour (`uidesc_hud_1g` vs `uidesc_hud_1g_nxgui`) and that the port builds the
+   nxgui variant identically.
+4. **Band (2-player) HUD values.** `hud_widgets.cpp:181` sources band / face-off
+   values from the port's own band aggregation; the original C's `band*_` value
+   derivation was not decoded — confirm against the C before multiplayer HUD.
+
+### Uncertain / not fully traced (Step 3)
+
+- The exact easing address for `motion` was inherited from gd10 ([C 0x822A6B28]);
+  the formulas are standard and match, but the Xbox decomp of the easing math
+  was not re-derived on the WT binary this pass.
+- Per-widget `value_range → range` output rules are marked [I] in
+  `hud_widgets.cpp` (written from the desc parameters, the C's rules not
+  decoded); they produce correct-looking output and 0 UNHANDLED, but were not
+  bit-verified against the native widget code.
