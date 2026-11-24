@@ -1261,3 +1261,168 @@ screen" (a menu with items, none hittable).
 - **7.2 gate (55%): MET for the gamepad menu + default controller + left-mode
   fix + mouse structural coverage.** The remaining 7.1 board-menu live-mouse
   harness check is the honest follow-up.
+
+## Onboarding Step 7.4 — shop (2026-11-24)
+
+Milestone 7.4 (the in-game store, the "Rock Store" / GH Store; gate 68%).
+Aggregate-first: the store **screens** are already built and reached (Step 3:
+`create_store_menu`, `create_character_hub_menu`, the `z_soundcheck` sound-stage
+background and camera morphs), and the port already parses the whole
+Create-A-Rocker (CAS) catalog (`data/band.cpp`). What was missing was the
+**purchase mechanic** — a currency balance, the priced catalog, and
+purchase → save → unlock. This pass REs that mechanic on our disc and ships it
+as a faithful, rendering-free, objectively-tested module. The gameplay judgment
+layer and the input layer were not touched.
+
+### (a) What the World Tour store sells, and where the catalog lives [C data]
+
+The store's inventory is the **Create-A-Rocker (CAS) part catalog**: clothing,
+accessories, heads/torsos/legs/shoes, and instrument parts (guitars, basses,
+drums, mics) and their finishes. The authoritative part list is
+`master_editable_list` (`scripts\game\cas\cas_parts.qb`, 59 parts). Each part is
+a global array (`CAS_Female_Acc_Left`, `CAS_Guitar_Body`, …, one per
+`car_*`/`cas_*` qb), and each option struct carries:
+`desc_id`, `frontend_desc` (localized display name), `mesh`, `materials`,
+`genre`, `polaroid` (thumbnail), an optional **`price`** (int, the cash cost)
+and an optional **`$locked`** flag (career-gated). Example
+(`car_female_rocker_acc.qb`): `f_bmtl_acc_lblackspike price=200 $locked`,
+`f_bmtl_acc_llaceband price=75` (buyable at once).
+
+Measured on our disc by `--shoptest` (over the 59 `master_editable_list` part
+arrays): **439 priced-or-locked catalog items across 31 populated part arrays;
+310 priced (234 free-to-buy, 76 career-gated `$locked`+`$price`), 205 locked;
+total catalog value $1,655,409.** (Cross-checked: 329 `price =` lines and 228
+`$locked` flags across the whole qb.pak — the extra priced/locked entries are in
+the progression-reward arrays, not the editable catalog.)
+
+Two other content types the store surfaces are present but **not cash-priced on
+this disc**: bonus **songs** (`Bonus_Songs` = eyeofthetiger, satchboogie;
+`defaultunlocked=0`, career-unlocked) and bonus **videos** (`Bonus_Videos`,
+`unlockable_content.qb`). **Characters** use a separate mechanism
+(`purchase_character` → `band_info.purchased_profiles`, and `is_profile_purchased`
+= free when the profile has no `price`): on our disc **no preset profile carries
+a `price`** (`Preset_Musician_Profiles_Locked/_Modifiable`: 0 price fields), so
+characters are career-unlock-gated, not cash-bought.
+
+> NOTE: the GH3-style store arrays the port's `glitches.cpp` still reads
+> (`Bonus_Guitars`, `Secret_Guitars`, `Bonus_Outfits`, `Bonus_Styles`, …) **do
+> not exist on the World Tour disc** (only `Bonus_Songs`/`Bonus_Videos`/
+> `Bonus_progression` do) — they are gd04 (GH3 Vault) inheritance. World Tour's
+> store is the CAS cash catalog above, not GH3's Vault.
+
+### (b) The currency — band cash [C scripts bandmoney.qb]
+
+The currency is the current band's **`cash`** (`band_info.cash`, per savegame;
+`get_current_band_info` → `GetGlobalTags band_info`). Helpers
+(`scripts\game\menu\bandmoney.qb`): `has_enough_money(price)` = `price <= cash`;
+`decrease_band_money(price)` = `cash -= price` + `SetGlobalTags band_info`;
+`increase_band_money(amount)` the inverse. Cash is **earned in the career**:
+`increase_band_cash_and_earnings` (`cas_common_arrays.qb`) →
+`increase_career_earnings` + `increase_band_money`, driven by the
+`Progression_CashMilestones*` / gig-earnings scripts
+(`guitar_progression.qb`). **Career is onboarding Step 7.6**, so cash *earning*
+(and the `unlocked` flags for the 76 career-gated items) is a **dependency**;
+the purchase mechanic itself is self-contained given a cash balance.
+
+### (c) The purchase + unlock model [C scripts cas_utils.qb, guitar_globaltags.qb, listmenu.qb]
+
+Ownership (`scripts\game\cas\cas_utils.qb`):
+- `is_part_unlocked(part, desc_id)`: an option with `$locked` is unlocked only
+  if its save flags contain `unlocked`; without `$locked` it is unlocked by
+  default.
+- `is_part_purchased(part, desc_id)`: an option with `$price` is purchased only
+  if its save flags contain `purchased`; without `$price` it is purchased by
+  default.
+- `is_part_unlocked_purchased` = both → owned & usable elsewhere in the game.
+
+Purchase (`continue_purchase_item`, `scripts\engine\menu\listmenu.qb`):
+`has_enough_money(price)` → `SoundEvent Menu_Purchase_Item` →
+`decrease_band_money(price)` → `set_current_band_part_flags(part, desc_id,
+purchased)`. The store UI is `make_character_purchase_menu` /
+`character_purchase` with the `character_purchase_price` text and a yes/no
+(`uidesc_character_purchase_menu.qs`); a locked item shows the
+"not enough money" dialogue on failure.
+
+### (d) The save format [C scripts guitar_globaltags.qb; port game/save.cpp]
+
+`set_current_band_part_flags` (`scripts\guitar\guitar_globaltags.qb`) stores the
+flags in **`band_info.unlock_purchased`**, a struct keyed by `part`
+(e.g. `CAS_Female_Acc_Left`), each an **array of `{ desc_id, unlocked?,
+purchased? }`** entries; `get_current_band_part_flags` reads the entry back by
+`desc_id`. In the port the global tags (incl. `band_info`) are the versioned
+JSON save (`game/save.{h,cpp}`, `SaveToMemoryCard`/`LoadFromMemoryCard` natives);
+`cash` is an int field and `unlock_purchased` a nested struct→array→struct — the
+JSON serializer already round-trips all of these.
+
+### (e) What I implemented (files)
+
+- **`engine/src/game/shop.{h,cpp}`** (`namespace shop`, rendering-free): the
+  faithful port of (b)–(d). `catalog(Globals)` enumerates every priced/locked
+  CAS option from the real part arrays (`master_editable_list`); `cash` /
+  `hasEnoughMoney`; `partUnlocked` / `partPurchased` / `owned` (exactly the
+  cas_utils predicates); `purchase(bandInfo, item)` (continue_purchase_item:
+  check → deduct cash → set the `purchased` flag in
+  `band_info.unlock_purchased.<part>`), returning Ok / NotPriced / NotUnlocked /
+  AlreadyOwned / NotEnoughCash; `grantUnlock` (a career reward's `unlocked`
+  flag). Invents no items — the catalog is the disc's data.
+- **`engine/src/tests/shoptest.{h,cpp}` + `--shoptest`** (`main.cpp`,
+  `CMakeLists.txt`): the objective harness.
+- No engine/UI/judge/input/decoder code changed; every pinned test stays
+  byte-identical (verified: `--uitest` below).
+
+### (f) Objective test evidence (`--shoptest <disc>`, headless, exit 0)
+
+Data-derived expected-vs-measured, no eyeballing:
+- **Catalog** = the disc's real priced CAS options (counts in (a)).
+- **Buy** a deterministic free-to-buy item (`CAS_Female_Acc_Left/f_punk_acc_lspike`,
+  $75): cash **575 → 500** (measured == start − the item's own price), the
+  `purchased` flag set, `is_part_unlocked_purchased` true; a repeat buy returns
+  `AlreadyOwned` with cash unchanged.
+- **Persists to the SAVE:** the purchased `band_info` is `save::write`-n and
+  `save::read` back from a save.json round-trip; the read-back tag still has the
+  deducted cash and the item still reads owned.
+- **Not enough cash:** a buy with `cash = price − 1` returns `NotEnoughCash`,
+  cash untouched, item not owned.
+- **Career gate:** a `$locked`+`$price` item
+  (`CAS_Female_Acc_Left/f_rock_acc_lskullwatch`, $200) returns `NotUnlocked`
+  (cash untouched); after `grantUnlock` (standing in for the career reward) it
+  buys to Ok and reads owned — proving the two-flag (`unlocked` + `purchased`)
+  gate.
+- **No regression:** `--uitest` still **47 flow states, 1181/1181
+  mouse-hittable, 0 dead screens, 0 UNHANDLED** (identical to the 7.2 baseline);
+  the store/character-hub flow states still build. `--shoptest`: **all store
+  checks passed (0 failed)**.
+
+### (g) Honest remains / flagged
+
+- **Live UI-click purchase (the biggest remainder).** The store *screens* build
+  and the model is the real purchase engine, but a mouse/controller click in the
+  live store is not yet routed into `shop::purchase`. The original drives it
+  through its own QScript chain (`continue_purchase_item` /
+  `make_character_purchase_menu`) over the 3-D `z_soundcheck` board menus, whose
+  full native substrate + board-menu live mouse is the same fragile,
+  not-headlessly-verifiable surface deferred in 7.1/7.2. Wiring the click to the
+  model (or implementing the money/flag natives so the game scripts transact
+  against it) is the next increment; the model is ready for it.
+- **Career dependency (Step 7.6).** Cash *earning* and the `unlocked` flags for
+  the 76 career-gated items come from the career (Progression cash milestones /
+  gig earnings). Until 7.6 those are not produced in normal play; the 234
+  free-to-buy items are fully exercisable now (and the cheat path already grants
+  cash/unlocks — `glitches.cpp`).
+- **Characters / bonus songs / videos:** the engine paths exist
+  (`purchase_character`/`purchased_profiles`, `Bonus_Songs`/`Bonus_Videos`) but
+  carry no cash `price` on this disc, so they are career-unlock content, not a
+  cash purchase — not modelled as store items here (would be inventing prices).
+
+### Uncertain / not fully traced (7.4)
+
+- The exact in-memory form of the saved `unlocked`/`purchased` flag (named vs.
+  bare key) is [I]: the port stores and reads them as bare flag keys (matching
+  the disc's `$locked`), and the save JSON round-trips either; the game's own
+  `StructureContains` match form was not bit-verified against the native.
+- `frontend_desc` is read as a localized-string key for display but the store's
+  per-item name/price *rendering* is the UI lane (not drawn here).
+- Whether any World Tour store UI also sells venues for cash (the task listed
+  venues) was not found in the disc data — venues on this disc are
+  career/`venue_<zone>.unlocked`-gated (see The Glitches venue unlock), not
+  cash-priced.
