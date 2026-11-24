@@ -366,7 +366,10 @@ SDL_JoystickID Input::attachVirtualPad(const std::string& spec) {
         std::string m = std::string(guid) + "," + desc.name +
                         ",a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,leftshoulder:b9,"
                         "rightshoulder:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,rightx:a2,"
-                        "righty:a3,lefttrigger:a4,righttrigger:a5,";
+                        // Unsigned triggers (the positive half, rest 0) like a real gamepad's: a
+                        // full-range "a4" would rest at mid-scale (0.5), so a full pull is only
+                        // 0.5 of travel - below the calibrated kAxisPress (0.75) axis-as-button.
+                        "righty:a3,lefttrigger:+a4,righttrigger:+a5,";
         if (SDL_AddGamepadMapping(m.c_str()) < 0) SDL_Log("virtual pad mapping: %s", SDL_GetError());
     }
     return id;
@@ -396,7 +399,14 @@ void Input::emit(std::vector<InputEvent>& out, Action a, bool down, uint64_t ts,
         const int k = int(a);
         if (down) {
             Recent& r = recent_[size_t(k)];
-            if (r.ns && ts >= r.ns && ts - r.ns < kSameNs && r.device != device_) {
+            if (r.ns && ts >= r.ns && ts - r.ns < kSameNs && r.device != device_) {  // one press, two devices
+                dropped_.insert({device_, k});
+                return;
+            }
+            // A4: a bouncing strum / menu control double-advances a menu - two
+            // Up-or-Down edges from one device within the strum window act once.
+            // (The in-song judge has its own 52 ms strumRepeatMs; menus had none.)
+            if ((a == Action::Up || a == Action::Down) && r.ns && ts >= r.ns && ts - r.ns < kMenuStrumDebounceNs && r.device == device_) {
                 dropped_.insert({device_, k});
                 return;
             }
@@ -1043,12 +1053,44 @@ void Input::keyEvent(const SDL_KeyboardEvent& k, std::vector<InputEvent>& out) {
     emit(out, a, down, ts, mode, std::max(kb, 0));
 }
 
+// A1: an axis bound as a button is active past kAxisPress of full travel, and
+// released below kAxisRelease (hysteresis). Pure and named so the self-test can
+// pin the press/release points from the constants.
+bool Input::axisButtonActive(Source::Kind kind, int delta, bool wasDown) {
+    const int th = int((wasDown ? kAxisRelease : kAxisPress) * kAxisFull);
+    return kind == Source::Kind::AxisPos ? delta > th : kind == Source::Kind::AxisNeg ? delta < -th : std::abs(delta) > th;
+}
+
+// A2: an axis past the tilt threshold in its bound direction (AxisAny keeps the
+// legacy either-way read; gd05's XboxGuitar default binds the tilt AxisPos).
+bool Input::tiltPast(Source::Kind kind, int delta) {
+    const int th = int(kTiltThreshold * kAxisFull);
+    return kind == Source::Kind::AxisPos ? delta > th : kind == Source::Kind::AxisNeg ? delta < -th : std::abs(delta) > th;
+}
+
+// A2: the tilt-hold state machine (one extra per-pad int). Returns true only
+// once the tilt has stayed active kTiltHoldFrames consecutive frames, then
+// stays true while held; inactive resets it.
+bool Input::tiltDeploy(bool active, int& frames) {
+    if (!active) {
+        frames = 0;
+        return false;
+    }
+    if (frames < kTiltHoldFrames) ++frames;
+    return frames >= kTiltHoldFrames;
+}
+
+// A5: the digital-whammy deadzone, as a named 0..1 mapping.
+float Input::whammyDeadzone(float raw01) {
+    raw01 = std::clamp(raw01, 0.0f, 1.0f);
+    return raw01 < kWhammyDeadzone ? 0.0f : (raw01 - kWhammyDeadzone) / (1.0f - kWhammyDeadzone);
+}
+
 bool Input::sourceActive(const Pad& p, const Source& s, bool wasDown) const {
     if (s.kind == Kind::Button) return s.index >= 0 && s.index < SDL_GAMEPAD_BUTTON_COUNT && p.buttons[size_t(s.index)];
     if (s.kind == Kind::Key || s.index < 0 || s.index >= SDL_GAMEPAD_AXIS_COUNT) return false;
-    // Past half way from the rest value; released below a third (no chatter).
-    const int d = int(p.axes[size_t(s.index)]) - int(p.rest[size_t(s.index)]), th = wasDown ? 10000 : 16000;
-    return s.kind == Kind::AxisPos ? d > th : s.kind == Kind::AxisNeg ? d < -th : std::abs(d) > th;
+    // A1: calibrated axis-as-button, kAxisPress / kAxisRelease (was 0.49 / 0.31).
+    return axisButtonActive(s.kind, int(p.axes[size_t(s.index)]) - int(p.rest[size_t(s.index)]), wasDown);
 }
 
 void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
@@ -1068,15 +1110,20 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
         p.analogWhammy = true;
         const int rest = p.rest[size_t(s.index)], v = p.axes[size_t(s.index)];
         float x = rest < -30000 ? float(v - rest) / 65535.0f : std::abs(float(v - rest)) / 32767.0f;
-        constexpr float kDead = 0.08f;
-        x = std::clamp(x, 0.0f, 1.0f);
-        p.whammyAxis = std::max(p.whammyAxis, x < kDead ? 0.0f : (x - kDead) / (1 - kDead));
+        p.whammyAxis = std::max(p.whammyAxis, whammyDeadzone(x));  // A5: named deadzone
     }
     auto was = p.down;
+    // A2: an axis-bound Gyro (gd05's XboxGuitar tilt) is driven per frame by
+    // poll()'s tilt debounce - a held tilt sends no events - so this event pass
+    // leaves it alone. A digital Gyro (a button, gd05's BACK) stays instant here.
+    bool gyroAxis = false;
+    for (const Source& s : b[size_t(C::Gyro)])
+        gyroAxis = gyroAxis || s.kind == Kind::AxisPos || s.kind == Kind::AxisNeg || s.kind == Kind::AxisAny;
     for (size_t c = 0; c < size_t(Control::Count); ++c) {
         bool now = false;
         for (const Source& s : b[c]) now = now || sourceActive(p, s, was[c]);
-        if (Control(c) == C::Whammy && p.whammyAxis > 0.15f) now = true;
+        if (Control(c) == C::Whammy && p.whammyAxis > kWhammyAction) now = true;  // A5: named action threshold
+        if (Control(c) == C::Gyro && gyroAxis) now = was[c];
         p.down[c] = now;
     }
     curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy;
@@ -1778,7 +1825,7 @@ void Input::updateMidi(MidiDev& m, uint64_t ts, std::vector<InputEvent>& out) {
             if (s.kind == Kind::MidiNote) now = now || m.notes[size_t(s.index & 127)] > 0;
             if (s.kind == Kind::MidiCc) now = now || m.cc[size_t(s.index & 127)] >= (was[c] ? 40 : 64);
         }
-        if (Control(c) == C::Whammy && m.whammyAxis > 0.15f) now = true;
+        if (Control(c) == C::Whammy && m.whammyAxis > kWhammyAction) now = true;  // A5: named action threshold
         m.down[c] = now;
     }
     curAnalog_ = m.whammyAxis > 0;
@@ -1931,6 +1978,39 @@ void Input::poll(uint64_t nowNs, std::vector<InputEvent>& out) {
     drainKernel();
     pollShake(nowNs, out);
     pollMidi(nowNs, out);
+    // A2: an axis-bound Gyro's tilt debounce, sampled per frame because a held
+    // tilt sends no SDL events. Star Power deploys only after the tilt stays
+    // past kTiltThreshold in one direction for kTiltHoldFrames frames; a flick
+    // or a wrong-way tilt never deploys. gd05's XboxGuitar default binds Gyro to
+    // BOTH an axis (RIGHTY) and a button (BACK), so this loop also owns that
+    // button part - it stays instant (one poll frame) while the axis is held.
+    // A Gyro with no axis source keeps the instant event-pass path (poll skips).
+    for (auto& [jid, p] : pads_) {
+        if (nowNs < p.settleNs) continue;
+        const Bindings& b = bindingsFor(p.guid, p.profile);
+        bool gyroAxis = false, tiltActive = false, gyroBtn = false;
+        for (const Source& s : b[size_t(C::Gyro)]) {
+            if (s.kind == Kind::AxisPos || s.kind == Kind::AxisNeg || s.kind == Kind::AxisAny) {
+                gyroAxis = true;
+                if (s.index >= 0 && s.index < SDL_GAMEPAD_AXIS_COUNT)
+                    tiltActive = tiltActive || tiltPast(s.kind, int(p.axes[size_t(s.index)]) - int(p.rest[size_t(s.index)]));
+            } else if (s.kind == Kind::Button) {
+                gyroBtn = gyroBtn || (s.index >= 0 && s.index < SDL_GAMEPAD_BUTTON_COUNT && p.buttons[size_t(s.index)]);
+            }
+        }
+        if (!gyroAxis) {  // no axis tilt: the event pass owns the Gyro (instant)
+            p.gyroFrames = 0;
+            continue;
+        }
+        const bool nowSp = tiltDeploy(tiltActive, p.gyroFrames) || gyroBtn;
+        if (nowSp == p.down[size_t(C::Gyro)]) continue;
+        auto was = p.down;
+        p.down[size_t(C::Gyro)] = nowSp;
+        device_ = int64_t(jid);
+        const bool joypad = p.profile == Profile::Joypad;
+        const ControllerMode mode = requireStrum("pad:" + std::to_string(jid)) ? ControllerMode::Guitar : ControllerMode::Joypad;
+        controlEdges(was, p.down, mode, p.slot, joypad, nowNs, out);
+    }
     for (int p = 0; p < kPlayers; ++p) {
         PendingStrum& s = strum_[size_t(p)];
         if (!s.on || nowNs < s.dueNs) continue;
