@@ -377,3 +377,62 @@ model, never piecemeal):
 - Whether `enable_touch_strip` is ever 0 in shipped play (it is script-set; the
   port defaults it on).
 - Whether a real tap must match the HOPO gem's zone (see (e).3).
+
+## Controls Phase B — drums (2026-11-24)
+
+Mirrored from gd10 (Metallica, the same gh4 engine): detect a drum kit, guard
+the guitar part from it, and add a tested, rendering-free gh4 drum judge. This
+note is self-contained.
+
+### Why
+
+World Tour's drum kit is a first-class controller in the original (the joypad
+descriptor's type enum = `10` GH drum kit / `11` RB drum kit; `IsDrumController`
+[C 0x8217d1d0], `IsRBDrum` [C 0x8217d2e0]; `GetDrumHitVelocity` [C 0x821860c8]
+reads the per-pad velocity bytes at `record+0x18+...`, taking the max of six for
+a type-10 GH drum) — see the Controls audit above. This port grew from gd01's
+five-fret guitar engine, so it had no drum instrument: a drum kit fell through
+to the gamepad (`Joypad`) profile and played the **guitar** part on scrambled
+pads (the active mis-detection error).
+
+### Detection + guard (input layer)
+
+- `input.cpp` `isDrumKit(id, pad)`: SDL joystick type `DRUM_KIT`, or `"drum"`
+  in the controller name (Santroller / Rock Band / GH kits, and the HID kits
+  SDL has no gamepad map for). A guitar is never matched. [I] SDL exposes only
+  the joystick type and the name on PC, not the USB descriptor's type enum.
+- At connect, `Pad::drum = profile == Joypad && isDrumKit(...)` (a detected
+  guitar is never flagged). The seat is logged as "Drum Kit".
+- `Input::drumKitSuppressesPlay(Action)` = frets | Strum | Whammy: the single
+  source of truth for the guard (so `--drumtest` checks it without a device).
+  `actionsOf`/`controlEdges` take a `drum` flag; for a drum seat the `on`
+  lambda drops exactly those play actions and strum pulses are not counted, so
+  a drum kit can no longer scramble-play the guitar. The menus, Start (pause)
+  and Star Power (the gyro) still work. The flag is passed at every Pad control
+  path (`releaseAll`, `update`, and the Phase-A gyro/tilt poll); the keyboard
+  and MIDI paths keep the default `drum=false`, so the guitar path is
+  byte-identical for every non-drum seat.
+- `Instrument::Drums` ("Drum Kit") is surfaced in `instrument()`/`instruments()`
+  and is fixed by detection (`setInstrument` refuses to change a drum seat).
+
+### Drum judge (`game/drum_player.{h,cpp}`, data-free, `--drumtest`)
+
+- Rendering-free, adapted from gd05's Rock Band `DrumPlayer` to gh4's chart.
+  Builds a playable gem stream from the `<song>_drums_notes` kit-piece events
+  (parsed into `Chart::drums`): note 73 kick, 75/76 toms, 77 snare, 78/79/84
+  hi-hat, 80/81/82/85 cymbals, mapped onto the five GH drum lanes (kick / red /
+  yellow / blue / green; the mapping is [I]). The arm-animation notes (37..57)
+  in the same array are skipped. Each gem carries the recorded per-pad velocity
+  (`ChartEvent::value`; `GetDrumHitVelocity` semantics), surfaced on the Hit
+  event for feel/anim; a live strike velocity overrides it. Scores hits on the
+  right lanes with the five-fret streak multiplier. Covered by `--drumtest`.
+
+### Not yet done (honest scope — same as gd10)
+
+- `_drums_notes` is the drummer's single performance/animation track (it drives
+  the AI drummer), **not** gh4's per-difficulty gameplay drum chart, so this
+  stream has no difficulty reduction.
+- The judge is a tested component and is **NOT** wired into the live match loop
+  (no HUD drum lanes, no routing of a live drum controller's pad/cymbal/kick
+  into it, no Overdrive/fill deploy). Wiring it in is the remaining increment;
+  it must keep the guitar path untouched for a guitar seat.

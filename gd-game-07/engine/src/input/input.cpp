@@ -72,6 +72,18 @@ bool isSantrollerGuitar(SDL_Gamepad* pad) {
     return true;
 }
 
+// A drum kit (gh4's type-10 GH / type-11 RB drum controller): SDL types it as
+// a drum kit, or it says "drum" in its name (Santroller / Rock Band / GH kits,
+// and the HID kits SDL has no gamepad map for). A guitar is never matched (its
+// name says "guitar", its SDL type is GUITAR). [I: SDL exposes only the type
+// and the name; the USB descriptor's type enum (GetDrumHitVelocity reads it)
+// is not surfaced on PC.]
+bool isDrumKit(SDL_JoystickID id, SDL_Gamepad* pad) {
+    if (SDL_GetJoystickTypeForID(id) == SDL_JOYSTICK_TYPE_DRUM_KIT) return true;
+    const std::string n = lower(SDL_GetGamepadName(pad));
+    return n.find("drum") != std::string::npos;
+}
+
 // SDL has no gamepad mappings for the HID Rock Band guitars: the Xbox-guitar
 // layout (A green, B red, Y yellow, X blue, left shoulder orange, d-pad
 // strum, right stick X whammy). [I] Button and axis numbers follow the
@@ -135,6 +147,7 @@ const char* Input::instrumentName(Instrument i) {
     case Instrument::Guitar: return "5 Fret Guitar";
     case Instrument::Gamepad: return "Gamepad";
     case Instrument::Midi: return "Generic MIDI";
+    case Instrument::Drums: return "Drum Kit";
     }
     return "";
 }
@@ -627,6 +640,9 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         else if (isPs2Guitar(pad)) profile = Profile::Ps2Guitar;
         Pad np;
         np.pad = pad, np.profile = np.detected = profile;
+        // A drum kit is kept out of the guitar path (profile stays Joypad for
+        // its menu navigation, but its pads never feed the guitar judge).
+        np.drum = profile == Profile::Joypad && isDrumKit(id, pad);
         char guid[64];
         SDL_GUIDToString(SDL_GetGamepadGUIDForID(id), guid, sizeof guid);
         np.guid = guid;
@@ -666,7 +682,11 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
                 if (!slotTaken(s, nullptr) && playerEnabled(s)) np.slot = s;
         pads_[id] = np;
         SDL_Log("Controller connected: %s (%04x:%04x, %s, %s)", np.name.c_str(), SDL_GetGamepadVendorForID(id),
-                SDL_GetGamepadProductForID(id), profileName(profile), np.slot < 0 ? "no player" : np.slot == 0 ? "player 1" : "player 2");
+                SDL_GetGamepadProductForID(id), np.drum ? "Drum Kit" : profileName(profile),
+                np.slot < 0 ? "no player" : np.slot == 0 ? "player 1" : "player 2");
+        if (np.drum)
+            SDL_Log("  drum kit detected: surfaced as a drum seat; its pads are not routed as scrambled guitar frets "
+                    "(playable drum gameplay is not wired in this port yet)");
         break;
     }
     case SDL_EVENT_GAMEPAD_REMOVED:
@@ -757,7 +777,7 @@ void Input::releaseAll(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
     curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy;
     const ControllerMode mode = requireStrum("pad:" + std::to_string(SDL_GetGamepadID(p.pad))) ? ControllerMode::Guitar : ControllerMode::Joypad;
     curFretsStrum_ = mode == ControllerMode::Joypad;
-    controlEdges(was, p.down, mode, p.slot, joypad, ts, out);
+    controlEdges(was, p.down, mode, p.slot, joypad, ts, out, p.drum);
     curFretsStrum_ = false;
     static constexpr Action kHelp[4] = {Action::Left, Action::Right, Action::Confirm, Action::Back};
     for (size_t k = 0; k < 4; ++k)
@@ -1037,7 +1057,7 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
     curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy, curTilt_ = p.tilt;
     const ControllerMode mode = requireStrum("pad:" + std::to_string(SDL_GetGamepadID(p.pad))) ? ControllerMode::Guitar : ControllerMode::Joypad;
     curFretsStrum_ = mode == ControllerMode::Joypad;
-    controlEdges(was, p.down, mode, p.slot, joypad, ts, out);
+    controlEdges(was, p.down, mode, p.slot, joypad, ts, out, p.drum);
     curFretsStrum_ = false;
     // The built-in menu helpers: d-pad left / right; a gamepad's south (select) and east (back).
     const std::array<bool, 4> help = {p.buttons[SDL_GAMEPAD_BUTTON_DPAD_LEFT], p.buttons[SDL_GAMEPAD_BUTTON_DPAD_RIGHT],
@@ -1055,14 +1075,17 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
 // strum also moves the menus (the other way round when lefty); Select and
 // the gyro are Star Power; a gamepad's frets take the lefty_joypad order.
 // A device without a player works the menus as player 1, and only pauses in a song.
-Input::ActionSet Input::actionsOf(const std::array<bool, size_t(Control::Count)>& held, bool joypad, int player) const {
+Input::ActionSet Input::actionsOf(const std::array<bool, size_t(Control::Count)>& held, bool joypad, int player, bool drum) const {
     ActionSet a;
     const bool lefty = lefty_[size_t(std::max(player, 0) & 1)];
     const bool play = !joypad || gamepadPlay_;
     for (size_t c = 0; c < size_t(Control::Count); ++c) {
         if (!held[c]) continue;
         if (player < 0 && inGame() && C(c) != C::Start && C(c) != C::GuitarStart) continue;
-        auto on = [&](Action x) { a.on[size_t(x)] = true; };
+        // A drum kit never feeds the guitar judge: its play actions (frets,
+        // strum, whammy) are dropped so it cannot scramble-play the guitar
+        // part; the menus, Start and Star Power still work.
+        auto on = [&](Action x) { if (!(drum && drumKitSuppressesPlay(x))) a.on[size_t(x)] = true; };
         switch (C(c)) {
         case C::Green: case C::Red: case C::Yellow: case C::Blue: case C::Orange: {
             int fret = int(c) - int(C::Green);
@@ -1072,8 +1095,8 @@ Input::ActionSet Input::actionsOf(const std::array<bool, size_t(Control::Count)>
             if (play) on(Action(int(Action::Fret0) + fret));
             break;
         }
-        case C::StrumUp: on(lefty && curGuitar_ ? Action::Down : Action::Up), on(Action::Strum), ++a.strums; break;
-        case C::StrumDown: on(lefty && curGuitar_ ? Action::Up : Action::Down), on(Action::Strum), ++a.strums; break;
+        case C::StrumUp: on(lefty && curGuitar_ ? Action::Down : Action::Up), on(Action::Strum); if (!drum) ++a.strums; break;
+        case C::StrumDown: on(lefty && curGuitar_ ? Action::Up : Action::Down), on(Action::Strum); if (!drum) ++a.strums; break;
         case C::Whammy: if (play) on(Action::Whammy); break;
         case C::Select: case C::GuitarSelect: case C::Gyro: on(Action::StarPower); break;
         case C::Start: case C::GuitarStart: on(Action::Start); break;
@@ -1091,8 +1114,8 @@ Input::ActionSet Input::actionsOf(const std::array<bool, size_t(Control::Count)>
 // control pressed. The keyboard's Start in the menus is select (enterKey:
 // Start on a text entry, UiManager::action).
 void Input::controlEdges(const std::array<bool, size_t(Control::Count)>& was, const std::array<bool, size_t(Control::Count)>& now,
-                         ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out) {
-    const ActionSet before = actionsOf(was, joypad, player), after = actionsOf(now, joypad, player);
+                         ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out, bool drum) {
+    const ActionSet before = actionsOf(was, joypad, player, drum), after = actionsOf(now, joypad, player, drum);
     const int pl = std::max(player, 0);
     const bool keyboardStart = device_ == -1 && (!inGame() || menuOverSong_);
     for (size_t k = 0; k < after.on.size(); ++k) {
@@ -1405,19 +1428,20 @@ void Input::discardEdit() {
 
 Input::Instrument Input::instrument(const std::string& id) const {
     if (midiById(id)) return Instrument::Midi;
-    if (const Pad* p = padById(id)) return p->profile == Profile::Joypad ? Instrument::Gamepad : Instrument::Guitar;
+    if (const Pad* p = padById(id)) return p->drum ? Instrument::Drums : p->profile == Profile::Joypad ? Instrument::Gamepad : Instrument::Guitar;
     return Instrument::Guitar;  // the keyboard and touch play the guitar part
 }
 
 std::vector<Input::Instrument> Input::instruments(const std::string& id) const {
     if (midiById(id)) return {Instrument::Midi};
-    if (padById(id)) return {Instrument::Guitar, Instrument::Gamepad};
+    if (const Pad* p = padById(id)) return p->drum ? std::vector<Instrument>{Instrument::Drums} : std::vector<Instrument>{Instrument::Guitar, Instrument::Gamepad};
     return {Instrument::Guitar};
 }
 
 void Input::setInstrument(const std::string& id, Instrument i) {
     Pad* p = padById(id);
-    if (!p || i == Instrument::Midi || instrument(id) == i) return;
+    // A drum kit's seat is fixed by detection (it is never a guitar / gamepad).
+    if (!p || i == Instrument::Midi || i == Instrument::Drums || p->drum || instrument(id) == i) return;
     // A guitar: the detected guitar type, else a PS2 guitar (adapter), as
     // gd01; the exact guitar type stays a choice (deviceType / cycleDeviceType).
     Profile to = i == Instrument::Gamepad ? Profile::Joypad : p->detected != Profile::Joypad ? p->detected : Profile::Ps2Guitar;
@@ -1877,7 +1901,7 @@ void Input::poll(uint64_t nowNs, std::vector<InputEvent>& out) {
         const bool joypad = p.profile == Profile::Joypad;
         const ControllerMode mode = requireStrum("pad:" + std::to_string(jid)) ? ControllerMode::Guitar : ControllerMode::Joypad;
         curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy, curTilt_ = p.tilt, curFretsStrum_ = mode == ControllerMode::Joypad;
-        controlEdges(was, p.down, mode, p.slot, joypad, nowNs, out);
+        controlEdges(was, p.down, mode, p.slot, joypad, nowNs, out, p.drum);
         curGuitar_ = curJoypad_ = curAnalog_ = curTilt_ = curFretsStrum_ = false;
     }
     for (int p = 0; p < 2; ++p) {
