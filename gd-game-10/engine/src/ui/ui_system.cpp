@@ -753,13 +753,30 @@ std::vector<Element*> UiSystem::focusedElements() const {
 }
 
 void UiSystem::focusMenu(Element* m, const qb::Struct& data) {
-    if (m->focused && m->selected >= 0 && size_t(m->selected) < m->children.size() && m->children[size_t(m->selected)]->focused) return;
+    // child_index: focus a child by ordinal (LaunchEvent type = focus
+    // data = {child_index = n}); the band-mode sub-menus focus their last item,
+    // the READY entry, this way (child_index = array_size - 1). It is honoured
+    // even when the menu is already focused (the hub re-focuses the rebuilt menu
+    // on this index); without it focus stayed on item 0 (RANDOM CHARACTER) and a
+    // player could never ready [C scripts ui_band_mode.qb ui_band_mode_update_menu].
+    const qb::Value* cidx = qs::Vm::param(data, K("child_index"));
+    const int reqIndex = cidx && cidx->type == qb::Type::Int ? cidx->i : -1;
+    if (reqIndex < 0 && m->focused && m->selected >= 0 && size_t(m->selected) < m->children.size() && m->children[size_t(m->selected)]->focused)
+        return;
     if (const qb::Value* c = qs::Vm::param(data, K("controller"))) m->controller = int(c->number());
-    if (const qb::Value* cid = qs::Vm::param(data, K("child_id")))
-        for (size_t i = 0; i < m->children.size(); ++i)
-            if (m->children[i]->id == cid->key) m->selected = int(i);
-    m->focused = true;
     const int n = int(m->children.size());
+    int want = m->selected;
+    if (const qb::Value* cid = qs::Vm::param(data, K("child_id"))) {
+        for (size_t i = 0; i < m->children.size(); ++i)
+            if (m->children[i]->id == cid->key) want = int(i);
+    } else if (reqIndex >= 0) {
+        want = reqIndex;
+    }
+    // Unfocus the old child when moving to a different, explicitly named one.
+    if (want != m->selected && m->selected >= 0 && size_t(m->selected) < m->children.size())
+        launch(m->children[size_t(m->selected)].get(), K("unfocus"), qb::Struct{});
+    m->selected = want;
+    m->focused = true;
     if (n == 0) return;
     if (m->selected < 0) m->selected = 0;
     m->selected = std::clamp(m->selected, 0, n - 1);
@@ -2453,6 +2470,13 @@ void UiSystem::addNatives() {
                 }
                 if (const qb::Value* first = step.st->find(K("id"))) {
                     e = resolve(first);
+                } else if (const qb::Value* idx = step.st->find(K("index")); idx && idx->type == qb::Type::Int && e) {
+                    // {index = N}: the parent's N-th child in creation order (the
+                    // band-mode hub resolves each per-player menu slot this way,
+                    // id = [{id = band_hmenu} {index = i}]; without it the step was
+                    // ignored and {index = 2} : die destroyed the whole hmenu, so
+                    // the per-player menus were never built) [C scripts ui_band_mode.qb].
+                    e = idx->i >= 0 && size_t(idx->i) < e->children.size() ? e->children[size_t(idx->i)].get() : nullptr;
                 } else if (const qb::Value* lid = step.st->find(K("local_id")); lid && e) {
                     Element* found = nullptr;
                     for (auto& c : e->children)
