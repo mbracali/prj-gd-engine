@@ -50,7 +50,7 @@
 | Step | Gate % | Status | Owner-agent | Evidence |
 |---|---|---|---|---|
 | 1 Boot | 8 | ✅ done (pre-existing) | — | ready_to_play, renders, plays |
-| 2 Encoders + model explorer | 16 | ⏳ | — | |
+| 2 Encoders + model explorer | 16 | ✅ | agent (11-24) | `--formattest` all 31,554 files parse; model/song/venue/texture types 100% decoded (.qs/.jam out of scope); `--exploretest` 48 models across Venues/Guitars/Bass/Drums/Mics/Chars, 0 fail; `--selftest` 133 songs; `--chartest` 26 bodies skinned |
 | 3 UI elements (bg/font/anim/widget/menu/HUD) | 26 | ⏳ | — | |
 | 4 Animations & physics | 32 | ⏳ | — | |
 | 5 Lights & effects | 40 | ⏳ | — | |

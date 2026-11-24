@@ -117,6 +117,7 @@ target_sources(gd07 PRIVATE
   src/tests/audittest.cpp
   src/tests/chartest.cpp
   src/tests/drumtest.cpp
+  src/tests/exploretest.cpp
   src/tests/format_checks.cpp
   src/tests/scripttest.cpp
   src/tests/selftest.cpp

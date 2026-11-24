@@ -436,3 +436,114 @@ pads (the active mis-detection error).
   (no HUD drum lanes, no routing of a live drum controller's pad/cymbal/kick
   into it, no Overdrive/fill deploy). Wiring it in is the remaining increment;
   it must keep the guitar path untouched for a guitar seat.
+
+## Onboarding Step 2 — encoders + model explorer (2026-11-24)
+
+Aggregate-first verification of the onboarding spec's Step 2 (gate 16%): can the
+port READ AND USE 100% of the disc file types World Tour needs for
+models/songs/venues/textures, and does the launcher's Explore show and load
+every category? Evidence is fresh headless runs of the dev hooks on our own
+disc (`gd-game-07/extracted/`, 31,554 files in 929 paks) plus the Ghidra/QB
+format citations already in `docs/FORMATS.md`. **One test file was added
+(`--exploretest`); no engine, input, judge, render or data-decoder code was
+changed.**
+
+### (a) Encoders — every model/song/venue/texture file type decodes
+
+`gd07 --formattest gd-game-07/extracted` parses **every pak and every file in
+it to its end** and prints `formattest: all files parse` (exit 0). Per-type
+census and decoder status (the counts are this run's, not FORMATS.md's older
+ones):
+
+| Disc type | Count | Decoded? | Evidence (this run / port decoder) |
+|---|---|---|---|
+| `.pak`/`.pab` archives | 929 paks / 31,554 files | ✅ | all 929 `Pak::load` to end; `data/pak.cpp`, `data/xdvdfs.cpp` |
+| QB `.qb`/`.mqb`/`.sqb` | 1,703 | ✅ | 43,601 sections, 8,292 scripts, **0 unused bytes**; `data/qb.cpp` |
+| QB node arrays `.nqb` | 106 | ✅ | decoded as QB; `data/qb.cpp` |
+| Particles `.pfx` | 106 | ✅ | `checkPfx`; `data/qb.cpp` |
+| Scenes `.scn` | 107 | ✅ | mesh record 0x70 bytes [C FORMATS.md]; `data/scene.cpp` |
+| Skinned models `.skin` | 1,696 | ✅ | `scene::parse(Skin)`; `data/scene.cpp` |
+| Static models `.mdl` | 14 | ✅ | `scene::parse(Mdl)`; `data/scene.cpp` |
+| Animation `.ska` | 5,707 | ✅ | Q key [C 0x82445E88], standardkeyQ byteswap [C 0x82445730]; `data/anim.cpp` |
+| Skeleton `.ske` | 239 | ✅ | `data/anim.cpp` |
+| Fonts `.fnt` | 15 | ✅ | `data/font.cpp` |
+| Havok `.hkc` | 106 | ✅ | 7,254 rigid bodies, 7,056 constraints; Havok 5.5.0-r1; `data/havok.cpp` |
+| Havok ragdoll `.rag` | 196 | ✅ | LZSS-wrapped packfiles; `data/havok.cpp` |
+| Textures `.img` | 5,513 | ✅ | incl. CAS/normal-map/volume; `data/texture.cpp` |
+| Textures `.tex` | 1,676 | ✅ | hash tables, 8_8/DXT1/volume (31 volumes, 352 slices, FNV-1a 1eb4a620); `data/texture.cpp` |
+| Audio in-pak `.wav` (XMA2) | 3,106 | ✅ | RIFF+big-endian XMA2 chunk; `checkWav`, `audio/xma_decoder.cpp` |
+| Audio banks `.fsb` (loose) | 486 | ✅ | song/preview FSB+XMA decoded by `--selftest`/`--songaudiotest`; `data/fsb.cpp`, `audio/song_stream.cpp` |
+| `.table` | 70 | ✅ | u32 words 0xE5F50254 / 0x21775481 |
+| Debug names `.dbg` | 2,680 | ✅ | `Disc::loadNames` (126,993 names resolved) |
+| Video `.bik` (loose) | 23 | ✅ | FFmpeg; `video/movie_player.cpp` (not a model/song/venue type) |
+| **Localized strings `.qs`** | **8,495** | ❌ | **no decoder — UI localization, not models/songs/venues/textures** |
+| **GHTunes songs `.jam`** | **19** | ❌ | **no decoder — user music-studio content, not a set-list song** |
+
+**Result: 100% of the model / song / venue / texture file types decode.** The
+only two undecoded types (`.qs` localized UI strings, `.jam` GHTunes studio
+songs) are outside the models/songs/venues/textures scope and are honestly out
+of scope for Step 2 (`.qs` belongs to the UI-text milestone; `.jam` to the
+music-studio feature).
+
+### (b) Model explorer — every category shows and loads its models
+
+Added **`--exploretest`** (`engine/src/tests/exploretest.{h,cpp}`,
+`CMakeLists.txt`, `main.cpp`): a headless harness that reproduces the launcher
+explorer's item list **with the same enumerators** (`venue::venueZones`,
+`band::everyInstrumentGh4` split Guitarist/Bassist/Drummer/Vocalist →
+Guitars/Bass/Drums/Mics, `band::everyTalentGh4` → Chars) and runs the **same
+`band::loadModel` + `BandView::add`** that `module_explore.cpp`'s `select()`
+runs before drawing. It does not include the module (that owns the launcher's
+`GdExplorer` C ABI); it mirrors it, so a failure here is a failure the launcher
+would show. `gd07 --exploretest gd-game-07/extracted` (exit 0):
+
+| Explore category | Models | Load+render-add | Enumerator |
+|---|---|---|---|
+| Venues | 18 | 18 ok, 0 fail | `venue::venueZones` (+ zone pak parsed) |
+| Guitars | 7 | 7 ok, 0 fail | `everyInstrumentGh4` role Guitarist |
+| Bass | 7 | 7 ok, 0 fail | `everyInstrumentGh4` role Bassist |
+| Drums | 3 | 3 ok, 0 fail | `everyInstrumentGh4` role Drummer |
+| Mics | 3 | 3 ok, 0 fail | `everyInstrumentGh4` role Vocalist |
+| Chars | 10 | 10 ok, 0 fail | `everyTalentGh4` preset roster |
+| **Total** | **48** | **48 ok, 0 fail; 197,599 vertices** | — |
+
+**Songs** is the separate `gd_game_songs` path (`module_songs.cpp`), proven by
+`--selftest`: **133 songs, 928 charts, 473,025 notes, autoplay charts failing
+0** (songs load, chart-parse and auto-play end to end; previews decode via the
+FSB/XMA loaders). The gd07 explorer code is **identical to gd10's** apart from
+the `GD07_*` env prefixes (same gh4 engine), so this also confirms the shared
+explorer on World Tour's data.
+
+Corroborating render evidence — `gd07 --chartest`: **26 character bodies
+loaded, skinned and animated, 0 not on the disc, 321,604 vertices, 0 material
+textures missing, 26/26 gh4 talents move their face**; the band renders in
+every venue stage. (chartest's own instrument pass uses the non-gh4
+`everyInstrument`, which is empty for gh4 — hence `0 instruments` there; that
+gap is exactly what `--exploretest` closes by using `everyInstrumentGh4`.)
+
+### (c) What changed
+
+- **New, isolated:** `engine/src/tests/exploretest.{h,cpp}`, the
+  `--exploretest` wiring in `engine/src/main.cpp`, and the source line in
+  `engine/CMakeLists.txt`. Test-only; it touches no engine, input, judge,
+  render or decoder code, so every pinned test stays byte-identical.
+- No encoder/decoder change was needed: the port already decodes 100% of the
+  in-scope types (part (a)).
+
+### (d) What remains (honest)
+
+- **`.qs` / `.jam` decoders** are still absent; both are **out of Step-2
+  scope** (UI localization text; GHTunes music-studio songs). Noted for the
+  UI-text and music-studio milestones.
+- **Pre-existing, not Step-2:** `--selftest` reports one `FAIL jamsession: not
+  on the disc` (a songlist entry with no `_song.pak.xen`; it is the music-studio
+  jam, filtered out of the launcher's Songs list by `module_songs.cpp`), and
+  `--chartest` reports 4 venue camera-framing FAILs (z_Goth, z_Recordstore,
+  z_Harbor, z_Tool — the framed band member leaves a song-camera cut). These
+  belong to the gameplay-data / animations-and-cameras milestones (Step 4/5),
+  not to encoders or Explore. Explore frames venues with a fixed orbit camera,
+  not the song cameras, so it is unaffected (all 18 venue paks parse).
+- The explorer renders instruments/characters at the **bind pose**; animated
+  Explore previews (`clip_count`/`clip_name`) are not wired for gd07 (optional
+  ABI fields, same as gd10).
+
