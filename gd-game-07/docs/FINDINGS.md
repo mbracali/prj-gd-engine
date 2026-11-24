@@ -1129,3 +1129,135 @@ judge is now proven on 100% of real disc drum data, and same-screen 2-player MP
 is confirmed. **Partial** on the two large, honestly-deferred pieces: live drum
 controller + HUD wiring (fragile input layer + an unverifiable renderer) and a
 playable vocal mic path (a net-new subsystem = its own wave).
+
+## Onboarding Step 7.2 — universal gamepad menu + 7.1 review (2026-11-24)
+
+Milestone 7.2 (universal gamepad menu, gate 55%) plus the recurrent 7.1 review
+(mouse in every menu; the intermittent "left mode" bug). **Aggregate-first:** the
+gd07 input engine already carries the whole universal model (Phase A+B, Steps
+2–5), so this pass **verified** 7.2 and its default, **root-caused and fixed the
+left-mode bug**, and **added objective mouse-hit coverage** to `--uitest`. The
+gameplay judgment layer was not touched.
+
+### (a) Universal gamepad menu — present & faithful (verified, no change)
+
+- **Host:** `engine/src/ui/port_gamepads.cpp` (`GamepadScreen : PortScreen`), the
+  GH3-lineage host per `docs/spec-gamepad-menu.md`: four player boxes (P1 blue
+  ALWAYS ON, P2 green, P3/P4 shown "NOT IN THIS GAME" — GH has two players), each
+  with Instrument + "Bind to:" (every device + Detect…) + Customize inputs;
+  bottom `[< Back] [Export] [Import]`; right INPUTS MAPPING with the doc's
+  sections (GENERAL, 5 FRET GUITAR), two slots/control, Require Strum, Controller
+  Type (pads), Reset, Touch (P1), Save/Discard; the left locks during an edit.
+- **Reached from** Enhanced > CONTROLS > **Gamepads** (`port_enhanced.cpp:135`
+  Button `gamepads` → `PortScreens::Id::Gamepads`), the help bar's **GAMEPADS**
+  pill (clickable), and the main-menu **yellow fret / key 3** shortcut
+  (`app.cpp` `menuAt`/`Fret2`). Instruments offered: 5 Fret Guitar, Gamepad,
+  Generic MIDI (+ Drums detected-not-played, the GH/RB drum guard).
+- **Objective proof** — `--walktest gamepads` **PASSES**: opens via key 3,
+  Customize inputs → Whammy Key 1 **rebound to E by the mouse** → Save →
+  `controllers.json` has it ("gamepads: Whammy on E, controllers.json has it"),
+  re-opened via the port help-bar item (mouse). Every field/dropdown/row is
+  mouse-clickable (`GamepadScreen::mouse`, the whole screen).
+
+### (b) Default controller — keyboard as a strum-required guitar (verified)
+
+The default device is the **keyboard**, which plays the 5-fret guitar part as a
+**guitar requiring strum** (the task's "keyboard mapped as an Xbox 360 guitar,
+strum required"):
+
+- `Input::defaults(Profile::Keyboard)` (input.cpp:251): frets `1..5`/`F1..F5`,
+  **strum on Up/Down arrows** (a strum bar, not the frets), Star Power on Tab,
+  Start on Enter.
+- `requireStrum("keyboard")` defaults **true** (input.cpp:1243) → the keyboard's
+  `ControllerMode` is **Guitar** (input.cpp:936) and `gh2Type("keyboard")` is GH2's
+  **`guitar`** (the strum-bar watcher), not `joypad_guitar` (input.cpp:810).
+- The keyboard owns player slot 0 whenever no pad holds it (input.cpp
+  `keyboardSlot`), and `lastMode_` starts Guitar — so at boot with no pad the
+  active controller is the keyboard-as-strum-guitar.
+- **Objective proof** — the input self-test (`--selftest`, `runInputChecks`):
+  `1 + F1: green pressed once (Require Strum on: no strum)` (a fret alone does
+  **not** strum) and `Up arrow: Up and Strum once` (the arrows strum, in Guitar
+  mode). All input checks pass.
+
+### (c) The "left mode" bug — root cause (data) & fix
+
+**Symptom (owner):** left-handed mode "doesn't work consistently for everyone."
+
+**Root cause (grounded):** `Input::setLefty(p1, p2)` is **never called in the
+gd07 app** — only in the self-test. The reference GH1/GH2 engine gd01 calls it
+every frame (`gd-game-01/engine/src/app.cpp:2566`); the whole **gh4 lineage
+(gd04/gd10/gd07) dropped the call** (grep: only `setup.lefty = {...}` at
+`app.cpp:1658`, which feeds the **render/HUD** — `song_screen.cpp:269-270`,
+`highway2d.cpp` — but never the input layer). So the input `lefty_` flag stays
+`{false,false}`.
+
+Lefty is a **visual mirror**: `highway2d.cpp` draws each gem/button at
+`lane = 4 - fret` (587, 860, 871, 944, 981) while the **judge matches by fret
+index**. The input layer's lefty does two things (input.cpp `actionsOf`):
+mirror a **joypad's** fret order `fret = 4 - fret` (1092, GH2's
+`lefty_joypad_guitar` [C]) and swap a **guitar's** menu strum (1098-1099). A real
+guitar and the keyboard **keep their frets** (you flip the instrument; the lanes
+mirror to match) — so lefty "worked" for them. A **gamepad can't be flipped**, so
+without the input mirror its green button still hits the green gem now drawn on
+the far side: the lanes are mirrored but the buttons are not → **lefty is broken
+for gamepad players only**, which is exactly the "inconsistent for everyone."
+
+**Fix** (`app.cpp` `frame()`, minimal, non-judgment): feed the input layer from
+the song's lefty while a song plays, off in menus —
+`if (front_ && song_ && !front_->songPaused) input_.setLefty(rq.lefty[0],
+rq.lefty[1]); else input_.setLefty(false,false);` — mirroring gd01's intent. Off
+in menus so a joypad's frets are never mirrored during navigation (the pinned
+`--uitest` cannot regress).
+
+**Objective proof** — input self-test, under the same `setLefty(true,true)`:
+`lefty: pad A is green (lefty_joypad_guitar)` (a **joypad's** frets mirror) **and
+the new** `lefty: a guitar's frets are NOT mirrored (Y still yellow); only a
+joypad's are` — the two together are the root cause (device-dependent lefty).
+All input checks pass.
+
+### (d) Mouse in every menu — audit + objective per-screen coverage
+
+Mouse is routed through three uniform paths, so it is structurally supported in
+**every** menu: data-driven GH3 menus via `UiSystem::menuAt` (one hit-test over
+all focused `VMenu/HMenu`, incl. the texture-board menus a prior GD07 pass fixed
+via `pointerToViewport`, ui_system.cpp:1817-1830), the port screens via the
+pure-virtual `PortScreen::mouse`, and the help bar via `helperAt`/`helperPills`
+(`app.cpp::menuMouse`; right-click = Back).
+
+New objective check: `UiSystem::menuHitCoverage(focusable, hittable)` counts the
+focusable, visible menu items on the focused menus and how many have mouse-hit
+bounds (directly or via their focus handler's named text — exactly menuAt's
+hittability). `--uitest` runs it on every started screen and FAILS on a "dead
+screen" (a menu with items, none hittable).
+
+- **`--uitest`: 47 flow states, exit 0, "every screen started through the flow
+  manager"; mouse coverage = 47 screens with a menu, 1181 focusable items,
+  1181 mouse-hittable (0 partial gaps, 0 dead screens).** (11 states build no
+  element — the disabled `online_*`/`leaderboard_*` screens, Step 7.8.)
+- `--walktest gamepads` **PASSES** (live mouse on the gamepad menu, §a).
+
+### Honest remains / flagged
+
+- **`--walktest mouse` / `mouseall` fail on World Tour's main menu (PRE-EXISTING
+  harness, not product):** the main menu is a **3-D board** menu (venue
+  z_soundcheck). `mouse` fails at `hover:menu:main_menu_options_text` because the
+  `hover:menu:` act uses `drawnBounds` (the item's **texture-space** center) as a
+  **screen** point, which `menuAt` then re-maps screen→texture — a double
+  transform that misses. `mouseall` fails at `helpend:UP/DOWN` because WT's main
+  menu help bar shows **SELECT + GAMEPADS** (its `check:pills` prints them at real
+  screen coords, both clickable), not an UP/DOWN pill. Both are walk assumptions
+  inherited from the 2-D-menu lineage (walk.cpp last touched at the gd07 stand-up;
+  my walk edits run only in the `uitest_` path; my app edit is in-song only — the
+  baseline behaves identically). The **live board-menu mouse itself is code-wired**
+  (the GD07 `pointerToViewport` pass) and the render target is real (OpenGL on the
+  box's GPU). **Follow-up (test harness, not product):** teach `hover/click:menu:`
+  to drive board menus by scanning a screen point through `pointerToViewport` into
+  the item's texture bounds, and adapt the help-pill expectations to WT's pills —
+  this would turn board-menu live mouse into an objective check too.
+- **1 pre-existing `--selftest` FAIL, unrelated:** `jamsession` song pak
+  (`DATA/COMPRESSED/SONGS/jamsession_song.pak.xen`) is **not on this disc dump** —
+  a data-availability gap (no code here touches song loading); all input/judge
+  checks pass.
+- **7.2 gate (55%): MET for the gamepad menu + default controller + left-mode
+  fix + mouse structural coverage.** The remaining 7.1 board-menu live-mouse
+  harness check is the honest follow-up.

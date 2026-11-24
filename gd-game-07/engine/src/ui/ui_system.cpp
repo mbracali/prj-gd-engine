@@ -1871,6 +1871,33 @@ bool UiSystem::menuAt(float x, float y, bool focus, bool* isList) {
     return true;
 }
 
+void UiSystem::menuHitCoverage(int& focusable, int& hittable) const {
+    // The same hittability menuAt uses: a focusable, visible menu item is
+    // reachable by the mouse exactly when it has drawable bounds, directly or
+    // through the element its focus handler names (coordinate space does not
+    // matter here -- only whether bounds exist, which is what menuAt tests).
+    for (const Element* m : focusedElements()) {
+        if (!isMenu(*m) || m->hidden) continue;
+        for (const auto& chp : m->children) {
+            const Element& ch = *chp;
+            if (ch.notFocusable || ch.hidden) continue;
+            ++focusable;
+            float x0, y0, x1, y1;
+            bool got = unionBounds(ch, x0, y0, x1, y1);
+            for (const Element::Handler& h : ch.handlers) {
+                if (got || h.event != K("focus")) continue;
+                for (const char* name : {"id", "text_id"})
+                    if (const qb::Value* v = qs::Vm::param(h.params, K(name)); v && v->type == qb::Type::Key && !got)
+                        if (const Element* t = find(v->key); t && t != &ch) {
+                            got = unionBounds(*t, x0, y0, x1, y1);
+                            if (!got && t->bx1 > t->bx0 && t->by1 > t->by0) got = true;
+                        }
+            }
+            if (got) ++hittable;
+        }
+    }
+}
+
 std::vector<UiSystem::HelpPillHit> UiSystem::helperPills() const {
     std::vector<HelpPillHit> out;
     const Element* box = find(K("user_control_container"));

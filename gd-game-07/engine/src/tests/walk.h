@@ -134,6 +134,11 @@ private:
     size_t created0_ = 0;
     int empty_ = 0;
     std::vector<std::string> emptyStates_;
+    // uitest mouse-coverage audit: focusable menu items summed over every state
+    // that had a focused menu, and how many the mouse can hit (menuHitCoverage).
+    int uiMenuStates_ = 0, uiMouseFocusable_ = 0, uiMouseHittable_ = 0;
+    std::vector<std::string> uiMouseGapStates_;   // a state missing some items (partial gap)
+    std::vector<std::string> uiMouseDeadStates_;  // a menu with items but none hittable (a dead screen)
     void uiStep(FrontEnd& fe, double now);
     // An act; false fails the walk (failure_ says why).
     bool act(const std::string& what, FrontEnd& fe, WalkHost& host);

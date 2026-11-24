@@ -230,6 +230,12 @@ public:
     // the element its focus handler names, as the main menu's do). `focus`
     // moves the selection there (a hover). Returns whether one was hit.
     bool menuAt(float x, float y, bool focus, bool* isList = nullptr);
+    // Mouse-hit coverage over the focused GH3 menus right now: the number of
+    // focusable, visible menu items (`focusable`) and how many of them menuAt
+    // can hit -- i.e. have drawable bounds (directly, or via the element their
+    // focus handler names). Any shortfall is an item the mouse cannot reach.
+    // Used by --uitest to audit "the mouse works in every menu" per screen.
+    void menuHitCoverage(int& focusable, int& hittable) const;
     // A screen point (1280 x 720) -> the point of a UI-texture viewport's
     // window under it (the menu boards in the 3D scene; MenuScene sets it).
     std::function<bool(uint32_t viewport, float x, float y, float& vx, float& vy)> pointerToViewport;

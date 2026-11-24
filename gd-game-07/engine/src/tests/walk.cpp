@@ -1013,7 +1013,19 @@ void Walk::uiStep(FrontEnd& fe, double now) {
     if (stateAt_ >= 0 && now - stateAt_ < 500) return;
     if (stateAt_ >= 0) {
         const size_t made = size_t(fe.ui().stats().created) - created0_;
-        if (made == 0) ++empty_, emptyStates_.push_back(qbkey::name(states_[stateIdx_ - 1]));
+        const std::string prev = qbkey::name(states_[stateIdx_ - 1]);
+        if (made == 0) ++empty_, emptyStates_.push_back(prev);
+        // Mouse-hit coverage for this screen: every focusable menu item must be
+        // reachable by the mouse (7.1: the mouse works in every menu). A screen
+        // with a focused menu whose items are all unreachable is a dead screen.
+        int focusable = 0, hittable = 0;
+        fe.ui().menuHitCoverage(focusable, hittable);
+        if (focusable > 0) {
+            ++uiMenuStates_;
+            uiMouseFocusable_ += focusable, uiMouseHittable_ += hittable;
+            if (hittable == 0) uiMouseDeadStates_.push_back(prev);
+            else if (hittable < focusable) uiMouseGapStates_.push_back(prev);
+        }
     }
     if (stateIdx_ >= states_.size()) {
         step_ = steps_.size();  // done
@@ -2091,6 +2103,20 @@ int Walk::finish(FrontEnd& fe) const {
         std::printf("uitest: %zu flow states started, %d built no element:", states_.size(), empty_);
         for (const std::string& n : emptyStates_) std::printf(" %s", n.c_str());
         std::printf("\nuitest: every screen was started through the flow manager\n");
+        // 7.1 mouse-coverage audit: the mouse reaches every focusable menu item.
+        std::printf("uitest mouse: %d screens with a menu, %d focusable items, %d mouse-hittable", uiMenuStates_, uiMouseFocusable_,
+                    uiMouseHittable_);
+        if (!uiMouseGapStates_.empty()) {
+            std::printf("; partial gaps:");
+            for (const std::string& n : uiMouseGapStates_) std::printf(" %s", n.c_str());
+        }
+        std::printf("\n");
+        if (!uiMouseDeadStates_.empty()) {
+            std::printf("uitest: FAILED: the mouse reaches no menu item on:");
+            for (const std::string& n : uiMouseDeadStates_) std::printf(" %s", n.c_str());
+            std::printf("\n");
+            return 1;
+        }
         return 0;
     }
     // Every loading screen stayed up kLoadingHoldMs (none since D23: as the original).

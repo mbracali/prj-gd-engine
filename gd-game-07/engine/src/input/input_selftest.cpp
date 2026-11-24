@@ -391,6 +391,17 @@ int runInputChecks() {
               "lefty: pad A is green (lefty_joypad_guitar)");
         SDL_SetJoystickVirtualButton(pad, SDL_GAMEPAD_BUTTON_SOUTH, false);
         pump(in, evs);
+        // Root cause of the "left mode" bug: a guitar (and the keyboard) keeps its
+        // frets under lefty -- only a joypad's are mirrored. Under the same
+        // lefty(true, true), the guitar's Y stays the yellow fret (not blue), so
+        // lefty depends on the device. The app must feed input_.setLefty from the
+        // song's lefty option (app.cpp frame()) or a gamepad in lefty plays wrong.
+        SDL_SetJoystickVirtualButton(guitar, SDL_GAMEPAD_BUTTON_NORTH, true);  // Y: yellow
+        pump(in, evs);
+        check(has(evs, Action::Fret2, true, ControllerMode::Guitar),
+              "lefty: a guitar's frets are NOT mirrored (Y still yellow); only a joypad's are");
+        SDL_SetJoystickVirtualButton(guitar, SDL_GAMEPAD_BUTTON_NORTH, false);
+        pump(in, evs);
         in.setLefty(false, false);
         in.setInGame(false);
         evs.clear();
