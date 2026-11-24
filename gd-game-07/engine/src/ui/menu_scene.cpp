@@ -723,7 +723,22 @@ void MenuScene::draw(Canvas& c) {
     view_->setTime(clockMs_ / 1000.0);
     view_->draw(cam, lightState_, lights_);
     objects_->draw(dev, cam, *venue_, lightState_, lights_);
+    // The venue's volumetric lighting, as the song stage draws it
+    // (render/venue_stage.cpp): the projector wash, the 3D cones, the soft 2D
+    // light volumes and the raytraced beams. The menu used to draw only the 3D
+    // cones, so z_soundcheck's big purple stage-light haze behind the band and
+    // logo (ref 01_main_menu.png: a bright magenta wash washing out the fire)
+    // never came up and the main menu read dark / backdrop-less (GW-003). The
+    // 2D volumes and the raytraced beams need the scene's depth once (they, and
+    // the projectors, write none); depthSnapshot is valid only inside the
+    // screen-fx pass (its scene target bound), so this all sits before fx_.end.
+    static const bool noProjectors = SDL_getenv("GD07_NO_PROJECTORS") != nullptr;  // development aid: compare without them
+    if (!noProjectors) view_->drawProjectors(cam, lights_);
     view_->drawVolumes(cam, lights_);
+    const gfx::TextureId sceneDepth = fx ? fx_.depthSnapshot() : gfx::TextureId{};
+    view_->drawVolumes2D(cam, lights_, sceneDepth);
+    static const bool noRays = SDL_getenv("GD07_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
+    if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, sceneDepth);
     if (fx) {
         // Enhanced: Remove All Effects drops GH3's own; Bloom None its bloom (as the songs').
         screenfx::Params p = fxParams_;
