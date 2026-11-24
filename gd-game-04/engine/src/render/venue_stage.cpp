@@ -279,11 +279,17 @@ bool VenueStage::attachStep(gfx::RenderDevice& device, const Disc& disc, std::st
             t = {};
         }
         device_ = &device;
+        // Enhanced > Sharper Character Shadows: the original's own 1024 / 512
+        // (scale 1, the default) or 2x / 4x per side (a port enhancement; the
+        // projection, bias and filter are the original's, so a larger map is
+        // only finer-grained). Captured here for shadowPass, as the maps are
+        // this size for the song (a live change applies from the next song).
+        shadowScale_ = std::clamp(SDL_getenv("GD04_SHADOW_SCALE") ? std::atoi(SDL_getenv("GD04_SHADOW_SCALE")) : shadowScale, 1, 4);  // env: a development aid / test override
         if (!SDL_getenv("GD04_NO_SHADOWS"))
             for (int i = 0; i < 2; ++i) {
                 std::string serr;
                 gfx::TargetDesc td;
-                td.width = td.height = i ? 512 : 1024;
+                td.width = td.height = (i ? 512 : 1024) * shadowScale_;
                 td.depth = true;
                 shadow_[size_t(i)] = device.createTarget(td, serr);
                 if (!shadow_[size_t(i)]) SDL_Log("venue: no shadow map: %s", serr.c_str());
@@ -504,7 +510,9 @@ void VenueStage::shadowPass(double ms, const venue::CamPose& cam) {
     if (particles_ && particles_->shadowLight)
         for (size_t i = 0; i < v.lights.size(); ++i)
             if (v.lights[i].name == particles_->shadowLight) best = int(i);
-    if (log) SDL_Log("shadow: light %s", best >= 0 ? qbkey::names().get(v.lights[size_t(best)].name).c_str() : "none");
+    if (log)
+        SDL_Log("shadow: light %s, cascades %d / %d (scale %dx)", best >= 0 ? qbkey::names().get(v.lights[size_t(best)].name).c_str() : "none",
+                kCascadeSize[0] * shadowScale_, kCascadeSize[1] * shadowScale_, shadowScale_);
     if (best < 0) return;
     const venue::Vec3 d = v.lights[size_t(best)].dir;
     const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
@@ -557,15 +565,16 @@ void VenueStage::shadowPass(double ms, const venue::CamPose& cam) {
             return g;
         };
         const gh3shader::Globals g = casterGlobals(kBias[i]), g2 = casterGlobals(kBiasDouble[i]);
+        const int size = kCascadeSize[i] * shadowScale_;  // Sharper Character Shadows: 1 = original 1024 / 512
         dev.setTarget(shadow_[size_t(i)]);
-        dev.setViewport(0, 0, kCascadeSize[i], kCascadeSize[i]);
+        dev.setViewport(0, 0, size, size);
         const float white[4] = {1, 1, 1, 1};
         dev.clear(white, true);
         // The acne probe (cascade 0, where the skinning happens): GD04_SHADOW_LOG, --venuetest.
         BandView::AcneProbe probe;
         const bool probing = i == 0 && band_->view() && (log || acneProbe);
         if (probing) {
-            probe.vp = vp, probe.size = float(kCascadeSize[i]);
+            probe.vp = vp, probe.size = float(size);
             probe.bias[0] = kBias[i] * biasScale, probe.bias[1] = kBiasDouble[i] * biasScale, probe.oldBias = kBias[i];
             band_->view()->setAcneProbe(&probe);
         }
@@ -580,7 +589,7 @@ void VenueStage::shadowPass(double ms, const venue::CamPose& cam) {
         if (band_->view()) shadowDraws_[size_t(i)] = band_->view()->stats().drawsLastFrame;
         s.tex[i] = dev.targetDepth(shadow_[size_t(i)]);
         s.vp[i] = vp;
-        s.size[i] = float(kCascadeSize[i]);
+        s.size[i] = float(size);  // g_shadowMapSize (c143): the receiver's PCF half-texel tracks the real resolution
     }
     dev.setTarget(oldTarget);
     dev.setViewport(vx, vy, vw, vh);

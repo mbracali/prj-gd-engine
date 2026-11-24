@@ -239,6 +239,11 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
         {Kind::Check, "shadows_all", "All Band Mates Cast Shadows", true,
          "Every band mate gets a spotlight from above and casts a shadow on the stage floor."},
+        {Kind::Choice, "self_shadow", "Sharper Character Shadows", true,
+         "The resolution of the shadows the band casts on themselves and the stage. Original is the Xbox 360's own soft, "
+         "low-resolution shadow map; 2x and 4x draw that map larger for crisper shadow edges on faces, hands and clothes, "
+         "at the cost of GPU memory and a little time. The shape, direction and darkness stay the same. From the next song.",
+         {{"original", "Original"}, {"2x", "2x"}, {"4x", "4x"}}},
         {Kind::Choice, "more_lights", "More Lights on Venues", true,
          "Richer stage lighting: brighter floor pools and a soft beam on each band mate.",
          {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},

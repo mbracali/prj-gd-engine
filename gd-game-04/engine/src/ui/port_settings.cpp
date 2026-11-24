@@ -63,6 +63,10 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"sharpening", {"off", "low", "high"}},
         {"star_blur", {"none", "light", "medium", "strong", "stronger"}},
         {"shadows_all", {"off", "on"}},
+        // Sharper Character Shadows (a port enhancement): the band's dynamic
+        // self-shadow map resolution. "original" (the default) is the Xbox
+        // 360's own 1024 / 512; 2x / 4x draw it larger for sharper edges.
+        {"self_shadow", {"original", "2x", "4x"}},
         {"more_lights", {"none", "1.5x", "2x", "2.5x"}},
         {"light_dust", {"none", "1.5x", "2x", "2.5x"}},
         {"no_shaky_cam", {"off", "on"}},
@@ -151,6 +155,7 @@ const Values& lowest() {
     static const Values v = {{"bokeh", "none"},       {"particles", "none"},  {"bloom", "none"},       {"cinematic_color", "off"},
                              {"film_grain", "none"},  {"chromatic", "none"},  {"ssao", "none"},        {"star_blur", "none"},
                              {"shadows_all", "off"},  {"more_lights", "none"}, {"light_dust", "none"}, {"color_grade", "off"},
+                             {"self_shadow", "original"},
                              {"sharpening", "off"},   {"antialiasing", "none"}, {"ai_upscaling", "none"}, {"sharp_ui", "off"}, {"no_effects", "off"}};
     return v;
 }
@@ -165,6 +170,7 @@ const Values& highest() {
     static const Values v = {{"bokeh", "stronger"},   {"particles", "2x"},      {"bloom", "3x"},        {"cinematic_color", "on"},
                              {"film_grain", "stronger"}, {"chromatic", "strong"}, {"ssao", "stronger"},   {"star_blur", "stronger"},
                              {"shadows_all", "on"},   {"more_lights", "2.5x"},   {"light_dust", "2.5x"}, {"color_grade", "off"},
+                             {"self_shadow", "4x"},
                              {"sharpening", "low"},   {"antialiasing", "taa"},   {"ai_upscaling", "none"}, {"sharp_ui", "on"}, {"no_effects", "off"}};
     return v;
 }
