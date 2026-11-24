@@ -46,6 +46,7 @@ target_sources(gd07 PRIVATE
   src/data/fsb.cpp
   src/data/inflate.cpp
   src/data/json.cpp
+  src/data/jam.cpp
   src/data/matlib.cpp
   src/data/pak.cpp
   src/data/qb.cpp
@@ -105,6 +106,7 @@ target_sources(gd07 PRIVATE
   src/game/match.cpp
   src/game/touch_strip.cpp
   src/game/save.cpp
+  src/game/instrument.cpp
   src/game/shop.cpp
   src/game/car.cpp
   src/game/song_db.cpp
@@ -125,6 +127,8 @@ target_sources(gd07 PRIVATE
   src/tests/selftest.cpp
   src/tests/shoptest.cpp
   src/tests/castest.cpp
+  src/tests/instrtest.cpp
+  src/tests/jamtest.cpp
   src/tests/walk.cpp
   src/tests/selftest_play.cpp
   src/tests/sfxtest.cpp

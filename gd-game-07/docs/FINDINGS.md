@@ -1710,3 +1710,123 @@ is now an objective check, and the full option set (solo/band/co-op/face-off/
 pro-face-off/battle) is Ghidra-confirmed against `guitar_gamemode.qb` +
 `ui_game_mode.qb`. The honest remainder is **2-player competitive walk coverage**
 (a multiplayer-wave item), not the quickplay mode itself.
+
+## Onboarding Step 7.5 — create-a-rockstar (instrument) + GHTunes (music) (2026-11-24)
+
+Milestone 7.5 instrument/music half (the character half is a sibling agent;
+this agent owns Create-A-Rockstar **instrument** creation and the **GHTunes**
+music studio). Aggregate-first, Ghidra/QB/disc-grounded, rendering-free,
+objectively tested. No engine/UI/judge/input decoder changed; the pinned
+`--uitest` stays **47 flow states, 1181/1181 mouse-hittable** (verified).
+
+### (a) Create-A-Rockstar — the instrument editor [C data + scripts]
+
+World Tour builds a custom instrument the same way it builds a character: out
+of **CAS part arrays**, one option chosen per slot. The instrument slots (the
+`CAS_<Instr>_<Slot>` globals, `cas_parts.qb`):
+- **Guitar / Bass**: Body, Neck, Head, Pickups, Pickguards, Bridges, Knobs,
+  Strings, Highway (`CAS_Guitar_Body` … `CAS_Guitar_Highway`, and the
+  `CAS_Bass_*` set).
+- **Drums**: `CAS_Drums`, `CAS_Drums_Sticks`, `CAS_Drums_Highway`.
+- **Mic**: `CAS_Mic`, `CAS_Mic_Stand`.
+
+Measured on our disc (`--instrtest`): guitar **9 slots, 8 populated, 499
+options**; bass **9 slots, 8 populated, 237 options**; drums **3 slots, 2
+populated, 7 options**; mic **2 slots, 2 populated, 18 options**.
+
+The chosen option per part is the disc's **`cas_current_appearance`** struct
+(part → `{ desc_id, … }`); `GetCASAppearancePart(part)` returns that entry
+(`scripts\game\cas\cas_appearance.qb`). A part can only be equipped if it is
+**owned** — `is_part_unlocked_purchased` (`cas_utils.qb`), the exact predicate
+the Rock Store sells against (Step 7.4): a free default option is owned by
+everyone; a priced/`$locked` option needs the store purchase / career unlock.
+The instrument's **name** is `instrument_name` (a wide string) and its kind is
+`instrument_type`; both save with the appearance into `band_info`
+(`set_current_band_part_flags` / `SetGlobalTags band_info`, the same versioned
+save the store uses).
+
+**Implemented** — `engine/src/game/instrument.{h,cpp}` (`namespace instrument`,
+rendering-free): `slots(kind)`, `options(g, part)` (every selectable `desc_id`
+from the part array, not only the priced ones the store sells), `makeDefault`,
+`choose(inst, g, bandInfo, part, descId)` → `Ok` / `NotASlot` / `NotAnOption`
+/ `NotOwned` (option-validated **and** ownership-gated via `shop::owned`, reusing
+Step 7.4's catalog), and faithful `toBandInfo` / `fromBandInfo`
+(`instrument_type` key + `instrument_name` wstring + `cas_current_appearance`
+struct of part → `{ desc_id }`). It invents no parts — every option is the
+disc's data, and ownership is the disc's predicate.
+
+**Objective test** (`--instrtest <disc>`, headless, exit 0, data-derived):
+every kind enumerates its real slots/options; a free body option equips (`Ok`);
+a bogus `desc_id` is `NotAnOption`, a drums part on a guitar is `NotASlot`; a
+priced guitar part (`CAS_Guitar_Body/Guitar_Body16`, $500) is **`NotOwned`
+until bought**, then equippable (ownership gate proven); and a composed,
+named guitar (kind + name + all 8 chosen parts) survives a **save→reload
+round-trip** byte-for-byte through `game/save`.
+
+### (b) GHTunes `.jam` — the music-studio song format [C data: all 19 jams]
+
+The 19 studio songs (`DATA/COMPRESSED/JAMS/jam1.pak.xen`,
+`c:/gh4/data/jams/*.jam`) were previously UNDECODED (Step 2). Decoded now.
+
+A `.jam` is **not** a standard `.qb` file; it is a Neversoft **keyed-struct
+stream**: a flat sequence of members, each `tag(1) + name-key(4, a standard QB
+key stored LITTLE-endian) + typed value`:
+
+| tag | meaning |
+|---|---|
+| `0x00` | end of the current struct (pop) |
+| `0x04 key wstrz` | UTF-16LE NUL-terminated wide string |
+| `0x0a u16` | array header: the element count; that many struct elements follow inline |
+| `0x0c key` | open a sub-struct (members until `0x00`) |
+| `0x12 key` | integer, value 0 (compressed — no value bytes) |
+| `0x10..0x18 key` | integer, value = `(tag & 0x0F)` little-endian bytes |
+
+The keys resolve against the disc's debug-name table **read little-endian**
+(e.g. bytes `ba 67 6b 90` → `0x906b67ba` = `qbkey("time")`). Confirmed field
+names: `editable_jam_markers` (an **array of section markers**, each `time`,
+`marker_name`, `bpm`, `lightshow`) + `editable_jam_markers_size`;
+`editable_jam_album_cover`(`_size`); and the three instrument note tracks
+`editable_song_expert` (guitar), `editable_song_rhythm_expert` (bass),
+`editable_song_drum_expert` (drums); plus `last_root` / `last_scale`.
+
+After the keyed header comes the per-instrument **note-performance payload**, a
+separate encoding in one of two shapes, detected by its first byte:
+- **note-table (`0x01`)**: a `0x01` + `u16` count, then fixed 8-byte records
+  (`u16 duration, u16 note, u32 time`) — the "studio" jams.
+- **opcode-stream (`0x8x`)**: a `0x8D/0x8E/0x90/0x91…` delta-opcode bytestream —
+  the recorded jams.
+
+**Implemented** — `engine/src/data/jam.{h,cpp}`: a self-contained parser that
+decodes the keyed header fully (section markers with names/time/bpm/lightshow,
+marker counts, album cover, which instrument tracks are present, the sample
+dictionary `0x0c` count) and **classifies + measures** the note payload. It
+loads all 19 from the jam pak.
+
+**Objective test** (`--jamtest <disc>`, headless, exit 0, data-derived): **19
+jams parsed, 0 header parse errors; 56 section markers total** (names resolve:
+Intro/Verse/Chorus/Bridge/Riff/Solo/Fill/Outro), bpm 80–140 per jam;
+`studioexample1` carries all three tracks (G/R/D); **note payloads: 9
+note-table + 10 opcode-stream, 508,139 bytes total**, every one classified.
+
+### (c) Honest scope — what is deferred to a dedicated GHTunes wave
+
+The container + song structure (markers/sections/tempo/lightshow/track
+presence/album cover) is fully decoded and tested. **Not** done here, and
+flagged as a dedicated **GHTunes composition wave** (large, standalone):
+- **Full note decode** of the two note-payload encodings into playable events
+  (the 8-byte note-table records are byte-identified; the `0x8x` delta-opcode
+  stream and the per-sample dictionary GUIDs are not fully decoded).
+- **Synthesis / playback** of a jam (the GHTunes sampler/instrument banks) and
+  the **composition studio UI** (track/pattern/note editing, tempo/scale, the
+  song-writer/wizard flows — `jam_songwriter.pak`, `jam_wizard.pak`,
+  `jam_advanced.pak`, `jam_ghtunes.pak`). These are not faked.
+- The instrument editor's **live UI-click** wiring is the same board-menu
+  surface deferred in 7.1/7.4 (the model is ready for it).
+
+### (d) Files touched
+
+- New: `engine/src/game/instrument.{h,cpp}`, `engine/src/data/jam.{h,cpp}`,
+  `engine/src/tests/instrtest.{h,cpp}`, `engine/src/tests/jamtest.{h,cpp}`.
+- Wiring: `engine/src/main.cpp` (`--instrtest` / `--jamtest`),
+  `engine/CMakeLists.txt`. No decoder/engine/UI/judge/input change; `--uitest`
+  pinned at 1181/1181.

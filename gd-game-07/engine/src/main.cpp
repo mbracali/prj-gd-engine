@@ -30,6 +30,8 @@
 #include "tests/exploretest.h"
 #include "tests/shoptest.h"
 #include "tests/castest.h"
+#include "tests/instrtest.h"
+#include "tests/jamtest.h"
 #include "tests/venuetest.h"
 #include "video/movie_player.h"
 #include "tests/sfxtest.h"
@@ -72,6 +74,9 @@ void usage() {
         "                       (shop ownership enforced), round-trip the created characters through a save, build a member\n"
         "  --exploretest        the launcher's model explorer headless: every Explore category (Venues / Guitars /\n"
         "                       Bass / Drums / Mics / Chars) loads and render-adds its models (module_explore path)\n"
+        "  --instrtest          the Create-A-Rockstar instrument editor headless: CAS slots/options per kind, choose\n"
+        "                       (option + ownership gated), name, and a save->reload round-trip\n"
+        "  --jamtest            parse every GHTunes .jam header (markers/bpm/tracks) and classify its note payload\n"
         "Environment: GD07_KEYS=\"<ms>:<key>,...\" scripted menu keys; GD07_SCREENSHOT=<file.bmp> with\n"
         "  GD07_SCREENSHOT_AT=<ms>[,<ms>...] saves frames; GD07_LOG=<file> also writes the log to that file\n"
         "  (Windows: gd07.log in the save folder); GD07_STATS=1 logs fps; GD07_PERF=1 a frame-time breakdown.\n"
@@ -161,6 +166,7 @@ int run(int argc, char** argv) {
     std::string movie;
     bool audittest = false, formattest = false, shadertest = false, selftest = false, sfxtest = false, scripttest = false;
     bool venuetest = false, chartest = false, drumtest = false, exploretest = false, shoptest = false, castest = false;
+    bool instrtest = false, jamtest = false;
     std::string songAudio;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -182,6 +188,8 @@ int run(int argc, char** argv) {
         else if (a == "--exploretest") exploretest = true;
         else if (a == "--shoptest") shoptest = true;
         else if (a == "--castest") castest = true;
+        else if (a == "--instrtest") instrtest = true;
+        else if (a == "--jamtest") jamtest = true;
         else if (a == "--drumtest") drumtest = true;
         else if (a == "--sfxtest") sfxtest = true;
         else if (a == "--songaudiotest") songAudio = value();
@@ -202,7 +210,7 @@ int run(int argc, char** argv) {
     if (shadertest) return runShaderTest(opt.dataPath);
     if (drumtest) return runDrumTest();  // data-free: the drum judge + input guard
     if ((!movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest || exploretest ||
-         shoptest || castest || !opt.walk.empty()) &&
+         shoptest || castest || instrtest || jamtest || !opt.walk.empty()) &&
         opt.dataPath.empty()) {
         usage();
         return 2;
@@ -215,6 +223,8 @@ int run(int argc, char** argv) {
     if (exploretest) return runExploreTest(opt.dataPath);
     if (shoptest) return runShopTest(opt.dataPath);
     if (castest) return runCasTest(opt.dataPath);
+    if (instrtest) return runInstrTest(opt.dataPath);
+    if (jamtest) return runJamTest(opt.dataPath);
     if (sfxtest) return runSfxTest(opt.dataPath);
     if (!songAudio.empty()) return runSongAudioTest(opt.dataPath, songAudio);
     if (scripttest) return runScriptTest(opt.dataPath);
