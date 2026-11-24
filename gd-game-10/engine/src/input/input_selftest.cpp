@@ -12,6 +12,9 @@
 #include <string>
 #include <vector>
 
+#include "game/note_track.h"
+#include "game/player.h"
+#include "game/tuning.h"
 #include "input/input.h"
 #include "platform/paths.h"
 
@@ -143,6 +146,104 @@ int runInputChecks() {
         in.setInGame(false);
         out.clear();
     }
+    // ---- Controls improvement Phase A (2026-11-24 audit), propagated from the
+    // gd01 anchor: the calibrated SDL->action layer, data-derived expected-vs-
+    // measured on the named constants. The gameplay judgment layer (player.cpp's
+    // GH3 per-frame judge) is asserted unchanged at the end.
+    {
+        const int full = int(Input::kAxisFull);
+        using K = Input::Source::Kind;
+        // A1 axis-as-button: a half-deflected axis (~0.49, the OLD press point)
+        // must NOT fire a fret; a full pull (~0.8) does; it releases at ~0.6.
+        check(!Input::axisButtonActive(K::AxisPos, int(0.49f * full), false), "A1: half-pulled axis (0.49) does not press a fret");
+        check(Input::axisButtonActive(K::AxisPos, int(0.80f * full), false), "A1: full-pulled axis (0.80) presses a fret");
+        check(Input::axisButtonActive(K::AxisPos, int(0.70f * full), true), "A1: 0.70 while held stays pressed (hysteresis band)");
+        check(!Input::axisButtonActive(K::AxisPos, int(0.60f * full), true), "A1: releases at 0.60 (below kAxisRelease)");
+        check(!Input::axisButtonActive(K::AxisNeg, int(0.80f * full), false), "A1: a positive push does not press an AxisNeg binding");
+        check(Input::kAxisPress == 0.75f && Input::kAxisRelease == 0.65f, "A1: press 0.75 / release 0.65 named constants");
+    }
+    {
+        const int full = int(Input::kAxisFull);
+        using K = Input::Source::Kind;
+        // A2 tilt direction + the 3-frame hold on an axis-bound Gyro.
+        check(Input::tiltPast(K::AxisPos, int(0.95f * full)), "A2: a near-full tilt one way is past the tilt threshold");
+        check(!Input::tiltPast(K::AxisPos, -int(0.95f * full)), "A2: the same tilt the OTHER way is not (one direction)");
+        check(!Input::tiltPast(K::AxisPos, int(0.70f * full)), "A2: a partial tilt (0.70) is not past the tilt threshold");
+        int f = 0;
+        check(!Input::tiltDeploy(true, f), "A2: a one-frame tilt does not deploy");
+        check(!Input::tiltDeploy(false, f), "A2: a one-frame flick never deploys");
+        f = 0;
+        bool deployed = false;
+        for (int i = 0; i < Input::kTiltHoldFrames; ++i) deployed = Input::tiltDeploy(true, f);
+        check(deployed, "A2: a tilt held kTiltHoldFrames frames deploys Star Power");
+        check(Input::tiltDeploy(true, f), "A2: it stays deployed while the tilt is held");
+        check(!Input::tiltDeploy(false, f), "A2: releasing the tilt ends it");
+        f = 0;
+        bool any = false;
+        for (int i = 0; i < 10; ++i) any = any || Input::tiltDeploy(false, f);
+        check(!any, "A2: a wrong-direction tilt never deploys, however long");
+        check(Input::kTiltHoldFrames == 3, "A2: the tilt hold default is 3 frames (GH3)");
+    }
+    {
+        // A2 + judgment-layer regression: the Star Power meter gate in the
+        // judgment layer (player.cpp updateStarPower, UNTOUCHED by this controls
+        // pass). The trigger (Select / tilt) never deploys on an empty meter,
+        // does not deploy just under the gate, and deploys at exactly 50 - which
+        // pins kStarPowerNeeded (50) unchanged through observable behaviour.
+        NoteTrack track;
+        Tuning tuning;
+        tuning.starPowerTriggerFrames = 3;  // GH3's star_power_trigger_frames
+        auto deploysAt = [&](float meter) {
+            Player jp(track, tuning, /*difficulty*/ 0, /*noFail*/ true);
+            jp.setStarPowerAmount(meter);
+            FrameInput fi;
+            fi.starPower = true;  // Select held (an instant trigger)
+            jp.frame(0.0, 16.0, fi);
+            return jp.stats().starPowerActive;
+        };
+        check(!deploysAt(0.0f), "A2: the trigger never deploys on an empty Star Power meter");
+        check(!deploysAt(49.0f), "judge: the Star Power gate holds just under 50 (deploy level unchanged)");
+        check(deploysAt(50.0f), "judge: the Star Power gate deploys at exactly 50 (kStarPowerNeeded unchanged)");
+    }
+    {
+        // A5 whammy input-layer deadzone / action constants.
+        check(Input::whammyDeadzone(0.05f) == 0.0f, "A5: below the 0.08 deadzone reads 0");
+        check(Input::whammyDeadzone(Input::kWhammyDeadzone) == 0.0f, "A5: exactly at the deadzone reads 0");
+        check(std::fabs(Input::whammyDeadzone(Input::kWhammyDeadzone + (1.0f - Input::kWhammyDeadzone) * 0.5f) - 0.5f) < 1e-4f, "A5: half past the deadzone reads 0.5");
+        check(Input::kWhammyDeadzone == 0.08f && Input::kWhammyAction == 0.15f, "A5: deadzone 0.08 / action 0.15 named constants");
+    }
+    {
+        // A4 menu strum debounce: two Up edges from one device within 52 ms
+        // advance the menu once; past 52 ms, twice. (The Up arrow is MenuUp +
+        // StrumUp, so a noisy strum bounces it.)
+        Input in;
+        in.setSaveDir(dir);
+        std::vector<InputEvent> out;
+        auto keyAt = [&](SDL_Keycode kc, bool down, uint64_t ns) {
+            SDL_Event e{};
+            e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+            e.key.key = kc, e.key.down = down, e.key.timestamp = ns;
+            in.handle(e, out);
+        };
+        auto count = [&](Action a, bool down) {
+            return std::count_if(out.begin(), out.end(), [&](const InputEvent& e) { return e.action == a && e.down == down; });
+        };
+        const uint64_t base = SDL_GetTicksNS() + 60ull * 1000000000ull;  // safely after any earlier synthetic events
+        out.clear();
+        keyAt(SDLK_UP, true, base);
+        keyAt(SDLK_UP, false, base + 5000000ull);
+        keyAt(SDLK_UP, true, base + 40000000ull);  // bounce within 52 ms
+        keyAt(SDLK_UP, false, base + 45000000ull);
+        check(count(Action::Up, true) == 1, "A4: two strum edges within 52 ms advance the menu once");
+        out.clear();
+        const uint64_t base2 = base + 1000000000ull;
+        keyAt(SDLK_UP, true, base2);
+        keyAt(SDLK_UP, false, base2 + 5000000ull);
+        keyAt(SDLK_UP, true, base2 + 65000000ull);  // past 52 ms
+        keyAt(SDLK_UP, false, base2 + 70000000ull);
+        check(count(Action::Up, true) == 2, "A4: two strum edges 65 ms apart advance the menu twice");
+        std::remove((dir + "controllers.json").c_str());
+    }
     {
         // controllers.json of 0.1.7 (version 1): its keyboard bindings carry over.
         std::ofstream(dir + "controllers.json")
@@ -217,13 +318,27 @@ int runInputChecks() {
         for (const InputEvent& e : evs) analog = analog || (e.action == Action::Whammy && e.down && e.analog);
         check(analog, "... and its Whammy action is marked analog");
         evs.clear();
+        // A2: a near-full tilt one way deploys Star Power, but only after it is
+        // held kTiltHoldFrames (3) game frames in a row (poll() samples it per
+        // frame; the event pass skips the axis Gyro). A one- or two-frame flick
+        // never deploys. The deploy is marked as a tilt (not an instant Select).
+        auto pollTilt = [&] { in.poll(SDL_GetTicksNS(), evs); };
         SDL_SetJoystickVirtualAxis(guitar, SDL_GAMEPAD_AXIS_RIGHTY, 32767);  // tilt
         pump(in, evs);
-        check(has(evs, Action::StarPower, true, ControllerMode::Guitar), "guitar tilt deploys Star Power");
+        check(evs.empty(), "A2: the tilt does not deploy on the event pass (no instant tilt)");
+        pollTilt();
+        pollTilt();
+        check(!has(evs, Action::StarPower, true, ControllerMode::Guitar), "A2: a tilt held under 3 frames does not deploy");
+        pollTilt();  // the 3rd active frame
+        bool tiltDeployed = false;
+        for (const InputEvent& e : evs) tiltDeployed = tiltDeployed || (e.action == Action::StarPower && e.down && e.tilt);
+        check(has(evs, Action::StarPower, true, ControllerMode::Guitar) && tiltDeployed, "A2: a tilt held 3 frames deploys Star Power (marked as a tilt)");
         evs.clear();
         // GD10-113: back level, then Select (the guitar's Back): Star Power at once, not a tilt.
         SDL_SetJoystickVirtualAxis(guitar, SDL_GAMEPAD_AXIS_RIGHTY, 0);
         pump(in, evs);
+        pollTilt();  // the tilt released: Star Power up (per-frame sample)
+        check(has(evs, Action::StarPower, false, ControllerMode::Guitar), "A2: releasing the tilt ends Star Power");
         evs.clear();
         SDL_SetJoystickVirtualButton(guitar, SDL_GAMEPAD_BUTTON_BACK, true);
         pump(in, evs);
@@ -287,9 +402,16 @@ int runInputChecks() {
         check(in.deviceType(g) == "Gamepad" && in.gh2Type(g) == "joypad_guitar", "... then to Gamepad");
         check(readFile(dir + "controllers.json").find("\"gamepad\"") != std::string::npos, "... saved in controllers.json");
         in.setInGame(true);
-        SDL_SetJoystickVirtualAxis(guitar, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 32767);
+        // Right shoulder is the yellow fret in the joypad layout (and nothing in
+        // the guitar layout), so it both proves the profile changed and is a
+        // full-scale button. (The virtual guitar's SDL-mapped left trigger rests
+        // at its mid-point and so cannot cross the A1 press threshold - the same
+        // half-pulled axis A1 rejects; a real pad's trigger, tested above, can.)
+        SDL_SetJoystickVirtualButton(guitar, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, true);
         pump(in, evs);
-        check(has(evs, Action::Fret0, true, ControllerMode::Joypad), "... and plays as a joypad");
+        check(has(evs, Action::Fret2, true, ControllerMode::Joypad), "... and plays as a joypad (right shoulder is the yellow fret)");
+        SDL_SetJoystickVirtualButton(guitar, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, false);
+        pump(in, evs);
         in.setInGame(false);
         for (int k = 0; k < 4; ++k) in.cycleDeviceType(g, 1);
         check(in.deviceType(g) == "Auto (Xbox 360 guitar)", "... and back to Auto");
