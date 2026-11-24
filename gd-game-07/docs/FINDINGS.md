@@ -2297,3 +2297,149 @@ overwritten.
   items mouse-hittable, 0 UNHANDLED, exit 0.
 - Files: `ui/glitches.{h,cpp}` (`ensureGlitchesGh4`), `ui/front_end.cpp` (calls it),
   `tests/enhancedtest.{h,cpp}`, `main.cpp` + `CMakeLists.txt` (`--enhancedtest`).
+
+## Onboarding Step 7.8 — online disabled (2026-11-24)
+
+The port ships NO online modes. This step RE'd World Tour's online entry points
+and made every one UNSELECTABLE (greyed + not_focusable), the faithful
+`demo_mode_disable` pattern the gh4 games use, so the online sub-tree is
+unreachable in normal play while the menu item still shows. No online flow
+state crashes (they build an empty dead-end when force-reached). Evidence:
+disc scripts dumped with `tools/qbscript.py dis`, `extracted/names.tsv`, and a
+headless `--uitest` on our disc.
+
+### (a) The online entry points (confirmed on the disc)
+
+World Tour's front end reaches online from exactly three player-visible entry
+items; every `online_*` / `net_*` / `leaderboard_*` / `*_match_*` flow state
+(~40 of them — `online_menu_fs`, `online_signin_fs`, `online_character_hub_fs`,
+`online_play_song_fs`, `online_setlist_fs`, `online_select_{guitar,bass,outfit,
+style,diff}_fs`, `online_leaderboard_{list,groups}_fs`, `view_leaderboard_fs`,
+`leaderboard_filter_fs`, `net_achievement_tracker_fs`, `net_matchmaking_fs`,
+`create_match_select_*_fs`, `custom_match_fs`, `quickmatch_search_fs`,
+`invite_joining_game_fs`, …) is only reached from inside these three:
+
+| Entry item (main menu / jam) | Handler [C script] | Leads to |
+|---|---|---|
+| ONLINE | `main_menu_select_online` -> `set_primary_controller state = uistate_net_setup require_live = 1` [C guitar_main_menu.qb] | `online_menu_fs` and the whole online tree (play, character hub, leaderboards, achievements/net) |
+| DOWNLOADS | `main_menu_select_downloads` -> `state = uistate_downloads` [C guitar_main_menu.qb] | DLC store (`online_select_downloads`/`store_select_downloads` -> `NetSessionFunc showmarketplaceui`) |
+| GHTUNES (music studio) | `jam_picked_ghtunes` -> `generic_event_choose state = uistate_signin new_state = UIstate_jam_ghtunes require_live = 1` [C menu_jam.qb] | GHTunes upload/download (`create_jam_ghtunes_menu` -> `VerifyJamUserContent`/`NetSessionFunc`) |
+
+MULTIPLAYER (`main_menu_select_multiplayer`) sets `game_mode = p2_faceoff`,
+`current_num_players = 2`, `state = uistate_select_controller` — it is LOCAL
+same-screen face-off, not online, so it stays selectable (correct). The music
+studio's own RECORD / GH MIX / TUTORIALS items (`UIstate_jam_select_song`,
+`jam_goto_tutorials`) are offline and stay selectable; only GHTUNES is online.
+There is NO main-menu LEADERBOARDS item on World Tour (that is Metallica's
+layout) — leaderboards are inside ONLINE, so disabling ONLINE seals them.
+`net_achievement_tracker` is likewise only reached from the online menu.
+
+### (b) What the port does (files)
+
+`ui/ui_system.cpp` — a single grounded online-key set `onlineKeys()`
+(`main_menu_select_online`, `main_menu_select_downloads`, `select_xbox_live`
+and gd10's `main_menu_select_xbox_live`, `jam_picked_ghtunes`,
+`uistate_net_setup`, `uistate_downloads`, `uistate_jam_ghtunes`) and a
+recursive `handlersLeadOnline(Element)` that searches an element's handlers AND
+their params. The recursion matters: a main-menu item attaches its choose
+script inline (`{ pad_choose main_menu_select_online }`), but a generic-menu
+item (the jam GHTunes icon) attaches it later via `SetScreenElementProps` with
+the real script buried as `pad_script = jam_picked_ghtunes` inside
+`generic_blocking_execute_script`'s params [C add_generic_menu_icon_item]. When
+`applyProps` sets event_handlers (create or setprops) and the tree leads
+online, the element is greyed `{rgba = [128 128 128 255] not_focusable}` and
+flagged `onlineEntry`; a text child made after its greyed container inherits
+the colour. `Element::onlineEntry` + `UiSystem::onlineEntryCoverage` report it.
+This unifies and extends the two earlier ad-hoc main-menu greying blocks
+(GD10-101 carried to WT). `GD07_MENU_DISABLE_LEGACY=1` restores Metallica-only.
+
+### (c) Objective evidence (`--uitest`, headless)
+
+`gd07 --uitest <disc>` (exit 0): **47 flow states started**, the `online_*` /
+`net_*` / `leaderboard_*` states **build no element** when force-reached (empty
+dead-end, not a crash); **mouse coverage pinned 1181/1181** across 47 screens
+(the greyed online items are excluded from the focusable set, as before);
+**`uitest online: 52 online-entry item(s) greyed+unselectable, 0 still
+selectable`**; and **`GHTunes wrapped-handler detected=1, local RECORD kept
+selectable=1`** — the recursive detector greys the wrapped GHTunes item and
+leaves the local RECORD item alone. The walk force-spawns each flow state
+directly to prove it builds without crashing; that bypasses the greyed entry
+points, so an online state building its own menu there is expected and is not a
+reachability signal — unreachability is proved by every entry point being
+unselectable.
+
+### What remains (honest)
+
+- The GHTunes jam menu is not force-built by the default `--uitest` walk (its
+  `create_jam_menu` has a camera wait loop), so the GHTunes greying is proven
+  by a deterministic wrapped-handler check mirroring the disc's
+  `add_generic_menu_icon_item` output, plus the shared `applyProps` path the
+  main-menu items exercise live. Wiring a live jam-menu walk is the same
+  live-UI remainder as 7.3/7.5/7.6/7.7.
+- Detection is by the grounded online-script/state key set; a brand-new online
+  transition not in that set would not be auto-greyed. The three WT entry
+  points above are the complete front-end set found on the disc.
+
+## Onboarding Step 7.9 — labels (trademark scrub) (2026-11-24)
+
+We must not ship console/platform trademarks in player-visible text. World
+Tour's localized UI text lives in the `.qs` tables (`qs.pak.xen`, 8,495+
+English entries); the port already applies `pcstrings::pcQsText` to every `.qs`
+string at load (`data/qs.cpp`) and `pcstrings::pcText` to QB string globals
+(inherited from gd10, GD10-039/035). This step scanned the WHOLE English `.qs`
+set plus the QB string literals for console/platform trademark naming (Xbox,
+Xbox 360, Xbox LIVE, PlayStation / PLAYSTATION®Network, PS3, Wii, Microsoft,
+Nintendo, gamertag, gamer card/profile, Xbox Dashboard, HDD, button-prompt
+console names, boot/legal screens) and closed every player-visible leak the
+existing scrub missed. Evidence: `tools/pak.py extract` of `qs.pak.xen`, a
+scan reproducing `pcQsText` exactly, and an in-engine `--uitest` check.
+
+### (a) Leaks found and fixed (`script/pc_strings.cpp`)
+
+The existing catch-all only matched the exact spellings `"Xbox LIVE"` and
+`"PlayStation®Network"`, but the disc ships other casings, so these passed
+through UNSCRUBBED:
+
+| Trademark on the disc | # strings | Was | Now |
+|---|---|---|---|
+| `PLAYSTATION®Network` (all-caps — the shipped spelling) | ~18 | leaked (catch-all tested mixed-case `PlayStation®Network`) | bare label -> `ONLINE`; sentences -> the no-online text (catch-all now case-insensitive on `playstation`) |
+| `Xbox Live` (mixed case) | 1 | leaked (catch-all tested `Xbox LIVE`) | no-online text (catch-all now nocase on `xbox live`/`xbox`) |
+| `gamer card` (lowercase, in `Press \m0 to view gamer card.`) | 1 | leaked (table only had `GAMER CARD`/`Gamer card`) | `profile` (new replaceAll) |
+| `gamertag` as a substring (`gamertag - %g`, `add_gamertag_to_band_lobby`) | 2 | leaked (table only had exact `gamertag`) | `player name` (new replaceAll) |
+| `HDD` (save/calibration messages: `Saving to the HDD.`, `Checking the HDD.`, `%dKB HDD space`, `… save data found on HDD.`) | ~7 | leaked | `disk` (new replaceAll; kept as save-system wording, not routed to the no-online text) |
+| `PS3` / `ps3` (debug lag readouts `PS3 Audio/Gem/Input Logic Lag Value: %l`, `PS3: unable to signin …`, `ps3 stuff`, `PS3_display_invite_callback`, `ps3_invite_callback`) | ~9 | leaked | token dropped (new replaceAll) |
+
+Changes, all in `pcQsText`: added `"PLAYSTATION®Network" -> "ONLINE"` to the
+whole-string table; new `replaceAll` rules for `HDD -> disk`, `gamer card ->
+profile`, `gamertag -> player name`, `PS3/ps3 -> ""`; and made the online
+catch-all case-insensitive (`containsNoCase` on `xbox live`, `playstation`,
+`xbox`). The already-handled set (Xbox 360 Controller/Headset, storage device,
+Xbox Dashboard, Microsoft points, GAMER CARD/GAMERTAG/VIEW GAMER CARD, the
+cheat/leaderboard/achievement warnings) is unchanged.
+
+### (b) Deliberately NOT scrubbed
+
+- **Song-licensing credits** `SONY BMG MUSIC ENTERTAINMENT` / `Sony ATV`
+  (~25 credit strings). "Sony" here is the record label / music publisher, not
+  the PlayStation maker; these are factual attributions in the song credits, so
+  bare "sony" is not treated as a console trademark and the credits are kept.
+- **Copyright/boot images** `boot_copyright_bg_1/2`, `boot_legal*.img` and the
+  `buttons_x360` glyph font: read-only texture/glyph DATA, not text labels. The
+  boot IIS screen's own TextBlock is just "PRESS ANY BUTTON TO ROCK..." (qs key
+  0x71da7fc7) — no trademark. Image legal/button-glyph art is out of the
+  text-label scope ("do not alter data we only read internally").
+- **The game's own title** (`GUITAR HERO WORLD TOUR` in a save string) is not a
+  console/platform trademark and is a separate branding decision; not touched
+  here (and `game-info.yaml` is untouched).
+
+### (c) Objective evidence (`--uitest`, headless)
+
+`gd07 --uitest <disc>` now also scans every loaded (scrubbed) localized string
+and fails on any residual console/platform mark:
+**`uitest labels: 9484 localized strings scanned, 0 with a console/platform
+trademark`** (marks checked: xbox, playstation, ps3, nintendo, wii, microsoft,
+gamertag, gamer card/profile, dashboard, memory unit, HDD; the Sony music
+credits do not contain these so they are untouched). A standalone scan of the
+raw `qs.pak.xen` reproducing `pcQsText` confirms 0 leaks outside the kept Sony
+credits. QB string literals in `qb.pak.xen` carried no console/platform
+trademark (ASCII or UTF-16) to scrub; player text is `.qs`.

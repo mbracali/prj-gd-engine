@@ -94,6 +94,7 @@ const std::unordered_map<std::string, std::string>& qsTable() {
         {"Xbox LIVE:", "ONLINE:"},
         {"Xbox LIVE Main Menu", "Online Main Menu"},
         {"PlayStation®Network", "ONLINE"},
+        {"PLAYSTATION®Network", "ONLINE"},  // the disc's own all-caps spelling (the one actually shipped)
         {"GAMER CARD", "PROFILE"},
         {"Gamer card", "Profile"},
         {"VIEW GAMER CARD", "VIEW PROFILE"},
@@ -157,10 +158,30 @@ std::string pcQsText(const std::string& text) {
     replaceAll(s, "storage device", "save location");
     replaceAll(s, "STORAGE DEVICE", "SAVE LOCATION");
     replaceAll(s, "Please return to the Xbox Dashboard and delete some existing data", "Please free some disk space");
+    // The HDD (hard-disk drive) is console/PS3 save wording; the PC port saves
+    // to disk. These are save-system messages (offline), so they keep their
+    // meaning rather than falling through to the no-online text below.
+    replaceAll(s, "HDD", "disk");
+    // Xbox LIVE "gamer card" / "Gamer Card" is console profile wording.
+    replaceAll(s, "gamer card", "profile");
+    replaceAll(s, "Gamer Card", "Profile");
+    replaceAll(s, "gamertag", "player name");
+    replaceAll(s, "Gamertag", "Player name");
+    // "PS3" is a console/platform trademark (it survives in some debug / invite
+    // / calibration strings on the disc). Drop the token wherever it is left; it
+    // never carries meaning the player needs (GD07 7.9). Record-label credits
+    // "SONY BMG" / "Sony ATV" are music attributions, not the PlayStation maker,
+    // and are deliberately NOT touched.
+    replaceAll(s, "PS3", "");
+    replaceAll(s, "ps3", "");
     // Online play is not in the port: its preferences name it plainly, the rest say so.
     replaceAll(s, "for Xbox LIVE play", "for online play");
     replaceAll(s, "the Xbox LIVE lobby", "the online lobby");
-    if (s.find("Xbox LIVE") != std::string::npos || s.find("PlayStation®Network") != std::string::npos ||
+    // Case-insensitive on the platform names: the disc ships "PLAYSTATION®Network"
+    // (all caps) and "Xbox Live" as well as "Xbox LIVE", and every one must go
+    // (GD07 7.9 trademark scrub). "xbox" alone is a safety net after the pad /
+    // headset / console phrases above have already been rewritten.
+    if (containsNoCase(s, "xbox live") || containsNoCase(s, "playstation") || containsNoCase(s, "xbox") ||
         containsNoCase(s, "gamer profile") || s.find("Xbox Dashboard") != std::string::npos ||
         s.find("set your console") != std::string::npos || s.find("signed in to enter the lobby") != std::string::npos)
         s = kNoOnline;

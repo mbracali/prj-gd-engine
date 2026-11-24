@@ -139,6 +139,9 @@ private:
     int uiMenuStates_ = 0, uiMouseFocusable_ = 0, uiMouseHittable_ = 0;
     std::vector<std::string> uiMouseGapStates_;   // a state missing some items (partial gap)
     std::vector<std::string> uiMouseDeadStates_;  // a menu with items but none hittable (a dead screen)
+    // 7.8 online disabled: greyed online-entry items seen across the walk, and
+    // any that stayed selectable (must be 0).
+    int uiOnlineSeen_ = 0, uiOnlineFocusable_ = 0;
     void uiStep(FrontEnd& fe, double now);
     // An act; false fails the walk (failure_ says why).
     bool act(const std::string& what, FrontEnd& fe, WalkHost& host);

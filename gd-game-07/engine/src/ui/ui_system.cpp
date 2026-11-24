@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cmath>
 #include <exception>
+#include <unordered_set>
 
 #include "data/disc.h"
 #include "data/pak.h"
@@ -35,6 +36,55 @@ bool fitLegacy() {
 uint32_t vpKey(const qb::Value* v) { return v && (v->type == qb::Type::Key || v->type == qb::Type::KeyPtr) ? v->key : 0; }
 
 uint32_t K(const char* s) { return qbkey::key(s); }
+
+// 7.8 online disabled: the scripts and ui/flow states that lead to an online
+// mode in World Tour's front end. The port ships no online, so any menu item
+// whose handler tree reaches one of these is greyed + not_focusable (the
+// original's demo_mode_disable pattern), matching gd01..gd03/gd10. Grounded in
+// the disc scripts (scripts\guitar\guitar_main_menu.qb, scripts\guitar\menu\
+// menu_jam.qb): ONLINE = main_menu_select_online (-> uistate_net_setup,
+// require_live = 1); DOWNLOADS/DLC store = main_menu_select_downloads
+// (-> uistate_downloads); GHTunes upload/download = jam_picked_ghtunes
+// (-> uistate_signin -> UIstate_jam_ghtunes, require_live = 1). The leaderboard
+// / online_* / net_* flow states are only reached from inside these, so
+// disabling the entry points makes the whole online sub-tree unreachable.
+const std::unordered_set<uint32_t>& onlineKeys() {
+    static const std::unordered_set<uint32_t> s = {
+        K("main_menu_select_online"), K("main_menu_select_downloads"),
+        K("main_menu_select_xbox_live"),  // gd10 (Metallica) spelling, harmless on WT
+        K("select_xbox_live"),            // World Tour spelling
+        K("jam_picked_ghtunes"),          // GHTunes (upload/download) in the music studio
+        K("uistate_net_setup"), K("uistate_downloads"), K("uistate_jam_ghtunes"),
+    };
+    return s;
+}
+
+// A key value matching the online set, searched recursively (a menu item's
+// real script can be wrapped: generic_menu's pad_choose runs
+// generic_blocking_execute_script with pad_script = <the script> buried in its
+// params [C script add_generic_menu_icon_item]).
+bool valueLeadsOnline(const qb::Value& v, int depth = 0) {
+    if (depth > 16) return false;
+    if ((v.type == qb::Type::Key || v.type == qb::Type::KeyPtr) && onlineKeys().count(v.key)) return true;
+    if (v.st)
+        for (const qb::Item& it : v.st->items) {
+            if (onlineKeys().count(it.name)) return true;
+            if (valueLeadsOnline(it.value, depth + 1)) return true;
+        }
+    if (v.arr)
+        for (const qb::Value& x : v.arr->values)
+            if (valueLeadsOnline(x, depth + 1)) return true;
+    return false;
+}
+
+bool structLeadsOnline(const qb::Struct& st, int depth = 0) {
+    if (depth > 16) return false;
+    for (const qb::Item& it : st.items) {
+        if (onlineKeys().count(it.name)) return true;
+        if (valueLeadsOnline(it.value, depth + 1)) return true;
+    }
+    return false;
+}
 
 const uint32_t kRootWindow = K("root_window");
 const uint32_t kVMenu = K("vmenu"), kHMenu = K("hmenu"), kVScrollingMenu = K("vscrollingmenu");
@@ -470,16 +520,25 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         if (e.type == kSprite && e.texture && newDimsW >= 0) e.sx *= scaleX, e.sy *= scaleY;
         else e.sx = scaleX, e.sy = scaleY;
     }
-    // The port has no online play: the main menu's Xbox LIVE item (gh4 sets
-    // its main_menu_select_online handler after making it) is greyed and
-    // skipped as create_main_menu's demo_mode_disable does (GD10-101) [C script].
-    if (qs::Vm::param(p, K("event_handlers")))
-        for (const Element::Handler& h : e.handlers)
-            if (h.script == K("main_menu_select_online") || h.script == K("main_menu_select_xbox_live")) {
-                e.rgba = {128, 128, 128, 255}, e.notFocusable = true;
-                for (auto& c : e.children)
-                    if (c->type == kText || c->type == kTextBlock) c->rgba = {128, 128, 128, 255};
-            }
+    // 7.8 online disabled: the port ships no online, so any item whose handler
+    // tree leads online (ONLINE, DOWNLOADS/DLC store, GHTunes upload/download)
+    // is greyed + not_focusable the moment its handlers are set, as the
+    // original's demo_mode_disable does {rgba = [128 128 128 255] not_focusable}
+    // (GD10-101) [C scripts guitar_main_menu.qb, menu_jam.qb]. The main menu's
+    // ONLINE item has its handler inline; a generic-menu item (jam GHTunes)
+    // gets it later via SetScreenElementProps and the script is wrapped in
+    // generic_blocking_execute_script's params, so detection recurses.
+    if (qs::Vm::param(p, K("event_handlers")) && handlersLeadOnline(e)) {
+        e.onlineEntry = true, e.rgba = {128, 128, 128, 255}, e.notFocusable = true;
+        for (auto& c : e.children)
+            if (c->type == kText || c->type == kTextBlock) c->rgba = {128, 128, 128, 255}, c->onlineEntry = true;
+    }
+    // add_mainmenu_item makes the item's text child AFTER the greyed container,
+    // so the demo_mode_disable colour is carried onto a text child of an online
+    // item here (the original passes demo_mode_disable to both; the ONLINE item
+    // has no such data, so the port greys it from the handler [C script]).
+    if (e.parent && e.parent->onlineEntry && (e.type == kText || e.type == kTextBlock))
+        e.onlineEntry = true, e.rgba = {128, 128, 128, 255}, e.notFocusable = true;
     if (e.upperCase && !e.text.empty()) e.text = upperText(e.text);
     if (e.type == kText || e.type == kTextBlock) measureText(e);
 }
@@ -1898,6 +1957,25 @@ void UiSystem::menuHitCoverage(int& focusable, int& hittable) const {
     }
 }
 
+bool UiSystem::handlersLeadOnline(const Element& e) {
+    for (const Element::Handler& h : e.handlers) {
+        if (onlineKeys().count(h.script)) return true;
+        if (structLeadsOnline(h.params)) return true;
+    }
+    return false;
+}
+
+void UiSystem::onlineEntryCoverage(int& seen, int& focusable) const {
+    std::function<void(const Element&)> walk = [&](const Element& e) {
+        if (e.onlineEntry) {
+            ++seen;
+            if (!e.notFocusable) ++focusable;  // 7.8: an online item must never stay selectable
+        }
+        for (const auto& c : e.children) walk(*c);
+    };
+    walk(*root_);
+}
+
 std::vector<UiSystem::HelpPillHit> UiSystem::helperPills() const {
     std::vector<HelpPillHit> out;
     const Element* box = find(K("user_control_container"));
@@ -2436,17 +2514,13 @@ void UiSystem::addNatives() {
         // gives both demo_mode_disable) [C script create_main_menu_elements]
         // (GD07 bug pass). GD07_MENU_DISABLE_LEGACY=1: only Metallica's.
         static const bool disableLegacy = SDL_getenv("GD07_MENU_DISABLE_LEGACY") != nullptr;
-        auto disabledItem = [](const Element& el) {
-            for (const Element::Handler& h : el.handlers)
-                if (h.script == K("main_menu_select_xbox_live") || h.script == K("main_menu_select_online") ||
-                    h.script == K("main_menu_select_downloads"))
-                    return true;
-            return false;
-        };
         bool online = raw->id == K("main_menu_leaderboards_text");
-        for (const Element::Handler& h : raw->handlers) online = online || h.script == K("main_menu_select_xbox_live");
-        if (!disableLegacy) online = online || disabledItem(*raw) || (raw->parent && disabledItem(*raw->parent));
-        if (online) raw->rgba = {128, 128, 128, 255}, raw->notFocusable = true;
+        if (!disableLegacy) online = online || handlersLeadOnline(*raw) || (raw->parent && handlersLeadOnline(*raw->parent));
+        if (online) {
+            raw->onlineEntry = true, raw->rgba = {128, 128, 128, 255}, raw->notFocusable = true;
+            for (auto& c : raw->children)
+                if (c->type == kText || c->type == kTextBlock) c->rgba = {128, 128, 128, 255}, c->onlineEntry = true;
+        }
         ++stats_.created;
         // new_menu focuses its menu before the items exist: the first
         // focusable item added to a focused menu takes the focus, once the

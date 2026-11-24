@@ -63,6 +63,7 @@ struct Element {
     uint32_t texContext = 0;  // the asset context the texture was set under (PushAssetContext), 0: global
     std::string text;
     bool hidden = false, flipH = false, flipV = false, notFocusable = false, blockEvents = false;
+    bool onlineEntry = false;  // a menu item that would lead to an online mode: greyed + not_focusable (7.8; no online in the port)
     bool allowExpansion = false, locked = false, preserveOrientation = false;
     bool layoutOnce = false;  // SetScreenElementLock on: one more layout first [C 0x8221A588]
     // A VMenu's width is set by its first-update event only (made, a child
@@ -261,6 +262,13 @@ public:
         float bodyY0, bodyY1;
     };
     std::vector<HelpBarPill> helpBarLayout() const;
+    // 7.8 online disabled: a menu item whose handler tree leads to an online
+    // mode (online play, downloads/DLC store, GHTunes upload/download). The
+    // port ships no online, so every such item is greyed + not_focusable.
+    static bool handlersLeadOnline(const Element& e);
+    // Walk the tree: `seen` = greyed online-entry items, `focusable` = any that
+    // ended up still selectable (must be 0).
+    void onlineEntryCoverage(int& seen, int& focusable) const;
     // The drawn bounds of an element (false: not drawn in the last frame).
     bool drawnBounds(uint32_t id, float& x0, float& y0, float& x1, float& y1) const;
     bool drawnTextBounds(const std::string& text, float& x0, float& y0, float& x1, float& y1) const;

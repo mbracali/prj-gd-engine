@@ -22,6 +22,7 @@
 #include "data/band.h"
 #include "data/json.h"
 #include "data/qbkey.h"
+#include "data/qs.h"
 #include "render/band.h"
 #include "render/canvas.h"
 #include "render/venue_stage.h"
@@ -1035,6 +1036,16 @@ void Walk::uiStep(FrontEnd& fe, double now) {
             if (hittable == 0) uiMouseDeadStates_.push_back(prev);
             else if (hittable < focusable) uiMouseGapStates_.push_back(prev);
         }
+        // 7.8 online disabled: the port ships no online mode, so every online
+        // ENTRY-POINT item built on this screen must be greyed + not_focusable.
+        // (The walk FORCE-spawns each flow state directly to prove it builds
+        // without crashing, which bypasses the greyed entry points, so an online
+        // state building its own menu here is expected and not a reachability
+        // signal -- unreachability is proved by the entry points being
+        // unselectable, below and in onlineEntryCoverage.)
+        int onlineSeen = 0, onlineFoc = 0;
+        fe.ui().onlineEntryCoverage(onlineSeen, onlineFoc);
+        uiOnlineSeen_ += onlineSeen, uiOnlineFocusable_ += onlineFoc;
     }
     if (stateIdx_ >= states_.size()) {
         step_ = steps_.size();  // done
@@ -2126,6 +2137,59 @@ int Walk::finish(FrontEnd& fe) const {
             std::printf("\n");
             return 1;
         }
+        // 7.8 online disabled: prove no online entry point is selectable.
+        // (a) Every online-entry item built during the walk (the main menu's
+        //     ONLINE and DOWNLOADS) is greyed and stayed not_focusable. With
+        //     the online sub-tree only reachable through these greyed entry
+        //     points, the whole online tree is unreachable in normal play.
+        std::printf("uitest online: %d online-entry item(s) greyed+unselectable, %d still selectable\n",
+                    uiOnlineSeen_, uiOnlineFocusable_);
+        bool onlineOk = uiOnlineFocusable_ == 0 && uiOnlineSeen_ > 0;
+        // (b) The GHTunes (upload/download) item's choose script is wrapped in
+        //     generic_blocking_execute_script's params [C script
+        //     add_generic_menu_icon_item: pad_script = jam_picked_ghtunes]; the
+        //     detector must see through the wrapper, and must leave the local
+        //     RECORD item (pad_script = UIstate_jam_select_song) selectable.
+        auto wrapped = [](uint32_t script) {
+            ui::Element e;
+            ui::Element::Handler h;
+            h.event = qbkey::key("pad_choose");
+            h.script = qbkey::key("generic_blocking_execute_script");
+            qs::Vm::set(h.params, qbkey::key("pad_script"), qs::Vm::makeKey(script));
+            e.handlers.push_back(std::move(h));
+            return ui::UiSystem::handlersLeadOnline(e);
+        };
+        const bool ghtunesGreyed = wrapped(qbkey::key("jam_picked_ghtunes"));
+        const bool recordKept = !wrapped(qbkey::key("uistate_jam_select_song"));
+        std::printf("uitest online: GHTunes wrapped-handler detected=%d, local RECORD kept selectable=%d\n",
+                    int(ghtunesGreyed), int(recordKept));
+        onlineOk = onlineOk && ghtunesGreyed && recordKept;
+        if (!onlineOk) {
+            std::printf("uitest: FAILED: online entry points are not all unselectable\n");
+            return 1;
+        }
+        // 7.9 labels / trademark scrub: no console or platform trademark may
+        // remain in any player-visible localized string once pcstrings::pcQsText
+        // has run on the .qs table (qstr applies it at load). Record-label
+        // credits "SONY BMG" / "Sony ATV" are music attributions (not the
+        // PlayStation maker) and are deliberately kept, so bare "sony" is not a
+        // trademark here. The game's own title is not a console/platform mark.
+        int scanned = 0, leaks = 0;
+        const char* const marks[] = {"xbox", "playstation", "ps3", "nintendo", " wii", "microsoft",
+                                      "gamertag", "gamer card", "gamer profile", "dashboard", "memory unit", "hdd"};
+        qstr::each([&](uint32_t, const std::string& s) {
+            ++scanned;
+            std::string low = s;
+            for (char& c : low) c = char(std::tolower((unsigned char)c));
+            for (const char* m : marks)
+                if (low.find(m) != std::string::npos) {
+                    if (leaks < 8) std::printf("uitest: FAILED: trademark %s remains in UI text: %s\n", m, s.c_str());
+                    ++leaks;
+                    break;
+                }
+        });
+        std::printf("uitest labels: %d localized strings scanned, %d with a console/platform trademark\n", scanned, leaks);
+        if (leaks > 0) return 1;
         return 0;
     }
     // Every loading screen stayed up kLoadingHoldMs (none since D23: as the original).
