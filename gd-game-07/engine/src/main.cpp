@@ -31,6 +31,7 @@
 #include "tests/shoptest.h"
 #include "tests/castest.h"
 #include "tests/instrtest.h"
+#include "tests/tuttest.h"
 #include "tests/jamtest.h"
 #include "tests/venuetest.h"
 #include "video/movie_player.h"
@@ -77,6 +78,8 @@ void usage() {
         "  --instrtest          the Create-A-Rockstar instrument editor headless: CAS slots/options per kind, choose\n"
         "                       (option + ownership gated), name, and a save->reload round-trip\n"
         "  --jamtest            parse every GHTunes .jam header (markers/bpm/tracks) and classify its note payload\n"
+        "  --tuttest            Tutorial/Training headless: build the select menu + the 9 training scripts from the disc,\n"
+        "                       and run each lesson's clock/gate advance (a gate blocks until the scripted input satisfies it)\n"
         "Environment: GD07_KEYS=\"<ms>:<key>,...\" scripted menu keys; GD07_SCREENSHOT=<file.bmp> with\n"
         "  GD07_SCREENSHOT_AT=<ms>[,<ms>...] saves frames; GD07_LOG=<file> also writes the log to that file\n"
         "  (Windows: gd07.log in the save folder); GD07_STATS=1 logs fps; GD07_PERF=1 a frame-time breakdown.\n"
@@ -166,7 +169,7 @@ int run(int argc, char** argv) {
     std::string movie;
     bool audittest = false, formattest = false, shadertest = false, selftest = false, sfxtest = false, scripttest = false;
     bool venuetest = false, chartest = false, drumtest = false, exploretest = false, shoptest = false, castest = false;
-    bool instrtest = false, jamtest = false;
+    bool instrtest = false, jamtest = false, tuttest = false;
     std::string songAudio;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -190,6 +193,7 @@ int run(int argc, char** argv) {
         else if (a == "--castest") castest = true;
         else if (a == "--instrtest") instrtest = true;
         else if (a == "--jamtest") jamtest = true;
+        else if (a == "--tuttest") tuttest = true;
         else if (a == "--drumtest") drumtest = true;
         else if (a == "--sfxtest") sfxtest = true;
         else if (a == "--songaudiotest") songAudio = value();
@@ -210,7 +214,7 @@ int run(int argc, char** argv) {
     if (shadertest) return runShaderTest(opt.dataPath);
     if (drumtest) return runDrumTest();  // data-free: the drum judge + input guard
     if ((!movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest || exploretest ||
-         shoptest || castest || instrtest || jamtest || !opt.walk.empty()) &&
+         shoptest || castest || instrtest || jamtest || tuttest || !opt.walk.empty()) &&
         opt.dataPath.empty()) {
         usage();
         return 2;
@@ -225,6 +229,7 @@ int run(int argc, char** argv) {
     if (castest) return runCasTest(opt.dataPath);
     if (instrtest) return runInstrTest(opt.dataPath);
     if (jamtest) return runJamTest(opt.dataPath);
+    if (tuttest) return runTutTest(opt.dataPath);
     if (sfxtest) return runSfxTest(opt.dataPath);
     if (!songAudio.empty()) return runSongAudioTest(opt.dataPath, songAudio);
     if (scripttest) return runScriptTest(opt.dataPath);

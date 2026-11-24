@@ -1830,3 +1830,138 @@ flagged as a dedicated **GHTunes composition wave** (large, standalone):
 - Wiring: `engine/src/main.cpp` (`--instrtest` / `--jamtest`),
   `engine/CMakeLists.txt`. No decoder/engine/UI/judge/input change; `--uitest`
   pinned at 1181/1181.
+
+## Onboarding Step 7.7 — tutorials (2026-11-24)
+
+**Aggregate first.** The port had **no** tutorial layer: `grep -ri tutorial
+engine/src` found only incidental hooks (`tutorial_disable_hud` in
+`ui/song_hooks.cpp`, a `select_tutorial` comment in `ui/front_end.cpp`, a
+`TUTORIAL` set-list filter in `platform/module_songs.cpp`). The gameplay judge,
+gem scroller, HUD, venues and VO buses that the lessons wrap are all in place
+(Steps 3–6). So 7.7 is the teaching layer around the finished judge.
+
+**The original (Ghidra-grounded, decoded QB in `qb.pak.xen`).** World Tour
+drives **every** lesson with ONE interpreter — the "training script" engine
+`scripts\tutorials\training.qb`:
+- `run_training_script` fires the array's step 0, then (for Restart_Lesson)
+  scans to the step whose `lesson` == `g_training_last_lesson`, then spawns
+  `training_script_update`.
+- `training_script_update` runs once per gameframe over the current step:
+  a `time` step fires at absolute ms (`current_training_time`); a `rel_time`
+  step fires at ms since the last fired step (`last_training_call_time`); a bare
+  step fires as soon as the PREVIOUS step's `call` script is no longer running
+  (`not ScriptIsRunning`). A `lesson = N` marker records `g_training_last_lesson`.
+  When `current_training_step` == array size, `kill_training_script_system` ends
+  the session.
+- A training script is `training_<item>_tutorial_script` = an array of structs
+  `{ lesson? time?/rel_time? call }`.
+
+**The lessons (the ordered progression).** The select menu
+`scripts\guitar\menu\menu_tutorial_select.qb` groups them:
+`tutorial_lessons = [guitar_lessons drum_lessons vocals_lessons band_lessons]`;
+each entry's `item` string is formatted into the script name
+(`menu_tutorial_select_choose`: `FormatText 'training_%i_tutorial_script'`),
+and `generic_event_choose $uistate_play_tutorial` launches it. Nine tracks,
+52 lessons, 40 player gates (measured by `--tuttest` straight from the arrays):
+- **Guitar / basic** (`training_basic_tutorial_script`, 8 lessons): 1 hold the
+  guitar (left/right orientation prompt), 2 frets+strum+tuning (strum each of
+  5 strings to pitch), 3–6 play scrolling notes (gate: `notes_hit >= 8`),
+  7 play notes (gate: `notes_hit >= 4`), 8 the HUD. [C `guitar_training_basic_tutorial.qb`]
+- **Guitar / star_power** (3 lessons): 1 fill & activate Star Power
+  (`training_received_star_power`), 2 the whammy bar, 3 combine (gate:
+  `notes_hit >= 8`).
+- **Guitar / advanced_techniques** (5 lessons): hammer-ons & pull-offs
+  (`wait_for_hammeron_complete`, `wait_for_hammerons`, `wait_for_pulloff_complete`).
+- **Guitar / new_features** (4 lessons): extended sustains, slider tapping,
+  slider strumming, slider wah (the touch strip).
+- **Guitar / versus** (7 lessons): Battle game-types, lead indicator, hit-notes
+  / tilt / fix-broken-string / attack tasks.
+- **Drums / drum_basic** (6 lessons) and **drum_int** (5 lessons): hold sticks,
+  play-each-note tasks on a static/scrolling highway, freeform
+  (`*_add_play_each_note_task` → `*_wait_for_drum_test_complete`, pads set
+  `LESSON_COMPLETE`).
+- **Vocals** (6 lessons shown as 8 markers counting headers): the mic, static
+  vs scrolling layout (a `prompt_for_layout` choice), singing / spoken /
+  freeform tasks, rock meter demo.
+- **Band** (4 lessons): intro, the band's rock meter + individual indicators +
+  note-streak demos, playing in unison, band-vs-band. All scripted demos — no
+  player gate.
+
+**Interventions / prompts / animations / movies / events.** All from
+`scripts\tutorials\tutorial_funcs.qb` (the shared vocabulary):
+- On-screen prompts: `training_set_lesson_header_text` /
+  `training_add_lesson_body_text` / `training_show_lesson_header` /
+  `training_show_task_header` / `training_set_task_header_body`; `training_blink_task`.
+- Narrator: `training_show_narrator { narrator = 'guitarist' | 'drummer' | ... }`
+  (`c:/gh4/data/images/training/tutorial_narrator_*`), with per-language VO
+  (`training_play_sound 'Tut_Gtr_*'`, `training_get_language_prefix`,
+  `Training_VO` buss), positive/negative feedback banks (`training_play_positive`
+  / `training_play_negative`, random-no-repeat).
+- Pointer/finger animations: `training_add_arrow`, `training_make_pointer_point_now`,
+  `training_create_fret_finger_sprites` / `training_animate_fret_fingers` /
+  `pose_fret_fingers`, `training_animate_strum_fingers`, the tuning note sprites.
+- Gem scroller & camera: `training_start_gem_scroller` (calls the real
+  `start_gem_scroller … training_mode=1` with a bot), `training_setup_camera`,
+  `training_pause/resume/destroy_gem_scroller`, `training_set_health` /
+  `training_set_score` / `training_set_HUD_flashing_red`.
+- "Special corks" (scripted demo moments): the band/vocals `*_and_demo` /
+  `*_show_rock_meter_and_demo` steps, `tutorial_enable_botplay`, the
+  `create_exploding_text 'LESSON COMPLETE'` + `Tutorial_Mode_Finish_Chord`.
+- Movies: no BINK cutscenes — the teaching is live (narrator icons + VO +
+  gem-scroller), `training_init_session` plays an IGC view-cam (`ch_view_cam`)
+  and `Hide_Band`.
+- Scripted gates (wait-for-the-player): bare steps whose `call` loops
+  `Wait 1 gameframe` until a judge-fed global reaches a threshold read from the
+  gate bytecode — `training_1_3_wait_for_hit_notes` (`notes_hit >= 8`),
+  `training_1_7_wait_for_hit_notes` (`>= 4`), `training_2_x` star-power
+  (`training_received_star_power == 1`), the drum/vocals `*_task`
+  (`LESSON_COMPLETE == 1`). Pause/skip/restart/quit:
+  `training_create_pause_menu`, `tutorial_skip_lesson` (`++g_training_last_lesson`
+  then `tutorial_restart`), `tutorial_restart` (`run_training_script $Restart_Lesson`).
+
+**What the port now does.** New `engine/src/game/tutorial.{h,cpp}` — a
+rendering-free, faithful port of the two training.qb scripts plus the select
+menu:
+- `tutorial::load(Globals)` builds the whole select menu and parses all nine
+  `training_<item>_tutorial_script` arrays straight from the disc globals
+  (`tutorial_lessons` → 4 categories → the `item` string → the script array);
+  it invents nothing (the set, grouping, lesson markers and step timing all
+  come from the data). `item` is stored as a QScript string ('basic', 'drum_int').
+- `tutorial::Session` reproduces `run_training_script` / `training_script_update`
+  exactly: it fires steps on the simulated clock (`time` / `rel_time` / previous
+  call finished), records `g_training_last_lesson` on a marker, blocks at a gate
+  step until `gateInput()` has supplied the scripted/autoplayed player input
+  enough times to satisfy it, and counts `g_training_lessons_completed`.
+- Gate thresholds that are known from the gate bytecode are reproduced
+  (`notes_hit >= 8` / `>= 4` etc.); the rest default to one scripted-input unit.
+
+**Objective evidence (`--tuttest`, headless, data-derived).**
+`gd07 --tuttest extracted` →
+`9 tracks, 52 lessons, 40 player gates total; 9/9 tracks ran to completion …;
+all tutorial checks passed (0 checks failed)`:
+- (a) menu = the disc's 4 categories / 9 scripts; every track's lesson count
+  equals the `lesson` markers in its real array; grouping is guitar 5 / drums 2
+  / vocals 1 / band 1.
+- (b) the clock model: the `time=1000` title step does not fire before 1000 ms
+  and does after.
+- (c) a gate BLOCKS with no input (step index frozen across 5000 frames) and
+  releases at the real threshold — the `notes_hit >= 8` gate does not advance on
+  the 7th hit and does on the 8th (expected-vs-measured).
+- (d) every one of the 9 tracks runs to completion when each gate is fed, and
+  the completed-lesson count reaches the track's lesson count.
+- `--uitest` unchanged (47 flow states, 1181/1181 mouse-hittable).
+
+**Honest remains.** (1) Live wiring of the `Session` into the running
+`uistate_play_tutorial` screen (spawning the gem scroller + narrator sprites +
+VO from the real engine, feeding `gateInput()` from the live note-hit / pad /
+star-power events) is not done here — the model and its advance are proven
+headless, but the on-screen lesson is not yet playable end-to-end in the app.
+(2) Gate thresholds beyond the four read from bytecode default to 1 (the tuning
+5-string count, the drum per-pad set, the slider-task counts are not yet decoded
+from their gate scripts). (3) The narrator sprite/finger animations and per-
+language VO selection are catalogued, not rendered. These are the same live-UI
+remainder flagged for 7.3/7.5 and belong with the gameplay-screen wiring wave.
+
+**Files.** New: `engine/src/game/tutorial.{h,cpp}`,
+`engine/src/tests/tuttest.{h,cpp}`. Wiring: `engine/src/main.cpp` (`--tuttest`),
+`engine/CMakeLists.txt`. No decoder / engine / UI / judge / input change.
