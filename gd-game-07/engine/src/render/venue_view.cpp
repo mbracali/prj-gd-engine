@@ -574,7 +574,19 @@ VenueView::InitStep VenueView::build(gfx::RenderDevice& dev, const venue::Venue&
             // 3 blend), +0xd4 the draw order, +0xcc bit 3 a blended surface.
             it.alphaRef = float(mat->e8 >> 24) / 255.0f;
             it.drawOrder = mat->d4;
-            it.stencil = (mat->cc & 0x80) ? -1 : int8_t(mat->dc & 1);
+            // +0xdc bit 0x80 is the bloom/glow tag: G_RE_New* neon, colour
+            // scroll, lamp bulbs, floor lights, the projection light and
+            // Z_SoundCheck_Plane02 (the menu's GUITAR HERO logo) carry it, and
+            // the TOD's materialfilter bloom (the gh4 bloom2 pass, ScreenFx's
+            // endUber; it marks the scene where the stencil is 1 and blurs it
+            // over the picture) glows just those. The rule read bit 0 before,
+            // which is 0 on every one of these meshes, so the materialfilter
+            // bloom had no source in any venue and the menu's logo (and every
+            // neon / light) stayed a mood-lit grey instead of the 360's bright
+            // bloom. GD07_NO_GLOW_FIX restores the old tag for an A/B. [C
+            // 823DC180; evidence scratchpad/logo2_evidence].
+            static const bool glowLegacy = SDL_getenv("GD07_NO_GLOW_FIX") != nullptr;
+            it.stencil = (mat->cc & 0x80) ? -1 : int8_t(glowLegacy ? (mat->dc & 1) : ((mat->dc & 0x80) ? 1 : 0));
             // 823DC180: the blend from +0xd8 (0 opaque, 1 SRC_ALPHA / ONE, 2 its
             // reverse subtract, 3 SRC_ALPHA / ONE_MINUS_SRC_ALPHA, 7 ONE / ONE);
             // +0xcc: 8 cull none, 0x20 no z write, 0x40 no alpha test (else
