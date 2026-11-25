@@ -769,6 +769,36 @@ void MenuScene::draw(Canvas& c) {
         if (!VenueStage::post.original) p.bloom.on = false, p.brightSat[0].on = p.brightSat[1].on = false;
         if (!VenueStage::post.gameBloom) p.bloom.on = false;
         p.nearZ = 0.05f, p.farZ = 4000.0f;  // VenueView's projection
+        // The active menu camera's depth of field: a submenu camera
+        // (ui_<state>_camera) carries a `dof` (DOF_UIblur_tod_manager:
+        // dof3 strength 0.9, everything past 4 m blurred) that softens the
+        // band and stage behind the focused jacket panel, while the main
+        // menu's camera has none and Default_TOD_Manager's dof3 strength 0
+        // leaves it sharp. The original applies it on bg_viewport in
+        // ApplyMenuTransitionDOF (the camera's `dof` once settled, or the one
+        // being left when going back) [C script menu_transitions.qb]; our
+        // ScreenFX_AddFXInstance only drives the brightness flash, so without
+        // this the submenu zoom lacked its focus blur. GD07_NO_MENU_DOF=1 off.
+        static const bool noMenuDof = SDL_getenv("GD07_NO_MENU_DOF") != nullptr;
+        if (!noMenuDof) {
+            const qb::Value* back = vm_.global(K("target_menu_camera_back"));
+            const qb::Value* state = (back && qs::Vm::number(back, 0) == 1) ? vm_.global(K("current_menu_camera")) : vm_.global(K("target_menu_camera"));
+            // The state name reaches us as a checksum (Key) or, from a script
+            // argument (task_menu_default_anim_in: base_name), a String.
+            std::string base;
+            if (state) {
+                if ((state->type == qb::Type::Key || state->type == qb::Type::KeyPtr) && state->key) base = qbkey::name(state->key);
+                else if (state->type == qb::Type::String) base = state->str;
+            }
+            if (!base.empty() && base != "none" && base != "null") {
+                const std::string cam = "ui_" + base + "_camera";
+                if (const qb::Value* cs = globals_.find(qbkey::key(cam.c_str())); cs && cs->st)
+                    if (const qb::Value* dof = globals_.field(*cs->st, K("dof")); dof && (dof->type == qb::Type::Key || dof->type == qb::Type::KeyPtr) && dof->key) {
+                        screenfx::readDof(globals_, dof->key, p);
+                        if (SDL_getenv("GD07_SCENELOG")) SDL_Log("menu scene: dof %s from %s (strength %.2f)", qbkey::name(dof->key).c_str(), cam.c_str(), p.dof.strength);
+                    }
+            }
+        }
         // bloom2's material filter: the scene's pass 19 [C 8250F158, 8242AB78].
         fx_.end(p, {}, [&] { view_->drawGlow(cam, lightState_, lights_); });
     }
