@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <chrono>
 #include <cmath>
 #include <exception>
@@ -736,7 +737,17 @@ void MenuScene::draw(Canvas& c) {
     if (!noProjectors) view_->drawProjectors(cam, lights_);
     view_->drawVolumes(cam, lights_);
     const gfx::TextureId sceneDepth = fx ? fx_.depthSnapshot() : gfx::TextureId{};
-    view_->drawVolumes2D(cam, lights_, sceneDepth);
+    // z_soundcheck's 2D light volumes are tuned for the song stage, where no
+    // fixed banner sits behind them; on the frontend they are drawn additively
+    // in front of the "Guitar Hero World Tour" logo banner (a venue node, not a
+    // UI layer -- MenuScene draws before the UI screen pass), and at full
+    // density the bright blue Row/RowA beams and the white LFX_Projector_light
+    // volume saturate the logo to an unreadable blue-white wash. The 360
+    // frontend reads as a soft purple haze with the logo crisp on top
+    // (ref 03_main_XENIA_REF.png). Scale the menu's volumes down so the wash
+    // stays below saturation over the logo; GD07_MENU_VOL2D_SCALE overrides it.
+    static const float vol2dScale = SDL_getenv("GD07_MENU_VOL2D_SCALE") ? float(std::atof(SDL_getenv("GD07_MENU_VOL2D_SCALE"))) : 0.35f;
+    view_->drawVolumes2D(cam, lights_, sceneDepth, vol2dScale);
     static const bool noRays = SDL_getenv("GD07_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
     if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, sceneDepth);
     if (fx) {

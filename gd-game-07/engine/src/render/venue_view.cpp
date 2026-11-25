@@ -1718,7 +1718,7 @@ void VenueView::drawProjectors(const venue::CamPose& cam, const venue::LightShow
 // softened over 0.3 m in front of the scene's depth; alpha x (1 - g_Burn).
 // Drawn here as a camera-facing trapezoid along the beam (2 startradius at
 // the lens, 2 endradius at range, q the half-width so u stays straight).
-void VenueView::drawVolumes2D(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth) {
+void VenueView::drawVolumes2D(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth, float intensity) {
     if (!dev_ || vol2d_.empty() || !vol2dVb_ || !gh3_.ready()) return;
     static const bool off = SDL_getenv("GD07_NO_VOLUMES2D") != nullptr;  // development aid: compare without them
     if (off) return;
@@ -1839,7 +1839,7 @@ void VenueView::drawVolumes2D(const venue::CamPose& cam, const venue::LightShow&
         }
         vs[63][0] = -1;
         // g_ConeColor c1 = volumecolor x density (alpha the density) as GH3's impostor [I].
-        const float dens = h.density * beams[bi].fade;
+        const float dens = h.density * beams[bi].fade * intensity;
         for (int k = 0; k < 3; ++k) ps[1][k] = h.volumeColor[size_t(k)] * dens;
         ps[1][3] = dens;
         static const float plane = SDL_getenv("GD07_VOL2D_PLANE") ? float(std::atof(SDL_getenv("GD07_VOL2D_PLANE"))) : 1.0f;  // development aid

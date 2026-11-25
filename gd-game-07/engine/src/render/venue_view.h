@@ -68,8 +68,10 @@ public:
     // for now volume3d): the _LightVolume2D templates (sys_lightvolume2d's
     // falloff, pattern and smoke textures) on a camera-facing trapezoid from
     // the lens to range, softened against the scene's depth (`depth`; empty:
-    // no soft edge).
-    void drawVolumes2D(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth);
+    // no soft edge). `intensity` scales each volume's additive density (1 as
+    // the songs draw them; the frontend passes less so z_soundcheck's wash
+    // stays a soft haze behind the logo banner instead of saturating it).
+    void drawVolumes2D(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth, float intensity = 1.0f);
     // The projectortype stageonly housings: GH3's _Projector_StageOnly on the
     // quad where the beam's frustum meets the stage plane (y 0), shadowed by
     // the band's dynamic shadow map.
