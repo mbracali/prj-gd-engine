@@ -143,12 +143,25 @@ Quat integrate(const Quat& q, Vec w, float h) {
 bool AccessorySim::collides(size_t i, size_t j) const {
     const Body &a = bodies_[i], &b = bodies_[j];
     if (!a.dynamic || b.dynamic || a.shape.kind != havok::Shape::Capsule || b.shape.kind != havok::Shape::Capsule) return false;
-    // gh4's ragdoll_collision_group: the bodies of one list pass through each
-    // other (the hair's roots with the head, neck and collars they lie on,
-    // the coat tails with the pelvis and stomach) [C data
-    // RagdollCollisionGroups_Rocker_Female; I: the lists as Havok group-filter
-    // groups that do not collide within themselves].
-    if (a.group >= 0 && a.group == b.group) return false;
+    // gh4's ragdoll_collision_group: list i's bodies are in collision layer
+    // 12 + i [C 8244A358: collisionFilterInfo = instance << 5 | layer, a body
+    // in no list layer 31], and the world's filter asks its layer table first
+    // [C 824A2FF0; the table C 824A32F8]: layers 12..17 (lists 0..5) meet
+    // every other of them but not themselves, layer 18 (list 6) only layer 12,
+    // layers 19 (list 7) and 31 nothing. So the hair's roots pass through the
+    // head, neck and collars they lie on, the coat tails and skirts through
+    // the pelvis, stomach and shins, and nothing meets the hands and feet
+    // (RagdollCollisionGroups_Rocker_Female's last list: the ankles and
+    // palms) [C data].
+    // GD07_RAGDOLL_LAYERS_LEGACY=1: only "one list's bodies do not meet" (development aid).
+    static const bool legacy = SDL_getenv("GD07_RAGDOLL_LAYERS_LEGACY") != nullptr;
+    if (layered_ && legacy) {
+        if (a.group >= 0 && a.group == b.group) return false;
+    } else if (layered_) {
+        const int la = a.group, lb = b.group;
+        if (la < 0 || lb < 0 || la >= 7 || lb >= 7 || la == lb) return false;
+        if ((la == 6 && lb != 0) || (lb == 6 && la != 0)) return false;
+    }
     // Havok's linked-body collision filter suppresses contact between a
     // constrained accessory and its anchor body.
     for (const Con& c : cons_)
@@ -163,6 +176,7 @@ bool AccessorySim::init(const bandanim::Rig& rig, const havok::Physics& rag, con
     dynamic_ = 0;
     parent_ = rig.parent;
     bodyOf_.assign(rig.size(), -1);
+    layered_ = groups != nullptr;
     std::vector<int> index(rag.bodies.size(), -1);
     for (size_t i = 0; i < rag.bodies.size(); ++i) {
         const havok::Body& hb = rag.bodies[i];

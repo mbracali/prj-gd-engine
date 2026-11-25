@@ -32,8 +32,9 @@ class AccessorySim {
 public:
     // False when the rig has none of `bones` with a .rag body.
     // `groups`: gh4's ragdoll_collision_group (RagdollCollisionGroups_Rocker_Female:
-    // lists of bone names): two bodies of one list do not collide (null: every
-    // accessory body against every body capsule).
+    // lists of bone names): each list is a collision layer of the world's
+    // filter (collides() has its table); null: every accessory body against
+    // every body capsule.
     bool init(const bandanim::Rig& rig, const havok::Physics& rag, const std::vector<uint32_t>& bones,
               const std::vector<std::vector<uint32_t>>* groups = nullptr);
     bool empty() const { return dynamic_ == 0; }
@@ -112,6 +113,7 @@ private:
     std::vector<int> bodyOf_;  // bone -> body (-1)
     std::vector<int> parent_;
     int dynamic_ = 0;
+    bool layered_ = false;  // gh4: the bodies' ragdoll_collision_group lists are collision layers
     State cur_;
     bool started_ = false;
     std::deque<State> history_;  // the last steps (a query earlier than the newest step)

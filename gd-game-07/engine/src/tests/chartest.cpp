@@ -32,6 +32,7 @@
 namespace {
 
 constexpr uint32_t K(const char* s) { return qbkey::key(s); }
+uint32_t K2(const char* s) { return qbkey::key(s); }
 constexpr double kStepMs = 1000.0 / 60.0;
 constexpr double kLeadInMs = 3000.0;
 constexpr double kCheckMs = 250.0;
@@ -243,6 +244,61 @@ BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, co
         for (const auto& mt : skin)
             if (!finite(mt)) return {false, "a NaN in the skinning matrices at " + std::to_string(int(t)) + " ms"};
         if (f % 30 == 0 && !skinBounds(*model, skin, lo, hi)) return {false, "a NaN in the skinned vertices"};
+        // GD07_CHARTEST_CLOTH=<dir>: full-size close-ups of the simulated skirt / coat every
+        // GD07_CHARTEST_CLOTH_STEP (30) frames, the camera GD07_CHARTEST_CLOTH_DIST (2.6) m from
+        // GD07_CHARTEST_CLOTH_BONE (Bone_Pelvis), GD07_CHARTEST_CLOTH_DROP (0.35) m under it, turned
+        // GD07_CHARTEST_YAW degrees (development aid: the portraits below show the last face pose, not the ragdoll).
+        if (const char* dir = SDL_getenv("GD07_CHARTEST_CLOTH"); dir && r) {
+            static const int every = SDL_getenv("GD07_CHARTEST_CLOTH_STEP") ? std::max(1, std::atoi(SDL_getenv("GD07_CHARTEST_CLOTH_STEP"))) : 30;
+            const char* bn = SDL_getenv("GD07_CHARTEST_CLOTH_BONE");
+            const int pb = model->skeleton->find(K2(bn ? bn : "Bone_Pelvis"));
+            if (f == 60 && std::getenv("GD07_CHARTEST_VERBOSE")) {
+                for (size_t pi = 0; pi < model->parts.size(); ++pi) {
+                    std::map<uint32_t, size_t> hist;
+                    size_t total = 0;
+                    for (const scene::Mesh& mesh : model->parts[pi].scene.meshes)
+                        for (size_t k = 0; k < mesh.positions.size(); ++k, ++total)
+                            for (int j = 0; j < 3; ++j)
+                                if (mesh.blendWeights[k][size_t(j)] > 0) ++hist[mesh.blendIndices[k][size_t(j)]];
+                    std::string line;
+                    for (const auto& [bi, n] : hist)
+                        line += " " + (bi < model->skeleton->bones.size() ? nameOf(model->skeleton->bones[bi].name) : std::string("?")) + "#" + std::to_string(bi) + ":" + std::to_string(n);
+                    std::printf("  clothpart %s %zu [%s] %zu verts:%s\n", m.profileName.c_str(), pi, pi < m.meshes.size() ? m.meshes[pi].c_str() : model->parts[pi].pak.c_str(), total, line.c_str());
+                }
+                std::vector<bandanim::Mat34> aw, as;
+                a.evaluate(t, aw, as);
+                for (size_t b = 0; b < world.size(); ++b) {
+                    if (!acc || !acc->isDynamic(int(b))) continue;
+                    size_t nv = 0;
+                    for (const band::Part& p : model->parts)
+                        for (const scene::Mesh& mesh : p.scene.meshes)
+                            for (size_t k = 0; k < mesh.positions.size(); ++k)
+                                for (int j = 0; j < 3; ++j)
+                                    if (mesh.blendWeights[k][size_t(j)] > 0 && mesh.blendIndices[k][size_t(j)] == b) ++nv;
+                    const bandanim::Vec s1 = bandanim::xform(world[b], {0.2f, 0, 0}), a1 = bandanim::xform(aw[b], {0.2f, 0, 0});
+                    const int par = a.rig().parent[b];
+                    std::printf("  cloth %s: bone %s parent %s verts %zu sim-vs-anim tip %.3f m\n", m.profileName.c_str(),
+                                nameOf(model->skeleton->bones[b].name).c_str(), par >= 0 ? nameOf(model->skeleton->bones[size_t(par)].name).c_str() : "-", nv,
+                                double(std::sqrt((s1.x - a1.x) * (s1.x - a1.x) + (s1.y - a1.y) * (s1.y - a1.y) + (s1.z - a1.z) * (s1.z - a1.z))));
+                }
+            }
+            if (f >= 60 && f % every == 0 && pb >= 0) {
+                const bandanim::Vec c = bandanim::xform(world[size_t(pb)], {0, 0, 0});
+                const float d = SDL_getenv("GD07_CHARTEST_CLOTH_DIST") ? float(std::atof(SDL_getenv("GD07_CHARTEST_CLOTH_DIST"))) : 2.6f;
+                const float drop = SDL_getenv("GD07_CHARTEST_CLOTH_DROP") ? float(std::atof(SDL_getenv("GD07_CHARTEST_CLOTH_DROP"))) : 0.35f;
+                const float yaw = (SDL_getenv("GD07_CHARTEST_YAW") ? float(std::atof(SDL_getenv("GD07_CHARTEST_YAW"))) : 0.0f) * 3.14159265f / 180.0f;
+                venue::CamPose cam;
+                cam.pos = {c.x + d * std::sin(yaw), c.y - drop, c.z + d * std::cos(yaw)};
+                cam.rot = {0, std::cos(yaw * 0.5f), 0, -std::sin(yaw * 0.5f)};
+                cam.fov = 30;
+                if (SDL_Surface* px = portrait(*r, *model, skin, 1.8f, &cam)) {
+                    char path[700];
+                    std::snprintf(path, sizeof path, "%s/cloth_%s_%04d.bmp", dir, m.profileName.c_str(), f);
+                    SDL_SaveBMP(px, path);
+                    SDL_DestroySurface(px);
+                }
+            }
+        }
     }
     // The accessories sampled every millisecond for 0.5 s (frames that fall
     // anywhere between the 60 Hz steps): no 1 ms move may be far over the
@@ -557,6 +613,32 @@ int runCharTest(const std::string& discPath) {
         g_faces = &faces;
         std::vector<band::Member> all = band::everyBody(g);
         if (all.empty()) all = band::everyTalentGh4(g, qbkey::key(chart.song));
+        // GD07_CHARTEST_PROFILES="judy:bass,axel:guitar": these musician profiles too (the CAS house
+        // band, whose parts bring accessory skeletons / ragdolls; development aid).
+        if (const char* pe = SDL_getenv("GD07_CHARTEST_PROFILES")) {
+            std::string list = pe;
+            if (list == "*") {  // every profile with an appearance, on the guitar
+                list.clear();
+                for (const char* arr : {"Preset_Musician_Profiles_Locked", "Preset_Musician_Profiles_Modifiable"})
+                    if (const qb::Value* av = g.find(qbkey::key(arr)); av && av->type == qb::Type::Array && av->arr)
+                        for (const qb::Value& e : av->arr->values)
+                            if (e.type == qb::Type::Struct && e.st)
+                                if (const qb::Value* nv = e.st->find(K("name"))) list += nameOf(nv->key) + ":guitar,";
+            }
+            for (size_t at = 0; at < list.size();) {
+                const size_t end = std::min(list.find(',', at), list.size());
+                const std::string item = list.substr(at, end - at);
+                at = end + 1;
+                const size_t colon = item.find(':');
+                const std::string who = item.substr(0, colon), part = colon == std::string::npos ? "guitar" : item.substr(colon + 1);
+                const qb::Struct* prof = band::findProfileGh4(g, qbkey::key(who));
+                const uint32_t pk = qbkey::key(part);
+                const uint32_t object = pk == K("bass") ? K("bassist") : pk == K("drum") ? K("drummer") : pk == K("vocals") ? K("vocalist") : K("guitarist");
+                band::Member mm;
+                if (prof && band::memberGh4(g, *prof, object, pk, qbkey::key(chart.song), mm)) all.push_back(std::move(mm));
+                else std::printf("chartest: profile %s (%s) not found\n", who.c_str(), part.c_str());
+            }
+        }
         for (const band::Member& m : all) {
             if (only && label(m).find(onlyText) == std::string::npos) continue;
             const BodyResult r = testMember(*disc, g, lib, chart, m, frames, &renderer, &bodies, missingTex, missingClips, verts);
