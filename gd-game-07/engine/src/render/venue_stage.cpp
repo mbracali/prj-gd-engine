@@ -692,13 +692,16 @@ void VenueStage::draw(double ms) {
     }
     lights_.evaluate(ms, lightState_);
     venue::CamPose cam = hasFixedCam_ ? fixedCam_ : cameras_.pose(ms);
-    // Development aid: GD07_CAM_MEMBER=<member index>,<metres>[,<bone>]: the
-    // camera in front of that band member (close-ups of the live band).
+    // Development aid: GD07_CAM_MEMBER=<member index>,<metres>[,<bone>[,<yaw degrees>[,<degrees down>]]]:
+    // the camera in front of that band member (close-ups of the live band),
+    // turned `yaw` around it (180: from behind) and tilted `down` (the member
+    // higher in the frame, clear of the highway).
     if (static const char* cm = SDL_getenv("GD07_CAM_MEMBER"); cm && band_) {
         int idx = 0;
         float dist = 1.5f;
         char bone[64] = "bone_chest";
-        std::sscanf(cm, "%d,%f,%63s", &idx, &dist, bone);
+        float yawOff = 0, down = 0;
+        std::sscanf(cm, "%d,%f,%63[^,],%f,%f", &idx, &dist, bone, &yawOff, &down);
         if (idx >= 0 && size_t(idx) < band_->members().size()) {
             const Band::Entry& e = band_->members()[size_t(idx)];
             venue::Vec3 chest;
@@ -707,8 +710,10 @@ void VenueStage::draw(double ms) {
                 const float fl = std::sqrt(f.x * f.x + f.z * f.z);
                 if (fl > 1e-6f) {
                     f = {f.x / fl, 0, f.z / fl};
+                    const float ya = yawOff * 0.01745329f;
+                    f = {f.x * std::cos(ya) + f.z * std::sin(ya), 0, f.z * std::cos(ya) - f.x * std::sin(ya)};
                     cam.pos = {chest[0] + f.x * dist, chest[1] + 0.1f, chest[2] + f.z * dist};
-                    const float yaw = std::atan2(-f.x, -f.z), pitch = std::atan2(0.1f, dist);
+                    const float yaw = std::atan2(-f.x, -f.z), pitch = std::atan2(0.1f, dist) + down * 0.01745329f;
                     const float cy = std::cos(yaw * 0.5f), sy = std::sin(yaw * 0.5f), cp = std::cos(pitch * 0.5f), sp = std::sin(pitch * 0.5f);
                     cam.rot = {cy * sp, sy * cp, -sy * sp, cy * cp};
                     cam.fov = 50;

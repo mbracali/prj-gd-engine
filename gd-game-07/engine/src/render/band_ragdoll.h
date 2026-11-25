@@ -31,7 +31,11 @@
 class AccessorySim {
 public:
     // False when the rig has none of `bones` with a .rag body.
-    bool init(const bandanim::Rig& rig, const havok::Physics& rag, const std::vector<uint32_t>& bones);
+    // `groups`: gh4's ragdoll_collision_group (RagdollCollisionGroups_Rocker_Female:
+    // lists of bone names): two bodies of one list do not collide (null: every
+    // accessory body against every body capsule).
+    bool init(const bandanim::Rig& rig, const havok::Physics& rag, const std::vector<uint32_t>& bones,
+              const std::vector<std::vector<uint32_t>>* groups = nullptr);
     bool empty() const { return dynamic_ == 0; }
     // True when the bone is an accessory (a simulated body).
     bool isDynamic(int bone) const {
@@ -76,6 +80,7 @@ private:
         bandanim::Vec com;                  // centre of mass in the body frame
         float maxLin = 0, maxAng = 0, linDamp = 0, angDamp = 0;
         havok::Shape shape;               // the .rag collision proxy, in the body frame
+        int group = -1;                     // its ragdoll_collision_group list (-1: none)
         Rt boneFromBody;                    // bone = body * boneFromBody (the bind poses)
     };
     struct Con {
@@ -99,6 +104,8 @@ private:
     // The constraint's velocity rows at the step's start (h: the step's time).
     void rows(const std::vector<BodyState>& s, const Con& c, float h, std::vector<SolverRow>& out) const;
     void pose(const State& s, std::vector<bandanim::Mat34>& world) const;
+    // True when accessory body i collides with body capsule j.
+    bool collides(size_t i, size_t j) const;
 
     std::vector<Body> bodies_;
     std::vector<Con> cons_;

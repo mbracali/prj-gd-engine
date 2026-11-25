@@ -53,6 +53,18 @@ struct Member {
     bool female = false;                   // Band_IsFemale: is_female of the full body / FemalePhysique
     uint32_t animStruct = 0;               // the body's anim_struct (car_male_anim_struct, ...)
     const qb::Struct* fullBody = nullptr;  // the CAS_Full_Body desc (ragdoll_path, accessory_bones), null for a CAS body
+    // A CAS body (no CAS_Full_Body): cas_create_a_rocker_male / _female (its
+    // ragdoll and accessory_bones), and the parts that bring accessory
+    // bones: cas_process_accessory_part merges each part's acc_bones from
+    // its acc_skeleton into the skeleton (skeleton_mergeskeleton) and from
+    // its acc_ragdoll into the ragdoll (ragdoll_mergeragdoll) [C scripts
+    // cas_bone_merging.qb, data cas_acc_bones.pak].
+    const qb::Struct* casBody = nullptr;
+    struct AccPart {
+        uint32_t skeleton = 0, ragdoll = 0;  // acc_skeleton, acc_ragdoll (cas_acc_bones.pak's .ske / .rag)
+        std::vector<uint32_t> bones;         // acc_bones
+    };
+    std::vector<AccPart> accParts;
 };
 
 // The band of a one-player song in `zone` (create_band with
@@ -147,6 +159,9 @@ struct Part {
 struct Model {
     Member member;
     const anim::Skeleton* skeleton = nullptr;
+    // gh4 CAS body: the skeleton with its parts' accessory bones merged in
+    // (Member::accParts); `skeleton` points at it.
+    std::shared_ptr<const anim::Skeleton> mergedSkeleton;
     std::vector<Part> parts;  // body first, then the instrument
     std::unordered_map<uint32_t, gh3tex::Texture> textures;
     ClipMap clips;  // the body pak's and anims pak's, then perm_anims and the song's
@@ -160,6 +175,9 @@ struct Model {
 // Null and `error` on failure.
 std::unique_ptr<Model> loadModel(const Disc& disc, const Globals& g, Library& lib, const Member& m, const std::string& song,
                                  std::string& error);
+// gh4: a file of the CAS paks by its name key (a part's acc_skeleton .ske or
+// acc_ragdoll .rag in cas_acc_bones.pak); empty when absent.
+std::vector<uint8_t> casFile(const Disc& disc, uint32_t key);
 // A copy of a model loadModel kept (the last 8), or null: nothing is read.
 // Thread-safe, as loadModel is.
 std::unique_ptr<Model> cachedModel(const Disc& disc, const Member& m, const std::string& song);
