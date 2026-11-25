@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <future>
 #include <map>
@@ -226,8 +227,8 @@ void ScreenFx::pass(const gh3shader::Program* prog, const Target* dst, gfx::Text
     c.program = prog ? prog->id : copy_;
     c.state.alphaWrite = true;
     if (blend != Blend::Replace) {
-        c.state.blend = true, c.state.src = gfx::BlendFactor::SrcAlpha;
-        c.state.dst = blend == Blend::Add ? gfx::BlendFactor::One : gfx::BlendFactor::InvSrcAlpha;
+        c.state.blend = true, c.state.src = blend == Blend::AddOne ? gfx::BlendFactor::One : gfx::BlendFactor::SrcAlpha;
+        c.state.dst = blend == Blend::Alpha ? gfx::BlendFactor::InvSrcAlpha : gfx::BlendFactor::One;
     }
     if (stencilEqual1) c.state.stencilTest = true, c.state.stencilFunc = gfx::CompareFunc::Equal, c.state.stencilRef = 1;
     c.layout = &gh3shader::vertexLayout();
@@ -305,7 +306,7 @@ void ScreenFx::bloomBlur(const Target& t, const Target& tmp, float gain) {
     pass(v, &t, dev_->targetTexture(tmp.id), {}, g, nullptr, 0, Blend::Replace, true);
 }
 
-void ScreenFx::dofBlur(const Target& t, const Target& tmp, float radius) {
+void ScreenFx::dofBlur(const Target& t, const Target& tmp, float radius, bool exact) {
     // 823CAD48: _2D_GaussianBlur7x7 (m_filterSampleOffsets c168..174,
     // m_filterSampleWeights c0..6) H then V; r = max(radius, 0.5), rho =
     // sqrt(r / 3); the centre G(0) and three merged pairs (2k - 1, 2k):
@@ -314,6 +315,12 @@ void ScreenFx::dofBlur(const Target& t, const Target& tmp, float radius) {
     // passes, each 6 texels further out (pairs 6p + 2k - 1, 6p + 2k, no
     // centre), added with SRC_ALPHA, ONE: only Enhanced's stronger bokeh
     // (radius > 6) needs them [C; I: FUN_82490b70 as ceil].
+    // World Tour's own (8241E1F8, bloom2's `thickness` and dof3's blur; the
+    // same weights and offsets, r = max(radius, 0.5), rho = sqrt(r / 3),
+    // (ceil(r) + 5) / 6 passes [C 8241e324..8241e398]): the further passes
+    // are added ONE, ONE (blend control 0x1010101 [C 8241e660]) and one whose
+    // largest weight is 1 / 256 or less is not drawn [C 8241e7ac, 82018668]:
+    // `exact`.
     const gh3shader::Program* p = gh3_.get(filter_, "_2D_GaussianBlur7x7");
     if (!p) return;
     const float r = std::max(radius, 0.5f), rho = std::sqrt(r / 3.0f);
@@ -325,14 +332,16 @@ void ScreenFx::dofBlur(const Target& t, const Target& tmp, float radius) {
             const float base = 6.0f * float(k);
             float off[7];
             off[0] = 0;
-            float wt[7];
+            float wt[7], wmax = 0;
             wt[0] = k == 0 ? gauss(0, rho) : 0.0f;
             for (int j = 1; j <= 3; ++j) {
                 const float x1 = base + float(2 * j - 1), x2 = base + float(2 * j), ww = gauss(x1, rho) + gauss(x2, rho);
                 const float o = ww > 0 ? x1 + gauss(x2, rho) / ww : x1;
                 off[2 * j - 1] = o, off[2 * j] = -o;
                 wt[2 * j - 1] = wt[2 * j] = ww;
+                wmax = std::max(wmax, ww);
             }
+            if (exact && k > 0 && wmax <= 1.0f / 256.0f) continue;
             // gh4: m_filterSampleWeights c64.., m_filterSampleOffsets c80.. (GH3: c0.., c168..) [C data].
             gh3shader::Globals g;
             for (int i = 0; i < 7; ++i) {
@@ -340,12 +349,12 @@ void ScreenFx::dofBlur(const Target& t, const Target& tmp, float radius) {
                 g.set(80 + i, ox, oy, 0, 0);
                 g.set(64 + i, wt[i], wt[i], wt[i], wt[i]);
             }
-            pass(p, &dst, dev_->targetTexture(src.id), {}, g, nullptr, 0, k == 0 ? Blend::Replace : Blend::Add);
+            pass(p, &dst, dev_->targetTexture(src.id), {}, g, nullptr, 0, k == 0 ? Blend::Replace : exact ? Blend::AddOne : Blend::Add);
         }
     }
 }
 
-void ScreenFx::end(const Params& p, gfx::TargetId into) {
+void ScreenFx::end(const Params& p, gfx::TargetId into, const std::function<void()>& glowPass) {
     if (!dev_) return;
     // GD07_SCREENFX_TIME=1 (development aid): the chain's CPU time a frame, averaged over 600 frames.
     static const bool timeLog = SDL_getenv("GD07_SCREENFX_TIME") != nullptr;
@@ -376,7 +385,7 @@ void ScreenFx::end(const Params& p, gfx::TargetId into) {
     gh3shader::Globals none;
 
     if (p.uber) {
-        endUber(p, cur, curT, quarters, copies);
+        endUber(p, cur, curT, quarters, copies, glowPass);
         dev_->setTarget(outer_);
         dev_->setViewport(ox_, oy_, ow_, oh_);
         outer_ = realOuter, ox_ = rx, oy_ = ry, ow_ = rw, oh_ = rh;
@@ -467,7 +476,7 @@ void ScreenFx::end(const Params& p, gfx::TargetId into) {
 }
 
 void ScreenFx::passN(const gh3shader::Program* prog, const Target* dst, const gfx::TextureId* tex, int n, const gh3shader::Globals& g,
-                     const float (*vs)[4], int vsCount, const float (*ps)[4], int psCount, uint32_t pointMask, bool addSrcAlpha) {
+                     const float (*vs)[4], int vsCount, const float (*ps)[4], int psCount, uint32_t pointMask, int blend) {
     if (dst) {
         dev_->setTarget(dst->id);
         dev_->setViewport(0, 0, dst->w, dst->h);
@@ -478,7 +487,8 @@ void ScreenFx::passN(const gh3shader::Program* prog, const Target* dst, const gf
     gfx::DrawCall c;
     c.program = prog->id;
     c.state.alphaWrite = true;
-    if (addSrcAlpha) c.state.blend = true, c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::One;
+    if (blend == 1) c.state.blend = true, c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::One;
+    if (blend == 2) c.state.blend = true, c.state.src = gfx::BlendFactor::One, c.state.dst = gfx::BlendFactor::SrcAlpha;
     c.layout = &gh3shader::vertexLayout();
     c.vertices = quad_;
     c.count = 6;
@@ -501,19 +511,35 @@ void ScreenFx::passN(const gh3shader::Program* prog, const Target* dst, const gf
     dev_->draw(c);
 }
 
-void ScreenFx::endUber(const Params& p, gfx::TextureId& cur, const Target*& curT, bool quarters, bool copies) {
+void ScreenFx::endUber(const Params& p, gfx::TextureId& cur, const Target*& curT, bool quarters, bool copies, const std::function<void()>& glowPass) {
     gh3shader::Globals none;
     const int qw = quarterA_.w, qh = quarterA_.h;
-    // bloom2 (slot 1: the uber's bloom1): the stencil-marked materials
-    // (materialfilter; _Bloom_SubtractModulateStencil reads the converted
-    // stencil) or the whole picture through the colour matrix
-    // colormodulate x (saturation(rgb) - subtract), at a quarter of the
-    // size, blurred over `thickness` [C: the shaders, their constants'
-    // names; I: the matrix's values, the blur, the size].
+    // Development aids. GD07_BLOOM2_LEGACY=1: the bloom as it was before the
+    // 8250F158 / 8250E840 reading (the picture where the stencil is 1, a blur
+    // over thickness / 4, the uber pass added SRC_ALPHA, ONE with g_Color =
+    // (color, intensity)). GD07_BLOOM_VIEW=1..3 shows a stage instead of the
+    // picture: 1 the bloom's source, 2 the colour matrix's output, 3 the
+    // blurred bloom (the uber pass's g_BloomEffectSampler).
+    static const bool legacy = [] {
+        const char* v = SDL_getenv("GD07_BLOOM2_LEGACY");
+        return v && *v && *v != '0';
+    }();
+    static const int view = SDL_getenv("GD07_BLOOM_VIEW") ? std::atoi(SDL_getenv("GD07_BLOOM_VIEW")) : 0;
+    const bool noise = p.noise.on && p.noise.intensity > 0 && noiseTex_;
+    // bloom2 (8250F158; the uber pass's bloom1). Its buffers are a quarter of
+    // the frame, A8R8G8B8 (so every step clamps to 0..1) [C 822D6608: the
+    // surface 0x1054 and the textures 0x1058 / 0x106c are width / 4 x height /
+    // 4 of format 0x18280186]. The source: with materialfilter the scene's
+    // pass 19 (the meshes whose material has +0xac & 0x80 [C 8242AB78]) drawn
+    // on its own into the buffer, cleared to 0 with flags 0xF, colour only [C
+    // 8250f648..8250f8b0]; without it the frame [C 8250fa8c..]. Then the
+    // colour matrix (_Bloom_SubtractModulate, material 0x4e2dc85a) and the
+    // blur over `thickness` texels of that buffer [C 8250f998 -> 8241E1F8].
     const Bloom& b = p.bloom;
     bool bloom = b.on && b.gh4 && quarters && copies && ensure(bloomA_, qw, qh, false) && ensure(bloomB_, qw, qh, false);
     const gh3shader::Program* extract = bloom ? gh3_.get(qbkey::key("_Bloom_SubtractModulate")) : nullptr;
     bloom = bloom && extract;
+    gfx::TextureId viewTex{};
     if (bloom) {
         gfx::TextureId src = cur;
         if (b.materialFilter) {
@@ -526,26 +552,56 @@ void ScreenFx::endUber(const Params& p, gfx::TextureId& cur, const Target*& curT
             dev_->setViewport(0, 0, scene_.w, scene_.h);
             const float zero[4] = {0, 0, 0, 0};
             dev_->clear(zero, false);
-            pass(gh3_.get(immediate_, "_2D_Tex_NoViewport"), &scene_, cur, {}, none, nullptr, 0, Blend::Replace, false, true);
+            // Pass 19 over the scene's depth, at the scene's size, then box
+            // filtered to the quarter [I: the original rasterises it at the
+            // quarter size, against a depth buffer of that size].
+            if (glowPass && !legacy) glowPass();
+            else pass(gh3_.get(immediate_, "_2D_Tex_NoViewport"), &scene_, cur, {}, none, nullptr, 0, Blend::Replace, false, true);
             src = dev_->targetTexture(scene_.id);
         }
+        if (view == 1) viewTex = src;
         toQuarter(src);
-        // The rows: out_i = mod_i x (sum_j S_ij rgb_j - sub_i), S the
-        // saturation matrix (bright_sat's weights) [I]; c0..c2 the rows,
-        // c3 the constant column (the non-stencil variant's layout: out =
-        // r c0 + g c1 + b c2 + c3) [C shader].
+        // g_ColorTransform (c0..c3: out = r c0 + g c1 + b c2 + c3 [C shader]):
+        // the rows of the product of three matrices, row vectors [C
+        // 8250f3d8..8250f600]: S the saturation (weights 0.3086, 0.6094, 0.082
+        // [C 8203ac00..08]), T the translation by -subtract, M the scale by
+        // colormodulate.rgb x colormodulate.a [C 8250f1f0..8250f200], which
+        // under the uber pass with noise is also x (1 - the noise's intensity)
+        // [C 8250f204..8250f230; I: the uber's slot 0x20 as the noise]. eq0
+        // (and any other key): S T M; eq1: T S M; eq2: T M S [C 8250f3a8..].
         const float sw[3] = {0.3086f, 0.6094f, 0.0820f}, sat = b.saturation;
-        float m[4][4] = {};
-        for (int i = 0; i < 3; ++i) {  // output channel
-            const float mod = b.strength[i];
-            for (int j = 0; j < 3; ++j) m[j][i] = mod * ((1 - sat) * sw[j] + (i == j ? sat : 0));
-            m[3][i] = -mod * b.cutoff[i];
+        float mod[3];
+        for (int i = 0; i < 3; ++i) mod[i] = b.strength[i] * (noise && p.uber && !legacy ? 1.0f - p.noise.intensity : 1.0f);
+        struct M4 {
+            float v[4][4];
+        };
+        auto mul = [](const M4& x, const M4& y) {
+            M4 r{};
+            for (int i = 0; i < 4; ++i)
+                for (int j = 0; j < 4; ++j)
+                    for (int k = 0; k < 4; ++k) r.v[i][j] += x.v[i][k] * y.v[k][j];
+            return r;
+        };
+        M4 S{}, T{}, M{};
+        for (int i = 0; i < 3; ++i) {  // the input channel (row)
+            for (int j = 0; j < 3; ++j) S.v[i][j] = (1 - sat) * sw[i] + (i == j ? sat : 0);
+            T.v[i][i] = 1, T.v[3][i] = -b.cutoff[i];
+            M.v[i][i] = mod[i];
         }
-        m[3][3] = 1;
+        S.v[3][3] = T.v[3][3] = M.v[3][3] = 1;  // [I: the alpha; the uber pass reads the bloom's rgb only]
+        const uint32_t eq = legacy ? 0 : b.equation;
+        const M4 prod = eq == qbkey::key("eq2") ? mul(mul(T, M), S) : eq == qbkey::key("eq1") ? mul(mul(T, S), M) : mul(mul(S, T), M);
+        float m[4][4];
+        std::memcpy(m, prod.v, sizeof m);
         const gfx::TextureId q = dev_->targetTexture(quarterA_.id);
         passN(extract, &bloomA_, &q, 1, none, nullptr, 0, m, 4, 0);
-        // thickness: the blur's reach in 1280 x 720 pixels, here quarter texels [I].
-        dofBlur(bloomA_, bloomB_, std::max(0.5f, b.thickness / 4.0f));
+        if (view == 2) viewTex = dev_->targetTexture(bloomA_.id);
+        // thickness: 8241E1F8's radius as it is, in this buffer's texels [C 8250f998: lfs f1, 0x1c(bloom2)].
+        if (view != 2) {
+            if (legacy) dofBlur(bloomA_, bloomB_, std::max(0.5f, b.thickness / 4.0f));
+            else dofBlur(bloomA_, bloomB_, b.thickness, true);
+        }
+        if (view == 3) viewTex = dev_->targetTexture(bloomA_.id);
     }
     // dof3 (slot 2: dof1): the colour blurred at a quarter (as GH3's dof) [I: the blur].
     const Dof& d = p.dof;
@@ -554,7 +610,6 @@ void ScreenFx::endUber(const Params& p, gfx::TextureId& cur, const Target*& curT
         toQuarter(cur);
         dofBlur(quarterA_, quarterB_, d.blurRadius);
     }
-    const bool noise = p.noise.on && p.noise.intensity > 0 && noiseTex_;
     const BrightSat& bs = p.brightSat[0];
     if (p.vignette.on && !sysVignette_) makeVignette(p.vignette);
     const bool vignette = p.vignette.on && vignetteTex_, ink = p.ink.on && inkTex_;
@@ -565,6 +620,12 @@ void ScreenFx::endUber(const Params& p, gfx::TextureId& cur, const Target*& curT
     if (vignette) parts += "_vignette1";
     if (ink) parts += "_inkblot1";
     const gh3shader::Program* uber = gh3_.get(uberKey(parts, dof));
+    if (viewTex && extract) {
+        // GD07_BLOOM_VIEW: the stage's rgb, alpha 1 (the colour matrix's shader with the identity).
+        const float ident[4][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
+        passN(extract, nullptr, &viewTex, 1, none, nullptr, 0, ident, 4, 0);
+        return;
+    }
     if (!uber) {
         pass(nullptr, nullptr, cur, {}, none, nullptr, 0, Blend::Replace);
         return;
@@ -607,7 +668,7 @@ void ScreenFx::endUber(const Params& p, gfx::TextureId& cur, const Target*& curT
     // g_invProjMat c152 [C shader constant tables].
     float ps[13][4] = {};
     for (int k = 0; k < 4; ++k) ps[3][k] = p.noise.color[k];
-    ps[3][3] = p.noise.intensity;  // [I: the lerp toward the noise]
+    ps[3][3] = p.noise.intensity;  // [I: the lerp toward the noise] (the shaders that read the frame, and GD07_BLOOM2_LEGACY)
     if (bs.on) {
         float m[3][4];
         brightSatMatrix(bs, m);
@@ -638,17 +699,26 @@ void ScreenFx::endUber(const Params& p, gfx::TextureId& cur, const Target*& curT
     if (flash) dst = curT == &copyA_ ? &copyB_ : &copyA_;
     // World Tour's uber shaders read no framebuffer (g_FramebufferSampler, s4):
     // bloom1 writes the bloom with alpha 1, noise1 noise x g_Color with alpha
-    // g_Color.w (the intensity), bloom1_noise1 their sum with that alpha [C
-    // shaders]. They are added onto the picture, weighted by their alpha [I: the
-    // render state is not decompiled]; the picture is copied there first.
+    // g_Color.w, bloom1_noise1 their sum with that alpha [C shaders]. The
+    // pass's material (0xf6fd3cd6, _Uber_ScreenFX) is given blend mode 11 [C
+    // 8250e89c: +0xa8 = 0xb], blend control 0x6010601 = ONE, SRC_ALPHA [C
+    // 824BCBE8]: out = shader.rgb + picture x shader.a. So the bloom is added
+    // whole and the picture is scaled by g_Color.w, and the noise's g_Color is
+    // (color.rgb x color.a, 1 - color.a) [C 8250A598] with color.a = the
+    // intensity [C 824F44D0: the TOD blend writes it there]: picture x (1 - i)
+    // + noise x color x i + bloom. The picture is copied there first.
     // Metallica's read s4 and replace it. GD07_UBER_BLEND_LEGACY=1: replace.
     static const bool uberLegacy = [] {
         const char* v = SDL_getenv("GD07_UBER_BLEND_LEGACY");
         return v && *v && *v != '0';
     }();
     const bool additive = !(uber->samplers & (1u << 4)) && !uberLegacy;
+    if (additive && !legacy) {
+        for (int k = 0; k < 3; ++k) ps[3][k] = noise ? p.noise.color[k] * p.noise.intensity : 0.0f;
+        ps[3][3] = noise ? 1.0f - p.noise.intensity : 1.0f;
+    }
     if (additive) pass(nullptr, dst, cur, {}, none, nullptr, 0, Blend::Replace);
-    passN(uber, dst, tex, 7, g, vs, 17, ps, 13, 1u << 1, additive);
+    passN(uber, dst, tex, 7, g, vs, 17, ps, 13, 1u << 1, additive ? (legacy ? 1 : 2) : 0);
     if (flash) {
         // ScreenFlash's FlashBS: a bright_sat of its own after the TOD's [I: gh4's second bright_sat].
         cur = dev_->targetTexture(dst->id), curT = dst;
@@ -841,10 +911,11 @@ void readEntry(const qb::Struct& e, Params& p, int& brightSlot) {
         d.nearBegin = num(e, "nearblurbegin", 0), d.nearEnd = num(e, "nearblurend", 0);
         d.blurRadius = 3.0f, d.resolution = 1;
     } else if (type->key == qbkey::key("bloom2")) {
-        // gh4's bloom2 (parsed by 825074F8 [C: the keys]): materialfilter,
-        // subtract, colormodulate, saturation, thickness, equation [C data];
-        // the uber pass's bloom1 (ScreenFx::endUber). colormodulate's fourth
-        // value scales the three [I]; equation (eq0 everywhere) not applied.
+        // gh4's bloom2 (parsed by 824F7C90 [C]: on +0x18, materialfilter
+        // +0x19, thickness +0x1c, saturation +0x20, subtract +0x30,
+        // colormodulate +0x40, equation +0x50); the uber pass's bloom1
+        // (ScreenFx::endUber). colormodulate's fourth value scales the three
+        // [C 8250f1f0..8250f200]; equation orders the colour matrix.
         Bloom& b = p.bloom;
         b.on = on;
         b.gh4 = true;
@@ -855,6 +926,7 @@ void readEntry(const qb::Struct& e, Params& p, int& brightSlot) {
         b.bloom1 = 1, b.bloom2 = 0, b.falloff1 = 1, b.falloff2 = 0;
         b.materialFilter = num(e, "materialfilter", 0) > 0;
         b.saturation = num(e, "saturation", 1), b.thickness = num(e, "thickness", 0);
+        if (const qb::Value* eqv = e.find(qbkey::key("equation"))) b.equation = eqv->key;
     } else if (type->key == qbkey::key("noise2")) {
         p.noise.on = on;
         p.noise.intensity = num(e, "intensity", 0);

@@ -2444,6 +2444,52 @@ raw `qs.pak.xen` reproducing `pcQsText` confirms 0 leaks outside the kept Sony
 credits. QB string literals in `qb.pak.xen` carried no console/platform
 trademark (ASCII or UTF-16) to scrub; player text is `.qs`.
 
+## bloom2 and the uber pass as the executable draws them (2026-11-25)
+
+Why the main menu's GUITAR HERO logo was grey: the bloom reached the picture at
+8 % of its strength. Measured at the letter faces (0..255, red mood): the
+blurred bloom buffer was already 253 / 246 / 239, the picture gained 35.
+
+- **[C 8250E840, 824BCBE8]** the uber pass's material (0xf6fd3cd6,
+  `_Uber_ScreenFX`) is given blend mode 11 at run time; World Tour's blend
+  table has 15 modes and mode 11 is blend control 0x6010601: ONE, SRC_ALPHA.
+  So `out = shader.rgb + picture x shader.a`. The engine added the shader
+  SRC_ALPHA, ONE, i.e. bloom x the noise's alpha.
+- **[C 8250A598, 824F44D0]** noise2's `g_Color` is (color.rgb x color.a, 1 -
+  color.a), and the TOD blend writes `intensity` into color.a. With Noise_Lite
+  (0.08, grey 0.5): picture x 0.92 + noise x 0.04 + bloom. The reference
+  frame's grain agrees (high-pass deviation 2.8 / 255 in its flattest blocks;
+  a uniform 0..0.04 gives 2.9).
+- **[C 824F7C90, 8250F158]** bloom2: colormodulate.rgb x its fourth value (and
+  x (1 - the noise's intensity) under the uber pass), `equation` orders the
+  colour matrix's three steps (eq0 S T M, eq1 T S M, eq2 T M S, row vectors),
+  `thickness` is the blur's radius in the bloom buffer's own texels (not / 4).
+- **[C 822D6608]** the bloom's surface and textures are width / 4 x height / 4,
+  A8R8G8B8: every step clamps to 0..1. No float or 10-bit target is involved.
+- **[C 8250F158, 8242AB78]** `materialfilter`: a mesh whose material has +0xac
+  & 0x80 is queued in pass 19 as well; the bloom clears its buffer's colour
+  (not its depth) and draws that pass into it, then runs the colour matrix and
+  the blur. It is not "the picture where the stencil is 1".
+- **[C 8241E1F8]** the blur's further passes are added ONE, ONE and a pass
+  whose largest weight is 1 / 256 or less is skipped.
+
+The engine does the same now (`ScreenFx::endUber`, `VenueView::drawGlow`).
+Inferred, not read from the executable: pass 19 is drawn at the scene's size
+over the scene's depth and box filtered to the quarter (the original
+rasterises it at the quarter size against a quarter-size depth buffer whose
+contents were not traced, with a slope-scaled depth bias of -1), and only
+where the main pass left the tag's stencil (z_scifi's `StageBack03` screen
+quad, which the main pass draws over, bloomed through without it).
+`GD07_BLOOM2_LEGACY=1` restores the earlier chain, `GD07_BLOOM_VIEW=1..3`
+shows the source / the matrix's output / the blurred bloom, `GD07_GLOW_LOG=1`
+lists the pass, `GD07_GLOW_NOSTENCIL=1` drops the stencil test.
+
+Open: the picture is 8 % darker wherever the noise runs (it is in the
+original); World Tour's blend modes 9..14 differ from the 13-entry table
+`gh3shader::materialState` uses (9 0x1010706, 10 0x7010701, 11 0x6010601, 12
+0x10108, 13 0x10189, 14 0x1810181); dof3's blur is called with radius 6 where
+the engine uses 3; skinned meshes with the tag are not in `drawGlow`.
+
 ## Render methods: `rendermethod = $pushback` is a late draw pass (2026-11-25)
 
 A node's `rendermethod` (z_soundcheck: the logo banner `Z_SoundCheck_Plane02`,

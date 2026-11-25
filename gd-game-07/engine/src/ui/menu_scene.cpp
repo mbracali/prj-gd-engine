@@ -769,7 +769,8 @@ void MenuScene::draw(Canvas& c) {
         if (!VenueStage::post.original) p.bloom.on = false, p.brightSat[0].on = p.brightSat[1].on = false;
         if (!VenueStage::post.gameBloom) p.bloom.on = false;
         p.nearZ = 0.05f, p.farZ = 4000.0f;  // VenueView's projection
-        fx_.end(p);
+        // bloom2's material filter: the scene's pass 19 [C 8250F158, 8242AB78].
+        fx_.end(p, {}, [&] { view_->drawGlow(cam, lightState_, lights_); });
     }
     VenueView::lensShiftX = 0;  // leave the static clear for other viewports
 }

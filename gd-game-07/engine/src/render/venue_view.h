@@ -44,15 +44,25 @@ public:
     void shutdown();
     // Draws into the bound target and viewport (depth tested; the caller's
     // frame cleared depth). `lights`: LightShow::evaluate's values.
-    void draw(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show) { drawPass(cam, lights, show, false); }
+    void draw(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show) { drawPass(cam, lights, show, 0); }
     // The `rendermethod = $pushback` nodes (z_soundcheck's logo banner, its
     // projection light and the viewport planes): the original keeps them out
     // of the main pass and draws them in a pass of their own after the scene
     // and the light volumes, so draw() skips them and the caller draws them
     // here, after drawVolumes2D / drawRaytraced [C 8238CE38, 8242AB78, 82431B38].
     void drawPushback(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show) {
-        if (hasPushback_) drawPass(cam, lights, show, true);
+        if (hasPushback_) drawPass(cam, lights, show, 1);
     }
+    // The bloom's material filter (gh4's bloom2 with materialfilter = 1): the
+    // meshes whose material carries +0xac & 0x80 are also queued in pass 19
+    // [C 8242AB78: mask |= 0x80000], which the bloom draws again, on their
+    // own and with their own materials, into its cleared colour buffer [C
+    // 8250F158: clear 0xF (colour only), scene pass 0x13]. Drawn into the
+    // bound target against the depth already there (no depth write).
+    void drawGlow(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show) {
+        if (hasGlow_) drawPass(cam, lights, show, 2);
+    }
+    bool hasGlow() const { return hasGlow_; }
 
     static gfx::ProgramDesc programDesc();
     // The dynamic shadow for this frame (the band from the shadow light, GH3's
@@ -123,7 +133,8 @@ public:
     const Stats& stats() const { return stats_; }
 
 private:
-    void drawPass(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show, bool pushbackPass);
+    // `pass`: 0 the main pass, 1 the pushback pass (pass 20), 2 the bloom's material filter (pass 19).
+    void drawPass(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show, int pass);
     enum class Mode : uint8_t { Opaque, Blend, Add, Subtract, AddOne };
     struct Item {
         uint32_t first = 0, count = 0;
@@ -133,6 +144,7 @@ private:
         bool twoSided = false, noDepthWrite = false;  // +0xcc & 8 (cull none), & 0x20 (no z write) [C 823DC180]
         uint32_t blendMode = 0, matFlags = 0;          // +0xd8, +0xcc (gh3shader::materialState)
         int8_t stencil = -1;      // the material's stencil reference (+0xdc; -1: none, +0xcc & 0x80) [C 823DC180]
+        bool glow = false;        // +0xdc (gh4: the material's +0xac) & 0x80: also in the bloom's pass 19 [C 8242AB78]
         bool unlit = false;
         const gh3shader::Program* gh3 = nullptr;  // the template's program (null: the approximation)
         int mat = -1;             // index into mats_
@@ -158,6 +170,7 @@ private:
     gfx::BufferId vb_, ib_;
     std::vector<Item> items_;
     bool hasPushback_ = false;  // any item of a `rendermethod = $pushback` node
+    bool hasGlow_ = false;      // any item in the bloom's pass 19 (Item::glow)
     std::vector<uint32_t> groups_;  // light group keys (a node's lightgroup)
     // The node's further groups (lightgroup2..4, 0: none), one per groups_
     // entry: a light serves the object when it serves any of them [C 823C9FD8].

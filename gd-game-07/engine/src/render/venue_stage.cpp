@@ -842,6 +842,14 @@ void VenueStage::draw(double ms) {
         if (!post.original) p.bloom.on = false, p.brightSat[0].on = p.brightSat[1].on = false;  // Remove All Effects
         if (!post.original) p.noise.on = p.vignette.on = p.ink.on = false;
         if (!post.gameBloom) p.bloom.on = false;  // Enhanced > Bloom: None
+        // bloom2's material filter: the scene's pass 19 [C 8250F158, 8242AB78],
+        // with the projection (the jitter) the scene was drawn with.
+        const float glowJx = VenueView::jitterX, glowJy = VenueView::jitterY;
+        const std::function<void()> glow = [&] {
+            VenueView::jitterX = glowJx, VenueView::jitterY = glowJy;
+            view_->drawGlow(cam, lightState_, lights_);
+            VenueView::jitterX = VenueView::jitterY = 0;
+        };
         VenueView::jitterX = VenueView::jitterY = 0;
         bool chained = false;
         if (chain && enh_) {
@@ -855,7 +863,7 @@ void VenueStage::draw(double ms) {
                 ldrW_ = sw, ldrH_ = sh;
             }
             if (ldr_) {
-                fx_.end(p, ldr_);
+                fx_.end(p, ldr_, glow);
                 gfx::PostFrame f;
                 gh3shader::Globals g;
                 gfx::Mat4 vp;
@@ -874,6 +882,6 @@ void VenueStage::draw(double ms) {
                 if (!chained) SDL_Log("enhanced fx: the chain failed; the venue is drawn without it");
             }
         }
-        if (!chained) fx_.end(p);
+        if (!chained) fx_.end(p, {}, glow);
     }
 }
