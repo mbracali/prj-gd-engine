@@ -769,6 +769,7 @@ void VenueStage::draw(double ms) {
     view_->drawVolumes2D(cam, lights_, sceneDepth);
     static const bool noRays = SDL_getenv("GD07_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
     if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, sceneDepth);
+    view_->drawPushback(cam, lightState_, lights_);  // the pushback pass: after the volumes [C 82431B38]
     if (particles_) {
         VenueView* vv = view_.get();
         const auto* ls = &lightState_;

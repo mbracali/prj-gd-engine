@@ -44,7 +44,15 @@ public:
     void shutdown();
     // Draws into the bound target and viewport (depth tested; the caller's
     // frame cleared depth). `lights`: LightShow::evaluate's values.
-    void draw(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show);
+    void draw(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show) { drawPass(cam, lights, show, false); }
+    // The `rendermethod = $pushback` nodes (z_soundcheck's logo banner, its
+    // projection light and the viewport planes): the original keeps them out
+    // of the main pass and draws them in a pass of their own after the scene
+    // and the light volumes, so draw() skips them and the caller draws them
+    // here, after drawVolumes2D / drawRaytraced [C 8238CE38, 8242AB78, 82431B38].
+    void drawPushback(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show) {
+        if (hasPushback_) drawPass(cam, lights, show, true);
+    }
 
     static gfx::ProgramDesc programDesc();
     // The dynamic shadow for this frame (the band from the shadow light, GH3's
@@ -115,6 +123,7 @@ public:
     const Stats& stats() const { return stats_; }
 
 private:
+    void drawPass(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show, bool pushbackPass);
     enum class Mode : uint8_t { Opaque, Blend, Add, Subtract, AddOne };
     struct Item {
         uint32_t first = 0, count = 0;
@@ -148,6 +157,7 @@ private:
     gfx::ProgramId program_;
     gfx::BufferId vb_, ib_;
     std::vector<Item> items_;
+    bool hasPushback_ = false;  // any item of a `rendermethod = $pushback` node
     std::vector<uint32_t> groups_;  // light group keys (a node's lightgroup)
     // The node's further groups (lightgroup2..4, 0: none), one per groups_
     // entry: a light serves the object when it serves any of them [C 823C9FD8].

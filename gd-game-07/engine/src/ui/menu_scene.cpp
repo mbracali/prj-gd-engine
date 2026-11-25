@@ -753,16 +753,16 @@ void MenuScene::draw(Canvas& c) {
     const gfx::TextureId sceneDepth = fx ? fx_.depthSnapshot() : gfx::TextureId{};
     // z_soundcheck's 2D light volumes run at full density, as on the song stage
     // and the 360 frontend (ref: a bright, coloured haze). The logo banner
-    // (venue node Z_SoundCheck_Plane02) and the viewport planes carry
-    // `rendermethod = $pushback`, so the venue draw writes their depth (see
-    // VenueView::draw) and these additive volumes -- depth-tested LessEqual --
-    // are occluded behind the crisp logo instead of washing over it. The old
-    // 0.70 scale was a workaround for the missing occlusion and is gone now that
-    // the plane pushes the haze back. GD07_MENU_VOL2D_SCALE overrides it.
+    // (venue node Z_SoundCheck_Plane02), its projection light and the viewport
+    // planes carry `rendermethod = $pushback`: the original draws them in a
+    // late pass after the scene and the volumes [C 82431B38], so the haze,
+    // whose beams cross in front of the banner, never washes over them (see
+    // drawPushback below). GD07_MENU_VOL2D_SCALE overrides the density.
     static const float vol2dScale = SDL_getenv("GD07_MENU_VOL2D_SCALE") ? float(std::atof(SDL_getenv("GD07_MENU_VOL2D_SCALE"))) : 1.0f;
     view_->drawVolumes2D(cam, lights_, sceneDepth, vol2dScale);
     static const bool noRays = SDL_getenv("GD07_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
     if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, sceneDepth);
+    view_->drawPushback(cam, lightState_, lights_);  // the pushback pass: after the volumes [C 82431B38]
     if (fx) {
         // Enhanced: Remove All Effects drops GH3's own; Bloom None its bloom (as the songs').
         screenfx::Params p = fxParams_;

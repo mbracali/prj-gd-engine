@@ -2443,3 +2443,38 @@ credits do not contain these so they are untouched). A standalone scan of the
 raw `qs.pak.xen` reproducing `pcQsText` confirms 0 leaks outside the kept Sony
 credits. QB string literals in `qb.pak.xen` carried no console/platform
 trademark (ASCII or UTF-16) to scrub; player text is `.qs`.
+
+## Render methods: `rendermethod = $pushback` is a late draw pass (2026-11-25)
+
+A node's `rendermethod` (z_soundcheck: the logo banner `Z_SoundCheck_Plane02`,
+`z_soundcheck_G_RE_ProjectionLight_01`, the viewport planes) is not a depth
+trick; it picks the pass the node's meshes are drawn in.
+
+- **[C 8238CE38, 8233F4B8 -> 823B1448]** the node loaders read `rendermethod`
+  and OR a flag into the sector's flags (+0x18): `stage` 0x04, `godray` 0x08,
+  `godrayonly` 0x10, `pushback` 0x20, `spotlightreceiver` 0x40.
+- **[C 8242AB78, 8242A978]** each mesh's pass mask starts as 1 (the main pass,
+  pass 0). `godray` adds pass 15, `spotlightreceiver` pass 14; `godrayonly`
+  *replaces* the main pass with pass 16 and `pushback` *replaces* it with pass
+  20 (mask `& ~1 | 0x100000`).
+- **[C 82431B38]** the scene render draws pass 0 first, then the shadow work,
+  pass 5, pass 4, pass 10 (drawn with the depth targets bound as textures [I:
+  the depth-softened light volumes]), pass 18, and only then pass 20, followed
+  by passes 3 and 2.
+
+So a pushback mesh is "pushed back" in the frame: drawn after the scene and the
+additive volumes, with its own material's state, which is why the 360's logo
+and menu planes sit crisp over the haze although the RowA beams cross in front
+of the banner (housings at z -3.3..-7.4 aiming at the camera, banner at z -6.6).
+The engine does the same: `VenueView::draw` skips pushback nodes and
+`VenueView::drawPushback` draws them after `drawVolumes2D` / `drawRaytraced`
+(menu scene and song stage). Evidence: main menu frames with the 2D volumes
+isolated wash the logo and hide the menu text without the pass and sit behind
+both with it; `--venuetest` z_soundcheck shots are pixel-identical either way;
+`--uitest` 1181 / 1181. `GD07_NO_PUSHBACK=1` draws them in the main pass
+(compare); `GD07_PUSHBACK_LOG=1` lists the pass's items.
+
+Not done here: the banner's letters are still greyer than the 360's (its
+material is alpha-blended, about 0.8 opaque in our frames, and
+`z_soundcheck_G_RE_ProjectionLight_01` is not drawn on the menu) and
+`godray` / `godrayonly` / `spotlightreceiver` are not honoured as passes.

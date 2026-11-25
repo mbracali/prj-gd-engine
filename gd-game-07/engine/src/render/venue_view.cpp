@@ -189,6 +189,7 @@ void VenueView::shutdown() {
     for (auto& [k, t] : textures_) dev_->destroyTexture(t.id);
     textures_.clear();
     items_.clear();
+    hasPushback_ = false;
     groups_.clear();
     groupsMore_.clear();
     dev_ = nullptr;
@@ -663,6 +664,7 @@ VenueView::InitStep VenueView::build(gfx::RenderDevice& dev, const venue::Venue&
             }
         }
         items_.push_back(it);
+        if (it.node >= 0 && v.nodes[size_t(it.node)].pushback) hasPushback_ = true;
     };
     if (pr.phase >= 2) {
         // The vertex, then the index buffer, 4 MB at a time (z_tushino's
@@ -942,9 +944,11 @@ void VenueView::lightAt(const std::vector<venue::LightState>& lights, const venu
     rgb[0] = c.x, rgb[1] = c.y, rgb[2] = c.z;
 }
 
-void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show) {
+void VenueView::drawPass(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show, bool pushbackPass) {
     if (!dev_ || !program_) return;
-    static const bool noPushback = SDL_getenv("GD07_NO_PUSHBACK") != nullptr;  // development aid: compare without the pushback occluder
+    // development aid: the pushback nodes in the main pass, as before the pass split
+    static const bool noPushback = SDL_getenv("GD07_NO_PUSHBACK") != nullptr;
+    if (pushbackPass && noPushback) return;
     gfx::RenderDevice& d = *dev_;
     const venue::Vec3 fwd = venue::rotate(cam.rot, {0, 0, 1});
     const venue::Vec3 up = venue::rotate(cam.rot, {0, 1, 0});
@@ -1067,6 +1071,13 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
             if (vis == 0) continue;
             if (vis < 0 && !n.createdAtStart && !(n.createdOn && show.flag(n.createdOn))) continue;
         }
+        // `rendermethod = $pushback`: the node's sector flag 0x20 [C 8238CE38 /
+        // 8233F4B8 -> 823B1448] takes its meshes out of the main pass and into
+        // pass 20 only [C 8242AB78: mask & ~1 | 0x100000; 8242A978], which the
+        // scene render draws late, after the main pass and the depth-sampling
+        // volumes' pass 10 [C 82431B38]. So they are drawn by drawPushback, with
+        // their own materials' states, not here.
+        if (!noPushback && (it.node >= 0 && v_->nodes[size_t(it.node)].pushback) != pushbackPass) continue;
         // A crowd card without its picture (a CrowdOff shot, the peds not
         // drawn yet) is not drawn: no texture would draw it black.
         if (it.card) {
@@ -1142,6 +1153,14 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
     // unselected GUITAR/BASS/DRUMS readable, stroke luma ~130). Never raises
     // global brightness. GD07_UI_BOARD_LIT_LEGACY=1 restores the old lit board.
     static const bool uiBoardLitLegacy = SDL_getenv("GD07_UI_BOARD_LIT_LEGACY") && SDL_getenv("GD07_UI_BOARD_LIT_LEGACY")[0] == '1';
+    static const bool pushbackLog = SDL_getenv("GD07_PUSHBACK_LOG") != nullptr;  // development aid: the pass's items, once
+    static bool pushbackLogged = false;
+    if (pushbackPass && pushbackLog && !pushbackLogged) {
+        pushbackLogged = true;
+        for (const Item* it : order)
+            SDL_Log("pushback pass: %s mode %d blend %u flags 0x%x alpharef %.3f tris %d%s", qbkey::names().get(v_->nodes[size_t(it->node)].name).c_str(),
+                    int(it->mode), it->blendMode, it->matFlags, it->alphaRef, int(it->count / 3), it->gh3 ? "" : " (fallback shader)");
+    }
     for (const Item* it : order) {
         c.first = int(it->first);
         c.count = int(it->count);
@@ -1257,15 +1276,6 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
                 gc.state.blend = ms.blend, gc.state.src = ms.src, gc.state.dst = ms.dst, gc.state.op = ms.op;
                 gc.state.depthWrite = ms.depthWrite, gc.state.depthFunc = ms.depthFunc;
             }
-            // `rendermethod = $pushback` (z_soundcheck's logo banner / viewport planes):
-            // the original render method pushes everything drawn afterward behind this
-            // plane, so it writes depth regardless of the material's own no-z-write flag.
-            // The material's alpha test still discards the transparent margins (no depth
-            // there), so the menu's additive volumetric passes (drawVolumes2D /
-            // drawRaytraced, depth-tested LessEqual) are occluded behind the opaque logo
-            // yet still haze through its gaps, matching the 360 [C z_soundcheck only].
-            if (!noPushback && it->node >= 0 && v_->nodes[size_t(it->node)].pushback)
-                gc.state.depthWrite = true, gc.state.depthFunc = gfx::CompareFunc::LessEqual;
             if (it->flare && it->housing >= 0) {
                 drawFlare(*it, gc, centreOf(it), cam);
                 ++draws;
@@ -1288,12 +1298,10 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
             c.state.blend = ms.blend, c.state.src = ms.src, c.state.dst = ms.dst, c.state.op = ms.op;
             c.state.depthWrite = ms.depthWrite, c.state.depthFunc = ms.depthFunc;
         }
-        if (!noPushback && it->node >= 0 && v_->nodes[size_t(it->node)].pushback)  // pushback occluder (see the gh3 path)
-            c.state.depthWrite = true, c.state.depthFunc = gfx::CompareFunc::LessEqual;
         d.draw(c);
         ++draws;
     }
-    stats_.drawsLastFrame = draws;
+    stats_.drawsLastFrame = pushbackPass ? stats_.drawsLastFrame + draws : draws;
 }
 
 void VenueView::drawFlare(const Item& it, gfx::DrawCall gc, const venue::Vec3& centre, const venue::CamPose& cam) {
