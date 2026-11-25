@@ -944,6 +944,7 @@ void VenueView::lightAt(const std::vector<venue::LightState>& lights, const venu
 
 void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show) {
     if (!dev_ || !program_) return;
+    static const bool noPushback = SDL_getenv("GD07_NO_PUSHBACK") != nullptr;  // development aid: compare without the pushback occluder
     gfx::RenderDevice& d = *dev_;
     const venue::Vec3 fwd = venue::rotate(cam.rot, {0, 0, 1});
     const venue::Vec3 up = venue::rotate(cam.rot, {0, 1, 0});
@@ -1256,6 +1257,15 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
                 gc.state.blend = ms.blend, gc.state.src = ms.src, gc.state.dst = ms.dst, gc.state.op = ms.op;
                 gc.state.depthWrite = ms.depthWrite, gc.state.depthFunc = ms.depthFunc;
             }
+            // `rendermethod = $pushback` (z_soundcheck's logo banner / viewport planes):
+            // the original render method pushes everything drawn afterward behind this
+            // plane, so it writes depth regardless of the material's own no-z-write flag.
+            // The material's alpha test still discards the transparent margins (no depth
+            // there), so the menu's additive volumetric passes (drawVolumes2D /
+            // drawRaytraced, depth-tested LessEqual) are occluded behind the opaque logo
+            // yet still haze through its gaps, matching the 360 [C z_soundcheck only].
+            if (!noPushback && it->node >= 0 && v_->nodes[size_t(it->node)].pushback)
+                gc.state.depthWrite = true, gc.state.depthFunc = gfx::CompareFunc::LessEqual;
             if (it->flare && it->housing >= 0) {
                 drawFlare(*it, gc, centreOf(it), cam);
                 ++draws;
@@ -1278,6 +1288,8 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
             c.state.blend = ms.blend, c.state.src = ms.src, c.state.dst = ms.dst, c.state.op = ms.op;
             c.state.depthWrite = ms.depthWrite, c.state.depthFunc = ms.depthFunc;
         }
+        if (!noPushback && it->node >= 0 && v_->nodes[size_t(it->node)].pushback)  // pushback occluder (see the gh3 path)
+            c.state.depthWrite = true, c.state.depthFunc = gfx::CompareFunc::LessEqual;
         d.draw(c);
         ++draws;
     }

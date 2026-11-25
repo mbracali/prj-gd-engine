@@ -751,21 +751,15 @@ void MenuScene::draw(Canvas& c) {
     if (!noProjectors) view_->drawProjectors(cam, lights_);
     view_->drawVolumes(cam, lights_);
     const gfx::TextureId sceneDepth = fx ? fx_.depthSnapshot() : gfx::TextureId{};
-    // z_soundcheck's 2D light volumes are tuned for the song stage, where no
-    // fixed banner sits behind them; on the frontend they are drawn additively
-    // in front of the "Guitar Hero World Tour" logo banner (a venue node, not a
-    // UI layer -- MenuScene draws before the UI screen pass), and at full
-    // density the bright blue Row/RowA beams and the white LFX_Projector_light
-    // volume saturate the logo to an unreadable blue-white wash. The 360
-    // frontend reads as a soft, coloured haze with the logo crisp on top
-    // (ref 03_main_XENIA_REF.png, the magenta phase of the cycle). Scale the
-    // menu's volumes down so the wash stays below saturation over the logo. The
-    // scale was 0.35 when the mood was frozen on the first (bluest) snapshot --
-    // the whole haze stayed dim and the fire dominated (GW menu reads orange);
-    // now that Z_Soundcheck_LightShow cycles the moods (update()), 0.70 brings
-    // the purple / pink / red haze up to the 360's brightness while the logo
-    // stays readable through all four snapshots. GD07_MENU_VOL2D_SCALE overrides it.
-    static const float vol2dScale = SDL_getenv("GD07_MENU_VOL2D_SCALE") ? float(std::atof(SDL_getenv("GD07_MENU_VOL2D_SCALE"))) : 0.70f;
+    // z_soundcheck's 2D light volumes run at full density, as on the song stage
+    // and the 360 frontend (ref: a bright, coloured haze). The logo banner
+    // (venue node Z_SoundCheck_Plane02) and the viewport planes carry
+    // `rendermethod = $pushback`, so the venue draw writes their depth (see
+    // VenueView::draw) and these additive volumes -- depth-tested LessEqual --
+    // are occluded behind the crisp logo instead of washing over it. The old
+    // 0.70 scale was a workaround for the missing occlusion and is gone now that
+    // the plane pushes the haze back. GD07_MENU_VOL2D_SCALE overrides it.
+    static const float vol2dScale = SDL_getenv("GD07_MENU_VOL2D_SCALE") ? float(std::atof(SDL_getenv("GD07_MENU_VOL2D_SCALE"))) : 1.0f;
     view_->drawVolumes2D(cam, lights_, sceneDepth, vol2dScale);
     static const bool noRays = SDL_getenv("GD07_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
     if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, sceneDepth);
