@@ -263,6 +263,9 @@ bool MenuScene::ensureVenue(bool wait) {
         }
         lights_ = {};
         lights_.init(*venue_, globals_, Chart{});
+        // Z_soundcheck_Init spawns Z_Soundcheck_LightShow, whose first
+        // CycleNextSnapshot fires at once (then every 2 s) [C]; arm it now.
+        nextSnapMs_ = clockMs_;
     }
     return venue_ != nullptr;
 }
@@ -599,6 +602,17 @@ void MenuScene::drawUiViewports(Canvas& c, gfx::RenderDevice& dev) {
 void MenuScene::update(double dtMs) {
     clockMs_ += dtMs;
     if (t_ < duration_) t_ = std::min(duration_, t_ + dtMs);
+    // Z_Soundcheck_LightShow: step the mood's snapshots every 2 s (blend 0.1 s)
+    // [C zones\z_soundcheck]. The lightshow has no notes on the frontend, so
+    // the zone script drives the cycling itself; without this the menu stays on
+    // the first snapshot and its one static mood reads fire-dominant instead of
+    // the 360's animated purple / pink / red show (GW-00x menu mood).
+    static const bool noCycle = SDL_getenv("GD07_MENU_NO_LIGHTCYCLE") != nullptr;
+    if (!noCycle && nextSnapMs_ >= 0 && venue_ && loadedZone_ == zone_)
+        while (clockMs_ >= nextSnapMs_) {
+            lights_.cycleSnapshot(clockMs_, 0.1f);
+            nextSnapMs_ += 2000.0;
+        }
     objects_->update(dtMs);
 }
 
@@ -743,10 +757,15 @@ void MenuScene::draw(Canvas& c) {
     // UI layer -- MenuScene draws before the UI screen pass), and at full
     // density the bright blue Row/RowA beams and the white LFX_Projector_light
     // volume saturate the logo to an unreadable blue-white wash. The 360
-    // frontend reads as a soft purple haze with the logo crisp on top
-    // (ref 03_main_XENIA_REF.png). Scale the menu's volumes down so the wash
-    // stays below saturation over the logo; GD07_MENU_VOL2D_SCALE overrides it.
-    static const float vol2dScale = SDL_getenv("GD07_MENU_VOL2D_SCALE") ? float(std::atof(SDL_getenv("GD07_MENU_VOL2D_SCALE"))) : 0.35f;
+    // frontend reads as a soft, coloured haze with the logo crisp on top
+    // (ref 03_main_XENIA_REF.png, the magenta phase of the cycle). Scale the
+    // menu's volumes down so the wash stays below saturation over the logo. The
+    // scale was 0.35 when the mood was frozen on the first (bluest) snapshot --
+    // the whole haze stayed dim and the fire dominated (GW menu reads orange);
+    // now that Z_Soundcheck_LightShow cycles the moods (update()), 0.70 brings
+    // the purple / pink / red haze up to the 360's brightness while the logo
+    // stays readable through all four snapshots. GD07_MENU_VOL2D_SCALE overrides it.
+    static const float vol2dScale = SDL_getenv("GD07_MENU_VOL2D_SCALE") ? float(std::atof(SDL_getenv("GD07_MENU_VOL2D_SCALE"))) : 0.70f;
     view_->drawVolumes2D(cam, lights_, sceneDepth, vol2dScale);
     static const bool noRays = SDL_getenv("GD07_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
     if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, sceneDepth);

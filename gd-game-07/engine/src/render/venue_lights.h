@@ -45,6 +45,12 @@ public:
     // Advances to song time `ms`: the lightshow notes and the performance's
     // changes in time order.
     void update(double ms, const PerfTimeline& perf);
+    // The frontend menu's Z_Soundcheck_LightShow loop [C zones\z_soundcheck]:
+    // LightShow_SetTime time = `blendTime`, then LightShow_CycleNextSnapshot
+    // save = true, repeated every 2 s. In a song the lightshow notes drive the
+    // cycling through update(); the menu has none, so the zone's own script
+    // steps the mood's snapshots (first, second, Third, Fourth) itself.
+    void cycleSnapshot(double ms, float blendTime);
     // Every venue light's values at song time `ms` (indexed as Venue::lights).
     void evaluate(double ms, std::vector<LightState>& out) const;
     // A node flag (createdonprogress / createdfromvariable): LS_ALWAYS, the

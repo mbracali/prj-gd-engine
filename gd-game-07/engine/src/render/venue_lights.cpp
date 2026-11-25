@@ -291,6 +291,15 @@ void LightShow::update(double ms, const PerfTimeline& perf) {
     now_ = std::max(now_, ms);
 }
 
+void LightShow::cycleSnapshot(double ms, float blendTime) {
+    // Z_Soundcheck_LightShow's loop body: LightShow_SetTime then
+    // LightShow_CycleNextSnapshot (save) [C]. The cycle steps the mood's
+    // snapshot list (modeEntry) in order, blended over the set time.
+    now_ = std::max(now_, ms);
+    blend_ = blendTime;
+    cycle(ms, true);
+}
+
 HousingState LightShow::housingAt(const HousingTarget& h, double t) const {
     if (h.blend <= 0 || t >= h.start + h.blend * 1000.0) return h.to;
     const float s = float(std::clamp((t - h.start) / (h.blend * 1000.0), 0.0, 1.0));

@@ -79,6 +79,12 @@ private:
     void dropPending();
     venue::LightShow lights_;
     std::vector<venue::LightState> lightState_;
+    // Z_Soundcheck_LightShow's cycle: the menu zone steps its mood's snapshots
+    // (first, second, Third, Fourth) every 2 s, blended over 0.1 s [C script];
+    // armed when the lights init. Without it the menu froze on the first
+    // snapshot (a static mood, fire-dominant) instead of the animated show the
+    // 360 runs behind the main menu. GD07_MENU_NO_LIGHTCYCLE=1 freezes it.
+    double nextSnapMs_ = -1;
     bool failed_ = false;  // the zone did not load (logged once)
     // Create / Kill {name = node} (SafeCreate, the store's Z_SoundCheck_G_RMM_Kill_me):
     // 1 created, 0 killed; EnableLightGroup / DisableLightGroup: the groups switched off.
