@@ -593,12 +593,28 @@ void VenueStage::shadowPass(double ms, const venue::CamPose& cam) {
     if (particles_ && particles_->shadowLight)
         for (size_t i = 0; i < v.lights.size(); ++i)
             if (v.lights[i].name == particles_->shadowLight) best = int(i);
-    if (log) SDL_Log("shadow: light %s", best >= 0 ? qbkey::names().get(v.lights[size_t(best)].name).c_str() : "none");
-    if (best < 0) return;
-    const venue::Vec3 d = v.lights[size_t(best)].dir;
-    const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-    if (dl < 1e-6f) return;
-    const gfx::Vec3 dir{d[0] / dl, d[1] / dl, d[2] / dl};
+    if (log) SDL_Log("shadow: light %s", best >= 0 ? qbkey::names().get(v.lights[size_t(best)].name).c_str() : "none (default dir)");
+    gfx::Vec3 dir;
+    if (best >= 0) {
+        const venue::Vec3 d = v.lights[size_t(best)].dir;
+        const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        if (dl < 1e-6f) return;
+        dir = {d[0] / dl, d[1] / dl, d[2] / dl};
+    } else {
+        // Most performance venues (z_metalfest, z_scifi, ...) carry only the
+        // light show's LFX lights: their band key lights live in the Alt_Band
+        // or per-member groups, or point nearly sideways, so none matches the
+        // band-group overhead caster that the greybox venues' GFX_L_Band_Top_
+        // Direct01 (group band, dir 0 -0.92 -0.40) supplies. The original still
+        // casts the band's dynamic shadow in those venues: a zone's scripts
+        // never call SetShadowDir / SetShadowDirFromLight (nor any shadow
+        // native), so the shadow pass reads the single global shadow direction
+        // guitar_startup leaves set at startup [C: 822B84B0; the default is not
+        // dumped, so this mirrors it with the game's own canonical band-top
+        // direction]. Without this the band casts no shadow at all in the real
+        // venues and looks pasted onto the stage. [GD07: owner 11-24.]
+        dir = gfx::normalize(gfx::Vec3{0.0f, -0.92f, -0.40f});
+    }
     // GH3's two cascades along the camera's view (the constants above). The
     // camera's near plane is the port's (0.05, VenueView::cameraGlobals) [I].
     const gfx::Vec3 fwd = toG(venue::rotate(cam.rot, {0, 0, 1}));
