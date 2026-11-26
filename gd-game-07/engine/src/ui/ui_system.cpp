@@ -1624,29 +1624,36 @@ void UiSystem::draw(Canvas& c) {
             if (spinGlobe_) {
                 // GHWT's world globe: the equirectangular world map on a
                 // rotating sphere, over the flaming glow. The front hemisphere
-                // (longitude -90..+90) is drawn as a lat/long mesh, orthographic;
-                // the texture repeats so the longitude offset scrolls new land
-                // into view, and a centre-bright shade reads as a sphere.
+                // (longitude -90..+90) is a lat/long mesh, orthographic; the
+                // texture repeats so the longitude offset scrolls new land into
+                // view. Lit by a front-upper-left key so the land reads bright
+                // like the 360's (whose globe reaches ~1.7x the flat map on the
+                // lit side), via a base pass then an additive over-bright pass.
                 const float cx = spinX_, cy = spinY_, r = spinR_;
                 const double lon0 = loadingMs_ / 1000.0 * 2 * M_PI * 0.12;  // ~0.12 rev/s
                 const int NLAT = 20, NLON = 20;
-                auto vert = [&](int i, int j) {
+                const float lx = -0.41f, ly = 0.41f, lz = 0.82f;  // key light, front-upper-left
+                auto vert = [&](int i, int j, bool over) {
                     const double lat = -M_PI / 2 + M_PI * i / NLAT;
                     const double lon = -M_PI / 2 + M_PI * j / NLON;
-                    const float sx = cx + r * float(std::cos(lat) * std::sin(lon));
-                    const float sy = cy - r * float(std::sin(lat));
-                    const float z = float(std::cos(lat) * std::cos(lon));
-                    const uint8_t s = uint8_t(std::clamp(70.0f + 185.0f * z, 0.0f, 255.0f));
-                    return Vertex{sx, sy, 0, float((lon0 + lon) / (2 * M_PI)), float((M_PI / 2 - lat) / M_PI), s, s, s, 255};
+                    const float nx = float(std::cos(lat) * std::sin(lon)), ny = float(std::sin(lat)), nz = float(std::cos(lat) * std::cos(lon));
+                    const float diff = std::max(0.0f, nx * lx + ny * ly + nz * lz);
+                    const float b = 0.62f + 1.45f * diff;  // ambient + key, up to ~2.0 on the lit side
+                    const float g = over ? std::clamp(b - 1.0f, 0.0f, 1.0f) : std::clamp(b, 0.0f, 1.0f);
+                    const uint8_t s = uint8_t(g * 255.0f);
+                    return Vertex{cx + r * nx, cy - r * ny, 0, float((lon0 + lon) / (2 * M_PI)), float((M_PI / 2 - lat) / M_PI), s, s, s, 255};
                 };
-                std::vector<Vertex> g;
-                g.reserve(size_t(NLAT) * NLON * 6);
-                for (int i = 0; i < NLAT; ++i)
-                    for (int j = 0; j < NLON; ++j) {
-                        const Vertex a = vert(i, j), b = vert(i, j + 1), cc = vert(i + 1, j + 1), d = vert(i + 1, j);
-                        g.push_back(a), g.push_back(b), g.push_back(cc), g.push_back(a), g.push_back(cc), g.push_back(d);
-                    }
-                c.draw(g.data(), g.size(), int(st.id), Blend::Alpha, /*repeat=*/true);
+                for (int pass = 0; pass < 2; ++pass) {
+                    const bool over = pass == 1;
+                    std::vector<Vertex> g;
+                    g.reserve(size_t(NLAT) * NLON * 6);
+                    for (int i = 0; i < NLAT; ++i)
+                        for (int j = 0; j < NLON; ++j) {
+                            const Vertex a = vert(i, j, over), b = vert(i, j + 1, over), cc = vert(i + 1, j + 1, over), d = vert(i + 1, j, over);
+                            g.push_back(a), g.push_back(b), g.push_back(cc), g.push_back(a), g.push_back(cc), g.push_back(d);
+                        }
+                    c.draw(g.data(), g.size(), int(st.id), over ? Blend::Add : Blend::Alpha, /*repeat=*/true);
+                }
             } else {
                 const float a = float(loadingMs_ / 1000.0 * 2 * M_PI), cs = std::cos(a), sn = std::sin(a), h = 48;
                 const float cx = spinX_ + h, cy = spinY_ + h;
