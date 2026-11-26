@@ -751,14 +751,24 @@ void MenuScene::draw(Canvas& c) {
     if (!noProjectors) view_->drawProjectors(cam, lights_);
     view_->drawVolumes(cam, lights_);
     const gfx::TextureId sceneDepth = fx ? fx_.depthSnapshot() : gfx::TextureId{};
-    // z_soundcheck's 2D light volumes run at full density, as on the song stage
-    // and the 360 frontend (ref: a bright, coloured haze). The logo banner
-    // (venue node Z_SoundCheck_Plane02), its projection light and the viewport
-    // planes carry `rendermethod = $pushback`: the original draws them in a
-    // late pass after the scene and the volumes [C 82431B38], so the haze,
-    // whose beams cross in front of the banner, never washes over them (see
-    // drawPushback below). GD07_MENU_VOL2D_SCALE overrides the density.
-    static const float vol2dScale = SDL_getenv("GD07_MENU_VOL2D_SCALE") ? float(std::atof(SDL_getenv("GD07_MENU_VOL2D_SCALE"))) : 1.0f;
+    // z_soundcheck's 2D light volumes are the menu's big coloured stage haze.
+    // The logo banner (venue node Z_SoundCheck_Plane02), its projection light
+    // and the viewport planes carry `rendermethod = $pushback`: the original
+    // draws them in a late pass after the scene and the volumes [C 82431B38],
+    // so the haze, whose beams cross in front of the banner, never washes over
+    // them (see drawPushback below).
+    //
+    // At full density (as the song stage draws them) the additive ONE+ONE haze
+    // blows the menu's centre to white: measured against the reference frame
+    // the beam band read luma 150 / 26% of pixels clipped, vs the 360's 96 /
+    // 6%, washing out the logo and the left menu items. The 360 tonemaps those
+    // highlights back down; our menu fx pass does not, so we draw the haze at a
+    // lower density to land in the same place without a tonemap. 0.60 matches
+    // the reference centre (luma 92 / 7% clipped) and keeps the logo and menu
+    // legible; raytraced beams and projector wash contribute ~nothing to the
+    // blow-out (isolation-tested) and are left at full. Menu-only: the song
+    // stage calls drawVolumes2D at the default 1.0. GD07_MENU_VOL2D_SCALE tunes.
+    static const float vol2dScale = SDL_getenv("GD07_MENU_VOL2D_SCALE") ? float(std::atof(SDL_getenv("GD07_MENU_VOL2D_SCALE"))) : 0.6f;
     view_->drawVolumes2D(cam, lights_, sceneDepth, vol2dScale);
     static const bool noRays = SDL_getenv("GD07_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
     if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, sceneDepth);
