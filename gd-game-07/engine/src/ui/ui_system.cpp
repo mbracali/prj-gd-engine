@@ -1707,6 +1707,18 @@ void UiSystem::drawElementText(Canvas& c, const Element& e, const FontEntry& fe,
     float lsx = 1, lsy = 1;  // this line's glyph scale (fit_width / fit_height)
     std::vector<Vertex> verts;
     std::array<uint8_t, 4> col = base;
+    // The focused menu item's flaming font (fontgrid_text_a6_fire) also carried
+    // an additive fire material overlay (sys_fontgrid_text_a6_fire) that the
+    // port does not load, so only the dim body showed and the gold flame
+    // highlights were lost [GD10-068]. The fire font texture itself is loaded,
+    // so draw the same glyphs a second time additively at full luminance: that
+    // adds the texture's bright flame pixels back over the body, as the 360's
+    // overlay did. GD07_NO_FIRE_GLOW=1 skips it.
+    static const bool noFireGlow = SDL_getenv("GD07_NO_FIRE_GLOW") != nullptr;
+    static const float fireGlow = SDL_getenv("GD07_FIRE_GLOW") ? float(std::atof(SDL_getenv("GD07_FIRE_GLOW"))) : 0.55f;
+    const bool fireFont = !shadowPass && !noFireGlow && e.font == K("fontgrid_text_a6_fire");
+    const uint8_t fireC = uint8_t(std::clamp(fireGlow * 255.0f, 0.0f, 255.0f));
+    std::vector<Vertex> fireVerts;
     auto quad = [&](std::vector<Vertex>& out, const font::Glyph& g, float x0, float y0, const std::array<uint8_t, 4>& cl) {
         const float gw = g.width * lsx, gy = (y0 - lineY) * lsy + lineY, gh = g.height * lsy;
         const Vertex a = P(x0 * sx, gy * sy, g.u0, g.v0, cl), b = P((x0 + gw) * sx, gy * sy, g.u1, g.v0, cl);
@@ -1776,12 +1788,14 @@ void UiSystem::drawElementText(Canvas& c, const Element& e, const FontEntry& fe,
                 c.draw(q.data(), q.size(), int(gf->tex.id), Blend::Alpha);
             } else {
                 quad(verts, *g, x0, y0, col);
+                if (fireFont) quad(fireVerts, *g, x0, y0, {fireC, fireC, fireC, col[3]});
             }
             pen = x0 + (g->width + float(g->advanceAdjust) + track) * lsx;
         }
         lineY += lineH;
     }
     if (!verts.empty()) c.draw(verts.data(), verts.size(), int(fe.tex.id), Blend::Alpha);
+    if (!fireVerts.empty()) c.draw(fireVerts.data(), fireVerts.size(), int(fe.tex.id), Blend::Add);
 }
 
 // ---- the port's own screens and the mouse (not GH3's) ----
