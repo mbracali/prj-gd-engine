@@ -441,6 +441,11 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
                                                                                                       : 0;
         else if (n == K("text_case") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr)) e.upperCase = v.key == K("upper");
         else if (n == K("text")) e.text = setText(v.str);
+        // use_shadow = $true/$false: the setlist listing (uidesc_setlist_b_listing_desc)
+        // turns on the light-grey drop shadow this way, as a named property rather than the
+        // bare `shadow` flag, so without it the authored dark-red [120,0,0] title had no
+        // shadow and was illegible on the near-black leather [C ui\uidesc_setlist_b_listing_desc.qb].
+        else if (n == K("use_shadow")) e.shadow = (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr) ? v.key != K("false") : v.number() != 0;
         else if (n == K("shadow_offs")) readPair(v, e.shadowX, e.shadowY);
         else if (n == K("shadow_rgba") && v.type == qb::Type::Array && v.arr) {
             for (size_t k = 0; k < 4 && k < v.arr->values.size(); ++k) e.shadowRgba[k] = uint8_t(std::clamp(int(v.arr->values[k].number()), 0, 255));
