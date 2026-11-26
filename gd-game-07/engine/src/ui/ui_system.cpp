@@ -1572,7 +1572,20 @@ void UiSystem::draw(Canvas& c) {
             for (const Vertex& v : q) e.bx0 = std::min(e.bx0, v.x), e.bx1 = std::max(e.bx1, v.x), e.by0 = std::min(e.by0, v.y), e.by1 = std::max(e.by1, v.y);
             e.drawnIn = drawCount_;
         }
-        if (e.type == kSprite && e.texture) {
+        if (e.type == kSprite && e.texture == K("white")) {
+            // `white` is GH3's built-in flat texture: a solid fill the element's
+            // rgba colours, NOT a pak asset. Our texture cache resolves `white`
+            // to an unrelated atlas entry, so the set list's opaque backing core
+            // (uidesc_Setlist_B's setlist_B_BG_runnerC, tex=white rgba[0,0,0,255],
+            // 768 wide) sampled that and let the venue/fire bleed through the song
+            // list [owner #2]. Draw it as a plain colour quad (texture id 0), as a
+            // sprite with no texture is drawn below.
+            const float w = e.w * it.wsx, h = e.h * it.wsy;
+            const Vertex a = P(0, 0, 0, 0, e.rgba), b = P(w, 0, 0, 0, e.rgba), cc = P(w, h, 0, 0, e.rgba), d = P(0, h, 0, 0, e.rgba);
+            const Vertex q[6] = {a, b, cc, a, cc, d};
+            c.draw(q, 6, 0, e.blend == 1 ? Blend::Add : e.blend == 2 ? Blend::Sub : Blend::Alpha);
+            ++stats_.spritesDrawn;
+        } else if (e.type == kSprite && e.texture) {
             gfx::TextureId id;
             // The band logo's texture shows the logo's CAP (ui/cap_logo.cpp).
             static const uint32_t logoTex = [this] {
