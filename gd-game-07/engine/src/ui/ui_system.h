@@ -178,6 +178,17 @@ public:
     void morphFromSetProps(Element& e, const qb::Struct& p);
     // DisplayLoadingScreen's picture is up (over everything).
     bool loadingScreenUp() const { return loadingTex_ != 0; }
+    // Puts up LOADINGSCREENS/<name>.img as the full-screen loading picture
+    // (optionally with a spinning <spin> image at sx,sy), returning true when
+    // the image existed; the DisplayLoadingScreen native and the state
+    // machine's task_menu (the boot copyright screen) both go through it.
+    bool showLoadingImage(const std::string& name, const std::string& spin = {}, float sx = 0, float sy = 0);
+    // Spins GHWT's world globe (the `tex` world map on a sphere) centred at
+    // (cx, cy), radius r, over the current loading picture -- the boot
+    // copyright screen's flaming Earth.
+    void setLoadingGlobe(const std::string& tex, float cx, float cy, float r);
+    // Takes the loading picture away (HideLoadingScreen).
+    void clearLoadingScreen() { loadingTex_ = 0, loadingSpin_ = 0, spinGlobe_ = false; }
     // World Tour's UI viewports (CreateViewport style = viewport_ui_texture,
     // CreateViewportTextureOverride): a viewport's windows drawn into a
     // texture that replaces a zone texture (the sound stage's
@@ -368,6 +379,12 @@ private:
     std::vector<uint32_t> assetContexts_;
     uint32_t loadAssetContext(uint32_t context, const qb::Struct* body);
     float spinX_ = 0, spinY_ = 0;
+    // GHWT's boot copyright screen (boot_legal) spins a world globe over the
+    // flaming glow (load_wheel is the equirectangular world map, not a flat
+    // wheel): spinGlobe_ renders the spinner as a rotating sphere centred at
+    // (spinX_, spinY_) with radius spinR_, instead of the flat turning quad.
+    bool spinGlobe_ = false;
+    float spinR_ = 48;
     double loadingMs_ = 0;
     // Texture-slot movies (PlayMovieFromBuffer, PreLoadMovie +
     // StartPreLoadedMovie): drawn full screen at their texturepri in the

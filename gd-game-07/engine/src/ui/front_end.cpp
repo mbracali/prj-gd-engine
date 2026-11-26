@@ -52,6 +52,16 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
     vm_->songAvailable = [this](const std::string& name) { return disc_.exists("DATA/MUSIC/" + name + "_1.fsb.xen"); };
     states = std::make_unique<UiStates>(*vm_);
     states->focus = [this](uint32_t id) { return ui_->focusElement(id); };
+    // The task_menu's loading screen (the boot copyright/legal screen): the
+    // 360's C task puts up LOADINGSCREENS/<base_name> for a state that has one.
+    states->showLoadingScreen = [this](const std::string& base) {
+        const bool up = ui_->showLoadingImage(base);
+        // boot_legal is the copyright screen: spin the world globe over its
+        // flaming glow (load_wheel is the world map), under the logo.
+        if (up && base == "boot_legal") ui_->setLoadingGlobe("load_wheel", 456, 552, 42);
+        return up;
+    };
+    states->hideLoadingScreen = [this] { ui_->clearLoadingScreen(); };
     states->addNatives();  // last: the `ui` object's members before the composite objects'
 }
 

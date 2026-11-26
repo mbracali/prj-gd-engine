@@ -1621,11 +1621,39 @@ void UiSystem::draw(Canvas& c) {
         const Vertex q[6] = {V(0, 0, 0, 0), V(1280, 0, 1, 0), V(1280, 720, 1, 1), V(0, 0, 0, 0), V(1280, 720, 1, 1), V(0, 720, 0, 1)};
         c.draw(q, 6, int(lt.id), Blend::Alpha);
         if (const gfx::TextureId st = loadingSpin_ ? tex_.find(loadingSpin_) : gfx::TextureId{}) {
-            const float a = float(loadingMs_ / 1000.0 * 2 * M_PI), cs = std::cos(a), sn = std::sin(a), h = 48;
-            const float cx = spinX_ + h, cy = spinY_ + h;
-            auto R = [&](float dx, float dy, float u, float v) { return V(cx + dx * cs - dy * sn, cy + dx * sn + dy * cs, u, v); };
-            const Vertex s[6] = {R(-h, -h, 0, 0), R(h, -h, 1, 0), R(h, h, 1, 1), R(-h, -h, 0, 0), R(h, h, 1, 1), R(-h, h, 0, 1)};
-            c.draw(s, 6, int(st.id), Blend::Alpha);
+            if (spinGlobe_) {
+                // GHWT's world globe: the equirectangular world map on a
+                // rotating sphere, over the flaming glow. The front hemisphere
+                // (longitude -90..+90) is drawn as a lat/long mesh, orthographic;
+                // the texture repeats so the longitude offset scrolls new land
+                // into view, and a centre-bright shade reads as a sphere.
+                const float cx = spinX_, cy = spinY_, r = spinR_;
+                const double lon0 = loadingMs_ / 1000.0 * 2 * M_PI * 0.12;  // ~0.12 rev/s
+                const int NLAT = 20, NLON = 20;
+                auto vert = [&](int i, int j) {
+                    const double lat = -M_PI / 2 + M_PI * i / NLAT;
+                    const double lon = -M_PI / 2 + M_PI * j / NLON;
+                    const float sx = cx + r * float(std::cos(lat) * std::sin(lon));
+                    const float sy = cy - r * float(std::sin(lat));
+                    const float z = float(std::cos(lat) * std::cos(lon));
+                    const uint8_t s = uint8_t(std::clamp(70.0f + 185.0f * z, 0.0f, 255.0f));
+                    return Vertex{sx, sy, 0, float((lon0 + lon) / (2 * M_PI)), float((M_PI / 2 - lat) / M_PI), s, s, s, 255};
+                };
+                std::vector<Vertex> g;
+                g.reserve(size_t(NLAT) * NLON * 6);
+                for (int i = 0; i < NLAT; ++i)
+                    for (int j = 0; j < NLON; ++j) {
+                        const Vertex a = vert(i, j), b = vert(i, j + 1), cc = vert(i + 1, j + 1), d = vert(i + 1, j);
+                        g.push_back(a), g.push_back(b), g.push_back(cc), g.push_back(a), g.push_back(cc), g.push_back(d);
+                    }
+                c.draw(g.data(), g.size(), int(st.id), Blend::Alpha, /*repeat=*/true);
+            } else {
+                const float a = float(loadingMs_ / 1000.0 * 2 * M_PI), cs = std::cos(a), sn = std::sin(a), h = 48;
+                const float cx = spinX_ + h, cy = spinY_ + h;
+                auto R = [&](float dx, float dy, float u, float v) { return V(cx + dx * cs - dy * sn, cy + dx * sn + dy * cs, u, v); };
+                const Vertex s[6] = {R(-h, -h, 0, 0), R(h, -h, 1, 0), R(h, h, 1, 1), R(-h, -h, 0, 0), R(h, h, 1, 1), R(-h, h, 0, 1)};
+                c.draw(s, 6, int(st.id), Blend::Alpha);
+            }
         }
     }
     c.clearClip();
@@ -2546,16 +2574,13 @@ void UiSystem::addNatives() {
         for (const qb::Item& it : p.items)
             if (it.name == 0 && (it.value.type == qb::Type::String || it.value.type == qb::Type::WString)) name = &it.value;
         if (!name) return false;
-        auto path = [](const std::string& n) { return "DATA/COMPRESSED/IMAGES/LOADINGSCREENS/" + n + ".img.xen"; };
-        const uint32_t key = qbkey::key("loadingscreen:" + name->str);
-        if (!tex_.loadImage(disc_, path(name->str), key)) return false;
-        loadingTex_ = key, loadingSpin_ = 0, loadingMs_ = 0;
+        std::string spin;
+        float sx = 0, sy = 0;
         if (const qb::Value* sp = Vm::param(p, K("spin_texture")); sp && !sp->str.empty()) {
-            const uint32_t sk = qbkey::key("loadingscreen:" + sp->str);
-            if (tex_.loadImage(disc_, path(sp->str), sk)) loadingSpin_ = sk;
-            spinX_ = Vm::number(Vm::param(p, K("spin_x")), 0), spinY_ = Vm::number(Vm::param(p, K("spin_y")), 0);
+            spin = sp->str;
+            sx = Vm::number(Vm::param(p, K("spin_x")), 0), sy = Vm::number(Vm::param(p, K("spin_y")), 0);
         }
-        return true;
+        return showLoadingImage(name->str, spin, sx, sy);
     });
     vm_.addNative("HideLoadingScreen", [this](Vm&, ScriptRun&, qb::Struct&) {
         loadingTex_ = 0;
@@ -2867,6 +2892,28 @@ void UiSystem::addNatives() {
         if (!on && isMenu(*e)) e->widthKids = size_t(-1), layoutMenu(*e);
         return true;
     });
+}
+
+bool UiSystem::showLoadingImage(const std::string& name, const std::string& spin, float sx, float sy) {
+    if (name.empty()) return false;
+    auto path = [](const std::string& n) { return "DATA/COMPRESSED/IMAGES/LOADINGSCREENS/" + n + ".img.xen"; };
+    const uint32_t key = qbkey::key("loadingscreen:" + name);
+    // The image may not exist (every other boot state's base_name has none):
+    // leave any current loading screen untouched and report nothing shown.
+    if (!tex_.loadImage(disc_, path(name), key)) return false;
+    loadingTex_ = key, loadingSpin_ = 0, loadingMs_ = 0, spinGlobe_ = false;
+    if (!spin.empty()) {
+        const uint32_t sk = qbkey::key("loadingscreen:" + spin);
+        if (tex_.loadImage(disc_, path(spin), sk)) loadingSpin_ = sk;
+        spinX_ = sx, spinY_ = sy;
+    }
+    return true;
+}
+
+void UiSystem::setLoadingGlobe(const std::string& tex, float cx, float cy, float r) {
+    const uint32_t sk = qbkey::key("loadingscreen:" + tex);
+    if (!tex_.loadImage(disc_, "DATA/COMPRESSED/IMAGES/LOADINGSCREENS/" + tex + ".img.xen", sk)) return;
+    loadingSpin_ = sk, spinGlobe_ = true, spinX_ = cx, spinY_ = cy, spinR_ = r;
 }
 
 bool UiSystem::drawSprite(Canvas& c, uint32_t texture, float x0, float y0, float x1, float y1, const std::array<uint8_t, 4>& rgba, bool flipU) const {

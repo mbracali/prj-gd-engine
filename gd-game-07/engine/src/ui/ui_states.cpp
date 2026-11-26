@@ -67,6 +67,16 @@ void UiStates::call(const Entry& e, const char* prefix) {
 
 void UiStates::enter(Entry& e, bool first) {
     if (first) call(e, "ui_init_");
+    // The task_menu puts up its loading screen (LOADINGSCREENS/<base_name>)
+    // before building the real UI, as the 360's C task does: on the boot
+    // flow only boot_legal has one, so this is the copyright/legal screen with
+    // the flaming globe. ui_create_boot_legal merely waits 6 s, so without
+    // this the state renders nothing. States with no such image (the movies,
+    // the menus) get false and show nothing extra [C task_menu].
+    if (showLoadingScreen) {
+        const std::string base = text(e.params.find(K("base_name")));
+        if (!base.empty()) e.loadingShown = showLoadingScreen(base);
+    }
     // A state with a pak: ui_state_pak_load pakname = ... [C script].
     if (const qb::Value* pak = e.params.find(K("pakname"))) {
         qb::Struct p;
@@ -89,6 +99,9 @@ void UiStates::enter(Entry& e, bool first) {
 }
 
 void UiStates::leave(Entry& e, bool remove) {
+    // Take the task_menu loading screen away as this state leaves, so it does
+    // not linger over the next one (the Activision movie after boot_legal).
+    if (e.loadingShown && hideLoadingScreen) hideLoadingScreen();
     call(e, "ui_destroy_");
     if (remove) call(e, "ui_deinit_");
 }
