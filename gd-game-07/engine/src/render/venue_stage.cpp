@@ -494,6 +494,7 @@ constexpr float kNearBlend[2] = {0.5f, 1.0f};       // 8291D708 -> c141.xy
 constexpr float kLispsmN[2] = {4.0f, 16.0f};        // 8291D754
 constexpr float kLightDist = 400, kLightNear = 5, kLightFar = 1000;  // 8291D718..20
 constexpr float kBias[2] = {64.0f / 16777216.0f, 1280.0f / 16777216.0f};  // single_sided x 2^-24
+constexpr float kBiasDouble[2] = {1200.0f / 16777216.0f, 1600.0f / 16777216.0f};  // double_sided x 2^-24 (GetShadowMapBias, 8291E644)
 constexpr int kCascadeSize[2] = {1024, 512};        // tod_profiles' shadow_map_size
 
 gfx::Vec3 toG(const venue::Vec3& v) { return {v[0], v[1], v[2]}; }
@@ -633,8 +634,23 @@ void VenueStage::shadowPass(double ms, const venue::CamPose& cam) {
     s.fadeStart = kCascadeFar[1] - kFarBlend, s.fadeEnd = kCascadeFar[1];
     s.intensity = intensity;
     s.dirToLight[0] = -dir.x, s.dirToLight[1] = -dir.y, s.dirToLight[2] = -dir.z;
+    // The band self-shadows (the character casters on their own bodies) use a
+    // SEPARATE, larger depth bias. GH3 biases each caster by its own single_/
+    // double_sided depth-bias state [C GetShadowMapBias 8291E644]; our bias is
+    // applied on the receiver side (one value for all receivers of a cascade),
+    // so the single value here can't be both small enough to keep the band's
+    // contact shadow attached to the stage floor (venue receiver) AND large
+    // enough to stop the double-sided character meshes (hair, cloth, the arms'
+    // back faces) shadow-acne'ing themselves. The character casters are
+    // predominantly double_sided, so the band self-receiver samples with the
+    // double_sided bias (1200/1600) and the venue/floor receiver keeps the
+    // single_sided one (64/1280) — the acne that covered the band in a blocky
+    // moire is gone and the floor shadow stays put [owner 2026-11-27: "the self
+    // shadows in the characters look wrong, whenever they are rendered"].
+    gfx::Mat4 vpCascade[2];
     for (int i = 0; i < 2; ++i) {
         const gfx::Mat4 vp = cascadeMatrix(cam, 16.0f / 9.0f, slice[i], slice[i + 1], dir, kLispsmN[i]);
+        vpCascade[i] = vp;
         // The casters draw upside down: the receivers' v = 0.5 - 0.5 y reads
         // OpenGL target rows bottom up (their shaders convert the depth).
         gfx::Mat4 flip;
@@ -680,7 +696,21 @@ void VenueStage::shadowPass(double ms, const venue::CamPose& cam) {
             SDL_Log("shadow: slices %.2f %.2f %.2f, member at%s", slice[0], slice[1], slice[2], where.c_str());
         }
     view_->setShadow(s);
-    if (band_->view()) band_->view()->setShadow(s);
+    // The band receives its own shadows with the double-sided caster bias.
+    // GD07_SHADOW_SINGLE_BIAS=1 keeps the old (single) bias everywhere to compare.
+    if (band_->view()) {
+        if (SDL_getenv("GD07_SHADOW_SINGLE_BIAS")) {
+            band_->view()->setShadow(s);
+        } else {
+            gh3shader::DynamicShadow sBand = s;
+            for (int i = 0; i < 2; ++i) {
+                gfx::Mat4 biasBand;
+                biasBand.at(2, 3) = -kBiasDouble[i] * biasScale;
+                sBand.vp[i] = biasBand * vpCascade[i];
+            }
+            band_->view()->setShadow(sBand);
+        }
+    }
 }
 
 void VenueStage::draw(double ms) {
