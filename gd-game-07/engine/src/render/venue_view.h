@@ -80,7 +80,7 @@ public:
     // The `volume` housings: GH3's _Raytrace_cone_volume over a closed
     // 20-segment cone, ray-cast against the scene's depth (a copy). An
     // empty texture: not drawn.
-    void drawRaytraced(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth);
+    void drawRaytraced(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth, float intensity = 1.0f);
     bool hasRaytraced() const { return !rays_.empty(); }
     // gh4's 2D light volumes (lightvolumetype volume2dsoftedge / volume2d, and
     // for now volume3d): the _LightVolume2D templates (sys_lightvolume2d's

@@ -771,7 +771,19 @@ void MenuScene::draw(Canvas& c) {
     static const float vol2dScale = SDL_getenv("GD07_MENU_VOL2D_SCALE") ? float(std::atof(SDL_getenv("GD07_MENU_VOL2D_SCALE"))) : 0.6f;
     view_->drawVolumes2D(cam, lights_, sceneDepth, vol2dScale);
     static const bool noRays = SDL_getenv("GD07_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
-    if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, sceneDepth);
+    // The raytraced god-ray beams (z_soundcheck's `volume` cones) are additive
+    // ONE+ONE and, at full density, clip the same way the 2D haze did: they come
+    // up as hard, saturated blue-white shafts that cross IN FRONT of the side
+    // speaker stacks, where the 360's are soft, desaturated and sit behind the
+    // dressing (ref frame at 217 s of the onboarding video: the speakers stay
+    // clearly readable through a faint haze) [owner 2026-11-27: "a set of white
+    // beams of light rendered in front of the speakers"]. The menu fx pass does
+    // not tonemap the highlight back down, so — as with drawVolumes2D above — we
+    // draw the beams at a lower intensity to land in the same soft place without
+    // a tonemap. Menu-only: the song stage calls drawRaytraced at the default
+    // 1.0. GD07_MENU_RAYTRACE_SCALE tunes it (0 = off, as GD07_NO_RAYTRACE).
+    static const float rayScale = SDL_getenv("GD07_MENU_RAYTRACE_SCALE") ? float(std::atof(SDL_getenv("GD07_MENU_RAYTRACE_SCALE"))) : 0.25f;
+    if (fx && !noRays && rayScale > 0 && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, sceneDepth, rayScale);
     view_->drawPushback(cam, lightState_, lights_);  // the pushback pass: after the volumes [C 82431B38]
     if (fx) {
         // Enhanced: Remove All Effects drops GH3's own; Bloom None its bloom (as the songs').

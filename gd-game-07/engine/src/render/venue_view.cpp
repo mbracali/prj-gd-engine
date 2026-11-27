@@ -1527,8 +1527,8 @@ gfx::Mat4 inverse4(const gfx::Mat4& m) {
 // smoke, g_DepthBufferTexture s1. The chord through the cone in front of the
 // scene's depth x the colour x the smoke. The near faces, ONE + ONE, depth
 // tested against the scene's depth buffer (the states below).
-void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth) {
-    if (!dev_ || rays_.empty() || !rayCount_ || !depth || !gh3_.ready()) return;
+void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth, float intensity) {
+    if (!dev_ || rays_.empty() || !rayCount_ || !depth || !gh3_.ready() || intensity <= 0) return;
     gfx::RenderDevice& d = *dev_;
     gh3shader::Globals globals;
     gfx::Mat4 viewM, viewProjM;
@@ -1614,7 +1614,7 @@ void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow&
         // g_ConeColor: the record's volume colour as is (823B6314: c2 = record +0x18;
         // the impostor's is that x density, 823B5E44) [C]; the shader weighs it by
         // g_ConeSize.w (the density) itself. Alpha 1 [I: the colour's fourth lane].
-        for (int q = 0; q < 3; ++q) ps[2][q] = h.volumeColor[size_t(q)];
+        for (int q = 0; q < 3; ++q) ps[2][q] = h.volumeColor[size_t(q)] * intensity;
         ps[2][3] = 1;
         for (int i = 0; i < 4; ++i)  // g_ViewProjInv, rows as the shaders read them
             for (int q = 0; q < 4; ++q) ps[3 + i][q] = vpInv.at(q, i);
