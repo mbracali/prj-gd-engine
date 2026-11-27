@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cctype>
 #include <algorithm>
+#include <bit>
 #include <cstdio>
 #include <cmath>
 #include <exception>
@@ -876,7 +877,8 @@ int runSelfTest(const std::string& dataPath) {
         std::printf("%zu songs; slop %.0f ms, head %d, tail %d, hopo_threshold %d ticks\n", songs.size(), rules.slopMs,
                     rules.headPoints, rules.tailPoints, rules.hopoThresholdTicks);
 
-        int audioFailures = 0, chartFailures = 0, hopos = 0, strumHopos = 0, ownThreshold = 0, drumNotes = 0, vocalPhrases = 0, rbSolos = 0, rbPerfectSolos = 0, rbEndings = 0, drumJudgeCharts = 0, drumJudgeFailed = 0, tambGems = 0, tambHits = 0;
+        int audioFailures = 0, chartFailures = 0, hopos = 0, strumHopos = 0, ownThreshold = 0, drumNotes = 0, vocalPhrases = 0, rbSolos = 0, rbPerfectSolos = 0, rbEndings = 0, drumJudgeCharts = 0, drumJudgeFailed = 0, tambGems = 0, tambHits = 0,
+            drumLiveCharts = 0, drumLiveFailed = 0, drumLiveWrongLaneBad = 0;
         PartTotals totals[kPartCount];
         for (const SongInfo& info : songs) {
             ownThreshold += info.audio.hopoThresholdTicks > 0;
@@ -912,6 +914,58 @@ int runSelfTest(const std::string& dataPath) {
                                 const bool ok = p.notesHit() == int(p.chart().gems.size()) && !p.failed();
                                 drumJudgeCharts += 1, drumJudgeFailed += !ok;
                                 if (!ok) std::fprintf(stderr, "  %s drums %s (game judge): %d/%d\n", info.id.c_str(), difficultyName(diff), p.notesHit(), int(p.chart().gems.size()));
+                            }
+                            {
+                                // The LIVE drum path (controls B1): the pads / kick feed the
+                                // faithful DrumPlayer through Player::drumStrike (the same entry
+                                // app.cpp routes real input to), not DrumPlayer::strike directly.
+                                // Objective checks: (1) a strike on the wrong lane does not hit and
+                                // breaks no streak gain; the right lane then hits; (2) striking every
+                                // gem's lane on time hits every note, scores, and the combo advances.
+                                Song split = song;
+                                Chart& c = split.charts[size_t(Part::Drums)][size_t(d)];
+                                for (Gem& g : c.gems) g.hopo = false;
+                                splitDrumChords(c);
+                                Player p(split, Part::Drums, diff, dr, ControllerMode::Joypad, false);
+                                p.setDrumMode(true);
+                                const auto& gems = p.chart().gems;
+                                // (1) Lane discrimination on the first gem: a lane that no gem
+                                // near gems[0] uses must not score; the first gem's own lane must.
+                                if (!gems.empty()) {
+                                    const int lane0 = std::countr_zero(unsigned(gems[0].frets));
+                                    uint32_t near = 0;  // lanes used within 200 ms of the first gem
+                                    for (const Gem& g : gems) {
+                                        if (g.ms > gems[0].ms + 200.0f) break;
+                                        if (std::fabs(g.ms - gems[0].ms) <= 200.0f) near |= g.frets;
+                                    }
+                                    int wrong = -1;
+                                    for (int l = 0; l < 5; ++l)
+                                        if (!(near & (1u << l))) { wrong = l; break; }
+                                    p.update(gems[0].ms);
+                                    if (wrong >= 0) p.drumStrike(wrong, gems[0].ms);  // should NOT hit
+                                    const int afterWrong = p.notesHit();
+                                    p.drumStrike(lane0, gems[0].ms);  // should hit
+                                    const bool discriminates = afterWrong == 0 && p.notesHit() == 1 && p.gemHit(0) && p.score() > 0;
+                                    drumLiveWrongLaneBad += !discriminates;
+                                    if (!discriminates)
+                                        std::fprintf(stderr, "  %s drums %s (live lane discrimination): wrongLane=%d afterWrong=%d hits=%d score=%d\n",
+                                                     info.id.c_str(), difficultyName(diff), wrong, afterWrong, p.notesHit(), p.score());
+                                }
+                                // (2) Full play through the live bridge.
+                                Player q(split, Part::Drums, diff, dr, ControllerMode::Joypad, false);
+                                q.setDrumMode(true);
+                                size_t next = 0;
+                                for (float t = -1000; t < split.endMs + 5000; t += 4) {
+                                    for (; next < gems.size() && gems[next].ms <= t; ++next)
+                                        for (int l = 0; l < 5; ++l)
+                                            if (gems[next].frets >> l & 1) q.drumStrike(l, gems[next].ms + 2);
+                                    q.update(t);
+                                }
+                                const bool ok = q.notesHit() == int(gems.size()) && q.streak() == int(gems.size()) && (gems.empty() || q.score() > 0) && !q.failed();
+                                ++drumLiveCharts, drumLiveFailed += !ok;
+                                if (!ok)
+                                    std::fprintf(stderr, "  %s drums %s (live DrumPlayer bridge): hits=%d streak=%d/%d score=%d failed=%d\n",
+                                                 info.id.c_str(), difficultyName(diff), q.notesHit(), q.streak(), int(gems.size()), q.score(), q.failed());
                             }
                             for (bool noKick : {false, true}) {
                                 DrumPlayer p(song, diff, dr, false, noKick);
@@ -1011,9 +1065,12 @@ int runSelfTest(const std::string& dataPath) {
         // solo a perfect solo, every Big Rock Ending banked by its final chord.
         std::printf("solos: %d of %d perfect; Big Rock Endings banked: %d\n", rbPerfectSolos, rbSolos, rbEndings);
         std::printf("drums through the game's judge: %d charts, %d not fully hit\n", drumJudgeCharts, drumJudgeFailed);
+        std::printf("drums through the LIVE DrumPlayer bridge (Player::drumStrike): %d charts, %d not fully hit, %d lane-discrimination failures\n",
+                    drumLiveCharts, drumLiveFailed, drumLiveWrongLaneBad);
         std::printf("tambourine: %d of %d gems tapped\n", tambHits, tambGems);
         if (tambHits != tambGems) ++chartFailures;
         chartFailures += drumJudgeFailed;
+        chartFailures += drumLiveFailed + drumLiveWrongLaneBad;
         if (rbPerfectSolos != rbSolos) ++chartFailures;
         // The microphone path, headless: a synthesised voice (a sawtooth at
         // the target pitch, an octave below for the low notes) through the

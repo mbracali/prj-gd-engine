@@ -6,12 +6,15 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 
 #include "game/autoplay.h"
 #include "game/chart.h"
+#include "game/drum_player.h"
 #include "game/match.h"
 #include "game/note_track.h"
 #include "game/player.h"
+#include "game/touch_strip.h"
 #include "game/tuning.h"
 #include "game/song_db.h"
 #include "script/globals.h"
@@ -258,6 +261,86 @@ bool easyChords(const NoteTrack& track, const Tuning& tu, PlayTotals& t, std::st
     return false;
 }
 
+// GHWT touch strip: plays `count` taps evenly inside each _Tapping span on the
+// strip's real zones (loaded from the globals), through TouchStrip + TapJudge;
+// true when every span is cleared and every tap scored. The strummed guitar
+// judge (Player) is not involved. Mirrors leftx_unscaled -> guitar_touch_patterns
+// nearest-zone + touch_pattern_switch_frames [C 0x8213e4b8, 0x8213e830].
+bool tapOnce(const std::vector<TapPhrase>& spans, const Globals& g, PlayTotals& t, std::string& why) {
+    if (spans.empty()) return true;
+    TouchStrip strip;
+    strip.load(g);
+    strip.setSwitchFrames(0);
+    TapJudge judge(spans);
+    std::vector<double> taps;
+    double endMs = 0;
+    for (const TapPhrase& p : spans) {
+        const int c = std::max(1, p.count);
+        for (int k = 0; k < c; ++k) taps.push_back(p.time + (k + 1.0) / (c + 1.0) * p.length);
+        endMs = std::max(endMs, double(p.time + p.length));
+    }
+    std::sort(taps.begin(), taps.end());
+    endMs += 500.0;
+    const double frameMs = 1000.0 / 60.0;
+    size_t next = 0;
+    int zone = 0;
+    for (double now = spans.front().time - 500.0; now < endMs; now += frameMs) {
+        bool down = false;
+        int slider = 0;
+        if (next < taps.size() && now >= taps[next]) {
+            down = true;
+            slider = strip.zones()[size_t(zone % int(strip.zones().size()))].value;  // a fresh zone each tap
+            ++zone, ++next;
+        }
+        judge.frame(now, strip.frame(slider, down));
+    }
+    const TapJudge::Stats st = judge.total(endMs);
+    ++t.tapJudgeRuns;
+    if (st.taps < st.tapsNeeded || st.spansCleared != st.spansTotal) {
+        ++t.tapJudgeFails;
+        why = "tap judge: " + std::to_string(st.taps) + " of " + std::to_string(st.tapsNeeded) + " taps, " +
+              std::to_string(st.spansCleared) + " of " + std::to_string(st.spansTotal) + " spans cleared";
+        return false;
+    }
+    return true;
+}
+
+// gh4 drums: build the playable gem stream from the real <song>_drums_notes
+// track (game/drum_player.h) and autoplay it -- strike every lane of every gem
+// a hair after its time, then sweep. The judge must hit every lane-note with no
+// miss and no overhit, mirroring the guitar autoplay's "every note hit" bar.
+// This is the drum gameplay path exercised on real disc data (drumtest covers
+// only a synthetic track); the live-match input routing + HUD remain (FINDINGS).
+bool drumOnce(const std::vector<ChartEvent>& drums, PlayTotals& t, std::string& why) {
+    DrumPlayer dp(drums);
+    if (dp.notes() == 0) return true;  // a drum track with only arm-animation notes
+    ++t.drumSongs;
+    t.drumGems += dp.gems().size();
+    t.drumNotes += size_t(dp.notes());
+    const std::vector<DrumPlayer::Gem> gems = dp.gems();
+    const float endMs = float(gems.back().ms) + 500.0f;
+    size_t next = 0;
+    for (float tm = float(gems.front().ms) - 500.0f; tm < endMs; tm += 4.0f) {
+        for (; next < gems.size() && float(gems[next].ms) <= tm; ++next)
+            for (int l = 0; l < DrumPlayer::LaneCount; ++l)
+                if (gems[next].lanes >> l & 1) dp.strike(l, float(gems[next].ms) + 2.0f);
+        dp.update(tm);
+    }
+    int misses = 0, overhits = 0;
+    for (const DrumPlayer::Event& e : dp.takeEvents()) {
+        if (e.kind == DrumPlayer::Event::Kind::Miss) ++misses;
+        else if (e.kind == DrumPlayer::Event::Kind::Overhit) ++overhits;
+    }
+    t.drumHits += size_t(dp.notesHit());
+    if (dp.notesHit() != dp.notes() || misses != 0 || overhits != 0) {
+        ++t.drumJudgeFails;
+        why = "drums: " + std::to_string(dp.notesHit()) + " of " + std::to_string(dp.notes()) + " lane-notes hit (" +
+              std::to_string(misses) + " miss, " + std::to_string(overhits) + " overhit)";
+        return false;
+    }
+    return true;
+}
+
 }  // namespace
 
 bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayTotals& t, std::string& why) {
@@ -269,8 +352,31 @@ bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayT
     t.rulesImplemented = true;
     const float scale = song.hammerOnMeasureScale > 0 ? song.hammerOnMeasureScale : tu.defaultHammerOnMeasureScale;
     bool ok = true;
+    // GHWT touch strip: the slider -> zone / slide / debounce and the tap judge
+    // logic, once (data-independent; uses the real guitar_touch_patterns via g).
+    if (!t.touchStripSelfTestRun) {
+        t.touchStripSelfTestRun = true;
+        const std::string r = touchStripSelfTest(&g);
+        t.touchStripOk = r.empty();
+        if (!r.empty()) {
+            if (ok) why = "touch strip: " + r;
+            ok = false;
+        }
+    }
     for (size_t p = 0; p < size_t(Part::Count); ++p) {
         for (int d = 0; d < kDifficulties; ++d) {
+            // GHWT touch strip: the _Tapping spans parsed for this part /
+            // difficulty, and the tap judge played against the real ones.
+            const auto& tap = chart.parts[p].tapping[size_t(d)];
+            if (!tap.empty()) {
+                t.tapSpans += tap.size();
+                for (const TapPhrase& tp : tap) t.tapSpanTaps += size_t(std::max(1, tp.count));
+                std::string tw;
+                if (!tapOnce(tap, g, t, tw)) {
+                    if (ok) why = std::string(partName(Part(p))) + " " + difficultyName(d) + " tapping: " + tw;
+                    ok = false;
+                }
+            }
             const auto& notes = chart.parts[p].notes[size_t(d)];
             if (notes.empty()) continue;
             ++t.charts;
@@ -293,6 +399,14 @@ bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayT
                 }
             }
         }
+    }
+    // gh4 drums: autoplay the song's real <song>_drums_notes stream through the
+    // drum judge (every lane-note hit, no miss / overhit). Recorded in the drum
+    // totals; a performance-track imperfection is NOT a guitar-gameplay failure,
+    // so it does not pull down this song's pass (the totals surface any fails).
+    if (!chart.drums.empty()) {
+        std::string w;
+        (void)drumOnce(chart.drums, t, w);
     }
     // GD10-108: an overstrum while a sustain is held ends it (guitar expert).
     if (!chart.notes(Part::Guitar, 3).empty()) {
@@ -410,6 +524,11 @@ void printPlayTotals(const PlayTotals& t) {
     std::printf("overstrum during a sustain: %zu sustains cut, %zu not ended\n", t.overstrumCuts, t.overstrumCutFails);
     std::printf("calibration (#69): %zu guitar expert runs played when heard, %zu failed\n", t.calibrationRuns, t.calibrationFails);
     std::printf("easy chords (GDALL-039): %zu guitar expert chords checked off and on, %zu failed\n", t.easyChordRuns, t.easyChordFails);
+    std::printf("touch strip (GHWT): %zu _Tapping spans parsed (%zu taps asked for), tap judge runs %zu, failed %zu; logic self-test %s\n",
+                t.tapSpans, t.tapSpanTaps, t.tapJudgeRuns, t.tapJudgeFails,
+                !t.touchStripSelfTestRun ? "not run" : t.touchStripOk ? "passed" : "FAILED");
+    std::printf("drums (gh4): %zu songs' real _drums_notes autoplayed, %zu gems / %zu lane-notes built, %zu hit, %zu songs failed\n",
+                t.drumSongs, t.drumGems, t.drumNotes, t.drumHits, t.drumJudgeFails);
     std::printf("autoplay: score (strummed) %lld, HOPO landings %zu, phrases captured %zu, charts failing %zu\n",
                 static_cast<long long>(t.score), t.hopos, t.phrasesCaptured, t.failedCharts);
 }

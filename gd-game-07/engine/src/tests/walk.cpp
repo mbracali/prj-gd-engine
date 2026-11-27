@@ -22,6 +22,7 @@
 #include "data/band.h"
 #include "data/json.h"
 #include "data/qbkey.h"
+#include "data/qs.h"
 #include "render/band.h"
 #include "render/canvas.h"
 #include "render/venue_stage.h"
@@ -461,20 +462,29 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_character_hub_fs", {}, 20000});
 
     } else if (name == "setlist_tabs") {
-        // GD10-090: quick play's set list tabs: blue BONUS (the bonus songs),
-        // orange DOWNLOADS (none on the disc), yellow SETLIST [C data
-        // setlist_event_handlers, change_tab].
+        // World Tour's Quickplay set list is a *sortable custom set list* (not
+        // Metallica's SETLIST/BONUS/DOWNLOADS tabs): QUICKPLAY ->
+        // uistate_game_mode -> Solo -> instrument -> uistate_setlist, whose Y
+        // button (pad_option2 -> setlist_switch_sort) cycles the sort through
+        // setlist_sorts = [title_alphabetical, artist_alphabetical,
+        // career_order]; green adds a song (up to 6), X jumps a section, LB/RB
+        // clears [C scripts ui_setlist.qb ui_create_setlist_spawned,
+        // setlist_switch_sort; data setlist_sorts]. Reach the set list via WT's
+        // own flow and prove the sort cycles (fast: no song launch; qp4 covers
+        // the add-song + launch path).
         steps_ = boot;
-        steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
-        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
-        steps_.push_back({"quickplay_setlist_fs",
-                          {"wait", "check:global:current_tab=tab_setlist", Action::Fret3, "wait", "wait", "check:global:current_tab=tab_bonus",
-                           "check:text:sl_text_1!=", "log:focus", Action::Down, "log:focus", Action::Fret4, "wait", "wait",
-                           "check:global:current_tab=tab_downloads", Action::Fret2, "wait", "wait", "check:global:current_tab=tab_setlist",
-                           // A bonus song bought (its save tag unlocked): listed and played.
-                           "set:tag:avalancha.unlocked=1", Action::Fret3, "wait", "wait", C},
-                          20000});
-        steps_.push_back({"song", {"check:global:current_tab=tab_bonus", "check:global:current_song=avalancha"}, 30000});
+        steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", D, C}, 10000});
+        steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
+        steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
+        steps_.push_back({"UIstate_setlist_prompt", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"UIstate_double_bass_popup", {"wait", "wait", "wait", C}, 20000, true});
+        steps_.push_back({"uistate_setlist",
+                          {"wait", "check:global:setlist_sort_index=0",
+                           // Y (pad_option2) cycles title -> artist -> career -> title.
+                           Action::Fret2, "wait", "wait", "check:global:setlist_sort_index=1",
+                           Action::Fret2, "wait", "wait", "check:global:setlist_sort_index=2",
+                           Action::Fret2, "wait", "wait", "check:global:setlist_sort_index=0"},
+                          30000});
 
     } else if (name == "cutcontent") {
         // GD10-110: Enable Cut Content removed from Enhanced Options: a saved
@@ -1013,7 +1023,29 @@ void Walk::uiStep(FrontEnd& fe, double now) {
     if (stateAt_ >= 0 && now - stateAt_ < 500) return;
     if (stateAt_ >= 0) {
         const size_t made = size_t(fe.ui().stats().created) - created0_;
-        if (made == 0) ++empty_, emptyStates_.push_back(qbkey::name(states_[stateIdx_ - 1]));
+        const std::string prev = qbkey::name(states_[stateIdx_ - 1]);
+        if (made == 0) ++empty_, emptyStates_.push_back(prev);
+        // Mouse-hit coverage for this screen: every focusable menu item must be
+        // reachable by the mouse (7.1: the mouse works in every menu). A screen
+        // with a focused menu whose items are all unreachable is a dead screen.
+        int focusable = 0, hittable = 0;
+        fe.ui().menuHitCoverage(focusable, hittable);
+        if (focusable > 0) {
+            ++uiMenuStates_;
+            uiMouseFocusable_ += focusable, uiMouseHittable_ += hittable;
+            if (hittable == 0) uiMouseDeadStates_.push_back(prev);
+            else if (hittable < focusable) uiMouseGapStates_.push_back(prev);
+        }
+        // 7.8 online disabled: the port ships no online mode, so every online
+        // ENTRY-POINT item built on this screen must be greyed + not_focusable.
+        // (The walk FORCE-spawns each flow state directly to prove it builds
+        // without crashing, which bypasses the greyed entry points, so an online
+        // state building its own menu here is expected and not a reachability
+        // signal -- unreachability is proved by the entry points being
+        // unselectable, below and in onlineEntryCoverage.)
+        int onlineSeen = 0, onlineFoc = 0;
+        fe.ui().onlineEntryCoverage(onlineSeen, onlineFoc);
+        uiOnlineSeen_ += onlineSeen, uiOnlineFocusable_ += onlineFoc;
     }
     if (stateIdx_ >= states_.size()) {
         step_ = steps_.size();  // done
@@ -2091,6 +2123,73 @@ int Walk::finish(FrontEnd& fe) const {
         std::printf("uitest: %zu flow states started, %d built no element:", states_.size(), empty_);
         for (const std::string& n : emptyStates_) std::printf(" %s", n.c_str());
         std::printf("\nuitest: every screen was started through the flow manager\n");
+        // 7.1 mouse-coverage audit: the mouse reaches every focusable menu item.
+        std::printf("uitest mouse: %d screens with a menu, %d focusable items, %d mouse-hittable", uiMenuStates_, uiMouseFocusable_,
+                    uiMouseHittable_);
+        if (!uiMouseGapStates_.empty()) {
+            std::printf("; partial gaps:");
+            for (const std::string& n : uiMouseGapStates_) std::printf(" %s", n.c_str());
+        }
+        std::printf("\n");
+        if (!uiMouseDeadStates_.empty()) {
+            std::printf("uitest: FAILED: the mouse reaches no menu item on:");
+            for (const std::string& n : uiMouseDeadStates_) std::printf(" %s", n.c_str());
+            std::printf("\n");
+            return 1;
+        }
+        // 7.8 online disabled: prove no online entry point is selectable.
+        // (a) Every online-entry item built during the walk (the main menu's
+        //     ONLINE and DOWNLOADS) is greyed and stayed not_focusable. With
+        //     the online sub-tree only reachable through these greyed entry
+        //     points, the whole online tree is unreachable in normal play.
+        std::printf("uitest online: %d online-entry item(s) greyed+unselectable, %d still selectable\n",
+                    uiOnlineSeen_, uiOnlineFocusable_);
+        bool onlineOk = uiOnlineFocusable_ == 0 && uiOnlineSeen_ > 0;
+        // (b) The GHTunes (upload/download) item's choose script is wrapped in
+        //     generic_blocking_execute_script's params [C script
+        //     add_generic_menu_icon_item: pad_script = jam_picked_ghtunes]; the
+        //     detector must see through the wrapper, and must leave the local
+        //     RECORD item (pad_script = UIstate_jam_select_song) selectable.
+        auto wrapped = [](uint32_t script) {
+            ui::Element e;
+            ui::Element::Handler h;
+            h.event = qbkey::key("pad_choose");
+            h.script = qbkey::key("generic_blocking_execute_script");
+            qs::Vm::set(h.params, qbkey::key("pad_script"), qs::Vm::makeKey(script));
+            e.handlers.push_back(std::move(h));
+            return ui::UiSystem::handlersLeadOnline(e);
+        };
+        const bool ghtunesGreyed = wrapped(qbkey::key("jam_picked_ghtunes"));
+        const bool recordKept = !wrapped(qbkey::key("uistate_jam_select_song"));
+        std::printf("uitest online: GHTunes wrapped-handler detected=%d, local RECORD kept selectable=%d\n",
+                    int(ghtunesGreyed), int(recordKept));
+        onlineOk = onlineOk && ghtunesGreyed && recordKept;
+        if (!onlineOk) {
+            std::printf("uitest: FAILED: online entry points are not all unselectable\n");
+            return 1;
+        }
+        // 7.9 labels / trademark scrub: no console or platform trademark may
+        // remain in any player-visible localized string once pcstrings::pcQsText
+        // has run on the .qs table (qstr applies it at load). Record-label
+        // credits "SONY BMG" / "Sony ATV" are music attributions (not the
+        // PlayStation maker) and are deliberately kept, so bare "sony" is not a
+        // trademark here. The game's own title is not a console/platform mark.
+        int scanned = 0, leaks = 0;
+        const char* const marks[] = {"xbox", "playstation", "ps3", "nintendo", " wii", "microsoft",
+                                      "gamertag", "gamer card", "gamer profile", "dashboard", "memory unit", "hdd"};
+        qstr::each([&](uint32_t, const std::string& s) {
+            ++scanned;
+            std::string low = s;
+            for (char& c : low) c = char(std::tolower((unsigned char)c));
+            for (const char* m : marks)
+                if (low.find(m) != std::string::npos) {
+                    if (leaks < 8) std::printf("uitest: FAILED: trademark %s remains in UI text: %s\n", m, s.c_str());
+                    ++leaks;
+                    break;
+                }
+        });
+        std::printf("uitest labels: %d localized strings scanned, %d with a console/platform trademark\n", scanned, leaks);
+        if (leaks > 0) return 1;
         return 0;
     }
     // Every loading screen stayed up kLoadingHoldMs (none since D23: as the original).

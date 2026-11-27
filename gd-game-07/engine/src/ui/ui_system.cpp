@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cmath>
 #include <exception>
+#include <unordered_set>
 
 #include "data/disc.h"
 #include "data/pak.h"
@@ -35,6 +36,55 @@ bool fitLegacy() {
 uint32_t vpKey(const qb::Value* v) { return v && (v->type == qb::Type::Key || v->type == qb::Type::KeyPtr) ? v->key : 0; }
 
 uint32_t K(const char* s) { return qbkey::key(s); }
+
+// 7.8 online disabled: the scripts and ui/flow states that lead to an online
+// mode in World Tour's front end. The port ships no online, so any menu item
+// whose handler tree reaches one of these is greyed + not_focusable (the
+// original's demo_mode_disable pattern), matching gd01..gd03/gd10. Grounded in
+// the disc scripts (scripts\guitar\guitar_main_menu.qb, scripts\guitar\menu\
+// menu_jam.qb): ONLINE = main_menu_select_online (-> uistate_net_setup,
+// require_live = 1); DOWNLOADS/DLC store = main_menu_select_downloads
+// (-> uistate_downloads); GHTunes upload/download = jam_picked_ghtunes
+// (-> uistate_signin -> UIstate_jam_ghtunes, require_live = 1). The leaderboard
+// / online_* / net_* flow states are only reached from inside these, so
+// disabling the entry points makes the whole online sub-tree unreachable.
+const std::unordered_set<uint32_t>& onlineKeys() {
+    static const std::unordered_set<uint32_t> s = {
+        K("main_menu_select_online"), K("main_menu_select_downloads"),
+        K("main_menu_select_xbox_live"),  // gd10 (Metallica) spelling, harmless on WT
+        K("select_xbox_live"),            // World Tour spelling
+        K("jam_picked_ghtunes"),          // GHTunes (upload/download) in the music studio
+        K("uistate_net_setup"), K("uistate_downloads"), K("uistate_jam_ghtunes"),
+    };
+    return s;
+}
+
+// A key value matching the online set, searched recursively (a menu item's
+// real script can be wrapped: generic_menu's pad_choose runs
+// generic_blocking_execute_script with pad_script = <the script> buried in its
+// params [C script add_generic_menu_icon_item]).
+bool valueLeadsOnline(const qb::Value& v, int depth = 0) {
+    if (depth > 16) return false;
+    if ((v.type == qb::Type::Key || v.type == qb::Type::KeyPtr) && onlineKeys().count(v.key)) return true;
+    if (v.st)
+        for (const qb::Item& it : v.st->items) {
+            if (onlineKeys().count(it.name)) return true;
+            if (valueLeadsOnline(it.value, depth + 1)) return true;
+        }
+    if (v.arr)
+        for (const qb::Value& x : v.arr->values)
+            if (valueLeadsOnline(x, depth + 1)) return true;
+    return false;
+}
+
+bool structLeadsOnline(const qb::Struct& st, int depth = 0) {
+    if (depth > 16) return false;
+    for (const qb::Item& it : st.items) {
+        if (onlineKeys().count(it.name)) return true;
+        if (valueLeadsOnline(it.value, depth + 1)) return true;
+    }
+    return false;
+}
 
 const uint32_t kRootWindow = K("root_window");
 const uint32_t kVMenu = K("vmenu"), kHMenu = K("hmenu"), kVScrollingMenu = K("vscrollingmenu");
@@ -391,6 +441,11 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
                                                                                                       : 0;
         else if (n == K("text_case") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr)) e.upperCase = v.key == K("upper");
         else if (n == K("text")) e.text = setText(v.str);
+        // use_shadow = $true/$false: the setlist listing (uidesc_setlist_b_listing_desc)
+        // turns on the light-grey drop shadow this way, as a named property rather than the
+        // bare `shadow` flag, so without it the authored dark-red [120,0,0] title had no
+        // shadow and was illegible on the near-black leather [C ui\uidesc_setlist_b_listing_desc.qb].
+        else if (n == K("use_shadow")) e.shadow = (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr) ? v.key != K("false") : v.number() != 0;
         else if (n == K("shadow_offs")) readPair(v, e.shadowX, e.shadowY);
         else if (n == K("shadow_rgba") && v.type == qb::Type::Array && v.arr) {
             for (size_t k = 0; k < 4 && k < v.arr->values.size(); ++k) e.shadowRgba[k] = uint8_t(std::clamp(int(v.arr->values[k].number()), 0, 255));
@@ -470,16 +525,25 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         if (e.type == kSprite && e.texture && newDimsW >= 0) e.sx *= scaleX, e.sy *= scaleY;
         else e.sx = scaleX, e.sy = scaleY;
     }
-    // The port has no online play: the main menu's Xbox LIVE item (gh4 sets
-    // its main_menu_select_online handler after making it) is greyed and
-    // skipped as create_main_menu's demo_mode_disable does (GD10-101) [C script].
-    if (qs::Vm::param(p, K("event_handlers")))
-        for (const Element::Handler& h : e.handlers)
-            if (h.script == K("main_menu_select_online") || h.script == K("main_menu_select_xbox_live")) {
-                e.rgba = {128, 128, 128, 255}, e.notFocusable = true;
-                for (auto& c : e.children)
-                    if (c->type == kText || c->type == kTextBlock) c->rgba = {128, 128, 128, 255};
-            }
+    // 7.8 online disabled: the port ships no online, so any item whose handler
+    // tree leads online (ONLINE, DOWNLOADS/DLC store, GHTunes upload/download)
+    // is greyed + not_focusable the moment its handlers are set, as the
+    // original's demo_mode_disable does {rgba = [128 128 128 255] not_focusable}
+    // (GD10-101) [C scripts guitar_main_menu.qb, menu_jam.qb]. The main menu's
+    // ONLINE item has its handler inline; a generic-menu item (jam GHTunes)
+    // gets it later via SetScreenElementProps and the script is wrapped in
+    // generic_blocking_execute_script's params, so detection recurses.
+    if (qs::Vm::param(p, K("event_handlers")) && handlersLeadOnline(e)) {
+        e.onlineEntry = true, e.rgba = {128, 128, 128, 255}, e.notFocusable = true;
+        for (auto& c : e.children)
+            if (c->type == kText || c->type == kTextBlock) c->rgba = {128, 128, 128, 255}, c->onlineEntry = true;
+    }
+    // add_mainmenu_item makes the item's text child AFTER the greyed container,
+    // so the demo_mode_disable colour is carried onto a text child of an online
+    // item here (the original passes demo_mode_disable to both; the ONLINE item
+    // has no such data, so the port greys it from the handler [C script]).
+    if (e.parent && e.parent->onlineEntry && (e.type == kText || e.type == kTextBlock))
+        e.onlineEntry = true, e.rgba = {128, 128, 128, 255}, e.notFocusable = true;
     if (e.upperCase && !e.text.empty()) e.text = upperText(e.text);
     if (e.type == kText || e.type == kTextBlock) measureText(e);
 }
@@ -1508,7 +1572,20 @@ void UiSystem::draw(Canvas& c) {
             for (const Vertex& v : q) e.bx0 = std::min(e.bx0, v.x), e.bx1 = std::max(e.bx1, v.x), e.by0 = std::min(e.by0, v.y), e.by1 = std::max(e.by1, v.y);
             e.drawnIn = drawCount_;
         }
-        if (e.type == kSprite && e.texture) {
+        if (e.type == kSprite && e.texture == K("white")) {
+            // `white` is GH3's built-in flat texture: a solid fill the element's
+            // rgba colours, NOT a pak asset. Our texture cache resolves `white`
+            // to an unrelated atlas entry, so the set list's opaque backing core
+            // (uidesc_Setlist_B's setlist_B_BG_runnerC, tex=white rgba[0,0,0,255],
+            // 768 wide) sampled that and let the venue/fire bleed through the song
+            // list [owner #2]. Draw it as a plain colour quad (texture id 0), as a
+            // sprite with no texture is drawn below.
+            const float w = e.w * it.wsx, h = e.h * it.wsy;
+            const Vertex a = P(0, 0, 0, 0, e.rgba), b = P(w, 0, 0, 0, e.rgba), cc = P(w, h, 0, 0, e.rgba), d = P(0, h, 0, 0, e.rgba);
+            const Vertex q[6] = {a, b, cc, a, cc, d};
+            c.draw(q, 6, 0, e.blend == 1 ? Blend::Add : e.blend == 2 ? Blend::Sub : Blend::Alpha);
+            ++stats_.spritesDrawn;
+        } else if (e.type == kSprite && e.texture) {
             gfx::TextureId id;
             // The band logo's texture shows the logo's CAP (ui/cap_logo.cpp).
             static const uint32_t logoTex = [this] {
@@ -1557,11 +1634,46 @@ void UiSystem::draw(Canvas& c) {
         const Vertex q[6] = {V(0, 0, 0, 0), V(1280, 0, 1, 0), V(1280, 720, 1, 1), V(0, 0, 0, 0), V(1280, 720, 1, 1), V(0, 720, 0, 1)};
         c.draw(q, 6, int(lt.id), Blend::Alpha);
         if (const gfx::TextureId st = loadingSpin_ ? tex_.find(loadingSpin_) : gfx::TextureId{}) {
-            const float a = float(loadingMs_ / 1000.0 * 2 * M_PI), cs = std::cos(a), sn = std::sin(a), h = 48;
-            const float cx = spinX_ + h, cy = spinY_ + h;
-            auto R = [&](float dx, float dy, float u, float v) { return V(cx + dx * cs - dy * sn, cy + dx * sn + dy * cs, u, v); };
-            const Vertex s[6] = {R(-h, -h, 0, 0), R(h, -h, 1, 0), R(h, h, 1, 1), R(-h, -h, 0, 0), R(h, h, 1, 1), R(-h, h, 0, 1)};
-            c.draw(s, 6, int(st.id), Blend::Alpha);
+            if (spinGlobe_) {
+                // GHWT's world globe: the equirectangular world map on a
+                // rotating sphere, over the flaming glow. The front hemisphere
+                // (longitude -90..+90) is a lat/long mesh, orthographic; the
+                // texture repeats so the longitude offset scrolls new land into
+                // view. Lit by a front-upper-left key so the land reads bright
+                // like the 360's (whose globe reaches ~1.7x the flat map on the
+                // lit side), via a base pass then an additive over-bright pass.
+                const float cx = spinX_, cy = spinY_, r = spinR_;
+                const double lon0 = loadingMs_ / 1000.0 * 2 * M_PI * 0.12;  // ~0.12 rev/s
+                const int NLAT = 20, NLON = 20;
+                const float lx = -0.41f, ly = 0.41f, lz = 0.82f;  // key light, front-upper-left
+                auto vert = [&](int i, int j, bool over) {
+                    const double lat = -M_PI / 2 + M_PI * i / NLAT;
+                    const double lon = -M_PI / 2 + M_PI * j / NLON;
+                    const float nx = float(std::cos(lat) * std::sin(lon)), ny = float(std::sin(lat)), nz = float(std::cos(lat) * std::cos(lon));
+                    const float diff = std::max(0.0f, nx * lx + ny * ly + nz * lz);
+                    const float b = 0.62f + 1.45f * diff;  // ambient + key, up to ~2.0 on the lit side
+                    const float g = over ? std::clamp(b - 1.0f, 0.0f, 1.0f) : std::clamp(b, 0.0f, 1.0f);
+                    const uint8_t s = uint8_t(g * 255.0f);
+                    return Vertex{cx + r * nx, cy - r * ny, 0, float((lon0 + lon) / (2 * M_PI)), float((M_PI / 2 - lat) / M_PI), s, s, s, 255};
+                };
+                for (int pass = 0; pass < 2; ++pass) {
+                    const bool over = pass == 1;
+                    std::vector<Vertex> g;
+                    g.reserve(size_t(NLAT) * NLON * 6);
+                    for (int i = 0; i < NLAT; ++i)
+                        for (int j = 0; j < NLON; ++j) {
+                            const Vertex a = vert(i, j, over), b = vert(i, j + 1, over), cc = vert(i + 1, j + 1, over), d = vert(i + 1, j, over);
+                            g.push_back(a), g.push_back(b), g.push_back(cc), g.push_back(a), g.push_back(cc), g.push_back(d);
+                        }
+                    c.draw(g.data(), g.size(), int(st.id), over ? Blend::Add : Blend::Alpha, /*repeat=*/true);
+                }
+            } else {
+                const float a = float(loadingMs_ / 1000.0 * 2 * M_PI), cs = std::cos(a), sn = std::sin(a), h = 48;
+                const float cx = spinX_ + h, cy = spinY_ + h;
+                auto R = [&](float dx, float dy, float u, float v) { return V(cx + dx * cs - dy * sn, cy + dx * sn + dy * cs, u, v); };
+                const Vertex s[6] = {R(-h, -h, 0, 0), R(h, -h, 1, 0), R(h, h, 1, 1), R(-h, -h, 0, 0), R(h, h, 1, 1), R(-h, h, 0, 1)};
+                c.draw(s, 6, int(st.id), Blend::Alpha);
+            }
         }
     }
     c.clearClip();
@@ -1608,6 +1720,18 @@ void UiSystem::drawElementText(Canvas& c, const Element& e, const FontEntry& fe,
     float lsx = 1, lsy = 1;  // this line's glyph scale (fit_width / fit_height)
     std::vector<Vertex> verts;
     std::array<uint8_t, 4> col = base;
+    // The focused menu item's flaming font (fontgrid_text_a6_fire) also carried
+    // an additive fire material overlay (sys_fontgrid_text_a6_fire) that the
+    // port does not load, so only the dim body showed and the gold flame
+    // highlights were lost [GD10-068]. The fire font texture itself is loaded,
+    // so draw the same glyphs a second time additively at full luminance: that
+    // adds the texture's bright flame pixels back over the body, as the 360's
+    // overlay did. GD07_NO_FIRE_GLOW=1 skips it.
+    static const bool noFireGlow = SDL_getenv("GD07_NO_FIRE_GLOW") != nullptr;
+    static const float fireGlow = SDL_getenv("GD07_FIRE_GLOW") ? float(std::atof(SDL_getenv("GD07_FIRE_GLOW"))) : 0.55f;
+    const bool fireFont = !shadowPass && !noFireGlow && e.font == K("fontgrid_text_a6_fire");
+    const uint8_t fireC = uint8_t(std::clamp(fireGlow * 255.0f, 0.0f, 255.0f));
+    std::vector<Vertex> fireVerts;
     auto quad = [&](std::vector<Vertex>& out, const font::Glyph& g, float x0, float y0, const std::array<uint8_t, 4>& cl) {
         const float gw = g.width * lsx, gy = (y0 - lineY) * lsy + lineY, gh = g.height * lsy;
         const Vertex a = P(x0 * sx, gy * sy, g.u0, g.v0, cl), b = P((x0 + gw) * sx, gy * sy, g.u1, g.v0, cl);
@@ -1677,12 +1801,14 @@ void UiSystem::drawElementText(Canvas& c, const Element& e, const FontEntry& fe,
                 c.draw(q.data(), q.size(), int(gf->tex.id), Blend::Alpha);
             } else {
                 quad(verts, *g, x0, y0, col);
+                if (fireFont) quad(fireVerts, *g, x0, y0, {fireC, fireC, fireC, col[3]});
             }
             pen = x0 + (g->width + float(g->advanceAdjust) + track) * lsx;
         }
         lineY += lineH;
     }
     if (!verts.empty()) c.draw(verts.data(), verts.size(), int(fe.tex.id), Blend::Alpha);
+    if (!fireVerts.empty()) c.draw(fireVerts.data(), fireVerts.size(), int(fe.tex.id), Blend::Add);
 }
 
 // ---- the port's own screens and the mouse (not GH3's) ----
@@ -1869,6 +1995,52 @@ bool UiSystem::menuAt(float x, float y, bool focus, bool* isList) {
         vm_.run(K("generic_menu_up_or_down_sound"), qb::Struct{});
     }
     return true;
+}
+
+void UiSystem::menuHitCoverage(int& focusable, int& hittable) const {
+    // The same hittability menuAt uses: a focusable, visible menu item is
+    // reachable by the mouse exactly when it has drawable bounds, directly or
+    // through the element its focus handler names (coordinate space does not
+    // matter here -- only whether bounds exist, which is what menuAt tests).
+    for (const Element* m : focusedElements()) {
+        if (!isMenu(*m) || m->hidden) continue;
+        for (const auto& chp : m->children) {
+            const Element& ch = *chp;
+            if (ch.notFocusable || ch.hidden) continue;
+            ++focusable;
+            float x0, y0, x1, y1;
+            bool got = unionBounds(ch, x0, y0, x1, y1);
+            for (const Element::Handler& h : ch.handlers) {
+                if (got || h.event != K("focus")) continue;
+                for (const char* name : {"id", "text_id"})
+                    if (const qb::Value* v = qs::Vm::param(h.params, K(name)); v && v->type == qb::Type::Key && !got)
+                        if (const Element* t = find(v->key); t && t != &ch) {
+                            got = unionBounds(*t, x0, y0, x1, y1);
+                            if (!got && t->bx1 > t->bx0 && t->by1 > t->by0) got = true;
+                        }
+            }
+            if (got) ++hittable;
+        }
+    }
+}
+
+bool UiSystem::handlersLeadOnline(const Element& e) {
+    for (const Element::Handler& h : e.handlers) {
+        if (onlineKeys().count(h.script)) return true;
+        if (structLeadsOnline(h.params)) return true;
+    }
+    return false;
+}
+
+void UiSystem::onlineEntryCoverage(int& seen, int& focusable) const {
+    std::function<void(const Element&)> walk = [&](const Element& e) {
+        if (e.onlineEntry) {
+            ++seen;
+            if (!e.notFocusable) ++focusable;  // 7.8: an online item must never stay selectable
+        }
+        for (const auto& c : e.children) walk(*c);
+    };
+    walk(*root_);
 }
 
 std::vector<UiSystem::HelpPillHit> UiSystem::helperPills() const {
@@ -2409,17 +2581,13 @@ void UiSystem::addNatives() {
         // gives both demo_mode_disable) [C script create_main_menu_elements]
         // (GD07 bug pass). GD07_MENU_DISABLE_LEGACY=1: only Metallica's.
         static const bool disableLegacy = SDL_getenv("GD07_MENU_DISABLE_LEGACY") != nullptr;
-        auto disabledItem = [](const Element& el) {
-            for (const Element::Handler& h : el.handlers)
-                if (h.script == K("main_menu_select_xbox_live") || h.script == K("main_menu_select_online") ||
-                    h.script == K("main_menu_select_downloads"))
-                    return true;
-            return false;
-        };
         bool online = raw->id == K("main_menu_leaderboards_text");
-        for (const Element::Handler& h : raw->handlers) online = online || h.script == K("main_menu_select_xbox_live");
-        if (!disableLegacy) online = online || disabledItem(*raw) || (raw->parent && disabledItem(*raw->parent));
-        if (online) raw->rgba = {128, 128, 128, 255}, raw->notFocusable = true;
+        if (!disableLegacy) online = online || handlersLeadOnline(*raw) || (raw->parent && handlersLeadOnline(*raw->parent));
+        if (online) {
+            raw->onlineEntry = true, raw->rgba = {128, 128, 128, 255}, raw->notFocusable = true;
+            for (auto& c : raw->children)
+                if (c->type == kText || c->type == kTextBlock) c->rgba = {128, 128, 128, 255}, c->onlineEntry = true;
+        }
         ++stats_.created;
         // new_menu focuses its menu before the items exist: the first
         // focusable item added to a focused menu takes the focus, once the
@@ -2440,16 +2608,13 @@ void UiSystem::addNatives() {
         for (const qb::Item& it : p.items)
             if (it.name == 0 && (it.value.type == qb::Type::String || it.value.type == qb::Type::WString)) name = &it.value;
         if (!name) return false;
-        auto path = [](const std::string& n) { return "DATA/COMPRESSED/IMAGES/LOADINGSCREENS/" + n + ".img.xen"; };
-        const uint32_t key = qbkey::key("loadingscreen:" + name->str);
-        if (!tex_.loadImage(disc_, path(name->str), key)) return false;
-        loadingTex_ = key, loadingSpin_ = 0, loadingMs_ = 0;
+        std::string spin;
+        float sx = 0, sy = 0;
         if (const qb::Value* sp = Vm::param(p, K("spin_texture")); sp && !sp->str.empty()) {
-            const uint32_t sk = qbkey::key("loadingscreen:" + sp->str);
-            if (tex_.loadImage(disc_, path(sp->str), sk)) loadingSpin_ = sk;
-            spinX_ = Vm::number(Vm::param(p, K("spin_x")), 0), spinY_ = Vm::number(Vm::param(p, K("spin_y")), 0);
+            spin = sp->str;
+            sx = Vm::number(Vm::param(p, K("spin_x")), 0), sy = Vm::number(Vm::param(p, K("spin_y")), 0);
         }
-        return true;
+        return showLoadingImage(name->str, spin, sx, sy);
     });
     vm_.addNative("HideLoadingScreen", [this](Vm&, ScriptRun&, qb::Struct&) {
         loadingTex_ = 0;
@@ -2761,6 +2926,28 @@ void UiSystem::addNatives() {
         if (!on && isMenu(*e)) e->widthKids = size_t(-1), layoutMenu(*e);
         return true;
     });
+}
+
+bool UiSystem::showLoadingImage(const std::string& name, const std::string& spin, float sx, float sy) {
+    if (name.empty()) return false;
+    auto path = [](const std::string& n) { return "DATA/COMPRESSED/IMAGES/LOADINGSCREENS/" + n + ".img.xen"; };
+    const uint32_t key = qbkey::key("loadingscreen:" + name);
+    // The image may not exist (every other boot state's base_name has none):
+    // leave any current loading screen untouched and report nothing shown.
+    if (!tex_.loadImage(disc_, path(name), key)) return false;
+    loadingTex_ = key, loadingSpin_ = 0, loadingMs_ = 0, spinGlobe_ = false;
+    if (!spin.empty()) {
+        const uint32_t sk = qbkey::key("loadingscreen:" + spin);
+        if (tex_.loadImage(disc_, path(spin), sk)) loadingSpin_ = sk;
+        spinX_ = sx, spinY_ = sy;
+    }
+    return true;
+}
+
+void UiSystem::setLoadingGlobe(const std::string& tex, float cx, float cy, float r) {
+    const uint32_t sk = qbkey::key("loadingscreen:" + tex);
+    if (!tex_.loadImage(disc_, "DATA/COMPRESSED/IMAGES/LOADINGSCREENS/" + tex + ".img.xen", sk)) return;
+    loadingSpin_ = sk, spinGlobe_ = true, spinX_ = cx, spinY_ = cy, spinR_ = r;
 }
 
 bool UiSystem::drawSprite(Canvas& c, uint32_t texture, float x0, float y0, float x1, float y1, const std::array<uint8_t, 4>& rgba, bool flipU) const {

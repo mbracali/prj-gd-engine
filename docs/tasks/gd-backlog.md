@@ -1349,3 +1349,9 @@ universal launcher, not released on its own.
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
 | GD28-001 | Original | ❌ | **LOW PRIORITY.** Discovery: the iOS Guitar Hero (Activision, 2010) — its package/formats, the executable, its input model (on-screen taps + drag/strum gestures, to be mapped to buttons for PC and to touch for modern phones), what the existing games give it; plan with the owner | Module placeholder added `gd-game-28/` (GitHub #139). `gd-game-28/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md). Owner 11-23: low priority, not forgotten | GitHub #139 Owner 11-23 |
+
+## gd-game-07 onboarding-spec wave (2026-11-24, owner)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD07-ONB | Enhancement | 🟡 | Run the universal onboarding spec on World Tour (gd-game-07), aggregating existing work (completeness 0.30→up). Milestone map + per-step status in docs/tasks/gd07-onboarding-status.md | Steps 0-7.10; ratchet completeness as each milestone verifies | Owner 11-24 onboarding-spec test |

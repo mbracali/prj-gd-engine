@@ -189,6 +189,8 @@ void VenueView::shutdown() {
     for (auto& [k, t] : textures_) dev_->destroyTexture(t.id);
     textures_.clear();
     items_.clear();
+    hasPushback_ = false;
+    hasGlow_ = false;
     groups_.clear();
     groupsMore_.clear();
     dev_ = nullptr;
@@ -573,7 +575,19 @@ VenueView::InitStep VenueView::build(gfx::RenderDevice& dev, const venue::Venue&
             // 3 blend), +0xd4 the draw order, +0xcc bit 3 a blended surface.
             it.alphaRef = float(mat->e8 >> 24) / 255.0f;
             it.drawOrder = mat->d4;
-            it.stencil = (mat->cc & 0x80) ? -1 : int8_t(mat->dc & 1);
+            // +0xdc bit 0x80 (gh4: the material's +0xac) is the bloom's
+            // material filter tag: G_RE_New* neon, colour scroll, lamp bulbs,
+            // floor lights, the projection light and Z_SoundCheck_Plane02 (the
+            // menu's GUITAR HERO logo) carry it. Such a mesh is queued in
+            // pass 19 as well as its own [C 8242AB78: +0xac & 0x80 -> mask |=
+            // 0x80000], and the TOD's bloom2 with materialfilter draws that
+            // pass again into its own cleared buffer [C 8250F158]: drawGlow.
+            // The stencil 1 the tag also writes is what the bloom read before
+            // (the picture where the stencil is 1; GD07_BLOOM2_LEGACY=1 keeps
+            // that). GD07_NO_GLOW_FIX restores the older bit-0 tag for an A/B.
+            static const bool glowLegacy = SDL_getenv("GD07_NO_GLOW_FIX") != nullptr;
+            it.stencil = (mat->cc & 0x80) ? -1 : int8_t(glowLegacy ? (mat->dc & 1) : ((mat->dc & 0x80) ? 1 : 0));
+            it.glow = !glowLegacy && (mat->dc & 0x80) != 0;
             // 823DC180: the blend from +0xd8 (0 opaque, 1 SRC_ALPHA / ONE, 2 its
             // reverse subtract, 3 SRC_ALPHA / ONE_MINUS_SRC_ALPHA, 7 ONE / ONE);
             // +0xcc: 8 cull none, 0x20 no z write, 0x40 no alpha test (else
@@ -663,6 +677,8 @@ VenueView::InitStep VenueView::build(gfx::RenderDevice& dev, const venue::Venue&
             }
         }
         items_.push_back(it);
+        if (it.node >= 0 && v.nodes[size_t(it.node)].pushback) hasPushback_ = true;
+        if (it.glow) hasGlow_ = true;
     };
     if (pr.phase >= 2) {
         // The vertex, then the index buffer, 4 MB at a time (z_tushino's
@@ -942,8 +958,12 @@ void VenueView::lightAt(const std::vector<venue::LightState>& lights, const venu
     rgb[0] = c.x, rgb[1] = c.y, rgb[2] = c.z;
 }
 
-void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show) {
+void VenueView::drawPass(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show, int pass) {
     if (!dev_ || !program_) return;
+    const bool pushbackPass = pass == 1, glowPass = pass == 2;
+    // development aid: the pushback nodes in the main pass, as before the pass split
+    static const bool noPushback = SDL_getenv("GD07_NO_PUSHBACK") != nullptr;
+    if (pushbackPass && noPushback) return;
     gfx::RenderDevice& d = *dev_;
     const venue::Vec3 fwd = venue::rotate(cam.rot, {0, 0, 1});
     const venue::Vec3 up = venue::rotate(cam.rot, {0, 1, 0});
@@ -1066,6 +1086,14 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
             if (vis == 0) continue;
             if (vis < 0 && !n.createdAtStart && !(n.createdOn && show.flag(n.createdOn))) continue;
         }
+        // `rendermethod = $pushback`: the node's sector flag 0x20 [C 8238CE38 /
+        // 8233F4B8 -> 823B1448] takes its meshes out of the main pass and into
+        // pass 20 only [C 8242AB78: mask & ~1 | 0x100000; 8242A978], which the
+        // scene render draws late, after the main pass and the depth-sampling
+        // volumes' pass 10 [C 82431B38]. So they are drawn by drawPushback, with
+        // their own materials' states, not here.
+        // The bloom's pass 19 holds the tagged meshes of either pass [C 8242AB78].
+        if (glowPass ? !it.glow : (!noPushback && (it.node >= 0 && v_->nodes[size_t(it.node)].pushback) != pushbackPass)) continue;
         // A crowd card without its picture (a CrowdOff shot, the peds not
         // drawn yet) is not drawn: no texture would draw it black.
         if (it.card) {
@@ -1141,6 +1169,24 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
     // unselected GUITAR/BASS/DRUMS readable, stroke luma ~130). Never raises
     // global brightness. GD07_UI_BOARD_LIT_LEGACY=1 restores the old lit board.
     static const bool uiBoardLitLegacy = SDL_getenv("GD07_UI_BOARD_LIT_LEGACY") && SDL_getenv("GD07_UI_BOARD_LIT_LEGACY")[0] == '1';
+    static const bool pushbackLog = SDL_getenv("GD07_PUSHBACK_LOG") != nullptr;  // development aid: the pass's items, once
+    static bool pushbackLogged = false;
+    if (pushbackPass && pushbackLog && !pushbackLogged) {
+        pushbackLogged = true;
+        for (const Item* it : order)
+            SDL_Log("pushback pass: %s mode %d blend %u flags 0x%x alpharef %.3f tris %d%s", qbkey::names().get(v_->nodes[size_t(it->node)].name).c_str(),
+                    int(it->mode), it->blendMode, it->matFlags, it->alphaRef, int(it->count / 3), it->gh3 ? "" : " (fallback shader)");
+    }
+    static const bool glowLog = SDL_getenv("GD07_GLOW_LOG") != nullptr;  // development aid: the bloom pass's items, once
+    static bool glowLogged = false;
+    if (glowPass && glowLog && !glowLogged) {
+        glowLogged = true;
+        for (const Item* it : order)
+            SDL_Log("glow pass: %s mode %d blend %u flags 0x%x alpharef %.3f tris %d c0 %.3f %.3f %.3f %.3f%s",
+                    it->node >= 0 ? qbkey::names().get(v_->nodes[size_t(it->node)].name).c_str() : "(no node)", int(it->mode), it->blendMode, it->matFlags,
+                    it->alphaRef, int(it->count / 3), it->gh3 ? mats_[size_t(it->mat)].consts.ps[0][0] : 0.0f, it->gh3 ? mats_[size_t(it->mat)].consts.ps[0][1] : 0.0f,
+                    it->gh3 ? mats_[size_t(it->mat)].consts.ps[0][2] : 0.0f, it->gh3 ? mats_[size_t(it->mat)].consts.ps[0][3] : 0.0f, it->gh3 ? "" : " (fallback shader)");
+    }
     for (const Item* it : order) {
         c.first = int(it->first);
         c.count = int(it->count);
@@ -1256,6 +1302,24 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
                 gc.state.blend = ms.blend, gc.state.src = ms.src, gc.state.dst = ms.dst, gc.state.op = ms.op;
                 gc.state.depthWrite = ms.depthWrite, gc.state.depthFunc = ms.depthFunc;
             }
+            if (glowPass) {
+                // Drawn a second time over the scene's own depth: nothing
+                // written to it or to the stencil [I: the original draws the
+                // pass at a quarter of the size against a depth buffer of its
+                // own, with a slope-scaled bias of -1, 8250F158]. And only
+                // where the main pass left this tag's stencil, that is where a
+                // tagged mesh is the surface the picture shows [I: keeps the
+                // bloom's source to what this engine's picture shows of them;
+                // a tagged mesh the main pass draws over without depth (z_scifi's
+                // StageBack03 screen quad, flags 0x20) would bloom through
+                // otherwise]. GD07_GLOW_NOSTENCIL=1: no such test.
+                static const bool noGate = SDL_getenv("GD07_GLOW_NOSTENCIL") != nullptr;
+                gc.state.depthWrite = false;
+                gc.state.stencilTest = !noGate && it->stencil > 0;
+                gc.state.stencilFunc = gfx::CompareFunc::Equal;
+                gc.state.stencilRef = uint8_t(std::max<int>(0, it->stencil));
+                gc.state.stencilWriteMask = 0, gc.state.stencilReplace = false;
+            }
             if (it->flare && it->housing >= 0) {
                 drawFlare(*it, gc, centreOf(it), cam);
                 ++draws;
@@ -1278,10 +1342,11 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
             c.state.blend = ms.blend, c.state.src = ms.src, c.state.dst = ms.dst, c.state.op = ms.op;
             c.state.depthWrite = ms.depthWrite, c.state.depthFunc = ms.depthFunc;
         }
+        if (glowPass) c.state.depthWrite = false;
         d.draw(c);
         ++draws;
     }
-    stats_.drawsLastFrame = draws;
+    stats_.drawsLastFrame = pass != 0 ? stats_.drawsLastFrame + draws : draws;
 }
 
 void VenueView::drawFlare(const Item& it, gfx::DrawCall gc, const venue::Vec3& centre, const venue::CamPose& cam) {
@@ -1462,8 +1527,8 @@ gfx::Mat4 inverse4(const gfx::Mat4& m) {
 // smoke, g_DepthBufferTexture s1. The chord through the cone in front of the
 // scene's depth x the colour x the smoke. The near faces, ONE + ONE, depth
 // tested against the scene's depth buffer (the states below).
-void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth) {
-    if (!dev_ || rays_.empty() || !rayCount_ || !depth || !gh3_.ready()) return;
+void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth, float intensity) {
+    if (!dev_ || rays_.empty() || !rayCount_ || !depth || !gh3_.ready() || intensity <= 0) return;
     gfx::RenderDevice& d = *dev_;
     gh3shader::Globals globals;
     gfx::Mat4 viewM, viewProjM;
@@ -1549,7 +1614,7 @@ void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow&
         // g_ConeColor: the record's volume colour as is (823B6314: c2 = record +0x18;
         // the impostor's is that x density, 823B5E44) [C]; the shader weighs it by
         // g_ConeSize.w (the density) itself. Alpha 1 [I: the colour's fourth lane].
-        for (int q = 0; q < 3; ++q) ps[2][q] = h.volumeColor[size_t(q)];
+        for (int q = 0; q < 3; ++q) ps[2][q] = h.volumeColor[size_t(q)] * intensity;
         ps[2][3] = 1;
         for (int i = 0; i < 4; ++i)  // g_ViewProjInv, rows as the shaders read them
             for (int q = 0; q < 4; ++q) ps[3 + i][q] = vpInv.at(q, i);
@@ -1718,7 +1783,7 @@ void VenueView::drawProjectors(const venue::CamPose& cam, const venue::LightShow
 // softened over 0.3 m in front of the scene's depth; alpha x (1 - g_Burn).
 // Drawn here as a camera-facing trapezoid along the beam (2 startradius at
 // the lens, 2 endradius at range, q the half-width so u stays straight).
-void VenueView::drawVolumes2D(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth) {
+void VenueView::drawVolumes2D(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth, float intensity) {
     if (!dev_ || vol2d_.empty() || !vol2dVb_ || !gh3_.ready()) return;
     static const bool off = SDL_getenv("GD07_NO_VOLUMES2D") != nullptr;  // development aid: compare without them
     if (off) return;
@@ -1839,7 +1904,7 @@ void VenueView::drawVolumes2D(const venue::CamPose& cam, const venue::LightShow&
         }
         vs[63][0] = -1;
         // g_ConeColor c1 = volumecolor x density (alpha the density) as GH3's impostor [I].
-        const float dens = h.density * beams[bi].fade;
+        const float dens = h.density * beams[bi].fade * intensity;
         for (int k = 0; k < 3; ++k) ps[1][k] = h.volumeColor[size_t(k)] * dens;
         ps[1][3] = dens;
         static const float plane = SDL_getenv("GD07_VOL2D_PLANE") ? float(std::atof(SDL_getenv("GD07_VOL2D_PLANE"))) : 1.0f;  // development aid

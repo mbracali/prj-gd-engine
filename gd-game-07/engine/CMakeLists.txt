@@ -46,6 +46,7 @@ target_sources(gd07 PRIVATE
   src/data/fsb.cpp
   src/data/inflate.cpp
   src/data/json.cpp
+  src/data/jam.cpp
   src/data/matlib.cpp
   src/data/pak.cpp
   src/data/qb.cpp
@@ -99,10 +100,17 @@ target_sources(gd07 PRIVATE
   src/render/venue_view.cpp
   src/render/xenos_glsl.cpp
   src/game/chart.cpp
+  src/game/drum_player.cpp
   src/game/note_track.cpp
   src/game/player.cpp
   src/game/match.cpp
+  src/game/touch_strip.cpp
   src/game/save.cpp
+  src/game/instrument.cpp
+  src/game/shop.cpp
+  src/game/career.cpp
+  src/game/car.cpp
+  src/game/tutorial.cpp
   src/game/song_db.cpp
   src/game/tuning.cpp
   src/script/bytecode.cpp
@@ -114,9 +122,18 @@ target_sources(gd07 PRIVATE
   src/script/vm.cpp
   src/tests/audittest.cpp
   src/tests/chartest.cpp
+  src/tests/drumtest.cpp
+  src/tests/exploretest.cpp
   src/tests/format_checks.cpp
   src/tests/scripttest.cpp
   src/tests/selftest.cpp
+  src/tests/shoptest.cpp
+  src/tests/castest.cpp
+  src/tests/instrtest.cpp
+  src/tests/jamtest.cpp
+  src/tests/tuttest.cpp
+  src/tests/careertest.cpp
+  src/tests/enhancedtest.cpp
   src/tests/walk.cpp
   src/tests/selftest_play.cpp
   src/tests/sfxtest.cpp

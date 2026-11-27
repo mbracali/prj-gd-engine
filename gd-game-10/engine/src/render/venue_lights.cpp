@@ -259,23 +259,60 @@ void LightShow::cycle(double t, bool save) {
     if (save) savedSnapshot_ = vals[next].key;
 }
 
+// The processor each mode entry names is resolved through the processor table
+// LightShow_SetProcessors registers. On this disc that is only
+// LightShow_SharedProcessors (one call, main init); no zone ships a per-venue
+// <zone>_lightshow_processors, so the shared table is authoritative [C qb.pak,
+// all_dis.txt ~44584]. Per processor: screnter / screvent (screxit is a no-op
+// for all) --
+//   default_generic : GenericMood_Enter (cycle save=true) / GenericMood_Event (cycle on snapshotchange)
+//   Poor_Generic    : Poor_Enter     (cycle save=true)    / Poor_Event     (waits, no cycle)
+//   Blackout_Generic: Blackout_Enter (cycle save=false)   / Blackout_Event (empty)
+//   Flare_Generic   : Flare_Enter    (cycle save=false)   / Flare_Event    (empty)
+//   Strobe_Generic  : GenericMood_Enter / GenericMood_Event  <-- NOT the orphaned
+//       LightShow_Strobe_* scripts (nothing references them); strobe is an
+//       ordinary cycling mood driven by the snapshotchange notes 57/58, and
+//       note 60 `strobetoggle` is consumed by no processor [C].
+//   Proc_*Intro     : GenericMood_Enter / nullscript (cycle on enter, not on snapshotchange)
+// A mode entry with no `processor` defaults to default_generic. The port read a
+// `processor` inline from the mapping entry and did nothing when absent -- so
+// the medium/good generic moods (intro, wash, prelude, exposition, verse,
+// chorus, ...; ~40 % of every zone's entries carry snapshots but no processor)
+// never played -- and modelled Strobe_Generic from the orphaned scripts.
+// GD10_LIGHTSHOW_LEGACY=1 restores that behaviour.
+bool LightShow::cyclesOnSnapshotChange() const {
+    // screvent == LightShow_GenericMood_Event: default_generic (the no-processor
+    // fallback) and Strobe_Generic only.
+    return processor_ == 0 || processor_ == K("default_generic") || processor_ == K("Strobe_Generic");
+}
+
 void LightShow::enterMood(uint32_t mood, double t) {
+    static const bool legacy = SDL_getenv("GD10_LIGHTSHOW_LEGACY") != nullptr;
     const uint32_t oldProc = processor_;
-    // The old processor's exit script.
-    if (oldProc == K("Strobe_Generic")) timeEnabled_ = true;  // LightShow_Strobe_Exit: SetTime enable [C]
     mood_ = mood;
     setStateFlags();
     const qb::Struct* e = structOf(modeEntry());
     processor_ = e ? keyOf(e->find(K("processor"))) : 0;
     strobeOn_ = false;
-    if (processor_ == K("Strobe_Generic")) {
-        timeEnabled_ = false;  // LightShow_Strobe_Enter: SetTime enable=false
-        cycle(t, false);       // LightShow_Strobe_Event's first CycleNextSnapshot (the blackout)
-    } else if (processor_ == K("Blackout_Generic") || processor_ == K("Flare_Generic")) {
-        cycle(t, false);
-    } else if (processor_) {
-        cycle(t, true);  // LightShow_GenericMood_Enter / LightShow_Poor_Enter
+    if (legacy) {
+        if (oldProc == K("Strobe_Generic")) timeEnabled_ = true;  // LightShow_Strobe_Exit: SetTime enable
+        if (processor_ == K("Strobe_Generic")) {
+            timeEnabled_ = false;  // LightShow_Strobe_Enter: SetTime enable=false
+            cycle(t, false);
+        } else if (processor_ == K("Blackout_Generic") || processor_ == K("Flare_Generic")) {
+            cycle(t, false);
+        } else if (processor_) {
+            cycle(t, true);
+        }
+        return;
     }
+    // Every processor's enter cycles to a snapshot; Blackout / Flare keep it as
+    // transient (save=false), the rest (GenericMood / Poor, and the
+    // no-processor default_generic) save it as the mood's current snapshot.
+    if (processor_ == K("Blackout_Generic") || processor_ == K("Flare_Generic"))
+        cycle(t, false);  // Blackout_Enter / Flare_Enter
+    else
+        cycle(t, true);  // GenericMood_Enter / Poor_Enter (Strobe_Generic / Proc_*Intro map here too)
 }
 
 void LightShow::applyNote(const ChartEvent& e, double t) {
@@ -304,12 +341,26 @@ void LightShow::applyNote(const ChartEvent& e, double t) {
             if (hasFlag(params, K("default"))) blend_ = defaultBlend_;
             else if (params) blend_ = num(params->find(K("time")), float(defaultBlend_));
         } else if (event == K("snapshotchange")) {
-            // GenericMood_Event cycles on it; Poor_Event and the others wait [C].
-            if (processor_ && processor_ != K("Poor_Generic") && processor_ != K("Blackout_Generic") && processor_ != K("Flare_Generic") &&
-                processor_ != K("Strobe_Generic"))
+            // Notes 57/58. GenericMood_Event cycles on it; Poor_Event waits and
+            // Blackout / Flare events are empty [C]. default_generic (the
+            // no-processor fallback) and Strobe_Generic both have screvent =
+            // LightShow_GenericMood_Event.
+            static const bool legacy = SDL_getenv("GD10_LIGHTSHOW_LEGACY") != nullptr;
+            if (legacy) {
+                // Old guard: required an inline processor and excluded Strobe.
+                if (processor_ && processor_ != K("Poor_Generic") && processor_ != K("Blackout_Generic") &&
+                    processor_ != K("Flare_Generic") && processor_ != K("Strobe_Generic"))
+                    cycle(t, true);
+            } else if (cyclesOnSnapshotChange()) {
                 cycle(t, true);
+            }
         } else if (event == K("strobetoggle")) {
-            if (processor_ == K("Strobe_Generic")) {
+            // Note 60. No shipped processor consumes it (every screvent is
+            // GenericMood / Poor / Blackout / Flare / nullscript; the
+            // LightShow_Strobe_* scripts are orphaned), so the real game ignores
+            // it [C]; kept only under GD10_LIGHTSHOW_LEGACY.
+            static const bool legacy = SDL_getenv("GD10_LIGHTSHOW_LEGACY") != nullptr;
+            if (legacy && processor_ == K("Strobe_Generic")) {
                 strobeOn_ = !strobeOn_;
                 if (strobeOn_ && savedSnapshot_) play(savedSnapshot_, t);
                 else cycle(t, false);

@@ -2011,6 +2011,9 @@ void applyEnhancedGlobals(const EnhancedStore& st) {
     Player::fullStarPower = st.on("cheat_full_sp");
     Highway2D::hyperspeed = st.on("cheat_hyperspeed");
     VenueStage::extras.shadowsAll = st.on("shadows_all");
+    // Sharper Character Shadows (a port enhancement): the self-shadow cascade
+    // resolution, original (1) by default. Read when a venue builds its maps.
+    VenueStage::shadowScale = std::array<int, 3>{1, 2, 4}[size_t(idx("self_shadow", {"original", "2x", "4x"}))];
     VenueStage::extras.moreLights = idx("more_lights", {"none", "1.5x", "2x", "2.5x"});
     VenueStage::extras.lightDust = idx("light_dust", {"none", "1.5x", "2x", "2.5x"});
     TextureCache::sharp = st.on("sharp_ui");  // from the next start (the textures load at boot)
@@ -2036,6 +2039,7 @@ void applyEnhancedGlobals(const EnhancedStore& st) {
         ps.cinematic = false;
         VenueStage::extras.shadowsAll = false;
         VenueStage::extras.moreLights = VenueStage::extras.lightDust = 0;
+        VenueStage::shadowScale = 1;  // back to the original's own self-shadow resolution
         venue::CameraDirector::noShake = true;
     }
 }

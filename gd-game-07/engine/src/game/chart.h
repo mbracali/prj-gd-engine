@@ -34,6 +34,15 @@ struct ChartPhrase {
     int32_t notes = 0;  // Star Power / battle-star phrases: notes in the phrase
 };
 
+// GHWT guitar touch strip: a _Tapping span, played by tapping the touch strip
+// (no strum) rather than strummed [C data: <song><infix>_<Diff>_Tapping, an
+// array of [time, length, count] int triples]. `count` is the taps in the span
+// (1, 2 or 4 observed on the disc). Distinct from "tapping HOPOs"
+// (hammer-ons/pull-offs), which the strummed guitar judge already handles.
+struct TapPhrase {
+    int32_t time = 0, length = 0, count = 0;
+};
+
 struct TimeSig {
     int32_t time = 0, num = 4, den = 4;
 };
@@ -51,6 +60,10 @@ struct ChartMarker {
 struct PartChart {
     std::array<std::vector<ChartNote>, kDifficulties> notes;
     std::array<std::vector<ChartPhrase>, kDifficulties> star, starBattle;
+    // The GHWT touch-strip tap spans (_Tapping), parsed always (purely
+    // additive); the touch-strip subsystem reads them when enable_touch_strip
+    // (qb 0x09383b1b) is on. Empty on most songs / difficulties.
+    std::array<std::vector<TapPhrase>, kDifficulties> tapping;
     bool empty() const {
         for (const auto& n : notes)
             if (!n.empty()) return false;

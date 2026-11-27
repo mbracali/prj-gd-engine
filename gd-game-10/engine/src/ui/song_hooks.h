@@ -13,6 +13,7 @@
 #include "data/qb.h"
 #include "ui/fx2d.h"
 #include "ui/hud_widgets.h"
+#include "game/match.h"  // kAttacks (the battle power-up count)
 
 class Canvas;
 class Disc;
@@ -119,7 +120,7 @@ private:
     std::array<PerPlayer, 2> pp_{};
     float lastCrowd_ = 1;
     std::array<int, 2> lastCards_{}, lastFired_{};
-    std::array<std::array<int, 8>, 2> lastByAttack_{};
+    std::array<std::array<int, kAttacks>, 2> lastByAttack_{};
     // attack_bolt's and bite_particle's 2D sparks (Create2DParticleSystem in
     // fx_) and their Destroy2DParticleSystem times [C scripts].
     std::array<double, 2> lastBolt_{-1e9, -1e9};

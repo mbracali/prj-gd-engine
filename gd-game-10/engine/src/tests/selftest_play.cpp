@@ -379,7 +379,10 @@ bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayT
             ++t.failedCharts;
         }
     }
-    // Battle (expert, both autoplayed): cards, attacks, the KO or sudden death.
+    // Battle (expert, both autoplayed): the Metallica power-up table must load
+    // (nine attacks: GH3's seven, then Mines and blackout), cards are awarded
+    // and attacks fire. A start failure is a hard failure -- it means the
+    // battle tables did not load (battle mode would be dead) [C guitar_battle.qb].
     if (!chart.notes(Part::Guitar, 3).empty()) {
         MatchSetup ms;
         ms.mode = GameMode::Battle, ms.players = 2;
@@ -396,6 +399,10 @@ bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayT
             }
             t.battleAttacks += size_t(m.counters().fired[0] + m.counters().fired[1]);
             if (m.outcome() != Match::Outcome::None) ++t.battleKos;
+        } else {
+            if (ok) why = "battle: " + err;
+            ok = false;
+            ++t.failedCharts;
         }
     }
     return ok;

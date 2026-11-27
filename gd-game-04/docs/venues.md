@@ -474,12 +474,40 @@ show's state made the shadows jump direction, GD04-103), light = 0.35 +
 0.65 x lit (as dark as the reference captures' shadows). Cost: one more
 band depth pass (512 x 512) per frame; the receivers' shaders are GH3's
 and already sampled both maps. GD04_NO_SHADOWS=1 turns it off;
-GD04_SHADOW_LOG=1 logs the light, the slices and each member's cascade
-coordinates; GD04_SHADOW_BIAS scales the bias (development aids). Not
-done: c140 (g_shadowDirWorldSpace, which some prop shaders read) stays 0.
---venuetest fails when a frame with a shadow light did not draw the band
-into both cascades. The menus' backdrop (ui/menu_scene.cpp) keeps its one
-map for both cascades, without the fade.
+GD04_SHADOW_LOG=1 logs the light, the cascade resolution, the slices and
+each member's cascade coordinates; GD04_SHADOW_BIAS scales the bias;
+GD04_SHADOW_SCALE=<1|2|4> overrides the self-shadow resolution (development
+aids). Not done: c140 (g_shadowDirWorldSpace, which some prop shaders read)
+stays 0. --venuetest fails when a frame with a shadow light did not draw the
+band into both cascades. The menus' backdrop (ui/menu_scene.cpp) keeps its
+one map for both cascades, without the fade.
+
+#### Sharper Character Shadows (an opt-in Enhanced option, not the original)
+
+The self-shadow is faithful to GH3, not a port defect. The port's cascades
+are the original's own 1024 x 1024 / 512 x 512 (tod_profiles'
+shadow_map_size), the receiver is GH3's own translated microcode (the same
+four-tap PCF, half a texel apart, bilinearly blended), and the depth maps
+are point-sampled (`gfx::Filter::Nearest`, s14 / s15 in BandView), so the
+taps are the Xbox 360 tfetch's, not a second bilinear blur. The cascades'
+world bounds (the LiSPSM projection, the 13 / 16 m slices) are the
+original's too, so a texel covers the same world area as on the console. GH3
+really does cast a soft, low-resolution self-shadow; the port reproduces it
+exactly. Measured: `GD04_SHADOW_LOG` reports `cascades 1024 / 512 (scale
+1x)`; `--venuetest` self-shadow acne stays under 1.1 %.
+
+Because the port matches, the softness is improved only by an opt-in
+enhancement, off by default: Enhanced Options > Performance & Graphics >
+**Sharper Character Shadows** (`self_shadow`: `original` / `2x` / `4x`,
+default `original`, persisted in enhanced.json; `app.cpp`'s
+`applyEnhancedGlobals` sets `VenueStage::shadowScale`). At 2x / 4x the venue
+builds its cascades at 2048 / 1024 or 4096 / 2048 and passes the real size
+as g_shadowMapSize (c143), so the receiver's half-texel PCF offsets track
+the finer map; the projection, slices, bias, intensity and the band-casts /
+band-receives behaviour are unchanged — the shadow is the same shape and
+darkness, only finer-grained. It takes effect from the next song (the maps
+are built when a venue attaches). The menus' backdrop stays at the
+original's 1024 (out of scope: the owner's case is the in-song band).
 
 ### LOD
 

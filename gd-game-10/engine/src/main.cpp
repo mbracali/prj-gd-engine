@@ -24,6 +24,7 @@
 #include "tests/audittest.h"
 #include "tests/formattest.h"
 #include "tests/scripttest.h"
+#include "tests/drumtest.h"
 #include "tests/selftest.h"
 #include "tests/chartest.h"
 #include "tests/venuetest.h"
@@ -43,6 +44,7 @@ void usage() {
         "  --no-fail            the rock meter cannot fail you\n"
         "  --formattest         parse every pak on the disc and every file in it to its end\n"
         "  --selftest           check the data (song list, every chart), auto-play every chart\n"
+        "  --drumtest           data-free checks of the gh4 drum judge and the drum-kit input guard\n"
         "  --uitest             boot through the menus, then start every flow state's screen in turn (headless)\n"
         "  --walktest <walk>    play through GH3's own menus: quickplay, lose, back, boot, mouse, gamepads, enhanced,\n"
         "                       stickyaxis, touch, options, practice, store, hub, venues, career, career_quickplay, pause, pausequit, coop, faceoff, proface,\n"
@@ -149,7 +151,7 @@ int run(int argc, char** argv) {
     Options opt;
     std::string movie;
     bool audittest = false, formattest = false, shadertest = false, selftest = false, sfxtest = false, scripttest = false;
-    bool venuetest = false, chartest = false;
+    bool venuetest = false, chartest = false, drumtest = false;
     std::string songAudio;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -168,6 +170,7 @@ int run(int argc, char** argv) {
         else if (a == "--selftest") selftest = true;
         else if (a == "--venuetest") venuetest = true;
         else if (a == "--chartest") chartest = true;
+        else if (a == "--drumtest") drumtest = true;
         else if (a == "--sfxtest") sfxtest = true;
         else if (a == "--songaudiotest") songAudio = value();
         else if (a == "--scripttest") scripttest = true;
@@ -185,6 +188,7 @@ int run(int argc, char** argv) {
         !opt.walk.empty())
         SDL_setenv_unsafe("GD10_SEED", "12345", 0);  // the tests' scripts pick the same randoms every run
     if (shadertest) return runShaderTest(opt.dataPath);
+    if (drumtest) return runDrumTest();  // data-free: the drum judge + input guard
     if ((!movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest || !opt.walk.empty()) &&
         opt.dataPath.empty()) {
         usage();

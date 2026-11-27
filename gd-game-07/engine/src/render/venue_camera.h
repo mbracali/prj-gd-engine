@@ -123,6 +123,23 @@ public:
     // The member and bone the shot playing frames (lookat / lookatbone of its first camera; 0: none).
     uint32_t lookatMember() const { return keys_.empty() ? 0 : keys_.front().lookat; }
     uint32_t lookatBone() const { return keys_.empty() ? 0 : keys_.front().lookatBone; }
+    // Whether the last pose() actively framed a member's bone: the shot's aiming
+    // camera has both lookat and lookatbone (a wide / audience shot carries only
+    // a lookat hint and is not a member frame), its bone resolved, and the aim is
+    // engaged (the bone within the reframable cone; too far off the authored
+    // direction, aim keeps the authored composition and does not track). Out: the
+    // framed member / bone, the framed bone's world position, and the shot's
+    // authored screenoffset in half-screens (x right, y down) — a close-up may
+    // author |offset| > 1 to crop the bone to the frame edge, so a framing check
+    // allows the bone out to its authored offset. Recorded by aim() (no effect on
+    // the pose). [C data: lookat / lookatbone / screenoffset; I: the aim cone.]
+    bool framedNow(uint32_t& member, uint32_t& bone, float so[2], Vec3& target) const {
+        if (!framing_.active) return false;
+        member = framing_.member, bone = framing_.bone;
+        so[0] = framing_.sox, so[1] = framing_.soy;
+        target = framing_.target;
+        return true;
+    }
 
 private:
     struct Keyed {  // a camera position: pos / Quat / FOV in the frame of LockTo
@@ -201,6 +218,14 @@ private:
     LockLookup lockLookup_;
     LockAnimated lockAnimated_;
     mutable double evalMs_ = 0;  // the song time world() places lock targets at
+    // aim()'s framing decision for the last pose() (read by framedNow; no effect on the pose).
+    struct Framing {
+        bool active = false;
+        uint32_t member = 0, bone = 0;
+        float sox = 0, soy = 0;
+        Vec3 target{};
+    };
+    mutable Framing framing_;
 };
 
 }  // namespace venue

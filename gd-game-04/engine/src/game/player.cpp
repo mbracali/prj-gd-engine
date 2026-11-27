@@ -68,12 +68,18 @@ void Player::changeHealth(bool good, double now) {
         // No loss once at 0 (co-op excepted) [C 0x8210FD18].
         if (st_.health <= 0 && !rules_.negativeHealth) return;
         // Invincibility: the first 20% (Easy) / 10% (Medium) of the song, no
-        // loss once at or below health_invincible_minimum x 0.02 [C 0x8210FD18].
+        // loss once at or below health_invincible_minimum x 0.02. In a career
+        // boss battle (game_mode p1_career) calc_health_invincible_time sets a
+        // window for BOTH players by their own difficulty (current_difficulty /
+        // current_difficulty2, which the boss shares), and CrowdDecrease's gate
+        // reads whichever player_status it is given, so the boss (player 2) is
+        // protected too -- it is not exempt [C 0x8210FD18, calc_health_invincible_time
+        // 0x69486C6D; the boss's loss is computed past the same gate].
         const float pct = rules_.invinciblePct >= 0 ? rules_.invinciblePct
                           : diff_ == 0                ? tu_.healthInvincibleEasy
                           : diff_ == 1                ? tu_.healthInvincibleMedium
                                                       : 0;
-        if (!rules_.boss && pct > 0 && now < songLengthMs_ * pct / 100.0 && st_.health <= tu_.healthInvincibleMinimum * 0.02f) return;
+        if (pct > 0 && now < songLengthMs_ * pct / 100.0 && st_.health <= tu_.healthInvincibleMinimum * 0.02f) return;
     }
     st_.health = std::min(kHealthMax, st_.health + delta);
     if (st_.health <= 0 && rules_.canFail && !noFail_ && !st_.failed) {

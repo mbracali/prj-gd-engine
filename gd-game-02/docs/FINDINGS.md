@@ -837,3 +837,156 @@ not reproduce the bugged drawings headless, and I ruled out guitar-mute
 persistence across songs (Mixer::play resets `guitarGain_`/`guitarTarget_` to 1
 and loadSong resets `setVolumeDb(0)`), so if the drawings and guitar-track are a
 *separate* defect from the pause, they remain open.
+
+## Controls audit (2026-11-24)
+
+Self-contained review of GH2's input handling vs our gd02 port, for the
+cross-game control-model work. Scope: the raw input layer
+(`engine/src/input/input.{cpp,h}`) and how gameplay consumes it
+(`engine/src/app.cpp`, `engine/src/game/player.cpp`, `engine/src/game/rules.h`).
+GH2 evidence is the decoded material already in this file (addresses only, no
+decompiler text). GH2 is guitar-only (no drums/vocals). `[C]` = from the
+game's code/data; `[I]` = inferred by the port for arbitrary SDL hardware.
+
+### (a) GH2 input per area, with evidence and exact numbers
+
+GH2 ran on fixed Xbox 360 hardware, so it has two distinct layers:
+
+1. **Device → controller object.** A beatmatch controller type is picked per
+   player at `0x822b3c50` from the joypad type that `joypad.dta` detects:
+   `ro_guitar_xbox` → `hx_guitar_xbox_new` (or `hx_guitar_xbox` with
+   `old_guitar`); `ro_guitar_xbox_old`/`_old_2` (debug) → `hx_guitar_xbox`;
+   `ro_guitar` (PS2 guitar via a PC adapter) → `guitar`; anything else (a pad)
+   → `joypad_guitar`, or `lefty_joypad_guitar` when the player's lefty flag is
+   set [C]. The fret slots per type are `beatmatch_controller.dta`'s `slots`;
+   `force_mercury kPad_Select` (Star Power) is in every type [C].
+2. **Controller object → watcher (judgment).** `guitar`, `lefty_guitar`,
+   `hx_guitar_xbox`, `hx_guitar_xbox_new` get the guitar watcher (strum bar +
+   frets, ctor `0x8234e9e8`, selected at `0x8234a620`); every other type gets
+   the joypad watcher (each fret press is a strum, ctor `0x8234e1f8`) [C].
+
+Exact timing/threshold constants (all `[C]` unless noted), the numbers the
+universal model must reconcile:
+
+| Area | GH2 value | Evidence |
+|---|---|---|
+| Hit window (slop) | **±100 ms**, every difficulty | `beatmatcher.dta watcher slop 100` → watcher `+0x14`, ctor `0x82350ae0`; window test `0x8234f5d0` |
+| Strum repeat filter | **52 ms** (`last + 52 >= now` drops it) | player sink `0x8233aa80`, constant `0x8205807c` = 52.0; guitar-mode strums only |
+| Wrong-strum grace | **60 ms** (`now + 60` deadline) | watcher `+0xa8` = 60.0, constant `0x82002af8` |
+| HOPO threshold | **170 ticks** global (strict `<`), per-song override **250** | parser `0x823341d0` |
+| HOPO hit window | **−100 … +160 ms** | `0x8234f294..0x8234f2b0` (−slop … slop+60) |
+| Overstrum report limit | **1 per 50 ms** | `0x8234f860`, constant `0x82002228` |
+| Joypad chord window | **50 ms** (first correct fret opens it) | joypad watcher `+0x84` = 50.0 |
+| Chord grouping | ≤ 10 ticks | chord test `0x82334630` |
+| Whammy → audio pitch bend | counts once value rises **above −0.35**; bend = `pitch_bend_range(1) × min(Δt/ms_to_full_pitch_bend(1000),1) × amount` | `0x8234ff18`; `beatmatcher.dta` `pitch_bend_range 1`, `ms_to_full_pitch_bend 1000` |
+| Star-Power whammy "moving" flag | speed **> 0.0005 /ms** (`whammy_speed×0.01`), held **500 ms** after the last move (`whammy_timeout`) | `0x822c8438`; scoring `star_power[8]`,`[9]` |
+| Star-Power whammy fill | **0.034 / beat** (`whammy_rate`), only during an armed/captured sustain phrase | `0x822dbd60` |
+| Star-Power ready / deploy | ready at meter **0.5** (`ready_level`); deploy = **held** engage, needs ready + not-active; drain **0.125 / measure** | ready `0x822dbd60`; deploy `0x822c80f8`; `star_power[4]`,`[1]` |
+| Star-Power deploy triggers | **tilt sensor** OR **Select/Back** (`force_mercury kPad_Select`), instant | `0x822c80f8` |
+| Controller latency | the player's lag setting is added to the input time at watcher `+0x2c` | set via watcher vtable `+0x40` |
+| Strum bar buttons (guitar ctrl) | D-pad up/down ids `0xc`/`0xe`, also `0x10`/`0x12` | guitar controller `0x8234c538` |
+| Input-live gate | controllers are OFF and drop buttons during the intro clock (song time < −25 ms) | off `0x822CED30`, on `0x822E2510` |
+
+Note there is **no input-layer strum debounce timer** in GH2 beyond the
+52 ms judgment-sink filter, and that filter applies to **guitar-mode strums
+only** — joypad fret-strums and chord completions are not debounced (a 52 ms
+filter there would block chords) [C/I].
+
+### (b) Our gd02 port — what is faithful, and the gaps/errors
+
+**Faithful (judgment layer).** `rules.h` / `player.cpp` reproduce every GH2
+number above exactly: `slopMs 100`, `strumRepeatMs 52` (guitar strum only,
+`player.cpp:91`), `pendingStrumMs 60`, `hopoThresholdTicks 170`/250,
+`overstrumGapMs 50`, `joypadChordMs 50`, HOPO window −100…+160, SP whammy
+speed 0.0005/ms + 500 ms hold (`whammyPoll`), SP fill 0.034/beat, ready 0.5,
+deploy as a held engage (`starPowerEngage`). Frame-time stamping (`lastT_`,
+GD02-152), the intro controllers-off gate (`controllersLive_`), the analog
+whammy fed per frame (`setWhammyValue`, `app.cpp:1778/1782`), and the 300 ms
+axis settle (`Pad::settleNs`) are all present. The judgment layer is **not**
+the fragility and must not be touched.
+
+**Gaps/errors (raw SDL→action layer, `input.cpp`).** These are the parts GH2
+never had to solve (fixed hardware) and that the port infers for arbitrary
+SDL controllers — this is where "very fragile" lives:
+
+- **G1 — axis-as-button threshold is one global constant, uncalibrated.**
+  `Input::sourceActive` (`input.cpp:927`) presses at `|value−rest| > 16000`
+  and releases at `< 10000` (hysteresis), rest sampled during the 300 ms
+  settle. On a 32767-span axis that is **≈0.49 to press / ≈0.31 to release**.
+  It governs frets on triggers (`Ps2Guitar` green = RT; `Joypad` green = LT,
+  blue = RT), the `XboxGuitar` alternate strum on LEFTY, and the whammy/gyro
+  axis-any detection. GH3 (gd04) and Rock Band both use **0.75** for
+  axis-as-button; our 0.49 is markedly lower, so a trigger or stick resting or
+  jittering near half-deflection can flicker a fret/strum on its own. Lower
+  threshold = more false positives. [I]
+- **G2 — tilt (Gyro) has no debounce and no calibration.** `XboxGuitar` binds
+  `Gyro` to `AxisAny` on RIGHTY (`input.cpp:208`) plus the Back button. A
+  single frame of RIGHTY crossing ≈0.49 from the sampled rest emits
+  `StarPower` immediately — no frame hold and no per-controller calibrated
+  position. Contrast: GH3 deploys tilt only after a per-controller
+  **calibrated `star_power_position`** threshold held **3 frames** (Select
+  instant); Rock Band uses a "mercury filter" (0.93 held **12 frames**). GH2's
+  own deploy is gated on the ready flag, which our port preserves
+  (`player.cpp` ready check), so an empty meter can't deploy — but when ready,
+  stick drift past ≈0.49 or a brief flick deploys SP by accident. `AxisAny`
+  also means **either** tilt direction deploys. This is the most likely single
+  cause of "accidental Star Power." [I]
+- **G3 — guitar analog mappings are inferred and unverified.** Whammy = RIGHTX
+  and tilt = RIGHTY on `XboxGuitar` are `[I]` (the real X-plorer's whammy/tilt
+  reports are not traced; REA can't open the XEX2). A pad forced to the guitar
+  type therefore reads right-stick motion as whammy **and** tilt at once.
+- **G4 — input-layer Whammy action threshold (0.15) and deadzone (0.08) are a
+  simplification**, not GH2's model. `Input::update` (`input.cpp:952-960`)
+  applies a 0.08 deadzone and fires the `Whammy` *action* above 0.15. This
+  only affects **digital** (key/button) whammy; analog pads skip the action
+  (`app.cpp:1630 !a.analog`) and feed the per-frame value into the faithful
+  speed-based SP flag, so SP whammy is correct. GH2's audio onset at −0.35 and
+  the 0…1 value range are **uncertain** (open question 6) — document, don't
+  "fix" the number blind.
+
+### (c) Prioritized improvement list
+
+**Small-safe (data-derived, unit-testable) — but gated on real-device logs.**
+Per the owner's "objective checks, not eyeballing" rule, every input-layer
+threshold change needs a real controller capture (expected-vs-measured), which
+this environment cannot produce (no hardware; REA cannot open the XEX2). So
+these are *prepared* fixes, not applied here:
+1. Raise the axis-as-button press threshold toward the GH3/RB **0.75**
+   (≈24500/32767) with release at ≈0.5, behind the existing hysteresis (G1).
+   Smallest, most isolated change; add a `sourceActive` unit test with
+   synthetic axis traces. Needs a drift/jitter capture to confirm it removes
+   false frets without making real triggers feel stiff.
+2. Give tilt (Gyro) a short frame-hold and a one-direction test (`AxisPos`,
+   tilt-up) instead of `AxisAny`, mirroring GH3's 3-frame deploy (G2). Needs a
+   guitar tilt capture to set the frame count/threshold.
+
+**Needs-coordination (the universal control model).** These are the real
+reconciliation items for one model across games:
+3. **One axis-as-button threshold** shared by gd02/gd03/gd04 (GH1/2/3), with
+   per-device calibration like GH3's `star_power_position` (G1+G2). The GH1/2
+   "home" reference contributes: 52 ms strum filter in the **judgment** layer,
+   guitar-mode only (not joypad/chords); ±100 ms slop; 60 ms wrong-strum
+   grace; 50 ms overstrum and joypad-chord windows.
+4. **Unified tilt/Star-Power deploy**: calibrated threshold + frame-hold +
+   single direction, reconciling GH3 (3-frame, calibrated) and RB (0.93 ×12
+   frames) with GH2's ready-gated held engage (G2).
+5. **Verified guitar analog mappings** (whammy/tilt axis identity) from
+   real-device captures before trusting RIGHTX/RIGHTY (G3).
+6. Decide whether the input-layer digital-whammy action threshold (0.15) and
+   the GH2 audio onset (−0.35) should be unified or kept separate (G4).
+
+### (d) Fix applied
+
+**None.** The judgment layer is faithful, and every candidate input-layer fix
+(G1/G2) changes feel and, by the owner's input rules, requires real-controller
+logs that cannot be captured here. A documented, number-exact findings set
+with no risky change is the deliverable.
+
+### (e) Uncertain / blocked
+
+- GH2's raw whammy value range and the −0.35 audio onset vs a 0…1 bar remain
+  open (this file's open question 6); the X-plorer's whammy/tilt axis identities
+  are untraced (REA can't open the XEX2).
+- The GH3/RB numbers (0.75 axis-as-button, 3-frame tilt, 0.93×12 mercury) are
+  from the sibling audits (gd04/Rock Band), cited for reconciliation, not
+  re-verified here.

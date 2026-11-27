@@ -4,6 +4,7 @@
 
 #include <climits>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "game/chart.h"
@@ -47,6 +48,7 @@ struct StarMeter {
 };
 
 class BandPerformer;
+class DrumPlayer;  // Rock Band's faithful drum watcher (game/drum_player.h)
 
 // One player of GH2 (Xbox 360): the beatmatch watcher (input judgement), the
 // Player (score, streak), its Star Power object and its crowd (rock meter),
@@ -68,6 +70,8 @@ public:
     // co-op) [C]; nullptr is default_config.
     Player(const Song& song, Part part, Difficulty difficulty, const Rules& rules, ControllerMode mode, bool noFail,
            int index = -1, const ScoreConfig* config = nullptr);
+    // Out of line: the DrumPlayer member (unique_ptr to an incomplete type).
+    ~Player();
 
     // ---- two players (docs/multiplayer.md)
     // The player's number (player +0x9c), for the normalisation and the
@@ -152,8 +156,17 @@ public:
     int multiplier() const { return baseMultiplier_ * bandOrSpMultiplier(); }
     void setBandBonus(int m) { bandBonus_ = m; }
     // Rock Band's drums (DrumTrackWatcherImpl, Swing RB 0x824A2320): every
-    // pad of a chord is its own gem (splitDrumChords) [C].
-    void setDrumMode(bool on) { drumMode_ = on; }
+    // pad of a chord is its own gem (splitDrumChords) [C]. Turning it on
+    // builds the faithful drum judge (DrumPlayer) that drumStrike() feeds.
+    void setDrumMode(bool on);
+    bool drumMode() const { return drumMode_; }
+    // A drum pad / kick struck at song time t: lane 0 kick, 1 red, 2 yellow,
+    // 3 blue, 4 green (game/drum_player.h). The strike is matched by the
+    // faithful DrumPlayer (wave 02, controls B1); this Player then scores the
+    // gem it chose through the usual hit / overstrum path, so the HUD, the
+    // band, the bonuses and the track keep working. Routed instead of the
+    // guitar frets / strum, replacing the fret-collapse path.
+    void drumStrike(int lane, float t);
     // A one-player song takes every device (D34 / D35): the watcher follows
     // the device that plays, a gamepad's (every fret press strums) or a
     // guitar's / the keyboard's (strummed) (GD05-056).
@@ -265,6 +278,7 @@ private:
     }
     int bandBonus_ = -1;
     bool drumMode_ = false;
+    std::unique_ptr<DrumPlayer> drum_;  // the live drum judge (drumMode_); null otherwise
     float lastDrumPassMs_ = -1e9f;
     bool hopoChain_ = false;
     void spStart(bool on);

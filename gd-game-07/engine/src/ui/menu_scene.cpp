@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <chrono>
 #include <cmath>
 #include <exception>
@@ -262,6 +263,9 @@ bool MenuScene::ensureVenue(bool wait) {
         }
         lights_ = {};
         lights_.init(*venue_, globals_, Chart{});
+        // Z_soundcheck_Init spawns Z_Soundcheck_LightShow, whose first
+        // CycleNextSnapshot fires at once (then every 2 s) [C]; arm it now.
+        nextSnapMs_ = clockMs_;
     }
     return venue_ != nullptr;
 }
@@ -598,6 +602,17 @@ void MenuScene::drawUiViewports(Canvas& c, gfx::RenderDevice& dev) {
 void MenuScene::update(double dtMs) {
     clockMs_ += dtMs;
     if (t_ < duration_) t_ = std::min(duration_, t_ + dtMs);
+    // Z_Soundcheck_LightShow: step the mood's snapshots every 2 s (blend 0.1 s)
+    // [C zones\z_soundcheck]. The lightshow has no notes on the frontend, so
+    // the zone script drives the cycling itself; without this the menu stays on
+    // the first snapshot and its one static mood reads fire-dominant instead of
+    // the 360's animated purple / pink / red show (GW-00x menu mood).
+    static const bool noCycle = SDL_getenv("GD07_MENU_NO_LIGHTCYCLE") != nullptr;
+    if (!noCycle && nextSnapMs_ >= 0 && venue_ && loadedZone_ == zone_)
+        while (clockMs_ >= nextSnapMs_) {
+            lights_.cycleSnapshot(clockMs_, 0.1f);
+            nextSnapMs_ += 2000.0;
+        }
     objects_->update(dtMs);
 }
 
@@ -723,14 +738,91 @@ void MenuScene::draw(Canvas& c) {
     view_->setTime(clockMs_ / 1000.0);
     view_->draw(cam, lightState_, lights_);
     objects_->draw(dev, cam, *venue_, lightState_, lights_);
+    // The venue's volumetric lighting, as the song stage draws it
+    // (render/venue_stage.cpp): the projector wash, the 3D cones, the soft 2D
+    // light volumes and the raytraced beams. The menu used to draw only the 3D
+    // cones, so z_soundcheck's big purple stage-light haze behind the band and
+    // logo (ref 01_main_menu.png: a bright magenta wash washing out the fire)
+    // never came up and the main menu read dark / backdrop-less (GW-003). The
+    // 2D volumes and the raytraced beams need the scene's depth once (they, and
+    // the projectors, write none); depthSnapshot is valid only inside the
+    // screen-fx pass (its scene target bound), so this all sits before fx_.end.
+    static const bool noProjectors = SDL_getenv("GD07_NO_PROJECTORS") != nullptr;  // development aid: compare without them
+    if (!noProjectors) view_->drawProjectors(cam, lights_);
     view_->drawVolumes(cam, lights_);
+    const gfx::TextureId sceneDepth = fx ? fx_.depthSnapshot() : gfx::TextureId{};
+    // z_soundcheck's 2D light volumes are the menu's big coloured stage haze.
+    // The logo banner (venue node Z_SoundCheck_Plane02), its projection light
+    // and the viewport planes carry `rendermethod = $pushback`: the original
+    // draws them in a late pass after the scene and the volumes [C 82431B38],
+    // so the haze, whose beams cross in front of the banner, never washes over
+    // them (see drawPushback below).
+    //
+    // At full density (as the song stage draws them) the additive ONE+ONE haze
+    // blows the menu's centre to white: measured against the reference frame
+    // the beam band read luma 150 / 26% of pixels clipped, vs the 360's 96 /
+    // 6%, washing out the logo and the left menu items. The 360 tonemaps those
+    // highlights back down; our menu fx pass does not, so we draw the haze at a
+    // lower density to land in the same place without a tonemap. 0.60 matches
+    // the reference centre (luma 92 / 7% clipped) and keeps the logo and menu
+    // legible; raytraced beams and projector wash contribute ~nothing to the
+    // blow-out (isolation-tested) and are left at full. Menu-only: the song
+    // stage calls drawVolumes2D at the default 1.0. GD07_MENU_VOL2D_SCALE tunes.
+    static const float vol2dScale = SDL_getenv("GD07_MENU_VOL2D_SCALE") ? float(std::atof(SDL_getenv("GD07_MENU_VOL2D_SCALE"))) : 0.6f;
+    view_->drawVolumes2D(cam, lights_, sceneDepth, vol2dScale);
+    static const bool noRays = SDL_getenv("GD07_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
+    // The raytraced god-ray beams (z_soundcheck's `volume` cones) are additive
+    // ONE+ONE and, at full density, clip the same way the 2D haze did: they come
+    // up as hard, saturated blue-white shafts that cross IN FRONT of the side
+    // speaker stacks, where the 360's are soft, desaturated and sit behind the
+    // dressing (ref frame at 217 s of the onboarding video: the speakers stay
+    // clearly readable through a faint haze) [owner 2026-11-27: "a set of white
+    // beams of light rendered in front of the speakers"]. The menu fx pass does
+    // not tonemap the highlight back down, so — as with drawVolumes2D above — we
+    // draw the beams at a lower intensity to land in the same soft place without
+    // a tonemap. Menu-only: the song stage calls drawRaytraced at the default
+    // 1.0. GD07_MENU_RAYTRACE_SCALE tunes it (0 = off, as GD07_NO_RAYTRACE).
+    static const float rayScale = SDL_getenv("GD07_MENU_RAYTRACE_SCALE") ? float(std::atof(SDL_getenv("GD07_MENU_RAYTRACE_SCALE"))) : 0.25f;
+    if (fx && !noRays && rayScale > 0 && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, sceneDepth, rayScale);
+    view_->drawPushback(cam, lightState_, lights_);  // the pushback pass: after the volumes [C 82431B38]
     if (fx) {
         // Enhanced: Remove All Effects drops GH3's own; Bloom None its bloom (as the songs').
         screenfx::Params p = fxParams_;
         if (!VenueStage::post.original) p.bloom.on = false, p.brightSat[0].on = p.brightSat[1].on = false;
         if (!VenueStage::post.gameBloom) p.bloom.on = false;
         p.nearZ = 0.05f, p.farZ = 4000.0f;  // VenueView's projection
-        fx_.end(p);
+        // The active menu camera's depth of field: a submenu camera
+        // (ui_<state>_camera) carries a `dof` (DOF_UIblur_tod_manager:
+        // dof3 strength 0.9, everything past 4 m blurred) that softens the
+        // band and stage behind the focused jacket panel, while the main
+        // menu's camera has none and Default_TOD_Manager's dof3 strength 0
+        // leaves it sharp. The original applies it on bg_viewport in
+        // ApplyMenuTransitionDOF (the camera's `dof` once settled, or the one
+        // being left when going back) [C script menu_transitions.qb]; our
+        // ScreenFX_AddFXInstance only drives the brightness flash, so without
+        // this the submenu zoom lacked its focus blur. GD07_NO_MENU_DOF=1 off.
+        static const bool noMenuDof = SDL_getenv("GD07_NO_MENU_DOF") != nullptr;
+        if (!noMenuDof) {
+            const qb::Value* back = vm_.global(K("target_menu_camera_back"));
+            const qb::Value* state = (back && qs::Vm::number(back, 0) == 1) ? vm_.global(K("current_menu_camera")) : vm_.global(K("target_menu_camera"));
+            // The state name reaches us as a checksum (Key) or, from a script
+            // argument (task_menu_default_anim_in: base_name), a String.
+            std::string base;
+            if (state) {
+                if ((state->type == qb::Type::Key || state->type == qb::Type::KeyPtr) && state->key) base = qbkey::name(state->key);
+                else if (state->type == qb::Type::String) base = state->str;
+            }
+            if (!base.empty() && base != "none" && base != "null") {
+                const std::string cam = "ui_" + base + "_camera";
+                if (const qb::Value* cs = globals_.find(qbkey::key(cam.c_str())); cs && cs->st)
+                    if (const qb::Value* dof = globals_.field(*cs->st, K("dof")); dof && (dof->type == qb::Type::Key || dof->type == qb::Type::KeyPtr) && dof->key) {
+                        screenfx::readDof(globals_, dof->key, p);
+                        if (SDL_getenv("GD07_SCENELOG")) SDL_Log("menu scene: dof %s from %s (strength %.2f)", qbkey::name(dof->key).c_str(), cam.c_str(), p.dof.strength);
+                    }
+            }
+        }
+        // bloom2's material filter: the scene's pass 19 [C 8250F158, 8242AB78].
+        fx_.end(p, {}, [&] { view_->drawGlow(cam, lightState_, lights_); });
     }
     VenueView::lensShiftX = 0;  // leave the static clear for other viewports
 }

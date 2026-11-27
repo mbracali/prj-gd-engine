@@ -115,13 +115,16 @@ std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck) {
     for (const EnhancedSetting& e : enhancedSettings())
         if (!e.values.empty()) d[e.key] = e.values.front();
     // Fleet defaults, every OS: FPS counter on, full-screen no border, 1080p,
-    // sharp UI on, bloom off. Controls: mouse on (list front), touch and
+    // sharp UI on. Controls: mouse on (list front), touch and
     // shake=whammy off on desktop.
     d["fps_counter"] = "on";
     d["screen_mode"] = "borderless";  // Full Screen (No Border)
     d["internal_res"] = "1080";
     d["sharp_ui"] = "on";
-    d["bloom"] = "none";
+    // Bloom on (Original) out of the box: the 360 runs with bloom, so the logo
+    // glows white and the neon/stage/Star-Power glows show, per "use the game's
+    // original settings out of the box" (owner 11-25, gd07).
+    d["bloom"] = "original";
     d["touch"] = "off";
     d["shake_whammy"] = "off";
     // Max FPS: 120 on Windows and macOS, 60 on Linux, Steam Deck and Android.

@@ -809,8 +809,13 @@ void SongHooks::step(SongScreen& s, double now) {
     // reaction and the attack's GH_BattleMode_Player<n>_SFX_* start
     // [C scripts battlemode_ready, battle_trigger_on, battle_lightning ...].
     if (m.battleMode()) {
-        static const char* const kAttackSfx[8] = {"Shake_Start", "DiffUp_Start", "DoubleNotes_Start", "Steal", "LeftyNotes_Start",
-                                                 "BrokenString_Start", "Whammy_Start", "Death_Drain"};
+        // GH_BattleMode_Player<n>_SFX_<name> per attack; Mines and blackout have
+        // their own sounds (Mines below; blackout's is inside its lights script),
+        // so their slots are empty here [C data guitar_battle.qb]. Indexed by the
+        // Attack enum (kLightning .. kBlackout).
+        static const char* const kAttackSfx[kAttacks] = {"Shake_Start",        "DiffUp_Start", "DoubleNotes_Start",
+                                                         "Steal",              "LeftyNotes_Start", "BrokenString_Start",
+                                                         "Whammy_Start",       "", ""};
         const Match::Counters& c = m.counters();
         for (int p = 0; p < players_; ++p) {
             const size_t i = size_t(p);
@@ -820,7 +825,7 @@ void SongHooks::step(SongScreen& s, double now) {
                 vm.run(K("SoundEvent"), e);
                 ++k_.spawned["battle card sound"];
             }
-            for (int a = 0; a < 8 && a < kAttacks; ++a)
+            for (int a = 0; a < kAttacks; ++a)
                 for (; lastByAttack_[i][size_t(a)] < c.byAttack[i][size_t(a)]; ++lastByAttack_[i][size_t(a)]) {
                     const int victim = 1 - p;
                     static const bool battleLog = SDL_getenv("GD10_BATTLELOG") != nullptr;  // development aid
@@ -831,11 +836,14 @@ void SongHooks::step(SongScreen& s, double now) {
                     spawnTracked(K("GH3_Battle_Play_Crowd_Reaction_SFX"), r, "GH3_Battle_Play_Crowd_Reaction_SFX", k_.spawned);
                     // The steal's sound is the stealer's [C script battle_steal].
                     const int who = a == kSteal ? p : victim;
-                    const std::string sfx = std::string("GH_BattleMode_Player") + (who ? "2" : "1") + "_SFX_" + kAttackSfx[a];
-                    spawnTracked(K(sfx), qb::Struct{}, sfx.c_str(), k_.spawned);
-                    if (a == kDeathLick)
-                        spawnTracked(K(victim ? "GH_BattleMode_Start_Heartbeat_P2" : "GH_BattleMode_Start_Heartbeat_P1"), qb::Struct{},
-                                     "GH_BattleMode_Start_Heartbeat", k_.spawned);
+                    if (kAttackSfx[a][0]) {
+                        const std::string sfx = std::string("GH_BattleMode_Player") + (who ? "2" : "1") + "_SFX_" + kAttackSfx[a];
+                        spawnTracked(K(sfx), qb::Struct{}, sfx.c_str(), k_.spawned);
+                    }
+                    // Mines' own release sound on the victim's side [C script battle_mine_attack].
+                    if (a == kMines)
+                        spawnTracked(K(victim ? "GH_SFX_BattleMode_Mine_Release_P2" : "GH_SFX_BattleMode_Mine_Release_P1"), qb::Struct{},
+                                     "GH_SFX_BattleMode_Mine_Release", k_.spawned);
                     // The band's attack and its answer: battle_trigger_on's
                     // Band_PlayAttackAnim on the attacker's band_member and
                     // Band_PlayResponseAnim on the receiver's, Type = the

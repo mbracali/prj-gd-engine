@@ -41,6 +41,9 @@ struct Node {
     uint32_t lightGroup = 0;  // key; qbkey("none") for most
     bool createdAtStart = false;
     uint32_t createdOn = 0;   // createdonprogress / createdfromvariable: a node flag (0: none)
+    bool pushback = false;    // `rendermethod = $pushback`: drawn in a late pass of its own, after the
+                              // scene and the light volumes (the menu logo, the viewport planes)
+                              // [C 8238CE38: sector flag 0x20; 8242AB78; 82431B38]
     const qb::Struct* st = nullptr;
 };
 

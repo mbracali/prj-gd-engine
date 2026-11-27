@@ -151,6 +151,10 @@ Chart loadChart(const Disc& disc, const std::string& song) {
             const std::string base = song + kPartInfix[p] + "_" + kDiff[d];
             c.parts[p].star[size_t(d)] = phrases(f, base + "_Star", true);
             c.parts[p].starBattle[size_t(d)] = phrases(f, base + "_StarBattleMode", true);
+            // GHWT touch-strip tap spans: <base>_Tapping, [time, length, count]
+            // triples [C data]. Additive: the note/star tracks above are untouched.
+            for (auto& r : rows(array(f, base + "_Tapping"), 3, base + "_Tapping"))
+                c.parts[p].tapping[size_t(d)].push_back(TapPhrase{r[0], r[1], r[2]});
         }
     }
     c.faceOffP1 = phrases(f, song + "_FaceOffP1", false);

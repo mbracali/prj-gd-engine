@@ -24,8 +24,17 @@
 #include "tests/audittest.h"
 #include "tests/formattest.h"
 #include "tests/scripttest.h"
+#include "tests/drumtest.h"
 #include "tests/selftest.h"
 #include "tests/chartest.h"
+#include "tests/exploretest.h"
+#include "tests/shoptest.h"
+#include "tests/castest.h"
+#include "tests/instrtest.h"
+#include "tests/tuttest.h"
+#include "tests/careertest.h"
+#include "tests/enhancedtest.h"
+#include "tests/jamtest.h"
 #include "tests/venuetest.h"
 #include "video/movie_player.h"
 #include "tests/sfxtest.h"
@@ -43,6 +52,7 @@ void usage() {
         "  --no-fail            the rock meter cannot fail you\n"
         "  --formattest         parse every pak on the disc and every file in it to its end\n"
         "  --selftest           check the data (song list, every chart), auto-play every chart\n"
+        "  --drumtest           data-free checks of the gh4 drum judge and the drum-kit input guard\n"
         "  --uitest             boot through the menus, then start every flow state's screen in turn (headless)\n"
         "  --walktest <walk>    play through GH3's own menus: quickplay, lose, back, boot, mouse, gamepads, enhanced,\n"
         "                       stickyaxis, touch, options, practice, store, hub, venues, career, career_quickplay, pause, pausequit, coop, faceoff, proface,\n"
@@ -61,6 +71,22 @@ void usage() {
         "                       in a song GD07_VENUE=<zone> picks the venue, GD07_NO_VENUE=1 draws none\n"
         "  --chartest           load, skin and animate every character, outfit and instrument; the band in every\n"
         "                       venue (60 vs 240 fps, framed by its cameras); GD07_CHARTEST_SHOTS=<dir> saves grids\n"
+        "  --shoptest           the World Tour store headless: the real CAS purchase catalog, a purchase deducts cash,\n"
+        "                       sets the save's purchased flag + unlocks the item, and persists through a save round-trip\n"
+        "  --castest            Create-A-Rocker headless: build the editable CAS slot set, create/name/edit a character\n"
+        "                       (shop ownership enforced), round-trip the created characters through a save, build a member\n"
+        "  --exploretest        the launcher's model explorer headless: every Explore category (Venues / Guitars /\n"
+        "                       Bass / Drums / Mics / Chars) loads and render-adds its models (module_explore path)\n"
+        "  --instrtest          the Create-A-Rockstar instrument editor headless: CAS slots/options per kind, choose\n"
+        "                       (option + ownership gated), name, and a save->reload round-trip\n"
+        "  --jamtest            parse every GHTunes .jam header (markers/bpm/tracks) and classify its note payload\n"
+        "  --tuttest            Tutorial/Training headless: build the select menu + the 9 training scripts from the disc,\n"
+        "                       and run each lesson's clock/gate advance (a gate blocks until the scripted input satisfies it)\n"
+        "  --enhancedtest       the Enhanced menu + cheats + The Glitches headless: catalogue/defaults/store, each\n"
+        "                       cheat's real effect, and the fully-unlocked house band\n"
+        "  --careertest         the World Tour Career headless: load the five careers (tiers/gigs/unlock order/rewards),\n"
+        "                       autoplay a gig to award cash, unlock the next gig + its venue, grant the CAS reward\n"
+        "                       (closing the store loop), and persist through a save round-trip\n"
         "Environment: GD07_KEYS=\"<ms>:<key>,...\" scripted menu keys; GD07_SCREENSHOT=<file.bmp> with\n"
         "  GD07_SCREENSHOT_AT=<ms>[,<ms>...] saves frames; GD07_LOG=<file> also writes the log to that file\n"
         "  (Windows: gd07.log in the save folder); GD07_STATS=1 logs fps; GD07_PERF=1 a frame-time breakdown.\n"
@@ -149,7 +175,8 @@ int run(int argc, char** argv) {
     Options opt;
     std::string movie;
     bool audittest = false, formattest = false, shadertest = false, selftest = false, sfxtest = false, scripttest = false;
-    bool venuetest = false, chartest = false;
+    bool venuetest = false, chartest = false, drumtest = false, exploretest = false, shoptest = false, castest = false;
+    bool instrtest = false, jamtest = false, tuttest = false, careertest = false, enhancedtest = false;
     std::string songAudio;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -168,6 +195,15 @@ int run(int argc, char** argv) {
         else if (a == "--selftest") selftest = true;
         else if (a == "--venuetest") venuetest = true;
         else if (a == "--chartest") chartest = true;
+        else if (a == "--exploretest") exploretest = true;
+        else if (a == "--shoptest") shoptest = true;
+        else if (a == "--castest") castest = true;
+        else if (a == "--instrtest") instrtest = true;
+        else if (a == "--jamtest") jamtest = true;
+        else if (a == "--tuttest") tuttest = true;
+        else if (a == "--careertest") careertest = true;
+        else if (a == "--enhancedtest") enhancedtest = true;
+        else if (a == "--drumtest") drumtest = true;
         else if (a == "--sfxtest") sfxtest = true;
         else if (a == "--songaudiotest") songAudio = value();
         else if (a == "--scripttest") scripttest = true;
@@ -182,10 +218,12 @@ int run(int argc, char** argv) {
         else if (a.rfind("-psn_", 0) != 0) opt.dataPath = a;
     }
     if (shadertest || !movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest ||
-        !opt.walk.empty())
+        exploretest || !opt.walk.empty())
         SDL_setenv_unsafe("GD07_SEED", "12345", 0);  // the tests' scripts pick the same randoms every run
     if (shadertest) return runShaderTest(opt.dataPath);
-    if ((!movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest || !opt.walk.empty()) &&
+    if (drumtest) return runDrumTest();  // data-free: the drum judge + input guard
+    if ((!movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest || exploretest ||
+         shoptest || castest || instrtest || jamtest || tuttest || careertest || enhancedtest || !opt.walk.empty()) &&
         opt.dataPath.empty()) {
         usage();
         return 2;
@@ -195,6 +233,14 @@ int run(int argc, char** argv) {
     if (selftest) return runSelfTest(opt.dataPath);
     if (venuetest) return runVenueTest(opt.dataPath);
     if (chartest) return runCharTest(opt.dataPath);
+    if (exploretest) return runExploreTest(opt.dataPath);
+    if (shoptest) return runShopTest(opt.dataPath);
+    if (castest) return runCasTest(opt.dataPath);
+    if (instrtest) return runInstrTest(opt.dataPath);
+    if (jamtest) return runJamTest(opt.dataPath);
+    if (tuttest) return runTutTest(opt.dataPath);
+    if (careertest) return runCareerTest(opt.dataPath);
+    if (enhancedtest) return runEnhancedTest(opt.dataPath);
     if (sfxtest) return runSfxTest(opt.dataPath);
     if (!songAudio.empty()) return runSongAudioTest(opt.dataPath, songAudio);
     if (scripttest) return runScriptTest(opt.dataPath);

@@ -702,3 +702,172 @@ tutorial's VO pacing and wrap-up match the shipped scripts and the decompiled
 behaviour. If it is real, it may be guitar/timing-specific on real hardware or in
 tutorial 2/3 (not covered here) — left open rather than guessing a fix.
 
+
+## Controls audit (2026-11-24)
+
+Scope: the raw controller-read / action layer of GH1 (PS2) vs our gd01 reference
+input engine (`engine/src/input/input.{cpp,h}`, `Input::defaults`). The judgment
+layer (strum repeat, hit window, HOPO, overstrum, Star Power) is already covered
+above under "Input judgment (watcher)" and "Hit detection" and is faithfully
+ported (`engine/src/game/player.cpp`: `kStrumDebounceMs = 52` cites `FUN_0025a0e0`;
+`slopMs`, `strumGraceMs`); this audit is about the layer *before* judgment — how a
+button/axis becomes a fret/strum/whammy/Star-Power action, where our controls are
+reported fragile. gd01's input engine is the reference the universal 15-control
+model is built from, so this closes the loop against the original it imitates.
+
+### RE coverage / limits (honest)
+
+The GH1 PS2 RE lives in the separate tree `prj-rea-ps2-gh1/` (Ghidra headless
+exports under `analysis/`, results in that repo's `FINDINGS.md`; REA can't open
+the ELF directly). Coverage of the **judgment** layer is strong (watcher
+`0x263248`-`0x2647f0`, instruction-level in places). Coverage of the **raw pad
+read** is THIN by comparison and partly inferential:
+- The controller→message path is confirmed by class/vtable evidence
+  (`BeatMatchController`, `GuitarController` `0x25b740`+, `JoypadController`
+  `0x25bde0`+, `JoypadClient` `0x2222c8`/`0x222470`, `ButtonDownMsg`/`ButtonUpMsg`
+  `0x298688`/`0x2da1a8`) and the poll dispatch `FUN_0025a048` / strum entry
+  `FUN_0025a0e0`.
+- The button *mapping* is confirmed from `config/beatmatch_controller.dta` (read
+  by the watcher ctor `FUN_00262d10`) and is cited above: guitar frets = R2 /
+  Circle / Triangle / X / Square; strum = D-pad up/down (Harmonix IDs 12/14);
+  Star Power = Select (8). Joypad frets = L2 / L1 / R1 / R2 / X.
+- The libpad/scePad byte-level read, poll cadence and any raw debounce were NOT
+  decompiled instruction-by-instruction here; the pad abstraction surfaces as
+  `PsIIlibpad`, `JoypadClient`, `FUN_001d4580` ("poll_all", "Can't call
+  JoypadPoll before initialization"). Claims below about *digital* fret reads and
+  *once-per-frame* polling are grounded in (i) the DualShock2 button model, (ii)
+  the Harmonix digital button IDs in the mapping, and (iii) the already-confirmed
+  note in this doc that "the PS2 reads the pad once a frame and turns the
+  difference into ButtonDown/ButtonUp messages". Where a statement is inferred it
+  is marked [inferred].
+
+### GH1 input per area (with evidence)
+
+- **Frets** — digital button bits. The mapping is five named digital buttons
+  (R2/Circle/Triangle/X/Square), not analog pressures. On PS2 the GH "SG"
+  controller reports frets as ordinary digital pad buttons, so there is no
+  press/release threshold to tune — a fret is down or up. [inferred from the
+  digital Harmonix IDs + DualShock2 model; evidence: `beatmatch_controller.dta`
+  mapping cited above]. Consequence: the original has no analog-threshold fret
+  fragility at all.
+- **Strum** — digital D-pad up/down (IDs 12/14). Debounce lives in the JUDGMENT
+  layer, not the read: `FUN_0025a0e0` ignores a repeat strum within **52 ms**
+  (`+0xa8 + 52.0 < +0x88`), guitar-mode only. The raw read just turns the
+  per-frame button edge into a strum.
+- **Whammy** — analog. Config symbols `whammy_speed`, `whammy_timeout`,
+  `whammy_start`, `whammy_end`, `whammy_rate` (`FUN_00116198`/`FUN_00116930`/
+  `FUN_0010ab90`). In GH1 the whammy bends the sustain only; it does NOT feed
+  Star Power (SP is Select).
+- **Star Power** — the Select button (ID 8) only. There is **no tilt / gyro /
+  accelerometer input in GH1 PS2**: a full-tree grep of `analysis/` for
+  tilt/accel/gyro/motion input functions and strings finds none (only particle
+  `relativeMotion:` and `motion_type` physics, unrelated). `set_whammystarpower‑
+  enabled` exists but is the GH2-era whammy→SP toggle, off/unused in GH1 input.
+  So in GH1 SP is a single clean digital press — no analog trigger, no debounce
+  needed.
+- **Guitar vs DualShock discrimination** — two `BeatMatchController` subclasses
+  are instantiated per controller: `GuitarController` (frets-also-HOPO, strum
+  gate) vs `JoypadController` (each fret press is also a strum; the 60 ms grace
+  applies to chords only — see `FUN_0025bea8` above). Selection is driven by
+  `GameConfig` (`get_controller`/`set_controller`/`is_missing_controller`/
+  `is_missing_multi_controller`; note the disabled-state string
+  "{set_controller} has been disabled"). Byte-level "is this a guitar PID?"
+  detection was not decompiled [inferred: config-driven controller class choice].
+- **Poll cadence** — the pad is read once per video frame and the frame-to-frame
+  difference becomes ButtonDown/ButtonUp (confirmed above in the HOPO-on-PC note).
+  This is why a same-frame fret swap never shows "no fret held".
+
+### Our reference engine — gaps / errors
+
+Anchor files: `engine/src/input/input.cpp` (`sourceActive`, `update`,
+`actionsOf`, `controlEdges`, `Input::defaults`) and `input.h`.
+
+1. **[SHARED, confirmed] Axis-as-button threshold is uncalibrated and too low.**
+   `sourceActive()` treats an axis as pressed past `th = wasDown ? 10000 : 16000`
+   from rest (SDL range 0..32767 for triggers). That is **press ≈ 0.49, release
+   ≈ 0.31** of full travel — matching the reported fragility, and well below the
+   GH3/Rock Band convention of ~0.75. This bites gd01 directly because the
+   Ps2Guitar default maps **Green → RIGHT_TRIGGER (AxisPos)** and the Joypad
+   default maps **Green → LEFT_TRIGGER, Blue → RIGHT_TRIGGER (AxisPos)**. A
+   lightly-rested or half-pulled analog trigger (0.49) fires a fret the original
+   never would (the original reads frets as digital bits). The 0.31/0.49
+   hysteresis band is also narrow, so an axis hovering there can chatter. This is
+   the single biggest raw-layer divergence from GH1.
+2. **[SHARED] Whammy drives the Whammy *action* at a very low 0.15 threshold.**
+   In `update()`, `if (C::Whammy && p.whammyAxis > 0.15f) now = true;` (whammy
+   deadzone `kDead = 0.08`). So a stick/bar barely off-rest counts as "whammying".
+   Low-stakes in GH1 (whammy only bends sustain, no SP), but it is an unprincipled
+   constant and inconsistent with the fret threshold.
+3. **[SHARED] Tilt/Gyro has no calibration or debounce in the model** — but GH1
+   is *protected by its defaults*. The `Gyro` control exists and in the
+   RockBand/Xbox/Ps2/Joypad defaults it is bound to **digital buttons**
+   (`BUTTON_BACK`, plus `RIGHT_SHOULDER` for RockBand), NOT an axis, so the
+   out-of-box gd01 experience does not suffer accidental SP from a one-frame
+   tilt. The fragility appears only if a user *rebinds* Gyro to an axis (the
+   capture path at line ~541 allows `AxisAny` for Gyro), or on a device whose
+   tilt surfaces as an axis — then there is no debounce/calibration and the same
+   0.49 threshold applies either direction. GH1-faithful note: the original has
+   NO tilt at all, so binding Gyro to anything is already a PC-convenience beyond
+   the original; GH1 should keep Gyro on a digital control.
+4. **[GH1-specific, already handled] Event-driven vs once-per-frame poll.** The
+   original's once-per-frame diff never sees a sub-frame "all frets released";
+   our event-driven SDL path did, which broke HOPO chains. Already mitigated:
+   the engine ends a HOPO chain only after no fret for longer than a pad frame
+   (1/59.94 s). No action needed; recorded for completeness.
+5. **[OK / faithful] Frets-also-strum for joypad, strum pulse, no-double-input
+   merge, 52 ms strum gate in judgment** all match the original's two-controller
+   model. `actionsOf`/`controlEdges` reproduce the joypad "each fret is a strum"
+   and the guitar strum-bar behaviour. No divergence found here.
+
+### Prioritized improvement list
+
+Small / safe (isolable, testable, but note cross-game reach):
+- None are truly gd01-only. The threshold constants in `sourceActive` and the
+  0.15 whammy-action constant are shared by every game through the same engine,
+  so even a "small" change is a shared-model change (see below). No risky change
+  was made in this pass by design.
+
+Needs coordination (one control model — do NOT patch piecemeal):
+- **P1 [SHARED] Raise and name the axis-as-button threshold.** Move press toward
+  ~0.75 (24576/32767) with a release around ~0.65 for clean hysteresis, as a
+  named constant (e.g. `kAxisPress`/`kAxisRelease`), applied once in
+  `sourceActive`. This directly removes the reported false-fret fires on
+  trigger-mapped frets (Ps2Guitar Green, Joypad Green/Blue) and aligns with
+  GH3/RB. Because it changes every profile and every game, it must land as one
+  coordinated change with a data-derived test (feed synthetic axis ramps, assert
+  the press/release points), not eyeballing. GH1-specific angle: the original
+  frets are digital, so a *higher* threshold is strictly more faithful for gd01.
+- **P2 [SHARED] Promote the whammy-action threshold to the same named model** and
+  reconcile `0.15`/`kDead 0.08` with the chosen press/release values so one
+  calibration governs all axis→button decisions.
+- **P3 [SHARED] Tilt/Gyro debounce + calibration policy.** Define that an
+  axis-bound Gyro requires a hold (debounce, e.g. one extra frame past threshold)
+  and a calibrated rest, so a single spurious frame cannot deploy SP. For gd01
+  specifically, keep the Gyro default on a digital button (faithful: GH1 has no
+  tilt) and document that axis-tilt is a PC extension.
+- **P4 [cross-game] Discrimination parity.** Our profile choice (Ps2Guitar /
+  XboxGuitar / RockBand / Joypad / Keyboard / Midi) stands in for the original's
+  GuitarController vs JoypadController; confirm the per-device "Require Strum"
+  default lands guitars in guitar-mode and pads in joypad-mode consistently
+  across games (gd01 `requireStrum("pad:...")` path).
+
+### gd01 as the anchor for the one-model work
+
+Since gd01's `Input::defaults` is the reference the universal model was built
+from, these are the anchors the one-control-model pass should standardise around:
+- The **15-control** set in `Input::Control` (Start, Select, MenuUp/Down,
+  GuitarStart/Select, StrumUp/Down, Green/Red/Yellow/Blue/Orange, Whammy, Gyro)
+  is the canonical control vocabulary — keep it.
+- The **per-profile default tables** in `Input::defaults` (Ps2Guitar, XboxGuitar,
+  RockBand, Joypad, Keyboard, Midi) are the canonical bindings. The GH1-faithful
+  facts to preserve as anchors: frets are digital where possible; Star Power on a
+  digital control (GH1 = Select; the PC Gyro convenience stays on a button by
+  default); whammy analog, sustain-only in GH1.
+- The **one thing that must change at the anchor, not per game**, is the axis
+  calibration (P1/P2): the threshold/hysteresis constants currently hard-coded in
+  `sourceActive`/`update` should become a single named calibration used by every
+  profile, because today's 0.49/0.31 is the root of the "very fragile" controls.
+
+No code change was made in this pass (an honest findings-only pass, per the
+cautious mandate); P1-P3 are the coordinated changes recommended for the shared
+model.

@@ -25,6 +25,28 @@ uint32_t keyOf(const qb::Value* v) {
     return v && (v->type == qb::Type::Key || v->type == qb::Type::KeyPtr) ? v->key : 0;
 }
 
+// gh4 Drumkit_anim_iterator's note switch [C scripts\guitar\guitar_hand_events.qb]:
+// a <song>_drums_notes value -> the drumkit_anims[] index whose difference clip
+// the DrumKit plays. Normal play fires 73..85 (90..99 are the faceoff/battle
+// twins of the same cases; 60..69 is the audio track). 74 (Tom_3) is never
+// charted, 83 unused; snare (4) only if the kit has one. (Shared gh4 engine.)
+int drumKitIndex(int note) {
+    switch (note) {
+        case 73: return 0;   // GH_Drum_Kick
+        case 75: return 2;   // GH_Drum_Tom_2
+        case 76: return 3;   // GH_Drum_Tom_1
+        case 77: return 4;   // GH_Drum_Snare
+        case 78: return 5;   // GH_Drum_Cymbal_HH_Closed
+        case 79: return 6;   // GH_Drum_Cymbal_HH_Open
+        case 80: return 7;   // GH_Drum_Cymbal_3
+        case 81: return 8;   // GH_Drum_Cymbal_1
+        case 82: return 9;   // GH_Drum_Cymbal_2
+        case 84: return 12;  // GH_Drum_Cymbal_HH_Open
+        case 85: return 13;  // GH_Drum_Cymbal_4
+        default: return -1;
+    }
+}
+
 bool hasFlag(const qb::Struct& st, uint32_t flag) {
     for (const qb::Item& it : st.items)
         if (it.name == 0 && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr) && it.value.key == flag) return true;
@@ -400,6 +422,7 @@ bool Animator::init(const Setup& s, std::string& error) {
     shortStrum_ = qbInt(g, K("short_strum_max_gem_length"), 150), medStrum_ = qbInt(g, K("med_strum_max_gem_length"), 600);
     fingerPress_ = numOf(g, "finger_press_blend_time", 0.07f), fingerRelease_ = numOf(g, "finger_release_blend_time", 0.2f);
     fretBlend_ = numOf(g, "fret_blend_time", 0.1f), drumBlend_ = numOf(g, "drum_blend_time", 0.1f);
+    drumKitBlend_ = numOf(g, "drum_kit_blend_time", 0.05f);
     armBlendOutDelay_ = numOf(g, "drummer_arm_blend_out_delay", 0.25f), twistRate_ = numOf(g, "drummer_twist_rate", 0.05f);
     const double strumLead = qbInt(g, K("strum_anim_lead_time"), 250), drumLead = qbInt(g, K("drum_anim_lead_time"), 150);
 
@@ -510,6 +533,22 @@ bool Animator::init(const Setup& s, std::string& error) {
                 add(e.time - drumLead, Ev::DrumArm, e.note, 0);
                 add(e.time, Ev::Cymbal, e.note, 0);
             }
+        }
+    }
+    // gh4: the drummer's arms are mocap, but the DrumKit's pieces (cymbals,
+    // toms, snare, kick) still wobble per hit. Drumkit_anim_iterator walks
+    // <song>_drums_notes and sends applydrumkitdifference_playanim of
+    // drumkit_anims[i] to the DrumKit; here that is a difference clip composed
+    // onto the pose by drumKit_[i] [C scripts\guitar\guitar_hand_events.qb].
+    if (role_ == band::Role::Drummer && model_->member.gh4) {
+        // note 85 (drumkit_anims[13], Cymbal_4) is gated on is_current_band_metallica
+        // in the iterator; World Tour is never Metallica, so note 85 is skipped --
+        // the shared gh4 iterator's gate [C guitar_hand_events.qb; I: no Metallica
+        // band on World Tour, same proxy gd10 uses].
+        const bool metallica = model_->member.profileName.rfind("LarsUlrich", 0) == 0;
+        for (const ChartEvent& e : s.chart->drums) {
+            const int idx = drumKitIndex(e.note);
+            if (idx >= 0 && (idx != 13 || metallica)) add(e.time, Ev::DrumKit, idx, 0);
         }
     }
     // gh4: Band_PlayClip {clip startframe}: the clip struct's anims.<member>
@@ -1178,6 +1217,17 @@ void Animator::handle(const Event& e) {
         }
         break;
     }
+    case Ev::DrumKit: {
+        // gh4: play drumkit_anims[e.a] (a difference clip) on its kit node;
+        // drumKit_blend_time is the applydrumkitdifference_playanim blend_period.
+        const qb::Value* da = g_->find(K("drumkit_anims"));
+        if (!da || da->type != qb::Type::Array || !da->arr || size_t(e.a) >= da->arr->values.size()) break;
+        if (const anim::Clip* c = clip(keyOf(&da->arr->values[size_t(e.a)]))) {
+            drumKit_[e.a].play(c, t, drumKitBlend_);
+            ++stats_.cymbals;
+        }
+        break;
+    }
     case Ev::Twist: {
         // drummer_autotwist, once a game frame: the twist moves
         // drummer_twist_rate toward compute_desired_drummer_twist (0x82107F48:
@@ -1256,6 +1306,8 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
     if (role_ == band::Role::Drummer) {
         for (const Node& n : drumArm_) evalNode(rig_, n, ms, pose, false, tmp);
         for (const Node& n : cymbal_) evalNode(rig_, n, ms, pose, false, tmp);
+        // gh4: the DrumKit difference anims compose their wobble onto the pose.
+        for (const Node& n : drumKit_) evalDelta(rig_, n, ms, 1.0f, pose, tmp);
         if (twistClip_ && twist_ != 0) {
             Node tw;
             tw.plays.push_back({twistClip_, 0, 0});

@@ -31,7 +31,12 @@
 class AccessorySim {
 public:
     // False when the rig has none of `bones` with a .rag body.
-    bool init(const bandanim::Rig& rig, const havok::Physics& rag, const std::vector<uint32_t>& bones);
+    // `groups`: gh4's ragdoll_collision_group (RagdollCollisionGroups_Rocker_Female:
+    // lists of bone names): each list is a collision layer of the world's
+    // filter (collides() has its table); null: every accessory body against
+    // every body capsule.
+    bool init(const bandanim::Rig& rig, const havok::Physics& rag, const std::vector<uint32_t>& bones,
+              const std::vector<std::vector<uint32_t>>* groups = nullptr);
     bool empty() const { return dynamic_ == 0; }
     // True when the bone is an accessory (a simulated body).
     bool isDynamic(int bone) const {
@@ -51,6 +56,18 @@ public:
     // joint stays together, else what went wrong (chartest).
     static std::string selfTest();
 
+    // Objective ragdoll metrics for the CURRENT simulated state (chartest).
+    // Before the Havok 5.5 capsule/box decode every .rag shape was "Other", so
+    // no body was a collision capsule (both counts 0) and the accessory solver
+    // could not keep hair off the body; `worstPenetration` is the deepest a
+    // dynamic accessory capsule still overlaps a keyframed body capsule (metres,
+    // the linked anchor pair excluded), the measured anim+physics clipping.
+    struct Metrics {
+        int accessoryCapsules = 0, bodyCapsules = 0;
+        float worstPenetration = 0;
+    };
+    Metrics metrics() const;
+
     struct Rt {  // a rigid transform: rotation then translation
         bandanim::Quat q;
         bandanim::Vec t;
@@ -64,6 +81,7 @@ private:
         bandanim::Vec com;                  // centre of mass in the body frame
         float maxLin = 0, maxAng = 0, linDamp = 0, angDamp = 0;
         havok::Shape shape;               // the .rag collision proxy, in the body frame
+        int group = -1;                     // its ragdoll_collision_group list (-1: none)
         Rt boneFromBody;                    // bone = body * boneFromBody (the bind poses)
     };
     struct Con {
@@ -87,12 +105,15 @@ private:
     // The constraint's velocity rows at the step's start (h: the step's time).
     void rows(const std::vector<BodyState>& s, const Con& c, float h, std::vector<SolverRow>& out) const;
     void pose(const State& s, std::vector<bandanim::Mat34>& world) const;
+    // True when accessory body i collides with body capsule j.
+    bool collides(size_t i, size_t j) const;
 
     std::vector<Body> bodies_;
     std::vector<Con> cons_;
     std::vector<int> bodyOf_;  // bone -> body (-1)
     std::vector<int> parent_;
     int dynamic_ = 0;
+    bool layered_ = false;  // gh4: the bodies' ragdoll_collision_group lists are collision layers
     State cur_;
     bool started_ = false;
     std::deque<State> history_;  // the last steps (a query earlier than the newest step)

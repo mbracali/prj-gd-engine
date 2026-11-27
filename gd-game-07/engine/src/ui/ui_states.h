@@ -38,6 +38,15 @@ public:
     size_t depth() const { return stack_.size(); }
     // Focuses a screen element (UiSystem::focusElement), set by the front end.
     std::function<bool(uint32_t id)> focus;
+    // Shows / hides the task_menu loading screen (the boot copyright screen),
+    // set by the front end. On the 360 the C task_menu task puts up
+    // LOADINGSCREENS/<base_name> for a state whose base_name has one (only
+    // boot_legal in the boot flow) -- no script drives it, so our state
+    // machine must, or UIstate_boot_legal shows nothing and the Activision
+    // movie bleeds into its 6 s. showLoadingScreen returns true when the
+    // image existed (so leave() knows to take it away).
+    std::function<bool(const std::string& base)> showLoadingScreen;
+    std::function<void()> hideLoadingScreen;
 
 private:
     struct State {
@@ -46,7 +55,8 @@ private:
     };
     struct Entry {
         uint32_t state = 0;
-        qb::Struct params;  // task params + the event's data
+        qb::Struct params;    // task params + the event's data
+        bool loadingShown = false;  // this entry put up the task_menu loading screen (hide it on leave)
     };
     void enter(Entry& e, bool first);
     void leave(Entry& e, bool remove);

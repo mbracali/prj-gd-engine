@@ -494,6 +494,7 @@ constexpr float kNearBlend[2] = {0.5f, 1.0f};       // 8291D708 -> c141.xy
 constexpr float kLispsmN[2] = {4.0f, 16.0f};        // 8291D754
 constexpr float kLightDist = 400, kLightNear = 5, kLightFar = 1000;  // 8291D718..20
 constexpr float kBias[2] = {64.0f / 16777216.0f, 1280.0f / 16777216.0f};  // single_sided x 2^-24
+constexpr float kBiasDouble[2] = {1200.0f / 16777216.0f, 1600.0f / 16777216.0f};  // double_sided x 2^-24 (GetShadowMapBias, 8291E644)
 constexpr int kCascadeSize[2] = {1024, 512};        // tod_profiles' shadow_map_size
 
 gfx::Vec3 toG(const venue::Vec3& v) { return {v[0], v[1], v[2]}; }
@@ -593,12 +594,28 @@ void VenueStage::shadowPass(double ms, const venue::CamPose& cam) {
     if (particles_ && particles_->shadowLight)
         for (size_t i = 0; i < v.lights.size(); ++i)
             if (v.lights[i].name == particles_->shadowLight) best = int(i);
-    if (log) SDL_Log("shadow: light %s", best >= 0 ? qbkey::names().get(v.lights[size_t(best)].name).c_str() : "none");
-    if (best < 0) return;
-    const venue::Vec3 d = v.lights[size_t(best)].dir;
-    const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-    if (dl < 1e-6f) return;
-    const gfx::Vec3 dir{d[0] / dl, d[1] / dl, d[2] / dl};
+    if (log) SDL_Log("shadow: light %s", best >= 0 ? qbkey::names().get(v.lights[size_t(best)].name).c_str() : "none (default dir)");
+    gfx::Vec3 dir;
+    if (best >= 0) {
+        const venue::Vec3 d = v.lights[size_t(best)].dir;
+        const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        if (dl < 1e-6f) return;
+        dir = {d[0] / dl, d[1] / dl, d[2] / dl};
+    } else {
+        // Most performance venues (z_metalfest, z_scifi, ...) carry only the
+        // light show's LFX lights: their band key lights live in the Alt_Band
+        // or per-member groups, or point nearly sideways, so none matches the
+        // band-group overhead caster that the greybox venues' GFX_L_Band_Top_
+        // Direct01 (group band, dir 0 -0.92 -0.40) supplies. The original still
+        // casts the band's dynamic shadow in those venues: a zone's scripts
+        // never call SetShadowDir / SetShadowDirFromLight (nor any shadow
+        // native), so the shadow pass reads the single global shadow direction
+        // guitar_startup leaves set at startup [C: 822B84B0; the default is not
+        // dumped, so this mirrors it with the game's own canonical band-top
+        // direction]. Without this the band casts no shadow at all in the real
+        // venues and looks pasted onto the stage. [GD07: owner 11-24.]
+        dir = gfx::normalize(gfx::Vec3{0.0f, -0.92f, -0.40f});
+    }
     // GH3's two cascades along the camera's view (the constants above). The
     // camera's near plane is the port's (0.05, VenueView::cameraGlobals) [I].
     const gfx::Vec3 fwd = toG(venue::rotate(cam.rot, {0, 0, 1}));
@@ -617,8 +634,23 @@ void VenueStage::shadowPass(double ms, const venue::CamPose& cam) {
     s.fadeStart = kCascadeFar[1] - kFarBlend, s.fadeEnd = kCascadeFar[1];
     s.intensity = intensity;
     s.dirToLight[0] = -dir.x, s.dirToLight[1] = -dir.y, s.dirToLight[2] = -dir.z;
+    // The band self-shadows (the character casters on their own bodies) use a
+    // SEPARATE, larger depth bias. GH3 biases each caster by its own single_/
+    // double_sided depth-bias state [C GetShadowMapBias 8291E644]; our bias is
+    // applied on the receiver side (one value for all receivers of a cascade),
+    // so the single value here can't be both small enough to keep the band's
+    // contact shadow attached to the stage floor (venue receiver) AND large
+    // enough to stop the double-sided character meshes (hair, cloth, the arms'
+    // back faces) shadow-acne'ing themselves. The character casters are
+    // predominantly double_sided, so the band self-receiver samples with the
+    // double_sided bias (1200/1600) and the venue/floor receiver keeps the
+    // single_sided one (64/1280) — the acne that covered the band in a blocky
+    // moire is gone and the floor shadow stays put [owner 2026-11-27: "the self
+    // shadows in the characters look wrong, whenever they are rendered"].
+    gfx::Mat4 vpCascade[2];
     for (int i = 0; i < 2; ++i) {
         const gfx::Mat4 vp = cascadeMatrix(cam, 16.0f / 9.0f, slice[i], slice[i + 1], dir, kLispsmN[i]);
+        vpCascade[i] = vp;
         // The casters draw upside down: the receivers' v = 0.5 - 0.5 y reads
         // OpenGL target rows bottom up (their shaders convert the depth).
         gfx::Mat4 flip;
@@ -664,7 +696,21 @@ void VenueStage::shadowPass(double ms, const venue::CamPose& cam) {
             SDL_Log("shadow: slices %.2f %.2f %.2f, member at%s", slice[0], slice[1], slice[2], where.c_str());
         }
     view_->setShadow(s);
-    if (band_->view()) band_->view()->setShadow(s);
+    // The band receives its own shadows with the double-sided caster bias.
+    // GD07_SHADOW_SINGLE_BIAS=1 keeps the old (single) bias everywhere to compare.
+    if (band_->view()) {
+        if (SDL_getenv("GD07_SHADOW_SINGLE_BIAS")) {
+            band_->view()->setShadow(s);
+        } else {
+            gh3shader::DynamicShadow sBand = s;
+            for (int i = 0; i < 2; ++i) {
+                gfx::Mat4 biasBand;
+                biasBand.at(2, 3) = -kBiasDouble[i] * biasScale;
+                sBand.vp[i] = biasBand * vpCascade[i];
+            }
+            band_->view()->setShadow(sBand);
+        }
+    }
 }
 
 void VenueStage::draw(double ms) {
@@ -692,13 +738,16 @@ void VenueStage::draw(double ms) {
     }
     lights_.evaluate(ms, lightState_);
     venue::CamPose cam = hasFixedCam_ ? fixedCam_ : cameras_.pose(ms);
-    // Development aid: GD07_CAM_MEMBER=<member index>,<metres>[,<bone>]: the
-    // camera in front of that band member (close-ups of the live band).
+    // Development aid: GD07_CAM_MEMBER=<member index>,<metres>[,<bone>[,<yaw degrees>[,<degrees down>]]]:
+    // the camera in front of that band member (close-ups of the live band),
+    // turned `yaw` around it (180: from behind) and tilted `down` (the member
+    // higher in the frame, clear of the highway).
     if (static const char* cm = SDL_getenv("GD07_CAM_MEMBER"); cm && band_) {
         int idx = 0;
         float dist = 1.5f;
         char bone[64] = "bone_chest";
-        std::sscanf(cm, "%d,%f,%63s", &idx, &dist, bone);
+        float yawOff = 0, down = 0;
+        std::sscanf(cm, "%d,%f,%63[^,],%f,%f", &idx, &dist, bone, &yawOff, &down);
         if (idx >= 0 && size_t(idx) < band_->members().size()) {
             const Band::Entry& e = band_->members()[size_t(idx)];
             venue::Vec3 chest;
@@ -707,8 +756,10 @@ void VenueStage::draw(double ms) {
                 const float fl = std::sqrt(f.x * f.x + f.z * f.z);
                 if (fl > 1e-6f) {
                     f = {f.x / fl, 0, f.z / fl};
+                    const float ya = yawOff * 0.01745329f;
+                    f = {f.x * std::cos(ya) + f.z * std::sin(ya), 0, f.z * std::cos(ya) - f.x * std::sin(ya)};
                     cam.pos = {chest[0] + f.x * dist, chest[1] + 0.1f, chest[2] + f.z * dist};
-                    const float yaw = std::atan2(-f.x, -f.z), pitch = std::atan2(0.1f, dist);
+                    const float yaw = std::atan2(-f.x, -f.z), pitch = std::atan2(0.1f, dist) + down * 0.01745329f;
                     const float cy = std::cos(yaw * 0.5f), sy = std::sin(yaw * 0.5f), cp = std::cos(pitch * 0.5f), sp = std::sin(pitch * 0.5f);
                     cam.rot = {cy * sp, sy * cp, -sy * sp, cy * cp};
                     cam.fov = 50;
@@ -748,6 +799,7 @@ void VenueStage::draw(double ms) {
     view_->drawVolumes2D(cam, lights_, sceneDepth);
     static const bool noRays = SDL_getenv("GD07_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
     if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, sceneDepth);
+    view_->drawPushback(cam, lightState_, lights_);  // the pushback pass: after the volumes [C 82431B38]
     if (particles_) {
         VenueView* vv = view_.get();
         const auto* ls = &lightState_;
@@ -820,6 +872,14 @@ void VenueStage::draw(double ms) {
         if (!post.original) p.bloom.on = false, p.brightSat[0].on = p.brightSat[1].on = false;  // Remove All Effects
         if (!post.original) p.noise.on = p.vignette.on = p.ink.on = false;
         if (!post.gameBloom) p.bloom.on = false;  // Enhanced > Bloom: None
+        // bloom2's material filter: the scene's pass 19 [C 8250F158, 8242AB78],
+        // with the projection (the jitter) the scene was drawn with.
+        const float glowJx = VenueView::jitterX, glowJy = VenueView::jitterY;
+        const std::function<void()> glow = [&] {
+            VenueView::jitterX = glowJx, VenueView::jitterY = glowJy;
+            view_->drawGlow(cam, lightState_, lights_);
+            VenueView::jitterX = VenueView::jitterY = 0;
+        };
         VenueView::jitterX = VenueView::jitterY = 0;
         bool chained = false;
         if (chain && enh_) {
@@ -833,7 +893,7 @@ void VenueStage::draw(double ms) {
                 ldrW_ = sw, ldrH_ = sh;
             }
             if (ldr_) {
-                fx_.end(p, ldr_);
+                fx_.end(p, ldr_, glow);
                 gfx::PostFrame f;
                 gh3shader::Globals g;
                 gfx::Mat4 vp;
@@ -852,6 +912,6 @@ void VenueStage::draw(double ms) {
                 if (!chained) SDL_Log("enhanced fx: the chain failed; the venue is drawn without it");
             }
         }
-        if (!chained) fx_.end(p);
+        if (!chained) fx_.end(p, {}, glow);
     }
 }

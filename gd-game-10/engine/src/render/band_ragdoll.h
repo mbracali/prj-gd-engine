@@ -59,6 +59,7 @@ public:
 private:
     struct Body {
         int bone = -1;
+        std::string name;  // the .rag body name (development aid)
         bool dynamic = false;
         float invMass = 0, invInertia = 0;  // keyframed: 0
         bandanim::Vec com;                  // centre of mass in the body frame

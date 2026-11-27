@@ -28,6 +28,16 @@ struct PlayTotals {
     size_t calibrationRuns = 0, calibrationFails = 0;
     // GDALL-039: Enhanced > Accessibility > Easy Chords, off and on (charts checked, failed).
     size_t easyChordRuns = 0, easyChordFails = 0;
+    // GHWT guitar touch strip: the _Tapping spans parsed and the taps they ask
+    // for; synthetic tap-judge runs against real spans (and how many missed the
+    // span's count); whether the TouchStrip / TapJudge logic self-test passed.
+    size_t tapSpans = 0, tapSpanTaps = 0, tapJudgeRuns = 0, tapJudgeFails = 0;
+    bool touchStripSelfTestRun = false, touchStripOk = false;
+    // gh4 drums (game/drum_player.h): the per-song <song>_drums_notes stream
+    // built into a playable gem stream and autoplayed. Songs with a drum track,
+    // gems and lane-notes built, lane-notes the autoplay hit, and songs where
+    // the drum judge did not clear its stream (a gem left unhit / an overhit).
+    size_t drumSongs = 0, drumGems = 0, drumNotes = 0, drumHits = 0, drumJudgeFails = 0;
 };
 
 // Plays every part and difficulty of a chart with the autoplayer; false and

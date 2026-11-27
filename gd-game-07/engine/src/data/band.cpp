@@ -313,9 +313,22 @@ bool memberGh4(const Globals& g, const qb::Struct& profile, uint32_t object, uin
         skeleton = female ? "GH_Rocker_Female" : "GH_Rocker_Male";
         for (const qb::Item& it : app->items) {
             if (!it.name || isInstrumentPart(it.name) || it.value.type != qb::Type::Struct || !it.value.st) continue;
-            if (const qb::Struct* d = casDesc(g, it.name, keyOf(it.value.st->find(K("desc_id")))))
+            if (const qb::Struct* d = casDesc(g, it.name, keyOf(it.value.st->find(K("desc_id"))))) {
                 if (std::string mesh = meshOf(g, *d); !mesh.empty()) m.meshes.push_back(mesh);
+                // cas_process_accessory_part: a part with acc_bones.
+                const qb::Value* ab = g.field(*d, K("acc_bones"));
+                const qb::Value *as = d->find(K("acc_skeleton")), *ar = d->find(K("acc_ragdoll"));
+                if (ab && ab->type == qb::Type::Array && ab->arr && as) {
+                    Member::AccPart ap;
+                    ap.skeleton = as->key;
+                    ap.ragdoll = ar ? ar->key : 0;
+                    for (const qb::Value& b : ab->arr->values)
+                        if (b.key) ap.bones.push_back(b.key);
+                    if (ap.skeleton && !ap.bones.empty()) m.accParts.push_back(std::move(ap));
+                }
+            }
         }
+        m.casBody = globalStruct(g, female ? K("cas_create_a_rocker_female") : K("cas_create_a_rocker_male"));
     }
     if (m.meshes.empty() || m.meshes.front().empty()) return false;
     m.female = female;
@@ -916,6 +929,52 @@ std::unique_ptr<Model> loadModelGh4(const Disc& disc, Library& lib, const Member
         return nullptr;
     }
     const CasArchive& cas = CasArchive::shared(disc);
+    // skeleton_mergeskeleton: each accessory part's acc_bones as its
+    // acc_skeleton has them (bind pose, parent) over the body's skeleton,
+    // which holds every accessory bone at a stock place [C script
+    // cas_process_accessory_part; I: the bone's transforms and parent
+    // copied by name]. Without it the parts' hair / coat tails were skinned
+    // on the stock bones and no ragdoll moved them: they followed the head /
+    // hips rigidly, through the body.
+    if (!m.accParts.empty() && !std::getenv("GD07_NO_ACC_MERGE")) {
+        auto sk = std::make_shared<anim::Skeleton>(*model->skeleton);
+        for (const Member::AccPart& ap : m.accParts) {
+            const CasEntry* se = cas.byFull(ap.skeleton);
+            if (!se) {
+                SDL_Log("band: %s: accessory skeleton %s is not in the CAS paks", who.c_str(), qbkey::names().get(ap.skeleton).c_str());
+                continue;
+            }
+            try {
+                const Bytes sb = CasArchive::read(disc, *se);
+                const anim::Skeleton acc = anim::parseSkeleton(sb.data(), sb.size());
+                for (uint32_t k : ap.bones) {
+                    const int i = sk->find(k), j = acc.find(k);
+                    if (i < 0 || j < 0) {
+                        SDL_Log("band: %s: accessory bone %s is not in %s", who.c_str(), qbkey::names().get(k).c_str(),
+                                i < 0 ? "the body's skeleton" : qbkey::names().get(ap.skeleton).c_str());
+                        continue;
+                    }
+                    anim::Bone& d = sk->bones[size_t(i)];
+                    const anim::Bone& s = acc.bones[size_t(j)];
+                    const int p = sk->find(s.parentName);
+                    if (std::getenv("GD07_RAGDOLL_LOG"))
+                        SDL_Log("band: %s: merge %s from %s: parent %s -> %s, pos (%.3f %.3f %.3f) -> (%.3f %.3f %.3f)", who.c_str(),
+                                qbkey::names().get(k).c_str(), qbkey::names().get(ap.skeleton).c_str(), qbkey::names().get(d.parentName).c_str(),
+                                qbkey::names().get(s.parentName).c_str(), double(d.pos[0]), double(d.pos[1]), double(d.pos[2]), double(s.pos[0]),
+                                double(s.pos[1]), double(s.pos[2]));
+                    d.pos = s.pos, d.rot = s.rot, d.invBind = s.invBind, d.flags = s.flags;
+                    if (p >= 0 && p < i) d.parent = p, d.parentName = s.parentName;
+                    else if (s.parentName != d.parentName)
+                        SDL_Log("band: %s: accessory bone %s keeps its parent (%s is after it)", who.c_str(), qbkey::names().get(k).c_str(),
+                                qbkey::names().get(s.parentName).c_str());
+                }
+            } catch (const std::exception& ex) {
+                SDL_Log("band: %s: accessory skeleton %s: %s", who.c_str(), qbkey::names().get(ap.skeleton).c_str(), ex.what());
+            }
+        }
+        model->mergedSkeleton = sk;
+        model->skeleton = sk.get();
+    }
     std::vector<uint32_t> texDone;
     for (const std::string& mesh : m.meshes) {
         const CasEntry* e = cas.skin(mesh);
@@ -984,6 +1043,12 @@ std::unique_ptr<Model> loadModelGh4(const Disc& disc, Library& lib, const Member
 
 std::unique_ptr<Model> loadModelUncached(const Disc& disc, const Globals& g, Library& lib, const Member& m, const std::string& song,
                                          std::string& error);
+}
+
+Bytes casFile(const Disc& disc, uint32_t key) {
+    const CasArchive& cas = CasArchive::shared(disc);
+    const CasEntry* e = cas.byFull(key);
+    return e ? CasArchive::read(disc, *e) : Bytes{};
 }
 
 namespace {

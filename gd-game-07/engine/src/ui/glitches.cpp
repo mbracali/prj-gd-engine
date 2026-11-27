@@ -132,6 +132,46 @@ bool ensureGlitches(Vm& vm) {
     return changed;
 }
 
+bool ensureGlitchesGh4(Vm& vm) {
+    // gh4 (World Tour / Metallica): the original's own unlock-all scripts stand
+    // in for a hand-built band roster — they leave the save with everything
+    // unlocked, and the save's band becomes the fully-unlocked house band
+    // "The Glitches" ($1,000,000), the last band in the band-selection screen.
+    bool changed = false;
+    vm.spawn(K("unlock_all_profiles"), qb::Struct{});
+    vm.spawn(K("purchase_all_profiles"), qb::Struct{});
+    // Its band is named The Glitches (current_band_has_band_name reads
+    // band_info.name) [C script; the name is the port's].
+    qb::Struct& bi = vm.globalTags[K("band_info")];
+    const qb::Value* nm = Vm::param(bi, K("name"));
+    if (!nm || nm->str.empty()) {
+        qb::Value n;
+        n.type = qb::Type::WString;
+        n.str = "The Glitches";
+        Vm::set(bi, K("name"), n);
+        changed = true;
+    }
+    // The house band's cash (kickoff rule 11; gd04's ensureGlitches): $1,000,000.
+    changed |= setInt(bi, "cash", 1000000);
+    changed |= setInt(bi, "first_play", 0);
+    // Singleplayer career needs a chosen character; the port has no live
+    // Create-A-Rocker, so last_singleplayer_character is never set by the CAS
+    // paths. Seed a premade profile (judy, a Preset_Musician_Profiles_Locked
+    // entry — profile_exists returns $true) so init_singleplayer_character_hub
+    // proceeds, exactly as a prior CAS pick would, and never override a real
+    // saved character. [I: the live singleplayer hub is the deferred
+    // live-career-UI surface; judy mirrors gd10's gh4 seed.]
+    qb::Struct& lsc = vm.globalTags[K("last_singleplayer_character")];
+    const qb::Value* cur = Vm::param(lsc, K("last_singleplayer_character"));
+    if (!cur || cur->type == qb::Type::None || cur->key == K("none") ||
+        (cur->type != qb::Type::Key && cur->type != qb::Type::KeyPtr)) {
+        Vm::set(lsc, K("last_singleplayer_character"), Vm::makeKey(K("judy")));
+        changed = true;
+    }
+    SDL_Log("The Glitches (gh4): band_info name/cash, unlock_all_profiles, purchase_all_profiles, singleplayer character seeded");
+    return changed;
+}
+
 bool unlockEverything(Vm& vm) {
     // The same mechanism gd07 uses for The Glitches at the main menu
     // (front_end.cpp): gh4's own unlock-all scripts, plus a save-wide sweep of

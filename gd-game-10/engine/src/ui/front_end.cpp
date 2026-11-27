@@ -270,6 +270,41 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
                 const qb::Value* nm = qs::Vm::param(bi, qbkey::key("name"));
                 if (!nm || nm->str.empty()) qs::Vm::set(bi, qbkey::key("name"), qs::Vm::makeString("The Glitches"));
                 SDL_Log("The Glitches (gh4): unlock_all_profiles, purchase_all_profiles");
+                // The Glitches is a returning band (everything unlocked), so its
+                // career intro is done: without this, picking a career difficulty
+                // runs the first-play intro (career_select_difficulty_flow_state_func,
+                // not progression_check_intro_complete) which auto-plays the
+                // gh4_1_intro_tier song through a cutscene-driven path; with it,
+                // career takes the normal route to the gig board / set list, which
+                // starts songs exactly as quick play does [C scripts
+                // career_menu_flow.qb, progression_check_intro_complete].
+                // ... and its gig-board intro movies (GHM_Movie1..3) are seen, so
+                // the gig board builds the set list straight away instead of
+                // playing a movie, autosaving and returning to the hub on the
+                // first few visits (ui_gig_posters_spawned gates the set list on
+                // career_<part>_movies_played) [C scripts ui_gig_posters.qb].
+                for (const char* p : {"guitar", "bass", "drum", "vocals", "band"}) {
+                    qs::Vm::set(bi, qbkey::key(std::string("career_intro_") + p + "_complete"), qs::Vm::makeInt(1));
+                    qs::Vm::set(bi, qbkey::key(std::string("career_") + p + "_movies_played"), qs::Vm::makeInt(3));
+                }
+                // Singleplayer career needs a chosen character: the port has no
+                // Create-A-Rocker, so last_singleplayer_character is never set by
+                // the CAS paths (choose_character_to_play, exit_save_changes) and
+                // init_singleplayer_character_hub keeps first_character_hub_enter = 1,
+                // returns $false and bounces to the (unimplemented) CAS selection
+                // screen, so the career hub / gig board / setlist are unreachable
+                // [C script init_singleplayer_character_hub]. Stand in a premade
+                // character (judy, the script's own profile_exists fallback; a
+                // Preset_Musician_Profiles_Locked profile, so profile_exists returns
+                // $true) so init proceeds ($true), exactly as a prior CAS pick would.
+                // Only when none is set (never overriding a real saved character).
+                qb::Struct& lsc = vm_->globalTags[qbkey::key("last_singleplayer_character")];
+                const qb::Value* cur = qs::Vm::param(lsc, qbkey::key("last_singleplayer_character"));
+                if (!cur || cur->type == qb::Type::None || cur->key == qbkey::key("none") ||
+                    (cur->type != qb::Type::Key && cur->type != qb::Type::KeyPtr)) {
+                    qs::Vm::set(lsc, qbkey::key("last_singleplayer_character"), qs::Vm::makeKey(qbkey::key("judy")));
+                    SDL_Log("career: seeded last_singleplayer_character = judy (no Create-A-Rocker)");
+                }
             }
         }
     }

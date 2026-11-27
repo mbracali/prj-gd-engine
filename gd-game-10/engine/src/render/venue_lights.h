@@ -71,6 +71,7 @@ private:
     uint32_t spotColor_ = 0;  // last LightShow_SpotlightColor
     bool spotOn_ = false;     // LightShow_EnableSpotlights state
     const qb::Value* modeEntry() const;
+    bool cyclesOnSnapshotChange() const;  // screvent == GenericMood_Event (default_generic / Strobe_Generic) [C]
     void setStateFlags();
     LightState at(size_t i, double t) const;
 

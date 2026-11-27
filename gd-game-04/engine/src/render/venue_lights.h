@@ -85,6 +85,12 @@ private:
     Performance perf_ = Performance::Medium;
     size_t perfAt_ = 0;  // the timeline's next change
     bool strobeOn_ = false;
+    // LightShow_AppendSnapshotParams (native 0x82125148, slot DAT_82a307d4):
+    // params a processor forces onto every snapshot it plays until `clear`.
+    // Blackout_Generic / Flare_Generic set intensity = specularintensity = 0.25
+    // [C scripts 0x7236971a / 0x5e1e8383]; < 0 means unset. The strobe
+    // intensity = 1.0 stays inline in play() (strobeOn_).
+    float appendIntensity_ = -1, appendSpecular_ = -1;
     int changes_ = 0;
     std::vector<Target> lights_;
     struct HousingTarget {

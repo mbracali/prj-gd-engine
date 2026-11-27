@@ -72,6 +72,18 @@ bool isSantrollerGuitar(SDL_Gamepad* pad) {
     return true;
 }
 
+// A drum kit (gh4's type-10 GH / type-11 RB drum controller): SDL types it as
+// a drum kit, or it says "drum" in its name (Santroller / Rock Band / GH kits,
+// and the HID kits SDL has no gamepad map for). A guitar is never matched (its
+// name says "guitar", its SDL type is GUITAR). [I: SDL exposes only the type
+// and the name; the USB descriptor's type enum (GetDrumHitVelocity reads it)
+// is not surfaced on PC.]
+bool isDrumKit(SDL_JoystickID id, SDL_Gamepad* pad) {
+    if (SDL_GetJoystickTypeForID(id) == SDL_JOYSTICK_TYPE_DRUM_KIT) return true;
+    const std::string n = lower(SDL_GetGamepadName(pad));
+    return n.find("drum") != std::string::npos;
+}
+
 // SDL has no gamepad mappings for the HID Rock Band guitars: the Xbox-guitar
 // layout (A green, B red, Y yellow, X blue, left shoulder orange, d-pad
 // strum, right stick X whammy). [I] Button and axis numbers follow the
@@ -135,6 +147,7 @@ const char* Input::instrumentName(Instrument i) {
     case Instrument::Guitar: return "5 Fret Guitar";
     case Instrument::Gamepad: return "Gamepad";
     case Instrument::Midi: return "Generic MIDI";
+    case Instrument::Drums: return "Drum Kit";
     }
     return "";
 }
@@ -350,7 +363,14 @@ void Input::emit(std::vector<InputEvent>& out, Action a, bool down, uint64_t ts,
         const int k = int(a);
         if (down) {
             Recent& r = recent_[size_t(k)];
-            if (r.ns && ts >= r.ns && ts - r.ns < kSameNs && r.device != device_) {
+            if (r.ns && ts >= r.ns && ts - r.ns < kSameNs && r.device != device_) {  // one press, two devices
+                dropped_.insert({device_, k});
+                return;
+            }
+            // A4: a bouncing strum / menu control double-advances a menu - two
+            // Up-or-Down edges from one device within the strum window act once.
+            // (The in-song judge has its own window; the menus had none.)
+            if ((a == Action::Up || a == Action::Down) && r.ns && ts >= r.ns && ts - r.ns < kMenuStrumDebounceNs && r.device == device_) {
                 dropped_.insert({device_, k});
                 return;
             }
@@ -620,6 +640,9 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         else if (isPs2Guitar(pad)) profile = Profile::Ps2Guitar;
         Pad np;
         np.pad = pad, np.profile = np.detected = profile;
+        // A drum kit is kept out of the guitar path (profile stays Joypad for
+        // its menu navigation, but its pads never feed the guitar judge).
+        np.drum = profile == Profile::Joypad && isDrumKit(id, pad);
         char guid[64];
         SDL_GUIDToString(SDL_GetGamepadGUIDForID(id), guid, sizeof guid);
         np.guid = guid;
@@ -659,7 +682,11 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
                 if (!slotTaken(s, nullptr) && playerEnabled(s)) np.slot = s;
         pads_[id] = np;
         SDL_Log("Controller connected: %s (%04x:%04x, %s, %s)", np.name.c_str(), SDL_GetGamepadVendorForID(id),
-                SDL_GetGamepadProductForID(id), profileName(profile), np.slot < 0 ? "no player" : np.slot == 0 ? "player 1" : "player 2");
+                SDL_GetGamepadProductForID(id), np.drum ? "Drum Kit" : profileName(profile),
+                np.slot < 0 ? "no player" : np.slot == 0 ? "player 1" : "player 2");
+        if (np.drum)
+            SDL_Log("  drum kit detected: surfaced as a drum seat; its pads are not routed as scrambled guitar frets "
+                    "(playable drum gameplay is not wired in this port yet)");
         break;
     }
     case SDL_EVENT_GAMEPAD_REMOVED:
@@ -706,8 +733,9 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
                 const bool menuControl = captureControl_ <= C::GuitarSelect;
                 int d = int(e.gaxis.value) - int(captureRest_[size_t(a)]);
                 if (!menuControl && std::abs(d) > 20000) {
-                    // The whammy and the gyro (tilt) take the axis either way; the others its direction.
-                    Kind k = captureControl_ == C::Whammy || captureControl_ == C::Gyro ? Kind::AxisAny : d > 0 ? Kind::AxisPos : Kind::AxisNeg;
+                    // The whammy takes the axis either way; the gyro (tilt, A2)
+                    // and the frets take the direction it was pushed (one way).
+                    Kind k = captureControl_ == C::Whammy ? Kind::AxisAny : d > 0 ? Kind::AxisPos : Kind::AxisNeg;
                     captureFrom(id, axis(k, SDL_GamepadAxis(a)));
                 }
                 break;
@@ -749,7 +777,7 @@ void Input::releaseAll(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
     curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy;
     const ControllerMode mode = requireStrum("pad:" + std::to_string(SDL_GetGamepadID(p.pad))) ? ControllerMode::Guitar : ControllerMode::Joypad;
     curFretsStrum_ = mode == ControllerMode::Joypad;
-    controlEdges(was, p.down, mode, p.slot, joypad, ts, out);
+    controlEdges(was, p.down, mode, p.slot, joypad, ts, out, p.drum);
     curFretsStrum_ = false;
     static constexpr Action kHelp[4] = {Action::Left, Action::Right, Action::Confirm, Action::Back};
     for (size_t k = 0; k < 4; ++k)
@@ -940,12 +968,44 @@ void Input::keyEvent(const SDL_KeyboardEvent& k, std::vector<InputEvent>& out) {
     emit(out, a, down, ts, mode, std::max(kb, 0));
 }
 
+// A1: an axis bound as a button is active past kAxisPress of full travel, and
+// released below kAxisRelease (hysteresis). Pure and named so the self-test can
+// pin the press/release points from the constants.
+bool Input::axisButtonActive(Source::Kind kind, int delta, bool wasDown) {
+    const int th = int((wasDown ? kAxisRelease : kAxisPress) * kAxisFull);
+    return kind == Source::Kind::AxisPos ? delta > th : kind == Source::Kind::AxisNeg ? delta < -th : std::abs(delta) > th;
+}
+
+// A2: an axis past the tilt threshold in its bound direction (AxisAny keeps the
+// legacy either-way read for the default binding and old saved bindings).
+bool Input::tiltPast(Source::Kind kind, int delta) {
+    const int th = int(kTiltThreshold * kAxisFull);
+    return kind == Source::Kind::AxisPos ? delta > th : kind == Source::Kind::AxisNeg ? delta < -th : std::abs(delta) > th;
+}
+
+// A2: the tilt-hold state machine (one extra per-pad int). Returns true only
+// once the tilt has stayed active kTiltHoldFrames consecutive frames, then
+// stays true while held; inactive resets it.
+bool Input::tiltDeploy(bool active, int& frames) {
+    if (!active) {
+        frames = 0;
+        return false;
+    }
+    if (frames < kTiltHoldFrames) ++frames;
+    return frames >= kTiltHoldFrames;
+}
+
+// A5: the digital-whammy deadzone, as a named 0..1 mapping.
+float Input::whammyDeadzone(float raw01) {
+    raw01 = std::clamp(raw01, 0.0f, 1.0f);
+    return raw01 < kWhammyDeadzone ? 0.0f : (raw01 - kWhammyDeadzone) / (1.0f - kWhammyDeadzone);
+}
+
 bool Input::sourceActive(const Pad& p, const Source& s, bool wasDown) const {
     if (s.kind == Kind::Button) return s.index >= 0 && s.index < SDL_GAMEPAD_BUTTON_COUNT && p.buttons[size_t(s.index)];
     if (s.kind == Kind::Key || s.index < 0 || s.index >= SDL_GAMEPAD_AXIS_COUNT) return false;
-    // Past half way from the rest value; released below a third (no chatter).
-    const int d = int(p.axes[size_t(s.index)]) - int(p.rest[size_t(s.index)]), th = wasDown ? 10000 : 16000;
-    return s.kind == Kind::AxisPos ? d > th : s.kind == Kind::AxisNeg ? d < -th : std::abs(d) > th;
+    // A1: calibrated axis-as-button, kAxisPress / kAxisRelease (was 0.49 / 0.31).
+    return axisButtonActive(s.kind, int(p.axes[size_t(s.index)]) - int(p.rest[size_t(s.index)]), wasDown);
 }
 
 void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
@@ -965,19 +1025,26 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
         p.analogWhammy = true;
         const int rest = p.rest[size_t(s.index)], v = p.axes[size_t(s.index)];
         float x = rest < -30000 ? float(v - rest) / 65535.0f : std::abs(float(v - rest)) / 32767.0f;
-        constexpr float kDead = 0.08f;
-        x = std::clamp(x, 0.0f, 1.0f);
-        p.whammyAxis = std::max(p.whammyAxis, x < kDead ? 0.0f : (x - kDead) / (1 - kDead));
+        p.whammyAxis = std::max(p.whammyAxis, whammyDeadzone(x));  // A5: named deadzone
     }
     auto was = p.down;
     for (size_t c = 0; c < size_t(Control::Count); ++c) {
         bool now = false;
-        for (const Source& s : b[c]) now = now || sourceActive(p, s, was[c]);
-        if (Control(c) == C::Whammy && p.whammyAxis > 0.15f) now = true;
+        for (const Source& s : b[c]) {
+            // A2: an axis-bound Gyro (the tilt) is driven per frame by poll()'s
+            // tilt debounce - a held tilt sends no events - so this event pass
+            // skips its axis sources. A digital Gyro source (Select / Back, a
+            // button) stays instant here.
+            if (Control(c) == C::Gyro && (s.kind == Kind::AxisPos || s.kind == Kind::AxisNeg || s.kind == Kind::AxisAny)) continue;
+            now = now || sourceActive(p, s, was[c]);
+        }
+        if (Control(c) == C::Whammy && p.whammyAxis > kWhammyAction) now = true;  // A5: named action threshold
         p.down[c] = now;
     }
-    // The tilt (gd10): Star Power (the gyro) held through an axis source alone
-    // (a release after a tilt keeps the flag, so the up edge matches its down);
+    // The tilt flag (gd10): this event pass owns only the digital Gyro source
+    // (Select / Back, a button), which deploys Star Power at once and is NOT a
+    // tilt. The axis tilt is driven in poll() (A2), which sets p.tilt there; the
+    // release after a tilt keeps the flag so the up edge matches its down.
     // GH3 waits star_power_trigger_frames for a tilt, Select deploys at once [C 0x82112F28].
     {
         bool tiltOn = false, buttonOn = false;
@@ -990,7 +1057,7 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
     curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy, curTilt_ = p.tilt;
     const ControllerMode mode = requireStrum("pad:" + std::to_string(SDL_GetGamepadID(p.pad))) ? ControllerMode::Guitar : ControllerMode::Joypad;
     curFretsStrum_ = mode == ControllerMode::Joypad;
-    controlEdges(was, p.down, mode, p.slot, joypad, ts, out);
+    controlEdges(was, p.down, mode, p.slot, joypad, ts, out, p.drum);
     curFretsStrum_ = false;
     // The built-in menu helpers: d-pad left / right; a gamepad's south (select) and east (back).
     const std::array<bool, 4> help = {p.buttons[SDL_GAMEPAD_BUTTON_DPAD_LEFT], p.buttons[SDL_GAMEPAD_BUTTON_DPAD_RIGHT],
@@ -1008,14 +1075,17 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
 // strum also moves the menus (the other way round when lefty); Select and
 // the gyro are Star Power; a gamepad's frets take the lefty_joypad order.
 // A device without a player works the menus as player 1, and only pauses in a song.
-Input::ActionSet Input::actionsOf(const std::array<bool, size_t(Control::Count)>& held, bool joypad, int player) const {
+Input::ActionSet Input::actionsOf(const std::array<bool, size_t(Control::Count)>& held, bool joypad, int player, bool drum) const {
     ActionSet a;
     const bool lefty = lefty_[size_t(std::max(player, 0) & 1)];
     const bool play = !joypad || gamepadPlay_;
     for (size_t c = 0; c < size_t(Control::Count); ++c) {
         if (!held[c]) continue;
         if (player < 0 && inGame() && C(c) != C::Start && C(c) != C::GuitarStart) continue;
-        auto on = [&](Action x) { a.on[size_t(x)] = true; };
+        // A drum kit never feeds the guitar judge: its play actions (frets,
+        // strum, whammy) are dropped so it cannot scramble-play the guitar
+        // part; the menus, Start and Star Power still work.
+        auto on = [&](Action x) { if (!(drum && drumKitSuppressesPlay(x))) a.on[size_t(x)] = true; };
         switch (C(c)) {
         case C::Green: case C::Red: case C::Yellow: case C::Blue: case C::Orange: {
             int fret = int(c) - int(C::Green);
@@ -1025,8 +1095,8 @@ Input::ActionSet Input::actionsOf(const std::array<bool, size_t(Control::Count)>
             if (play) on(Action(int(Action::Fret0) + fret));
             break;
         }
-        case C::StrumUp: on(lefty && curGuitar_ ? Action::Down : Action::Up), on(Action::Strum), ++a.strums; break;
-        case C::StrumDown: on(lefty && curGuitar_ ? Action::Up : Action::Down), on(Action::Strum), ++a.strums; break;
+        case C::StrumUp: on(lefty && curGuitar_ ? Action::Down : Action::Up), on(Action::Strum); if (!drum) ++a.strums; break;
+        case C::StrumDown: on(lefty && curGuitar_ ? Action::Up : Action::Down), on(Action::Strum); if (!drum) ++a.strums; break;
         case C::Whammy: if (play) on(Action::Whammy); break;
         case C::Select: case C::GuitarSelect: case C::Gyro: on(Action::StarPower); break;
         case C::Start: case C::GuitarStart: on(Action::Start); break;
@@ -1044,8 +1114,8 @@ Input::ActionSet Input::actionsOf(const std::array<bool, size_t(Control::Count)>
 // control pressed. The keyboard's Start in the menus is select (enterKey:
 // Start on a text entry, UiManager::action).
 void Input::controlEdges(const std::array<bool, size_t(Control::Count)>& was, const std::array<bool, size_t(Control::Count)>& now,
-                         ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out) {
-    const ActionSet before = actionsOf(was, joypad, player), after = actionsOf(now, joypad, player);
+                         ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out, bool drum) {
+    const ActionSet before = actionsOf(was, joypad, player, drum), after = actionsOf(now, joypad, player, drum);
     const int pl = std::max(player, 0);
     const bool keyboardStart = device_ == -1 && (!inGame() || menuOverSong_);
     for (size_t k = 0; k < after.on.size(); ++k) {
@@ -1358,19 +1428,20 @@ void Input::discardEdit() {
 
 Input::Instrument Input::instrument(const std::string& id) const {
     if (midiById(id)) return Instrument::Midi;
-    if (const Pad* p = padById(id)) return p->profile == Profile::Joypad ? Instrument::Gamepad : Instrument::Guitar;
+    if (const Pad* p = padById(id)) return p->drum ? Instrument::Drums : p->profile == Profile::Joypad ? Instrument::Gamepad : Instrument::Guitar;
     return Instrument::Guitar;  // the keyboard and touch play the guitar part
 }
 
 std::vector<Input::Instrument> Input::instruments(const std::string& id) const {
     if (midiById(id)) return {Instrument::Midi};
-    if (padById(id)) return {Instrument::Guitar, Instrument::Gamepad};
+    if (const Pad* p = padById(id)) return p->drum ? std::vector<Instrument>{Instrument::Drums} : std::vector<Instrument>{Instrument::Guitar, Instrument::Gamepad};
     return {Instrument::Guitar};
 }
 
 void Input::setInstrument(const std::string& id, Instrument i) {
     Pad* p = padById(id);
-    if (!p || i == Instrument::Midi || instrument(id) == i) return;
+    // A drum kit's seat is fixed by detection (it is never a guitar / gamepad).
+    if (!p || i == Instrument::Midi || i == Instrument::Drums || p->drum || instrument(id) == i) return;
     // A guitar: the detected guitar type, else a PS2 guitar (adapter), as
     // gd01; the exact guitar type stays a choice (deviceType / cycleDeviceType).
     Profile to = i == Instrument::Gamepad ? Profile::Joypad : p->detected != Profile::Joypad ? p->detected : Profile::Ps2Guitar;
@@ -1668,7 +1739,7 @@ void Input::updateMidi(MidiDev& m, uint64_t ts, std::vector<InputEvent>& out) {
             if (s.kind == Kind::MidiNote) now = now || m.notes[size_t(s.index & 127)] > 0;
             if (s.kind == Kind::MidiCc) now = now || m.cc[size_t(s.index & 127)] >= (was[c] ? 40 : 64);
         }
-        if (Control(c) == C::Whammy && m.whammyAxis > 0.15f) now = true;
+        if (Control(c) == C::Whammy && m.whammyAxis > kWhammyAction) now = true;  // A5: named action threshold
         m.down[c] = now;
     }
     curAnalog_ = m.whammyAxis > 0;
@@ -1796,6 +1867,43 @@ void Input::pollShake(uint64_t nowNs, std::vector<InputEvent>& out) {
 void Input::poll(uint64_t nowNs, std::vector<InputEvent>& out) {
     pollShake(nowNs, out);
     pollMidi(nowNs, out);
+    // A2: an axis-bound Gyro's tilt debounce, sampled per frame because a held
+    // tilt sends no SDL events. The Star Power action deploys only after the
+    // tilt stays past kTiltThreshold in one direction for kTiltHoldFrames
+    // frames; a flick or a wrong-way tilt never deploys. The digital Gyro
+    // companion (Select / Back) is still read here so it stays instant (poll()
+    // runs the same frame as the event that set the button). A Gyro with no
+    // axis source is left entirely to the event pass.
+    for (auto& [jid, p] : pads_) {
+        if (nowNs < p.settleNs) continue;
+        const Bindings& b = bindingsFor(p.guid, p.profile);
+        bool gyroAxis = false, tiltActive = false, buttonOn = false;
+        for (const Source& s : b[size_t(C::Gyro)]) {
+            if (s.kind == Kind::AxisPos || s.kind == Kind::AxisNeg || s.kind == Kind::AxisAny) {
+                gyroAxis = true;
+                if (s.index >= 0 && s.index < SDL_GAMEPAD_AXIS_COUNT)
+                    tiltActive = tiltActive || tiltPast(s.kind, int(p.axes[size_t(s.index)]) - int(p.rest[size_t(s.index)]));
+            } else {
+                buttonOn = buttonOn || sourceActive(p, s, p.down[size_t(C::Gyro)]);
+            }
+        }
+        if (!gyroAxis) {
+            p.gyroFrames = 0;
+            continue;
+        }
+        const bool tilted = tiltDeploy(tiltActive, p.gyroFrames);
+        const bool nowSp = buttonOn || tilted;
+        if (nowSp == p.down[size_t(C::Gyro)]) continue;
+        auto was = p.down;
+        p.down[size_t(C::Gyro)] = nowSp;
+        p.tilt = nowSp ? (tilted && !buttonOn) : p.tilt;  // mark a tilt deploy vs a Select/Back one
+        device_ = int64_t(jid);
+        const bool joypad = p.profile == Profile::Joypad;
+        const ControllerMode mode = requireStrum("pad:" + std::to_string(jid)) ? ControllerMode::Guitar : ControllerMode::Joypad;
+        curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy, curTilt_ = p.tilt, curFretsStrum_ = mode == ControllerMode::Joypad;
+        controlEdges(was, p.down, mode, p.slot, joypad, nowNs, out);
+        curGuitar_ = curJoypad_ = curAnalog_ = curTilt_ = curFretsStrum_ = false;
+    }
     for (int p = 0; p < 2; ++p) {
         PendingStrum& s = strum_[size_t(p)];
         if (!s.on || nowNs < s.dueNs) continue;

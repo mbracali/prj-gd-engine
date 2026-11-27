@@ -129,6 +129,52 @@ public:
     enum class Instrument { Guitar, Gamepad, Midi };
     static const char* instrumentName(Instrument i);
 
+    // ---- Input calibration (controls-improvement Phase A, 2026-11-24 audit;
+    // docs/FINDINGS.md "Controls audit", propagated from the gd01 anchor).
+    // Named so feel-tuning is a data change, not a code change. Only the raw
+    // SDL->action layer; the gameplay judgment layer (player.cpp's GH3 per-frame
+    // judge) is untouched. These guard only axis-bound controls (triggers,
+    // sticks, the guitar's whammy / tilt); digital buttons are unaffected.
+    static constexpr float kAxisFull = 32767.0f;  // SDL axis full-scale
+    // A1 - axis-as-button: an axis bound as a fret/strum presses past kAxisPress
+    // of full travel and releases below kAxisRelease (hysteresis kept). Was the
+    // uncalibrated 16000/32767 ~ 0.49 press, 10000/32767 ~ 0.31 release; GH reads
+    // frets as digital bits and implies ~0.75, so a higher threshold is strictly
+    // more faithful and stops half-pulled triggers/sticks false-firing frets.
+    static constexpr float kAxisPress = 0.75f;
+    static constexpr float kAxisRelease = 0.65f;
+    // A2 - tilt / Star Power on an AXIS-bound Gyro: the tilt must cross
+    // kTiltThreshold (near full deflection) in ONE direction and stay past it
+    // for kTiltHoldFrames consecutive frames before the Star Power action is
+    // sent; a one-frame flick or a wrong-way tilt never fires. A digital Gyro
+    // (a button: Select/Back, gd04's default companion) stays instant. This
+    // realises GH3's star_power_position + star_power_trigger_frames (~3 frames,
+    // the audit confirms 3) at the input layer; the in-song judge's own
+    // triggerFrames_ gate (player.cpp) is left untouched.
+    static constexpr float kTiltThreshold = 0.90f;
+    static constexpr int kTiltHoldFrames = 3;
+    // A5 - digital whammy: below kWhammyDeadzone the bar reads 0; the Whammy
+    // *action* edge fires past kWhammyAction. The analog whammy value
+    // (whammyValue(), which feeds the faithful speed-based Star Power path) is
+    // unchanged.
+    static constexpr float kWhammyDeadzone = 0.08f;
+    static constexpr float kWhammyAction = 0.15f;
+    // A4 - menu strum debounce: in the menus (NOT the in-song judge, which keeps
+    // its own window in player.cpp), two Up-or-Down menu edges from one device
+    // within this window advance the menu once (a noisy strum bounce).
+    static constexpr uint64_t kMenuStrumDebounceNs = 52000000ull;  // 52 ms
+
+    // A1: is an axis bound as a button active? `delta` is the signed value from
+    // its rest (SDL units, +/-kAxisFull); `wasDown` picks the hysteresis side.
+    static bool axisButtonActive(Source::Kind kind, int delta, bool wasDown);
+    // A2: is an axis past the tilt threshold in its bound direction?
+    static bool tiltPast(Source::Kind kind, int delta);
+    // A2: advance the per-pad tilt hold; returns whether an axis Gyro should hold
+    // Star Power this frame (true only from the kTiltHoldFrames-th active frame).
+    static bool tiltDeploy(bool active, int& frames);
+    // A5: a raw axis magnitude (0..1 from rest) mapped through the deadzone.
+    static float whammyDeadzone(float raw01);
+
     // Before SDL_Init: started by Steam (Game Mode, or any game Steam
     // starts), Steam hides the real controllers (SDL_GAMECONTROLLER_IGNORE_
     // DEVICES) and offers its virtual gamepads, which SDL skips unless
@@ -362,6 +408,7 @@ private:
         float whammyAxis = 0;
         bool analogWhammy = false;  // its whammy is bound to an axis
         bool tilt = false;          // Star Power (the gyro) is held by the tilt axis (no button)
+        int gyroFrames = 0;  // A2: an axis-bound Gyro's tilt-hold counter (poll)
         uint64_t settleNs = 0;  // until then (300 ms after connecting) its axes settle: rest re-read, no actions
         // Buttons held as it connected (or while it settled): their rest is
         // "down" (an adapter's stuck bit, a D-pad SDL reads from an axis

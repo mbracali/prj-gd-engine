@@ -177,7 +177,17 @@ private:
     bool specialOnce_ = false;  // play_special_anim's clip playing: then Stance_A and the idle loop
     const anim::Clip* clip(uint32_t key);
     const qb::Value* animSet() const;
+    // skill (bad / normal / good, from player 1's health) and speed (slow /
+    // med / fast, from the song tempo) at song time `t`, shared by the body
+    // tempo anims and the stance transitions [C 0x82108C90, 0x82108B60].
+    uint32_t skillKey(double t) const;
+    uint32_t speedKey(double t) const;
     const anim::Clip* tempoAnim(uint32_t anim, double t, uint32_t& key);
+    // play_stance_transition_cfunc (0x821138D8): anim_set.<old>.transitions.
+    // <new>, either a clip key (the male singer, the guitarists) or a
+    // skill/speed tree resolved like a tempo anim (the female singer's
+    // transitions.<new>.<skill>.<speed>) [C data].
+    const anim::Clip* transitionClip(uint32_t toStance, double t, uint32_t& key);
     void bodyIteration(double t);
     void scheduleClipEvents(uint32_t clipKey, double t);
     std::vector<ClipEvent> clipEvents_;

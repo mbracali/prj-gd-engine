@@ -1306,7 +1306,11 @@ bool Vm::step(ScriptRun& run, int budget) {
                         // case) shares the next case's body: `case p1_quickplay
                         // case p2_quickplay ... case p4_quickplay <body>`
                         // (ui_create_play_song_spawned) [I: D11; the compiled
-                        // jumps of empty cases point past endswitch].
+                        // jumps of empty cases point past endswitch]. An empty case
+                        // can equally fall through to the `default` body (`case
+                        // p1_career default <body>` in the same script, where
+                        // <body> is start_song): without following into default,
+                        // career never started its song [I].
                         auto nl = [&](size_t k) {
                             while (k < t.size() && (t[k].op == kEndOfLine || t[k].op == kEndOfLineNumber)) ++k;
                             return k;
@@ -1314,14 +1318,25 @@ bool Vm::step(ScriptRun& run, int budget) {
                         size_t at = cv.i;
                         for (;;) {
                             const size_t j = nl(at);
-                            if (!(j + 1 < t.size() && t[j].op == kShortJump && t[nl(j + 1)].op == kCase)) break;
-                            at = nl(j + 1);
-                            size_t h = at + 1;
-                            if (h < t.size() && t[h].op == kShortJump) ++h;
-                            Exec skip(*this, run);
-                            skip.i = h;
-                            (void)skip.expression();  // the next case's value
-                            at = skip.i;
+                            if (!(j + 1 < t.size() && t[j].op == kShortJump)) break;
+                            const size_t nxt = nl(j + 1);
+                            if (nxt < t.size() && t[nxt].op == kCase) {
+                                at = nxt;
+                                size_t h = at + 1;
+                                if (h < t.size() && t[h].op == kShortJump) ++h;
+                                Exec skip(*this, run);
+                                skip.i = h;
+                                (void)skip.expression();  // the next case's value
+                                at = skip.i;
+                                continue;
+                            }
+                            if (nxt < t.size() && t[nxt].op == kDefault) {
+                                // Fall through to the default body (after its label
+                                // and the compiled jump that follows it).
+                                at = nxt + 1;
+                                if (at < t.size() && t[at].op == kShortJump) ++at;
+                            }
+                            break;
                         }
                         fr.pc = at;
                         matched = true;

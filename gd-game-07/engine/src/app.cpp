@@ -1429,6 +1429,19 @@ void App::frame() {
         input_.poll(SDL_GetTicksNS(), polled);
         if (!polled.empty()) dispatchInput(polled);
     }
+    // Lefty Flip (Options > Game Settings), per player, while a song plays: the
+    // mirrored highway and HUD already follow setup.lefty (song_screen.cpp), but
+    // the INPUT must flip too or a gamepad's frets stay in hand order while the
+    // lanes are mirrored -- the "left mode" bug that worked for the keyboard and
+    // a real guitar (which keep their frets and only swap the menu strum) yet not
+    // for a gamepad (lefty_joypad_guitar reverses the fret order [C]). gd01 sets
+    // this every frame (gd-game-01 app.cpp:2566); the gh4 lineage (gd04/gd10/gd07)
+    // dropped the call. Off in the menus so a joypad's frets are never mirrored
+    // there (the pause menu included): the flip is a song-time mapping only.
+    if (front_ && song_ && !front_->songPaused)
+        input_.setLefty(front_->songRequest.lefty[0], front_->songRequest.lefty[1]);
+    else
+        input_.setLefty(false, false);
     // A controller lost mid-song (GD10-042): the 360's engine calls GH3's
     // controller_unplugged {device_num} while check_for_unplugged_controllers
     // is 1 (controller_pulling.qb; in a song: controller_disconnect_fs, "YOU

@@ -182,27 +182,99 @@ std::unique_ptr<AccessorySim> Band::accessorySim(const Disc& disc, const Globals
     // hair, torso and legs ACC bones) [C data; I: the same accessory ragdoll
     // as GH3's, the vocalist_static_tree's ragdoll node].
     if (m.gh4) {
-        if (!m.fullBody) return nullptr;
-        const qb::Value* rp = m.fullBody->find(K("ragdoll_path"));
-        const qb::Value* ab = g.find(keyOfValue(m.fullBody->find(K("accessory_bones"))));
+        // A CAS body: cas_create_a_rocker_male / _female's ragdoll, each
+        // accessory part's ragdoll merged in below.
+        const qb::Struct* body = m.fullBody ? m.fullBody : m.casBody;
+        if (!body) return nullptr;
+        const qb::Value* rp = body->find(K("ragdoll_path"));
+        const qb::Value* ab = g.find(keyOfValue(body->find(K("accessory_bones"))));
         if (!rp || rp->type != qb::Type::String || !ab || ab->type != qb::Type::Array || !ab->arr) return nullptr;
         std::vector<uint32_t> bones;
         for (const qb::Value& b : ab->arr->values) bones.push_back(b.key);
+        // gh4's .rag: "LZSS", u32 size, Neversoft's LZSS of a Havok 5.5.0 packfile [C data].
+        auto parseRag = [](const uint8_t* p, size_t s) {
+            Bytes unpacked;
+            if (s >= 8 && std::memcmp(p, "LZSS", 4) == 0) {
+                const size_t n = size_t(p[4]) << 24 | size_t(p[5]) << 16 | size_t(p[6]) << 8 | size_t(p[7]);
+                unpacked = qb::lzss(p + 8, s - 8, n);
+                p = unpacked.data(), s = unpacked.size();
+            }
+            return havok::parse(p, s);
+        };
         try {
             if (!globalPak) globalPak = Pak::shared(disc, "DATA/COMPRESSED/PAK/global_rag_skel.pak.xen");
-            if (const PakEntry* re = globalPak->findType(keyOfValue(m.fullBody->find(K("ragdoll"))), K(".rag"))) {
+            const PakEntry* re = globalPak->findType(keyOfValue(body->find(K("ragdoll"))), K(".rag"));
+            if (!re) {
+                // The CAS bodies' ragdoll ($ragdoll_Rocker_male) is under its file's name
+                // (gh_rocker_male_ragdoll) [C data global_rag_skel.pak].
+                std::string base = rp->str;
+                if (const size_t sl = base.find_last_of("\\/"); sl != std::string::npos) base = base.substr(sl + 1);
+                if (const size_t dot = base.find('.'); dot != std::string::npos) base = base.substr(0, dot);
+                re = globalPak->findType(qbkey::key(base), K(".rag"));
+            }
+            if (re) {
                 auto [p, s] = globalPak->data(*re);
-                // gh4's .rag: "LZSS", u32 size, Neversoft's LZSS of a Havok 5.5.0 packfile [C data].
-                Bytes unpacked;
-                if (s >= 8 && std::memcmp(p, "LZSS", 4) == 0) {
-                    const size_t n = size_t(p[4]) << 24 | size_t(p[5]) << 16 | size_t(p[6]) << 8 | size_t(p[7]);
-                    unpacked = qb::lzss(p + 8, s - 8, n);
-                    p = unpacked.data(), s = unpacked.size();
+                havok::Physics phys = parseRag(p, s);
+                // ragdoll_mergeragdoll: each accessory part's acc_bones as its
+                // acc_ragdoll has them: the bone's rigid body (shape, mass,
+                // place) and its constraint to its parent body, over the
+                // body's ragdoll [C script cas_process_accessory_part; I:
+                // by bone name]. The accessory bones no part brings keep
+                // the body's stock bodies: nothing is skinned on them, and
+                // they stay keyframed (they are no part's hair or cloth).
+                const bool merge = !m.fullBody && !SDL_getenv("GD07_NO_ACC_MERGE");
+                if (!m.fullBody) bones.clear();
+                for (size_t pi = 0; merge && pi < m.accParts.size(); ++pi) {
+                    const band::Member::AccPart& ap = m.accParts[pi];
+                    const Bytes rb = ap.ragdoll ? band::casFile(disc, ap.ragdoll) : Bytes{};
+                    if (rb.empty()) {
+                        SDL_Log("band: accessory ragdoll %s is not in the CAS paks", qbkey::names().get(ap.ragdoll).c_str());
+                        continue;
+                    }
+                    try {
+                        const havok::Physics acc = parseRag(rb.data(), rb.size());
+                        auto bodyOf = [](const havok::Physics& ph, uint32_t key) {
+                            for (size_t i = 0; i < ph.bodies.size(); ++i)
+                                if (qbkey::key(ph.bodies[i].name) == key) return int(i);
+                            return -1;
+                        };
+                        std::vector<std::pair<int, int>> moved;  // the body in phys, in acc
+                        for (uint32_t k : ap.bones) {
+                            const int ai = bodyOf(acc, k);
+                            if (ai < 0) continue;
+                            int bi = bodyOf(phys, k);
+                            if (bi < 0) bi = int(phys.bodies.size()), phys.bodies.push_back(acc.bodies[size_t(ai)]);
+                            else phys.bodies[size_t(bi)] = acc.bodies[size_t(ai)];
+                            moved.push_back({bi, ai});
+                            bones.push_back(k);
+                        }
+                        for (const auto& [bi, ai] : moved) {
+                            phys.constraints.erase(std::remove_if(phys.constraints.begin(), phys.constraints.end(),
+                                                                  [bi = bi](const havok::Constraint& c) { return c.bodyA == bi; }),
+                                                   phys.constraints.end());
+                            for (const havok::Constraint& c : acc.constraints) {
+                                if (c.bodyA != ai || c.bodyB < 0 || size_t(c.bodyB) >= acc.bodies.size()) continue;
+                                havok::Constraint n = c;
+                                n.bodyA = bi;
+                                n.bodyB = bodyOf(phys, qbkey::key(acc.bodies[size_t(c.bodyB)].name));
+                                if (n.bodyB >= 0) phys.constraints.push_back(std::move(n));
+                            }
+                        }
+                    } catch (const std::exception& ex) {
+                        SDL_Log("band: accessory ragdoll %s: %s", qbkey::names().get(ap.ragdoll).c_str(), ex.what());
+                    }
                 }
-                const havok::Physics phys = havok::parse(p, s);
+                // ragdoll_collision_group: lists of bone names [C data].
+                std::vector<std::vector<uint32_t>> groups;
+                if (const qb::Value* cg = g.find(keyOfValue(body->find(K("ragdoll_collision_group")))); cg && cg->type == qb::Type::Array && cg->arr)
+                    for (const qb::Value& l : cg->arr->values) {
+                        groups.emplace_back();
+                        if (l.type == qb::Type::Array && l.arr)
+                            for (const qb::Value& b : l.arr->values) groups.back().push_back(b.key);
+                    }
                 auto acc = std::make_unique<AccessorySim>();
-                if (acc->init(rig, phys, bones)) return acc;
-                SDL_Log("band: ragdoll %s: no accessory body", rp->str.c_str());
+                if (acc->init(rig, phys, bones, groups.empty() || SDL_getenv("GD07_NO_RAGDOLL_GROUPS") ? nullptr : &groups)) return acc;
+                if (m.fullBody) SDL_Log("band: ragdoll %s: no accessory body", rp->str.c_str());
             } else {
                 SDL_Log("band: ragdoll %s: not in global_rag_skel", rp->str.c_str());
             }

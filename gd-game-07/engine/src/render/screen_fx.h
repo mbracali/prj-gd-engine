@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <functional>
 #include <memory>
 
 #include "data/matlib.h"
@@ -33,11 +34,12 @@ struct Bloom {  // simple_bloom (Function_8241BC20 parses, Function_8243D240 dra
     float falloff1 = 0, falloff2 = 0;
     bool materialFilter = false, autoLuminance = false;
     float distanceMod = 0;
-    // gh4's bloom2 (parsed by 825074F8 [C: the keys]): `cutoff` holds
-    // subtract, `strength` colormodulate (x its fourth value), drawn through
-    // _Bloom_SubtractModulate(Stencil) and the uber pass (docs/render.md).
+    // gh4's bloom2 (parsed by 824F7C90, drawn by 8250F158 [C]): `cutoff`
+    // holds subtract, `strength` colormodulate (x its fourth value), drawn
+    // through _Bloom_SubtractModulate and the uber pass (ScreenFx::endUber).
     bool gh4 = false;
     float saturation = 1, thickness = 0;
+    uint32_t equation = 0;  // eq0 / eq1 / eq2: the order of the colour matrix's three steps [C 8250F158]
 };
 
 struct Dof {  // dof (Function_8241EE68 parses, Function_824440F8 draws) [C params; the chain: screen_fx.cpp]
@@ -142,7 +144,10 @@ public:
     // false when the effects cannot run (draw straight to the target then).
     bool begin(float scale = 1.0f);
     // Runs the effects and composites into the target and viewport bound at begin().
-    void end(const Params& p, gfx::TargetId into = {});
+    // `glowPass` draws the bloom's material filter pass (VenueView::drawGlow)
+    // into the bound target; without one a materialfilter bloom2 reads the
+    // picture where the stencil is 1, as before.
+    void end(const Params& p, gfx::TargetId into = {}, const std::function<void()>& glowPass = {});
     // The scene target's depth and size, and the viewport begin() saw (Enhanced's chain).
     gfx::TextureId sceneDepth() const { return dev_ && scene_.id ? dev_->targetDepth(scene_.id) : gfx::TextureId{}; }
     // A copy of the scene's depth so far (the raytraced light beams sample
@@ -170,7 +175,7 @@ private:
     int ox_ = 0, oy_ = 0, ow_ = 0, oh_ = 0;
     uint32_t immediate_ = 0, immediateAlt_ = 0, filter_ = 0;
 
-    enum class Blend : uint8_t { Replace, Add, Alpha };  // ONE,ZERO / SRC_ALPHA,ONE / SRC_ALPHA,ONE_MINUS_SRC_ALPHA
+    enum class Blend : uint8_t { Replace, Add, Alpha, AddOne };  // ONE,ZERO / SRC_ALPHA,ONE / SRC_ALPHA,ONE_MINUS_SRC_ALPHA / ONE,ONE
     bool ensure(Target& t, int w, int h, bool depth);
     // One full-screen pass into `dst` (null: the target and viewport begin() saw).
     void pass(const gh3shader::Program* prog, const Target* dst, gfx::TextureId s0, gfx::TextureId s1, const gh3shader::Globals& g,
@@ -182,9 +187,10 @@ private:
     void toQuarter(gfx::TextureId sceneColor);
     void bloomBlur(const Target& t, const Target& tmp, float gain);
     // gh4's chain (p.uber): bloom2's and dof3's buffers, then _Uber_ScreenFX_<parts>.
-    void endUber(const Params& p, gfx::TextureId& cur, const Target*& curT, bool quarters, bool copies);
+    void endUber(const Params& p, gfx::TextureId& cur, const Target*& curT, bool quarters, bool copies, const std::function<void()>& glowPass);
+    // `blend`: 0 ONE, ZERO; 1 SRC_ALPHA, ONE; 2 ONE, SRC_ALPHA (the engine's blend mode 11, 0x6010601 [C 824BCBE8]).
     void passN(const gh3shader::Program* prog, const Target* dst, const gfx::TextureId* tex, int n, const gh3shader::Globals& g,
-               const float (*vs)[4], int vsCount, const float (*ps)[4], int psCount, uint32_t pointMask, bool addSrcAlpha = false);
+               const float (*vs)[4], int vsCount, const float (*ps)[4], int psCount, uint32_t pointMask, int blend = 0);
     // sys_noise / sys_vignettemask / sys_inkblot (global_gfx.scn's materials), decoded on a worker.
     void startSysTextures();
     bool pollSysTextures();
@@ -199,7 +205,9 @@ private:
     void makeVignette(const Vignette& v);
     double inkNext_ = 0, inkClock_ = 0;
     float inkMat_[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 0, 0}};
-    void dofBlur(const Target& t, const Target& tmp, float radius);
+    // `exact`: the further passes as 8241E1F8 draws them (ONE, ONE; none whose
+    // largest weight is 1 / 256 or less); else the earlier SRC_ALPHA, ONE.
+    void dofBlur(const Target& t, const Target& tmp, float radius, bool exact = false);
 };
 
 }  // namespace screenfx

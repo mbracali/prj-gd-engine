@@ -543,6 +543,7 @@ void CameraDirector::starPower(double ms, bool on) {
 
 CamPose CameraDirector::pose(double ms) const {
     evalMs_ = ms;
+    framing_.active = false;  // aim() sets it when a shot frames a member; the control-script path never does
     if (ctl_ == Ctl::Script) {
         // ccam_domorph: from the pose at the call to its target over `time` (0: at once) [C].
         if (!haveMorph_) return lastPose_;
@@ -671,6 +672,7 @@ void CameraDirector::scriptMorph(const qb::Struct& params, double ms) {
 // position this way (docs/venues.md "Conventions"); I: GH3's own tracking,
 // its smoothing and the roll it keeps]. x right, y down, in half-screens.
 CamPose CameraDirector::aim(const CamPose& p, const Keyed& k0, const Keyed& k1, float mix, double ms) const {
+    framing_.active = false;  // not framing a member until proven below
     if (!lookup_) return p;
     const Keyed& k = mix < 0.5f || !k1.lookat ? k0 : k1;
     if (!k.lookat || !k.lookatBone) return p;
@@ -679,6 +681,8 @@ CamPose CameraDirector::aim(const CamPose& p, const Keyed& k0, const Keyed& k1, 
     float so[2] = {k.screenOffset[0], k.screenOffset[1]};
     if (k0.lookat && k1.lookat && &k0 != &k1)
         for (int i = 0; i < 2; ++i) so[i] = k0.screenOffset[i] + (k1.screenOffset[i] - k0.screenOffset[i]) * mix;
+    framing_.member = k.lookat, framing_.bone = k.lookatBone;
+    framing_.sox = so[0], framing_.soy = so[1], framing_.target = target;
     const float th = std::tan(p.fov * 0.5f * 3.14159265f / 180.0f), tv = th / (16.0f / 9.0f);
     // The wanted direction in the camera's local axes (screen right is local -x).
     Vec3 local{-so[0] * th, -so[1] * tv, 1.0f};
@@ -704,6 +708,7 @@ CamPose CameraDirector::aim(const CamPose& p, const Keyed& k0, const Keyed& k1, 
     }
     const Vec3 a = norm(have), b = norm(want);
     const float d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    framing_.active = d >= 0.2f;  // engaged only when the member is within the reframable cone
     if (d < 0.2f) return p;  // behind or far off: keep the authored framing
     const Vec3 c{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
     Quat r{c[0], c[1], c[2], 1 + d};

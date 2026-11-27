@@ -63,6 +63,7 @@ struct Element {
     uint32_t texContext = 0;  // the asset context the texture was set under (PushAssetContext), 0: global
     std::string text;
     bool hidden = false, flipH = false, flipV = false, notFocusable = false, blockEvents = false;
+    bool onlineEntry = false;  // a menu item that would lead to an online mode: greyed + not_focusable (7.8; no online in the port)
     bool allowExpansion = false, locked = false, preserveOrientation = false;
     bool layoutOnce = false;  // SetScreenElementLock on: one more layout first [C 0x8221A588]
     // A VMenu's width is set by its first-update event only (made, a child
@@ -177,6 +178,17 @@ public:
     void morphFromSetProps(Element& e, const qb::Struct& p);
     // DisplayLoadingScreen's picture is up (over everything).
     bool loadingScreenUp() const { return loadingTex_ != 0; }
+    // Puts up LOADINGSCREENS/<name>.img as the full-screen loading picture
+    // (optionally with a spinning <spin> image at sx,sy), returning true when
+    // the image existed; the DisplayLoadingScreen native and the state
+    // machine's task_menu (the boot copyright screen) both go through it.
+    bool showLoadingImage(const std::string& name, const std::string& spin = {}, float sx = 0, float sy = 0);
+    // Spins GHWT's world globe (the `tex` world map on a sphere) centred at
+    // (cx, cy), radius r, over the current loading picture -- the boot
+    // copyright screen's flaming Earth.
+    void setLoadingGlobe(const std::string& tex, float cx, float cy, float r);
+    // Takes the loading picture away (HideLoadingScreen).
+    void clearLoadingScreen() { loadingTex_ = 0, loadingSpin_ = 0, spinGlobe_ = false; }
     // World Tour's UI viewports (CreateViewport style = viewport_ui_texture,
     // CreateViewportTextureOverride): a viewport's windows drawn into a
     // texture that replaces a zone texture (the sound stage's
@@ -230,6 +242,12 @@ public:
     // the element its focus handler names, as the main menu's do). `focus`
     // moves the selection there (a hover). Returns whether one was hit.
     bool menuAt(float x, float y, bool focus, bool* isList = nullptr);
+    // Mouse-hit coverage over the focused GH3 menus right now: the number of
+    // focusable, visible menu items (`focusable`) and how many of them menuAt
+    // can hit -- i.e. have drawable bounds (directly, or via the element their
+    // focus handler names). Any shortfall is an item the mouse cannot reach.
+    // Used by --uitest to audit "the mouse works in every menu" per screen.
+    void menuHitCoverage(int& focusable, int& hittable) const;
     // A screen point (1280 x 720) -> the point of a UI-texture viewport's
     // window under it (the menu boards in the 3D scene; MenuScene sets it).
     std::function<bool(uint32_t viewport, float x, float y, float& vx, float& vy)> pointerToViewport;
@@ -255,6 +273,13 @@ public:
         float bodyY0, bodyY1;
     };
     std::vector<HelpBarPill> helpBarLayout() const;
+    // 7.8 online disabled: a menu item whose handler tree leads to an online
+    // mode (online play, downloads/DLC store, GHTunes upload/download). The
+    // port ships no online, so every such item is greyed + not_focusable.
+    static bool handlersLeadOnline(const Element& e);
+    // Walk the tree: `seen` = greyed online-entry items, `focusable` = any that
+    // ended up still selectable (must be 0).
+    void onlineEntryCoverage(int& seen, int& focusable) const;
     // The drawn bounds of an element (false: not drawn in the last frame).
     bool drawnBounds(uint32_t id, float& x0, float& y0, float& x1, float& y1) const;
     bool drawnTextBounds(const std::string& text, float& x0, float& y0, float& x1, float& y1) const;
@@ -354,6 +379,12 @@ private:
     std::vector<uint32_t> assetContexts_;
     uint32_t loadAssetContext(uint32_t context, const qb::Struct* body);
     float spinX_ = 0, spinY_ = 0;
+    // GHWT's boot copyright screen (boot_legal) spins a world globe over the
+    // flaming glow (load_wheel is the equirectangular world map, not a flat
+    // wheel): spinGlobe_ renders the spinner as a rotating sphere centred at
+    // (spinX_, spinY_) with radius spinR_, instead of the flat turning quad.
+    bool spinGlobe_ = false;
+    float spinR_ = 48;
     double loadingMs_ = 0;
     // Texture-slot movies (PlayMovieFromBuffer, PreLoadMovie +
     // StartPreLoadedMovie): drawn full screen at their texturepri in the

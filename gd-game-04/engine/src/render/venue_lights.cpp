@@ -169,6 +169,11 @@ void LightShow::play(uint32_t snapshot, double t) {
             tg.to.intensity = num(e->find(K("intensity")), tg.to.intensity);
             tg.to.specular = num(e->find(K("specularintensity")), tg.to.specular);
             tg.to.shadow = num(e->find(K("shadowintensity")), tg.to.shadow);
+            // LightShow_AppendSnapshotParams overrides the played values (native
+            // 0x82128E28 merges the append slot into each snapshot entry) [C]:
+            // blackout / flare force 0.25, strobe forces intensity 1.0.
+            if (appendIntensity_ >= 0) tg.to.intensity = appendIntensity_;
+            if (appendSpecular_ >= 0) tg.to.specular = appendSpecular_;
             if (strobeOn_ && mood_ == K("strobe")) tg.to.intensity = 1.0f;  // LightShow_AppendSnapshotParams intensity=1.0
             tg.start = t;
             tg.blend = timeEnabled_ ? blend_ : 0.0;
@@ -201,10 +206,22 @@ void LightShow::enterMood(uint32_t mood, double t) {
     const qb::Struct* e = structOf(modeEntry());
     processor_ = e ? keyOf(e->find(K("processor"))) : 0;
     strobeOn_ = false;
+    // LightShow_AppendSnapshotParams state: cleared on every mood change (the
+    // generic / poor / strobe enters do not append; the old mood's exit runs
+    // its AppendSnapshotParams `clear`), then set by the blackout / flare enter
+    // below [C scripts]. The strobe intensity = 1.0 override is applied inline.
+    appendIntensity_ = appendSpecular_ = -1;
     if (processor_ == K("Strobe_Generic")) {
         timeEnabled_ = false;  // LightShow_Strobe_Enter: SetTime enable=false
         cycle(t, false);       // LightShow_Strobe_Event's first CycleNextSnapshot (the blackout)
     } else if (processor_ == K("Blackout_Generic") || processor_ == K("Flare_Generic")) {
+        // Blackout_Generic (0x7236971a) / Flare_Generic (0x5e1e8383): outside
+        // the debug zones (z_soundcheck / z_training / z_viewer, which GH3 skips
+        // with a GetPakManCurrent switch) the enter forces every played light to
+        // intensity = specularintensity = 0.25 via LightShow_AppendSnapshotParams
+        // before the single CycleNextSnapshot [C scripts; held until the mood's
+        // exit `clear`]. The port missed this and showed those moods too bright.
+        if (v_->zone != "z_soundcheck" && v_->zone != "z_viewer") appendIntensity_ = appendSpecular_ = 0.25f;
         cycle(t, false);
     } else if (processor_) {
         cycle(t, true);  // LightShow_GenericMood_Enter / LightShow_Poor_Enter

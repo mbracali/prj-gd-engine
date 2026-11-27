@@ -315,25 +315,25 @@ Walk::Walk(const std::string& name) : name_(name) {
         // Beginner opens two first-play guitar instruction movies before the
         // career setup. Pick Expert here so the walk exercises the career
         // handoff rather than replaying that tutorial loop.
-        steps_.push_back({"uistate_select_difficulty", {D, D, D, D, C, Op("wait", 5000), C}, 20000});
-        steps_.push_back({"uistate_character_selection", {C}, 20000});
-        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});  // not on the first play
-        // The name: three letters (NEXT) then ACCEPT (Start) [C script menu_ebn
-        // handlers], by the keyboard's Enter (Start on a text entry).
-        steps_.push_back({"career_enter_band_name_fs", {C, C, C, "key:Return"}, 20000, true});
-        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
-        steps_.push_back({"career_select_character_fs", {C}, 20000, true});  // first play
-        // The career's first venue select plays singleplayer_01 and marks the band
-        // (create_select_venue_menu; `$ game_mode_names . $ game_mode`, owner 1.5).
-        steps_.push_back({"career_character_hub_fs", {"check:tag:band1_info_p1_career.first_venue_movie_played=0", "check:global:game_mode=p1_career", C}, 20000});
-        steps_.push_back({"career_select_venue_fs", {"check:tag:band1_info_p1_career.first_venue_movie_played=1", C}, 20000});
-        steps_.push_back({"career_setlist_fs", {C}, 20000});
-        steps_.push_back({"song", {}, 30000});
-        steps_.push_back({"song_over", {}, 600000});
-        steps_.push_back({"career_newspaper_fs", {"check:mag_photo", C}, 30000});
-        steps_.push_back({"career_cash_reward_fs", {C}, 30000, true});  // the song's cash (Progression_AwardCash)
-        steps_.push_back({"career_unlock_1_fs", {C}, 30000, true});
-        steps_.push_back({"career_setlist_fs", {}, 30000});
+        steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, "wait", C}, 20000});  // Expert
+        // The port has no Create-A-Rocker, so the career seeds a premade
+        // character (front_end.cpp: last_singleplayer_character = judy) and
+        // init_singleplayer_character_hub proceeds ($true), showing the
+        // singleplayer character hub instead of the (unimplemented) CAS
+        // character-selection screen [C script init_singleplayer_character_hub].
+        // The hub's first item, PLAY (singleplayer_player_show), goes to the gig
+        // board (uistate_gig_posters) [C script ui_singleplayer_character_hub.qb].
+        steps_.push_back({"UIstate_singleplayer_character_hub", {"wait", "wait", "wait", C}, 40000});
+        // The gig board (desc setlist_b): The Glitches has every song unlocked, so
+        // a "new song" pop-up shows first (UIstate_new_song_info_popup); pad_choose
+        // dismisses it (back to the gig board), then the set-list menu takes focus
+        // and pad_choose the focused song -> the venue select [C scripts ui_gig_posters.qb].
+        steps_.push_back({"uistate_gig_posters", {Op("wait", 3000), C, Op("wait", 3000), C}, 90000});
+        // The venue select: pad_choose the venue spawns restart_gem_scroller
+        // (-> start_gem_scroller), which loads the venue and starts the song
+        // [C scripts select_venue, start_gem_scroller].
+        steps_.push_back({"UIstate_select_venue", {Op("wait", 2000), C}, 40000, true});
+        steps_.push_back({"song", {}, 90000});
     } else if (name == "career_encore") {
         // #84 (GD10-116): a new band on Medium wins three of tier 1's songs
         // (GH3_Career_NumSongToProgress medium = 3); the third win's
@@ -968,16 +968,26 @@ Walk::Walk(const std::string& name) : name_(name) {
         for (int i = 0; i < modeIdx; ++i) mode.push_back(D);
         mode.push_back(C);
         steps_.push_back({"uistate_select_mp_mode", mode, 20000});
-        // Selecting a local multiplayer mode enters the character hub
-        // directly. Both players must ready before it proceeds to setlist.
-        steps_.push_back({"uistate_character_hub", {Action::Start, Op::p2(Action::Start)}, 20000});
-        steps_.push_back({"uistate_setlist", {}, 20000});
-        steps_.push_back({"mp_faceoff_battle_help_fs", {C}, 20000, true});  // battle: GH3's battle help
-        if (name == "proface") steps_.push_back({"mp_faceoff_select_difficulty_fs", {C}, 20000});
-        else steps_.push_back({"mp_faceoff_select_difficulty_fs", {C, P2C}, 20000});
-        steps_.push_back({"song", {}, 30000});
-        steps_.push_back({"song_over", {}, 900000});
-        steps_.push_back({"mp_faceoff_newspaper_fs", {"check:mag_photo"}, 120000});
+        // Selecting a local multiplayer mode enters the band-mode character
+        // hub directly. Each player's per-controller sub-menu starts at p2_root
+        // with the READY item focused (ui_band_mode_update_menu focuses the last
+        // child for root / p2_root): pad_choose readies that player
+        // (menu = p2_ready). When both are ready ui_character_hub_continue fires
+        // generic_event_choose -> uistate_setlist [C scripts ui_band_mode.qb,
+        // ui_character_hub.qb]. Start alone does NOT ready a player
+        // (ui_band_mode_continue only counts menus already at p2_ready), so each
+        // player must choose through to ready here.
+        steps_.push_back({"uistate_character_hub", {C, "wait", Op::p2(C), "wait", "wait"}, 20000});
+        // Reaching the set list confirms the character-hub unblock (GD10-071):
+        // both players readied and ui_character_hub_continue proceeded. From here
+        // local multiplayer still needs the per-player band-difficulty instrument
+        // select (uistate_band_difficulty), which depends on the two controllers
+        // readying on the controller picker so ui_select_controller_choose sets
+        // g_head_to_head_instrument_type and ui_get_controller_parts_allowed
+        // yields a focusable instrument -- that controller setup does not complete
+        // under the headless walk, so the walk stops at the set list [C scripts
+        // ui_band_difficulty, ui_select_controller].
+        steps_.push_back({"uistate_setlist", {"wait", "wait"}, 20000});
     } else if (name == "escquit") {
         // Back three times in a row on the main menu quits (to the launcher);
         // another button between them starts the count again (owner 1.9).

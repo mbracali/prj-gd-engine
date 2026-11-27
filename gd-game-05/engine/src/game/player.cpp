@@ -3,6 +3,7 @@
 #include "game/player.h"
 
 #include "game/band_performer.h"
+#include "game/drum_player.h"
 
 #include <algorithm>
 #include <bit>
@@ -47,6 +48,34 @@ Player::Player(const Song& song, Part part, Difficulty difficulty, const Rules& 
         if (!owned(int(i))) continue;
         int tail = g.noSustain ? 0 : g.durationTicks * rules_.tailPoints / rules_.tailTicksPerBeat;
         baseScore_ += g.fretCount() * (rules_.headPoints + tail);
+    }
+}
+
+Player::~Player() = default;
+
+// Rock Band's drums (controls B1): drumMode builds the faithful drum judge on
+// the same (split, native-lane) drum chart this Player holds. The Player still
+// owns scoring, the crowd meter, Star Power phrases, the band and the track;
+// DrumPlayer only decides which gem / lane each strike resolves to.
+void Player::setDrumMode(bool on) {
+    drumMode_ = on;
+    if (on && !drum_) drum_ = std::make_unique<DrumPlayer>(song_, difficulty_, rules_, noFail_, false);
+}
+
+// A pad / kick struck at t (lane 0 kick .. 4 green). DrumPlayer matches the
+// strike to a gem in its slop window (nearest open note in that lane); the
+// Player then scores that hit, or takes the overstrum of a stray pad, through
+// the same paths the guitar watcher uses. Passes (gems that scroll by unhit)
+// stay with the Player's own miss sweep (sweep(), the drumMode branch), so the
+// per-time-group pass penalty and the crowd meter are unchanged.
+void Player::drumStrike(int lane, float t) {
+    if (!drum_) return;
+    drum_->strike(lane, t);
+    for (const DrumPlayer::Event& e : drum_->takeEvents()) {
+        if (e.kind == DrumPlayer::Event::Kind::Hit && e.gem >= 0 && !hit_[size_t(e.gem)])
+            watcherHit(t, e.lane, e.gem, false);
+        else if (e.kind == DrumPlayer::Event::Kind::Overhit)
+            watcherMiss(t, e.lane, -1);  // a stray pad: the overstrum path (as the joypad watcher's best<0 did)
     }
 }
 

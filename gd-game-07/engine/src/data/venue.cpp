@@ -58,6 +58,7 @@ void readNodes(Venue& v, const qb::Array& arr) {
         n.createdAtStart = hasFlag(st, K("createdatstart"));
         n.createdOn = keyOf(st.find(K("createdonprogress")));
         if (!n.createdOn) n.createdOn = keyOf(st.find(K("createdfromvariable")));
+        n.pushback = keyOf(st.find(K("rendermethod"))) == K("pushback");
         if (!n.name) continue;
         v.nodeIndex.emplace(n.name, v.nodes.size());
         v.nodes.push_back(n);

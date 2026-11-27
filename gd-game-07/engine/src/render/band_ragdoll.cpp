@@ -140,12 +140,43 @@ Quat integrate(const Quat& q, Vec w, float h) {
 
 }  // namespace
 
-bool AccessorySim::init(const bandanim::Rig& rig, const havok::Physics& rag, const std::vector<uint32_t>& bones) {
+bool AccessorySim::collides(size_t i, size_t j) const {
+    const Body &a = bodies_[i], &b = bodies_[j];
+    if (!a.dynamic || b.dynamic || a.shape.kind != havok::Shape::Capsule || b.shape.kind != havok::Shape::Capsule) return false;
+    // gh4's ragdoll_collision_group: list i's bodies are in collision layer
+    // 12 + i [C 8244A358: collisionFilterInfo = instance << 5 | layer, a body
+    // in no list layer 31], and the world's filter asks its layer table first
+    // [C 824A2FF0; the table C 824A32F8]: layers 12..17 (lists 0..5) meet
+    // every other of them but not themselves, layer 18 (list 6) only layer 12,
+    // layers 19 (list 7) and 31 nothing. So the hair's roots pass through the
+    // head, neck and collars they lie on, the coat tails and skirts through
+    // the pelvis, stomach and shins, and nothing meets the hands and feet
+    // (RagdollCollisionGroups_Rocker_Female's last list: the ankles and
+    // palms) [C data].
+    // GD07_RAGDOLL_LAYERS_LEGACY=1: only "one list's bodies do not meet" (development aid).
+    static const bool legacy = SDL_getenv("GD07_RAGDOLL_LAYERS_LEGACY") != nullptr;
+    if (layered_ && legacy) {
+        if (a.group >= 0 && a.group == b.group) return false;
+    } else if (layered_) {
+        const int la = a.group, lb = b.group;
+        if (la < 0 || lb < 0 || la >= 7 || lb >= 7 || la == lb) return false;
+        if ((la == 6 && lb != 0) || (lb == 6 && la != 0)) return false;
+    }
+    // Havok's linked-body collision filter suppresses contact between a
+    // constrained accessory and its anchor body.
+    for (const Con& c : cons_)
+        if (c.active && c.a == int(i) && c.b == int(j)) return false;
+    return true;
+}
+
+bool AccessorySim::init(const bandanim::Rig& rig, const havok::Physics& rag, const std::vector<uint32_t>& bones,
+                        const std::vector<std::vector<uint32_t>>* groups) {
     bodies_.clear();
     cons_.clear();
     dynamic_ = 0;
     parent_ = rig.parent;
     bodyOf_.assign(rig.size(), -1);
+    layered_ = groups != nullptr;
     std::vector<int> index(rag.bodies.size(), -1);
     for (size_t i = 0; i < rag.bodies.size(); ++i) {
         const havok::Body& hb = rag.bodies[i];
@@ -170,6 +201,8 @@ bool AccessorySim::init(const bandanim::Rig& rig, const havok::Physics& rag, con
         b.linDamp = hb.linearDamping;
         b.angDamp = hb.angularDamping;
         b.shape = hb.shape;
+        for (size_t gi = 0; groups && gi < groups->size(); ++gi)
+            if (std::find((*groups)[gi].begin(), (*groups)[gi].end(), key) != (*groups)[gi].end()) b.group = int(gi);
         // The skeleton mapper's simple mapping [C 821AF798 hkaSkeletonMapperUtils::createMapping
         // by name]: bone = body * (body bind)^-1 * (bone bind), the .rag's bodies
         // sitting at the bind pose [C data].
@@ -180,9 +213,11 @@ bool AccessorySim::init(const bandanim::Rig& rig, const havok::Physics& rag, con
         bodyOf_[size_t(bone)] = int(bodies_.size());
         bodies_.push_back(b);
         if (SDL_getenv("GD07_RAGDOLL_LOG"))
-            SDL_Log("ragdoll #%d %s: %s mass %.2f invI %.2f com (%.3f %.3f %.3f) damp %.2f/%.2f maxAng %.1f; body-to-bone (%.4f %.4f %.4f)",
+            SDL_Log("ragdoll #%d %s: %s mass %.2f invI %.2f com (%.3f %.3f %.3f) damp %.2f/%.2f maxAng %.1f; body-to-bone (%.4f %.4f %.4f); shape %d %s r %.3f a (%.3f %.3f %.3f) b (%.3f %.3f %.3f) t (%.3f %.3f %.3f)",
                     bone, hb.name.c_str(), b.dynamic ? "dynamic" : "keyframed", hb.mass, b.invInertia, b.com.x, b.com.y, b.com.z, b.linDamp,
-                    b.angDamp, b.maxAng, b.boneFromBody.t.x, b.boneFromBody.t.y, b.boneFromBody.t.z);
+                    b.angDamp, b.maxAng, b.boneFromBody.t.x, b.boneFromBody.t.y, b.boneFromBody.t.z, int(hb.shape.kind), hb.shape.className.c_str(),
+                    hb.shape.radius, hb.shape.a[0], hb.shape.a[1], hb.shape.a[2], hb.shape.b[0], hb.shape.b[1], hb.shape.b[2], hb.shape.translation[0],
+                    hb.shape.translation[1], hb.shape.translation[2]);
     }
     if (!dynamic_) return false;
     for (const havok::Constraint& hc : rag.constraints) {
@@ -222,6 +257,10 @@ bool AccessorySim::init(const bandanim::Rig& rig, const havok::Physics& rag, con
         const int child = bodies_[size_t(c.a)].bone, par = bodies_[size_t(c.b)].bone;
         bool ancestor = false;
         for (int p = parent_[size_t(child)]; p >= 0 && !ancestor; p = parent_[size_t(p)]) ancestor = p == par;
+        // Or a body further down its parent's own branch: gh4's coat tails
+        // hang under Bone_Stomach_Lower / Bone_Pelvis and are tied to
+        // Bone_Chest / Bone_Stomach_Lower [C data cas_acc_bones.pak].
+        for (int p = parent_[size_t(par)]; p >= 0 && !ancestor; p = parent_[size_t(p)]) ancestor = p == parent_[size_t(child)];
         if (ancestor) continue;
         SDL_Log("ragdoll: %s is tied to %s, not one of its skeleton's parents: animated, not simulated", c.d.name.c_str(),
                 rag.bodies[size_t(c.d.bodyB)].name.c_str());
@@ -448,21 +487,18 @@ void AccessorySim::step(State& s, const std::vector<Mat34>& world, const Vec& gr
     // The original Havok world also resolves contacts. The accessory-only
     // solver above handles its joints; now resolve the capsule contacts
     // against the keyframed body capsules in the same .rag. This keeps hair,
-    // chains and coat tails outside the character collision proxies.
-    for (int pass = 0; pass < 2; ++pass) {
+    // chains and coat tails outside the character collision proxies. A few
+    // relaxation passes: a deep overlap pushed out of one body capsule can land
+    // in another, so more passes resolve the common cases (capsule pairs only,
+    // negligible cost), matching gd10's solver [GD10-044].
+    for (int pass = 0; pass < 4; ++pass) {
         for (size_t i = 0; i < bodies_.size(); ++i) {
             const Body& aBody = bodies_[i];
             if (!aBody.dynamic || aBody.shape.kind != havok::Shape::Capsule) continue;
             Vec a0, a1; capsuleWorld(aBody.shape, s.b[i].x, a0, a1);
             for (size_t j = 0; j < bodies_.size(); ++j) {
                 const Body& bBody = bodies_[j];
-                if (bBody.dynamic || bBody.shape.kind != havok::Shape::Capsule) continue;
-                // Havok's linked-body collision filter suppresses contact
-                // between a constrained accessory and its anchor body.
-                bool linked = false;
-                for (const Con& c : cons_)
-                    if (c.active && c.a == int(i) && c.b == int(j)) { linked = true; break; }
-                if (linked) continue;
+                if (!collides(i, j)) continue;
                 Vec b0, b1, ca, cb; capsuleWorld(bBody.shape, s.b[j].x, b0, b1);
                 closestSegments(a0, a1, b0, b1, ca, cb);
                 const Vec delta = sub(ca, cb);
@@ -605,6 +641,29 @@ void AccessorySim::apply(double ms, std::vector<Mat34>& world, const std::functi
         mix.b[i].x = {bandanim::nlerp(x0.q, x1.q, frac), add(x0.t, mul(sub(x1.t, x0.t), frac))};
     }
     pose(mix, world);
+}
+
+AccessorySim::Metrics AccessorySim::metrics() const {
+    Metrics m;
+    for (const Body& b : bodies_)
+        if (b.shape.kind == havok::Shape::Capsule) ++(b.dynamic ? m.accessoryCapsules : m.bodyCapsules);
+    if (cur_.b.size() != bodies_.size()) return m;
+    for (size_t i = 0; i < bodies_.size(); ++i) {
+        const Body& aBody = bodies_[i];
+        if (!aBody.dynamic || aBody.shape.kind != havok::Shape::Capsule) continue;
+        Vec a0, a1;
+        capsuleWorld(aBody.shape, cur_.b[i].x, a0, a1);
+        for (size_t j = 0; j < bodies_.size(); ++j) {
+            const Body& bBody = bodies_[j];
+            if (!collides(i, j)) continue;
+            Vec b0, b1, ca, cb;
+            capsuleWorld(bBody.shape, cur_.b[j].x, b0, b1);
+            closestSegments(a0, a1, b0, b1, ca, cb);
+            const float d = len(sub(ca, cb)), minD = aBody.shape.radius + bBody.shape.radius;
+            if (minD > 0 && minD - d > m.worstPenetration) m.worstPenetration = minD - d;
+        }
+    }
+    return m;
 }
 
 std::string AccessorySim::selfTest() {

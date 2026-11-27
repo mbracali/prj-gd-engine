@@ -47,6 +47,13 @@ public:
     static inline int internalHeight = 0;  // 0: the window's
     // Enhanced: All Band Mates Cast Shadows, More Lights on Venues, Dust in Light Beams (gd02's extras).
     static inline gfx::EnhancedLights::Settings extras;
+    // Enhanced > Sharper Character Shadows (a port enhancement; not in the
+    // original): the band's dynamic self-shadow cascades drawn at a higher
+    // resolution. 1 = the original's own 1024 / 512 (the default, GH3's
+    // exact behaviour); 2 / 4 = 2x / 4x per side. Read when a venue builds
+    // its shadow maps (VenueStage::configure), so it takes effect from the
+    // next song; the projection, bias, filter and intensity are unchanged.
+    static inline int shadowScale = 1;
     // A player's Star Power on (Blur on Star Power), set each frame by the song.
     void setStarPower(bool on) { starPowerOn_ = on; }
     // A fixed camera instead of the director's (the Enhanced backdrop's shot); null: the director's.
@@ -152,6 +159,7 @@ private:
     std::unique_ptr<Particles> particles_;  // the zone's particles and pyro (GD04_NO_PARTICLES=1: none)
     gfx::RenderDevice* device_ = nullptr;
     std::array<gfx::TargetId, 2> shadow_{};  // the band's dynamic shadow cascades, 1024 / 512 (GD04_NO_SHADOWS=1: none)
+    int shadowScale_ = 1;  // the shadowScale (Sharper Character Shadows) captured when the cascades were made; used by shadowPass
     std::array<size_t, 2> shadowDraws_{};    // the casters each cascade drew last frame
     int shadowLight_ = -1;  // the shadow's light, chosen once per venue (VenueStage::shadowPass)
     int flashFrames = 0, outros = 0;       // frames drawn with ScreenFlash's FlashBS (venuetest)

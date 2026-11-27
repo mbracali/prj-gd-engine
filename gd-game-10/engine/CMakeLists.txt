@@ -99,6 +99,7 @@ target_sources(gd10 PRIVATE
   src/render/venue_view.cpp
   src/render/xenos_glsl.cpp
   src/game/chart.cpp
+  src/game/drum_player.cpp
   src/game/note_track.cpp
   src/game/player.cpp
   src/game/match.cpp
@@ -114,6 +115,7 @@ target_sources(gd10 PRIVATE
   src/script/vm.cpp
   src/tests/audittest.cpp
   src/tests/chartest.cpp
+  src/tests/drumtest.cpp
   src/tests/format_checks.cpp
   src/tests/scripttest.cpp
   src/tests/selftest.cpp

@@ -283,6 +283,74 @@ player's `player_status` struct.
   calc_health_invincible_time, 0x8210FD18]. No loss with cheat_nofail (non-career),
   tutorial, training.
 
+### Boss battles: deep per-boss pass + invincibility fix (2026-11-24)
+
+A full per-boss RE of the three career bosses (Tom Morello, Slash, Lou/the
+Devil) against `guitar_battle.qb` and the XEX. Everything below is [C] from the
+disc data / decompiled C unless noted; one genuine defect was found and fixed.
+
+- Per-boss `PowerUps` (card pool both players draw from, `bossbattle_select`),
+  by `name` key against `battlemode_powerups` (0xab5dd1f9): Tom Morello
+  (Boss_TomMorello_Props 0x9a5885e7) = Amp Overload, Difficulty Up, Double
+  Notes, Whammy; Slash (0x79cdef14) = + Broken String; Lou (Boss_Devil_Props
+  0xd38033de, `character_name` "Lou") = + Lefty Flip + Broken String. No boss
+  uses Powerup Steal or Death Drain as a card (Death Drain only in sudden
+  death, which boss battles do not have; the boss drain is the scripted
+  `boss_battle_begin_deathlick`). gainpernote/losspernote/PowerUpMissedNote/
+  WhammySpeed/BrokenStringSpeed/BrokenStringMissedNote all read per-difficulty
+  from the props at runtime (BattleData::loadBoss); field keys verified. The
+  port's filter and enum ordering match the table exactly.
+- `bossbattle_select` (0xc6bd40ce) vs `battlemode_select` (0x503e0639):
+  identical roll EXCEPT the boss path has no health-<=0.5 "losing" branch
+  (always `weight`, `weight_low` for the last-rolled and the top card) and no
+  sudden-death forced Death Drain. It skips Difficulty Up when the victim's
+  difficulty (current_difficulty2 for P1, current_difficulty for the boss) is
+  expert. The port's `select()` with `bossRules` reproduces this.
+- Boss AI: firing (0x82108948) = reset a 100-frame counter at 0 cards, count
+  down at 1 card, fire at once at 2; `CheckButtonsBoss` (0x821096E8) +
+  `CheckBossCutoff` (0x82109A78) = plays the rhythm chart, HOPO tapped 4 times
+  then strummed on the 5th (a global hammer counter reset on every strum), hold
+  = max fret sustain /1000 + 1 s (1 s when < 61 ms), frets released when the
+  hold expires; `bossbattle_ai_damage` (0x5076aabf) + ApplyBossBattleGemMisses
+  (0x82103eb8) = pct % of the fret-gems in each [start,end) window missed
+  (immediate cards from the boss's current note, delayed cards one travel+1 s
+  ahead), Whammy has `no_ai_damage` so only kills the frets, Broken String runs
+  until all five broken counters < 3; 200 ms lead. All match the port
+  (`bossInput`, `bossDamage`, `applyBossMisses`). The `game_mode == tutorial`
+  (0x39940016) guard in the firing/select scripts is irrelevant to a real boss
+  battle (not tutorial).
+- Outcome: boss at 0 -> Outcome::P1Wins -> `failed()` false -> `r.won` ->
+  GuitarEvent_SongWon (newspaper); player at 0 -> Outcome::Failed ->
+  GuitarEvent_SongFailed. `battleKo` is Battle-only, so a boss win is a normal
+  SongWon, not a KO-fail. Lou's death-drain restart is wired through
+  `setup.devilFinish`/`startMs` (player 2 off-screen at x 1000). Faithful.
+- GuitarEvent_BattleAttackFinished (0x30252d4c): still not raised, and this
+  stays a faithful-in-effect omission. It only resets battle audio-mixing state
+  (ramps the five guitar busses over 0.15 s and zeroes the per-player balance
+  buss DSP 0xf6a36814). No attack-start script (battle_lightning /
+  _up_difficulty / _death_lick / _trigger_on / _steal / _broken_string /
+  _whammy_attack) applies any guitar buss/DSP, and the port applies none per
+  attack either, so there is nothing stuck to reset -- implementing it would be
+  a no-op without first adding the attack-time ducking it reverses. Documented,
+  not fixed.
+
+FIX -- boss early-window invincibility (game/player.cpp). CrowdDecrease
+(0x8210FD18) gates every health loss on `song_time < player_status.invincible_time
+(0xf4cecb3d) && health <= health_invincible_minimum x 0.02 (0.5)`, reading
+whichever `player_status` it is handed; the boss's own loss is computed past the
+same gate. In a career boss battle game_mode is `p1_career` (0x76362f1e, per the
+KO logic's own `iVar6 == 0x76362f1e` test), which is in
+`calc_health_invincible_time`'s first branch, so it sets the window for BOTH
+players by their own difficulty (the boss shares P1's via current_difficulty2) --
+easy 20 % / medium 10 %. The port's `changeHealth` had `if (!rules_.boss && ...)`,
+which denied the boss the window, so on easy/medium the boss could be drained
+below 0.5 and killed in the opening of the song, unlike the original. Dropping
+the `!rules_.boss` guard (the boss's `invinciblePct` is -1 -> by difficulty, diff
+= P1's) restores it; hard/expert unchanged (0 % window). Verified with a
+deterministic Player-level harness (before: boss 0.50 -> 0.395 inside the easy &
+medium windows; after: held at 0.50 inside, still loses after the window and
+when > 0.5, hard still loses).
+
 ### 8. Modes (details, per mode, in `modes.md`)
 
 - Co-op (p2_career; p2_coop is online only: the local MULTIPLAYER menu has
@@ -723,6 +791,74 @@ the song is thrufireandflames; with it set CrowdDecrease takes no health
 - Back-face culling fixes the M5 stage-rear cameras (they stand behind
   walls) [I: Direct3D's default CCW, the templates' own states not decoded].
 
+## Character roster, selection and the store (audit, 2026-11-24)
+
+GH3 has **no Create-A-Rocker / appearance creator** (that arrives in GHWT /
+Metallica). "Character creation" in GH3 = a fixed + unlockable character
+**roster**, character **selection** (career / quick play / multiplayer band
+setup), and a **store** that buys characters, guitars, finishes, outfits,
+styles, songs and videos with career cash. All of it is **GH3's own QScript
+running on the port's VM** (ui.md): the port supplies the screen-element /
+menu-object natives and persists the globals; the roster / unlock / price /
+cash logic is the original scripts' [C scripts]. **Audited faithful; no code
+change.**
+
+- **Unlock model** [C scripts guitar_globaltags.qb]: every character body,
+  guitar, finish, outfit, style and video is a GlobalTag keyed by its
+  `desc_id` with `unlocked` 0/1 (and `unlocked_for_purchase`); band cash is
+  the GlobalTag `band_info`'s `cash` field. `setup_globaltags` (called at
+  new-save setup) runs `setup_unlocks` (Secret_Guitars / Secret_Basses
+  `unlocked_for_purchase = 0`; Bonus_Guitars / _Finishes / Bonus_Basses
+  `unlocked_for_purchase = 1`; Secret_Characters `default_charactertags` =
+  unlocked 0; Bonus_Outfits unlocked 0; Bonus_Styles every 6th (one per
+  character) unlocked 1), `setup_character_tags` (Secret_Characters[0..2] =
+  Slash / Morello / Satan `unlocked_for_purchase = 0`, boss-gated),
+  `setup_characterguitar_tags` (per profile x player, default guitar /
+  bass, falls back to Les Paul Black / LP VBRST), `setup_store_tags`
+  (videos). Secret_Characters = Slash 10000, Tom Morello 10000, Satan (Lou)
+  15000, RockGod 20000, Grim Ripper 10000 [C data Secret_Characters].
+- **Store** [C scripts menu_store.qb]: `store_buy_character` guards on
+  `unlocked = 0` (no re-buy), special-cases Satan Outfit2 needing Satan
+  Outfit1 first, checks `cash >= price`, deducts cash into `band_info`,
+  sets the body **and** its musician_instrument's tag `unlocked = 1`,
+  autosaves. `Progression_AwardCash` (guitar_progression.qb) adds
+  Cash_System_rules cash (by difficulty / new-vs-old stars) to `band_info`.
+  Pages: create_store_{characters,guitars,guitar_finishes,outfits,styles,
+  songs,videos}_menu. The Vault is these tags read back.
+- **Selection** [C script menu_character_select.qb]: `get_valid_character_index`
+  — a profile is valid iff downloaded, not `debug_only`, `Type = Guitarist`,
+  and (its body tag exists with `unlocked = 0` -> invalid); the main roster
+  carries no such tag so it is always selectable, secret characters are
+  gated by their bought tag. `cs_scroll_up_or_down` (no wrap) / paging via
+  `cs_check_if_new_page`.
+- **Appearance customisation that does exist**: per-character outfit + style
+  + selected guitar / bass (player_status.outfit / style,
+  `current_selected_guitar` / `_bass`), bought in the store. No freeform
+  editor.
+- **Port backing, verified faithful**: GetGlobalTags / SetGlobalTags
+  (natives_core.cpp:330 / 356), Push/PopGlobalTags sections
+  (natives_core.cpp:371 / 380), SaveToMemoryCard / LoadFromMemoryCard ->
+  save.json tags + sections (natives_flow.cpp:94 / 102, game/save.cpp). The
+  lookups the scripts use (get_musician_profile_size / _struct,
+  is_musician_profile_downloaded, find_instrument_index,
+  is_musician_instrument_downloaded, get_current_band_info,
+  find_profile_by_id) are GH3 **scripts**, run as-is. The port adds only:
+  the neighbour-prefetch heuristic (natives_game.cpp:95, mirrors
+  get_valid_character_index's Guitarist / not-debug_only / body-tag-unlocked
+  filter), `cs_check_if_new_page` for retail's 13-icon page (GD04-094,
+  natives_flow.cpp:182), the store character-name layout fix (GD04-099), and
+  The Glitches Vault isolation (ui/glitches, GD04-026 / 096).
+- **Objective evidence** (bl04 build, headless `--walktest`, isolated
+  XDG_DATA_HOME): `store` passes all six pages (finishes / songs / characters
+  / outfits / styles / videos) with their models and character_name_text
+  centred at x 897.5 (GD04-099 check); `vault` passes — The Glitches' band 5
+  reads Instrument_focus01.unlocked = 1 while the save view and band 1 read
+  0 (GD04-026 / 096 isolation); `career` passes (character -> hub -> song ->
+  newspaper mag_photo = Guitarist_Axel_Outfit1_Style1 from axel_1 ->
+  cash_reward); `faceoff` passes (character select scrolls Axel / Casey /
+  Izzy / Judy); `cutcontent` passes (paging `cs: jumped 0 icon 12 total 13
+  name "GRIM RIPPER"`).
+
 ## The band (M6; details in `band.md`)
 
 - `create_band` (one player): guitarist from `player1_status`
@@ -855,3 +991,588 @@ data sound_buss.qb]; the port's audio/sound_buss.h:
   SetSoundSeekPosition / PauseSound / StopStream play the song's SongStream on
   the song mixer while no song is (Mixer::play at the song's start resets the
   speed); walk practice checks it (check:preview).
+
+## Career mode audit (2026-11-24): faithful, no fix
+
+A full career audit (tier/setlist progression and the gating, boss battles,
+encores, co-op career, unlocks/store/cash/stars, the menus / screen-flow,
+save/profile). Ground: the static Ghidra export (`ghidra/analysis/decomp`,
+functions.tsv), the decoded QB, and headless walks. REA was not used (it
+cannot open the XEX2). **Verdict: faithful.** The career layer runs GH3's own
+QB scripts (progression, store, cash, stars, the newspaper, the flow states)
+over the native shims; only the atom VM is a reimplemented driver, and it
+matches the binary. No code change.
+
+- **Atom VM** (`script/atoms.cpp`), the one reimplemented career driver,
+  checked instruction-for-instruction against the XEX and found faithful:
+  the condition met-test `met()` = Function_8239E740 (`required[diff] == 0`
+  -> met, else state == 0x4e29e602); the conditions loop `conditions()` =
+  Function_8239EBE0 (re-evaluate each condition via Function_82422B18 in
+  order, break on the first unmet); the permanent-skip = Function_82422B18
+  (vtable+8 "permanent?" AND already-met -> skip evaluation), mirrored by the
+  guard `!(permanent && !isAtom && met(d))`; the per-atom update `step()` =
+  Function_8239F040 (Locked + conditions -> tool_only complete (8239E8F8)
+  else active+spawn+runNow (8239EDB8); Active + script ended -> complete);
+  tool_only on a retail disc = Function_8239E960 (DAT_82a6ca11 "is CD"); the
+  complete/relock `complete()` = Function_8239E8F8 / 8239F158 (disabled
+  waiters relocked, deps reset, updated at once); the UpdateAtoms walk
+  `update()` = Function_822B0978 (every atom in order; one whose script is
+  still running stops the pass). State constants: Locked 0x152d376e, Active
+  0xb4e103fd, Complete 0xbd982fdc, Disabled 0x7b01911c; condition true
+  0x4e29e602 / false 0x0f636d0d. SetProgressionDifficulty (Function_82270C90)
+  stores the raw numeric `difficulty` param (no key->index conversion), which
+  `natives_misc.cpp`'s `Vm::number` matches; it feeds `met()`'s `required[diff]`.
+- **Boss / battle outcome routing** (`game/match.cpp` 699-730, `app.cpp`
+  1299-1302, `ui/front_end.cpp` 170): GameMode::Boss is distinct from Battle,
+  so a boss defeat (h2 <= 0 -> P1Wins, "song_wonp2") takes the won path ->
+  `GuitarEvent_SongWon`; a player loss (h1 <= 0) -> Failed ->
+  `GuitarEvent_SongFailed`; a regular Battle KO (healths differ) sets
+  `battleKo` -> `GuitarEvent_SongFailed` (GH3 then raises GuitarEvent_SongWon
+  battle_win = 1). Matches modes.md §5/§6 [C 0x8210FD18].
+- **Save** (`ui/natives_flow.cpp` SaveToMemoryCard / LoadFromMemoryCard):
+  serialises the whole tag store -- `glitchesSaveView` (global tags) AND
+  `globalTagSections` (the per-band career sections) -- so no career field is
+  dropped. Cash, stars and store prices are GH3-script-driven (no native
+  `AwardCash`): faithful by construction given GetGlobalTags / SetGlobalTags.
+- **Objective evidence** (headless, build/linux, disc data): walk `career`
+  passed (band -> difficulty -> character -> venue -> setlist -> song -> won
+  -> newspaper -> cash_reward -> autosave -> setlist; 1 song); walk
+  `career_encore` passed with every embedded check (num_songs_to_progress
+  2->1->0, careertier1.complete 0->1, g_encore_ready = 1, encore =
+  rocknrollallnite, progression_completion_tier = 1, reaching
+  career_sponsored_fs; 4 songs) -- the atom-driven tier -> encore ->
+  tier-complete -> sponsor chain; walk `boss_devil` passed (the devil beaten,
+  the song restarts at 336682 ms "Lou's finish", then the newspaper; 2 songs).
+## Multiplayer audit (2026-11-24): faithful, no change
+
+A full re-audit of local multiplayer (face-off, pro face-off, battle, co-op
+career, boss battle) against the disc's QB and scripts (`qb.py` / `qbscript.py`
+on `COMPRESSED/PAK/qb.pak.xen`) and the XEX addresses already in this file.
+Found faithful; no code changed. Ground truth confirmed and recorded here:
+
+- **Battle power-ups (`battlemode_powerups`, scripts\guitar\guitar_battle.qb)**
+  are exactly **8**, in this order: Lightning / DifficultyUp / DoubleNotes /
+  PowerUpSteal / LeftyNotes / BrokenString / WhammyAttack / DeathLick [C data].
+  Weights: all `weight 10` except DeathLick `0`; `weight_low 0` throughout;
+  `weight_losing 10` only for PowerUpSteal / LeftyNotes / WhammyAttack (else 0).
+  drain_time 7500 Lightning, 10000 DeathLick, 5000 rest. flicker 2/2/3/3
+  (Lightning); repair 6/8/10/12 (BrokenString), 3/4/5/6 (Whammy); kill_rate
+  0.4/0.3/0.25/0.2 (DeathLick). `immediate` Lightning / BrokenString / Whammy;
+  `no_ai_damage` Whammy; `fire_bolt` all but PowerUpSteal / DeathLick.
+  `max_num_powerups 3`; `battle_{easy,medium,hard,expert}_drain_offset`
+  0/1500/3000/4500. This is GH3's canonical 8-card set (incl. Death Lick and
+  sudden death), the opposite of Metallica/gd10's 9 -- the port matches it
+  exactly: game/match.h `enum Attack` and `BattleData::load` require size 8,
+  game/match.cpp reads every field [C].
+- **battlemode_select / bossbattle_select** (disassembled): weight-sum roll,
+  skip DifficultyUp vs an expert victim, `weight_low` for the last-selected and
+  the top-of-hand cards, `weight_losing` when health <= 0.5 (human only; the
+  boss path has no health gate and filters by `current_boss.PowerUps`),
+  sudden death forces DeathLick (index 7). game/match.cpp `select()` matches,
+  incl. the bossRules branch for both the human's and the boss's cards [C].
+- **battlemode_ready**: a full hand destroys the top card (index
+  current_num_powerups-1), then stores the new card there -- i.e. the new card
+  replaces the top, older cards kept. game/match.cpp `award()`
+  (`cards.pop_back(); cards.push_back(card)`) matches [C].
+- Face-off section filter + `last` from the full chart (GD04-004) intact
+  (game/note_track.cpp `faceOffTrack`); score scale, co-op shared run / shared
+  SP / fail-on-average, the 2P HUDs (co-op sum score + 74x(avg-1) needle,
+  face-off +-65 score-gap needle, battle +-42 per-player needle) all as in
+  `modes.md` [C].
+- **gd10-lesson check (local-MP setup reaching a playable song): PASSES.**
+  Unlike Metallica's unimplemented band-mode lobby, GH3's local-MP hubs advance:
+  the `battle`, `coop` and `boss_keys` walks (dev_ff build, FFmpeg prefix,
+  offscreen) all reach `song` -> `song_over` -> newspaper. Evidence (walk logs):
+  - battle: 2 songs; song 1 both perfect (70/70, 64/64) -> tie -> sudden death;
+    song 2 Death-Drain-only, P2 drained to health 0 -> KO, `outcome 2` P1 wins,
+    UI_1stPlayerWins_SFX; all 8 attacks observed (SFX log), dead frets repaired.
+  - coop: both parts 38/38 notes (shared total), separate scores 3652 / 2738,
+    streaks 24 / 14, health 1.644 / 1.397.
+  - boss_keys (real key input): 178/181 keys hit, 10 cards got + fired, 6 boss
+    attacks received, 3 fret recoveries (none dead at end), 58/60 hit after the
+    last attack, whammy bar drawn; boss bot 40 forced misses -> KO, P1 beats the
+    boss. All three walks: `passed`.
+## UI/mechanics re-audit (2026-11-24): HUD, scoring, judge, mouse — faithful
+
+A verification pass over the in-game HUD and the core mechanics against the
+XEX (Ghidra analysis export; REA cannot open the XEX2). Each subsystem was
+cross-checked binary-vs-port source; verdict **faithful** for every area
+below. No code changed.
+
+- **Scoring / multiplier** [C 0x8210BB40, re-read]: the fret count is bits
+  0x10000 / 0x1000 / 0x100 / 0x10 / 0x1 of the pattern; the run multiplier is
+  `iVar6 < 10 -> 1, < 0x14 -> 2, < 0x1e -> 3, else 4`; star_power_used
+  (key 0x92be3d33) shifts it left once (x2); score += scale (0x829ba010) x
+  points_per_note (0x829cd708 = 50) x multiplier x fretcount. game/player.cpp
+  `PlayerStats::multiplier()` (run < 10/20/30, x2 on Star Power) and `hit()`
+  (`kPointsPerNote * multiplier() * fretCount()`) match; the face-off scale
+  `(base_p1 + base_p2) x 0.5 / base_p` is applied in `addScore` via
+  rules_.scoreScale (match.cpp:204) [C 0x8210B9A0]. Co-op (both runs,
+  both notes_hit/total_notes, both runs reset on a miss) match [C 0x8210A748].
+- **Judge** (window / HOPO / tap / chord / overstrum / sustain): game/player.cpp
+  `frame()` / `updateSustain()` match the rules already confirmed in
+  §§1-5 above (hit window, split_late cap, tap candidate = highest held fret
+  != last-hit mask, post-tap ignore window, overstrum-kills-sustain, sustain
+  points in chunks of >= 2). No deviation found on re-read.
+- **In-game HUD numeric drivers** (UpdateScoreFastPerFrame 0x821167B0, the
+  per-part updates read into agents/scratch/hud_spec.md §1.3):
+  - Score text, Star Power tubes (per = 100/6 [C 0x82007A78]).
+  - Multiplier progress lights [C jump table 0x821172D8]:
+    `L = run>30 ? 10 : run>20 ? run-20 : run>10 ? run-10 : run`, `full = L/2`;
+    L<=1 -> all off, L odd -> halflit[full], allwaylit[0..full-1].
+    render/hud2d.cpp line 269 / 370-383 reproduce this exactly (including the
+    full-at-the-boundary note, which is the binary's own behaviour).
+  - Nixie digits (list {1,2,3,4,6,8}, 'b' in Star Power).
+  - Rock-meter needle (1P) [C 0x82116D08, 0x82007A5C/58/68/6C]:
+    `ang = (S-h)/S x -84 + 42`, zones T1 14 / T2 31.5; red/green health
+    multipliers 1.35 / 0.85 [C 0x821062A8]. render/hud2d.cpp lines 184-202
+    match.
+- **Two-player / co-op / face-off HUD** (render/hud2p.cpp): the co-op needle
+  uses `ang = 74 x (havg - 1)` = `((d1+d2) x 0.5 / S) x -148 + 74` with zones
+  T1 24.6667 / T2 55.5 [C 0x82007A60..74]; face-off needle
+  `clamp(diff x -0.0065, +-65)` [C 0x82116AC4]; the single-player fallback
+  `-84/+42`. All three match the binary; the co-op wider gauge is correctly
+  switched by mode (hud2p.cpp:114-115, 306-316).
+- **Mouse-clickability** (the recurring bug class, docs/guidelines/usual-bugs.md):
+  app.cpp `menuMouse` + ui_system.cpp `menuAt` hit-test **every** focusable,
+  non-hidden child of every focused menu generically by its drawn bounds
+  (empty items resolve to the text their focus handler highlights), and
+  `helperPills` / `helperAt` cover the whole visible help-bar pill (glyph,
+  text and backing). No menu depends on a hardcoded hit list. Faithful to the
+  universal rule.
+
+Not re-covered here (other agents / earlier passes): career mode, multiplayer
+rules, character select/roster, venue lighting, character animation. Known
+open item unchanged: the store main menu's "20 px high" layout discrepancy
+(ui.md §10) is still not root-caused in the VMenu/VScrollingMenu layout code
+[C 0x82315FB0 / 0x82317640 read]; left for a future pass, not a confident fix.
+
+Method note: this was a static binary-vs-source cross-check (no fresh gd04
+build, to respect the one-build/RAM/token budget); the runtime paths are
+already exercised by the repo's walks/self-tests and recent GD04-121/122 runs.
+
+## Character animation, collision, physics audit (2026-11-24)
+
+Audit of the band's animation, collision and ragdoll physics against the
+original. Read with the Ghidra headless export (`ghidra/analysis/decomp`,
+REA cannot open the XEX2), the ragdoll data through `tools/havok.py`
+(`ragdoll_axel` of `global.pak`) and the QB through `tools/qb.py`. Code:
+`engine/src/render/band_anim.*`, `render/band_ragdoll.*`, `render/band.*`,
+`data/havok.*`. **No code change: the three areas are faithful** (the one
+gap, accessory-vs-body collision, is blocked from grounding by VMX128 and is
+immaterial by the data's own constraint limits, below).
+
+### Animation -- FAITHFUL [C as cited in "The band" / `band.md`]
+- Body loop (`hero_play_tempo_anim_cfunc` 0x821090B0 / 0x82108E58, skill
+  0x82108C90, speed 0x82108B60), stance transitions, `Band_PlayAnim` /
+  `ChangeStance` / `PlayFacialAnim`, strum / fret / finger-chord iterators
+  (FretFingers 0x821119F8), the drummer's arms / cymbals / twist
+  (0x821121D8, 0x82107F48), facial loop, IK (0x823F78E0 / 0x823F65C0),
+  `hero_ConstraintBones`, difference-clip order and win/lose/special all
+  match the RE in `render/band_anim.cpp`. No pop / wrong-clip / retarget /
+  timing defect found.
+- Probed one edge case: the drummer body twist is applied with
+  `evalDelta`, which early-returns on `strength <= 0`, so a negative twist
+  would be dropped. Checked the data: every `drummer_{left,right}_arm_twist_
+  factors.track_*` is in [0.0, 1.0] (qb.pak), so the mean is >= 0 and the
+  twist is one-directional by design -- the early-return never drops a
+  meaningful value. Not a bug.
+- Out of scope (noted, not animation): the `modes.md` S9 items
+  (card-slide / lefty-flip-button-slide 2D HUD approximations, and
+  `GuitarEvent_BattleAttackFinished` -- a battle-DSP-reset sound, not a
+  character anim).
+
+### Physics (ragdoll / accessory dynamics) -- FAITHFUL [C 821AFC08, 823FE140, 823FFC28, 82253B10]
+- `render/band_ragdoll.cpp` reproduces GH3's Havok 4.6 setup: world gravity
+  (0, -9.8, 0) [C 82253B10 -> 8200E4E4], transformed to the member's model
+  frame in `render/band.cpp:112`; 4-iteration solver (tau 0.6, damp 1);
+  accessory bodies MOTION_STABILIZED_SPHERE_INERTIA with their constraint
+  to the parent in the world, the rest hard-keyframed; pose read one frame
+  behind; `checkAndFixConstraint(0.05, 0.8)`. On by default (GD04_NO_RAGDOLL
+  off). The `.rag` ball-socket / ragdoll twist+cone+planes / limited-hinge /
+  prismatic constraints, masses, sphere inertia, damping and velocity caps
+  are all decoded (`data/havok.cpp:488-527`) and enforced in `solve()`.
+- Verified the port decodes the SAME constraint limits the original data
+  carries: `data/havok.cpp` reads coneMax, twist min/max, planes min/max,
+  their isEnabled flags, axes (twistAxisInA / refAxisInB) and
+  `angleMeasurementMode` (aligned vs perpendicular); `band_ragdoll.cpp`
+  `solve()` applies them (`coneRow`, `limit`). A decode bug here would let
+  the hair swing free -- none found.
+- Frame-rate independence and NaN-freedom are the repo's objective gate
+  (`tests/chartest.cpp:219-266`: accessories sampled every ms, worst 1 ms
+  move < 12x the mean; GD04-104). No change made, so that baseline stands.
+
+### Collision (accessory hair/cloth vs body) -- documented LIMITATION, immaterial; NOT a groundable defect
+- The usual-bugs rule (hair/cloth must not penetrate the body) was judged
+  objectively from the data, not by eye:
+  - `ragdoll_axel` (35 bodies): the body is capsules (Pelvis/Chest/Head/
+    arms/legs), the accessories (Bone_ACC_01..15) are small boxes that at
+    the bind pose sit FLUSH on the body surface (e.g. chest accessory
+    ACC_09 at z=0.172 vs the Chest capsule surface ~z=0.166, ~6 mm; the
+    ACC_01..08 hair boxes just above the Head capsule).
+  - Each accessory's ragdoll constraint has a TIGHT cone/twist/planes
+    limit: hair (ACC_01..08) cone <= 7-30 deg (most <= 10-15), twist +-5,
+    planes +-0..25; chest/stomach accessories cone <= 30-35, planes
+    +-10..30. These bound each segment to a few cm of its rest pose, so the
+    hair physically cannot swing far enough to grossly penetrate a
+    non-adjacent body part. The port enforces these exact limits, so its
+    secondary motion stays within the same envelope.
+  - Adjacent (constraint-connected) accessory<->parent pairs do not collide
+    in Havok by default (disableCollisionsBetweenConstraintBodies), which is
+    why the flush rest contact is intended, not a penetration.
+- So the "colliders on, no penetration" requirement is satisfied here by the
+  constraint limits, which the port reproduces -- not by narrow-phase
+  collision. The port implements no accessory-vs-body narrow-phase
+  (`band_ragdoll.*`), as already noted in `band.md` S6b.
+- Whether GH3 additionally enabled non-adjacent accessory-vs-body collision
+  CANNOT be grounded: the world setup (Function_82253B10) and the
+  collisionFilterInfo computation (Function_823360F0) both truncate on
+  VMX128 "bad instruction data" in the decomp, and the layer collision
+  matrix was not found (confirmed this audit). Per the owner rule (fix only
+  confidently-groundable defects, do not invent), narrow-phase collision is
+  left unimplemented -- a known limitation, not a defect to fix blind.
+## Venue light show audit (2026-11-24)
+
+A full re-RE of the light-show processor pipeline against the disc data and the
+XEX, with the gd10 "dead-mood / processor-table" bug class as the lead
+hypothesis. Sources: `qb.pak.xen` (globals), the eight zone paks'
+`<zone>_lightshow_mapping` / `<zone>_snapshots` / `<zone>_lightshow_processors`,
+`dbg.pak.xen` (symbol table), and the XEX decomp (`ghidra/analysis/decomp`).
+
+- **Processor-table / inline-processor (the gd10 bug): FAITHFUL.** GH3's
+  `<zone>_lightshow_mapping` stores an inline `processor` (qbkey 0xd63fb9af) on
+  **every** mood x performance entry, in all ten zones (checked: artdeco,
+  budokan, dive, hell, party, prison, video, wikker, soundcheck, credits -
+  0 entries missing a processor). `LightShow_InitEventMappings` (script
+  0xdb830c61) registers `LightShow_SharedProcessors` (global 0xa1b494ab, 10
+  entries: `name` 0xa1dc81f9 -> enter 0x3be47b24 / event 0xb93ab1ed / exit
+  0x072c7f7e scripts) plus the optional `<zone>_lightshow_processors`, then
+  calls `LightShow_SetParams` (native 0x82128c50) perf=medium mood=intro. There
+  is **no `default_generic`** in GH3 and no defaulting of a missing processor
+  (that is the Metallica/gd10 addition). The port reads the inline processor
+  (`venue_lights.cpp:202`) and hardcodes each processor's behaviour by name; as
+  every entry carries the name, no mood is dead. The two non-obvious moods
+  0x79d8d4b6 / 0x4f35c489 are the song-lose / song-win moods, processors
+  `Fail_Generic` (0xc29f7b4d) / `Win_Generic` (0x7d17e328); both share the
+  generic enter/event/exit, so the port's generic treatment is correct.
+
+- **Blackout / Flare intensity override: BUG (FIXED).** `Blackout_Generic`
+  (enter 0x7236971a) and `Flare_Generic` (enter 0x5e1e8383) call
+  `LightShow_AppendSnapshotParams { intensity=0.25, specularintensity=0.25 }`
+  before their single `LightShow_CycleNextSnapshot`, held until the mood's exit
+  `clear` (a `GetPakManCurrent` switch skips it only for z_soundcheck /
+  z_training / z_viewer). `LightShow_AppendSnapshotParams` (native 0x82125148)
+  stores the params into slot DAT_82a307d4; the snapshot applier (0x82128e28)
+  merges that slot into every played entry, **overriding** the per-light value.
+  Proven override (not default) by the strobe case: the saved lit snapshot's
+  stored intensities (e.g. z_dive verse 0x1df0cdc0: 0.5/2.0/1.0/...) are all
+  shown at 1.0 while `AppendSnapshotParams { intensity=1.0 }` is active - the
+  port already modelled that one inline. The blackout snapshot (z_dive
+  0x2dff7ec7) stores intensity 0.5/0.5/0.0..., so GH3's blackout/flare moods
+  show every light at 0.25 intensity + 0.25 specular; the port used the stored
+  values, so both moods were too bright and too shiny in all seven venues that
+  use the shared processors (blackout: all but z_wikker; flare: all but
+  z_prison). Fix: a general append-params override
+  (`venue_lights.cpp` enterMood sets 0.25 for Blackout_Generic / Flare_Generic
+  off the debug zones; play() applies it like the strobe 1.0),
+  `venue_lights.h` `appendIntensity_` / `appendSpecular_`. --venuetest: all 8
+  venues still 1016/1016 checkpoints identical at 60 vs 240 fps.
+
+- **Custom venue processors Z_Prison_Flare / Z_Wikker_Blackout: partial gap
+  (NOT fixed - staging, not light values).** z_prison's `flare` mood uses
+  `Z_Prison_Flare` (0x7fe26da1) and z_wikker's `blackout` uses
+  `Z_Wikker_Blackout` (0x3eadcdd6), defined in their `<zone>_lightshow_processors`
+  (other zones' tables are empty). Their enters cycle one snapshot (save=false,
+  one-shot) and their events do not cycle, and both mood lists are a single
+  snapshot - so the port's generic treatment produces the **correct light
+  values** (verified). What the port misses is the scripts' venue-specific
+  extras, which the port never runs because the LightShow class does not execute
+  processor enter/event/exit QScripts: `Z_Prison_LightShow_Flare_Enter`
+  (0x56847ae3) fires `screenflash` (ScreenFlashOn), `Z_Prison_LightShow_Flare_Event`
+  (0xd45ab02a) swaps the Z_Prison_Flare_Skeleton01 ped and plays anims, and
+  `Z_Wikker_LightShow_Blackout_Enter`/`_Exit` hide/unhide the flower petals. The
+  port implements the ScreenFX_* / FlashBS natives (particles.cpp) but nothing
+  triggers them from the flare mood (its only caller is the flare processor
+  enter). Left as a documented gap: wiring it means running the venue lightshow
+  processor scripts on the venue VM on mood transitions.
+
+- Other areas FAITHFUL: snapshot field keys (lightchecksum 0x7ce4d954, r/g/b,
+  intensity 0x164d476d, specularintensity 0xb9832749, shadowintensity
+  0xa0bad95d; FarAttenStart/End present but not applied - correct); generic
+  (enter 0xbd9fb969 cycle save=true, event 0x3f4173a0 cycle on `snapshotchange`
+  0x1b36b057) and Poor (event 0x1cd91b07 waits but does not cycle) match the
+  port; `lightshow_statenodeflagmapping` groups `performance` 0x7d28697e /
+  `mood` 0xfcc65109 and `lightshow_coloroverrides` (8 colours, no black/off)
+  match the port's reads.
+## Singer (vocalist) animation audit (2026-11-24)
+
+Full Ghidra/QB audit of the SINGER's movement and animation against the port
+(render/band_anim.cpp, the vocalist path). The vocalist tree is
+`constraintbones( ragdoll( ik(Singer_IK_Params)( partialswitch( face, body ) ) ) )`
+with `state = $ON` [C guitar_anim_tree.qb vocalist_static_tree]. Profiles
+Singer / Singer_Bret / Singer_Alt use `singer_male_animations`, Singer_Female
+uses `singer_female_animations`, all `Type = $vocalist`, `stance = $Stance_A`,
+no `ik_params` / finger / fret / strum fields [C guitar_band_profile.qb].
+
+- **FIXED - female singer stance transitions skipped.** The singer alternates
+  Stance_A (not singing, `*_nosingidle*`) and Stance_B (singing, `*_singidle*`,
+  `*_singsolo*`), switched by the song's `Band_ChangeStance` events, with a
+  transition clip between (nosing_to_sing / sing_to_nosing)
+  [C guitar_animation_data_singer_male/female.qb; welcometothejungle_performance
+  vocalist Stance_B at 4766, barracuda 4 switches]. `anim_set.<old>.transitions.
+  <new>` is a clip key for the **male** singer and the guitarists, but the
+  **female** singer stores it as a skill/speed tree
+  `transitions.<new>.<skill>.<speed>` (the `good` skill using `_hop` variants),
+  resolved by play_stance_transition_cfunc (0x821138D8) like a tempo anim
+  [C guitar_animation_data_singer_female.qb; it is the only character with this
+  form]. band_anim.cpp's bodyFinished read the entry as a plain key
+  (`keyOf(trs->find(new))`), which is 0 for a struct, so the female singer
+  played NO transition and snapped between stances. Fix: `Animator::
+  transitionClip` resolves either form (skillKey / speedKey shared with
+  tempoAnim). Objective (barracuda, Singer_Female, z_dive, GD04_ANIMLOG):
+  before, Stance_A idle ended 30567 ms and the Stance_B idle began at 30567 ms
+  (gap 0, no Trans clip); after, GH3_Singer_Fem_Trans_NoSngSng (2.87 s) plays
+  30567->33433 ms, then the Stance_B idle (measured 2866 ms gap = the clip's
+  data duration). sing->nosing at 151900 ms resolved GH3_Singer_Fem_Trans_
+  SngNoSng_hop (good skill). Male singer (welcometothejungle) unchanged:
+  GH3_Singer_Male_nosing_to_sing 1.63 s / sing_to_nosing 2.40 s still resolve.
+  chartest 60/240 fps: 1097 checkpoints identical, 0 off screen (frame-rate
+  independent). Files: render/band_anim.cpp (transitionClip, skillKey,
+  speedKey, bodyFinished), render/band_anim.h.
+
+- **Faithful - body loop.** `bandmember_idle` spawns `hero_play_adjusting_
+  random_anims {Anim = idle}`; the singer's event table
+  (BandMember_Idle_EventTable) routes only `play_anim` -> handle_play_anim and
+  `change_stance` -> handle_change_stance (no strum/fret/star-power) [C
+  guitar_character.qb]. The port's bodyIteration / playAnimEvent /
+  changeStanceEvent match; anim_set.<stance>.<idle|special|Jump>.<skill>.<speed>
+  random no-repeat [C].
+
+- **Faithful - facial / lip-sync.** `facial_anim_loop` plays
+  `anim_set.facial_anims.idle` at random (+1 gameframe) [C]; `Band_PlayFacialAnim`
+  (guitar_midi_anim_funcs.qb) spawns `play_special_facial_anim {Anim}` on the
+  member, which kills the loop, plays the lip-sync clip, then respawns the loop
+  [C]. The lip-sync clips live in the song pak (e.g. gh3_singer_Male_Welcome_1,
+  .ska flags 0x068b5000 = masked partial, 30 face bones) and gd04 loads them
+  (data/band.cpp:458). The port's facial() + the Perf band_playfacialanim case
+  match; song clips drive the mouth/face over the body via the face partial.
+
+- **Faithful - win / lose.** play_win_anims / play_lose_anims call
+  `play_special_anim {stance = win|lose, Anim = idle, blendduration = 0.0}` on
+  the vocalist (always `win` / `lose`, not the small-stage variants) [C
+  guitar_character.qb]; play_special_anim excludes the vocalist from
+  hero_disable_arms (Guitarist/Bassist/Drummer only), plays the win/lose idle
+  once, then Stance_A + bandmember_idle. venue_stage.cpp outro + playSpecial
+  (vocalist not guitarLike, so no arm toggle) match.
+
+- **Faithful - IK is legs-only.** Singer_IK_Params has only the two leg chains
+  (bone_thigh/knee/ankle -> Bone_IK_Foot_Slave_L/R); the singer has NO arm IK
+  (unlike the drummer's two hand-slave chains), the arms come straight from the
+  body/face clips [C guitar_anim_tree.qb]. The port builds chains from the data,
+  so the behaviour was already correct; only the band_anim.cpp / band.md
+  comments (which claimed hand-slave IK for the singer) were wrong and are
+  corrected.
+
+- **Faithful - the singer never walks.** All 79 Band_WalkToNode performance
+  entries across every song target the Guitarist; none target the vocalist, so
+  the port's un-done Band_WalkToNode does not affect the singer [C: scan of
+  every SONGS/*_song.pak.xen].
+
+- **Out of scope / cross-member - ragdoll_markforreset not reproduced.**
+  handle_change_stance, handle_play_anim and play_special_anim (win/lose) all
+  call `ragdoll_markforreset` [C guitar_hand_events.qb / guitar_character.qb],
+  which snaps the hair ragdoll to the animated pose at rest on each such event.
+  render/band_ragdoll.cpp only resets on start or a > 2 s song-time jump
+  (band_ragdoll.cpp:422), so after a hard stance/anim/win-lose pose change the
+  hair carries momentum the original would have cleared. This affects all band
+  members' hair (a shared subsystem), not only the singer; flagged for the
+  orchestrator, not fixed here.
+
+## Controls audit (2026-11-24)
+
+Scope: the INPUT LAYER only (how the raw controller is read and turned into
+frets / strum / whammy / tilt), not the judge (the hit / HOPO / overstrum
+windows are already [C] in "Gameplay rules" §1-3 above and are NOT revisited
+here). Read from the Ghidra export (`ghidra/analysis/`, base 0x82000000);
+REA cannot open the XEX2. Our side: `engine/src/input/input.{cpp,h}`,
+`engine/src/game/controller_mode.h`, `engine/src/game/player.{cpp,h}`,
+`engine/src/ui/song_screen.cpp`. No tracked spec `spec-gamepad-menu.md`
+exists in the repo (the kickoff named it); the port's control model is the
+one in `input.h`. RB numbers below are the kickoff's Rock Band audit, used
+only to reconcile a future universal model. No code was changed this pass
+(rationale at the end).
+
+### A. The original, per input area (binary evidence)
+
+**A1. Per-player input struct and the connected flag [C].**
+`FUN_820e7cd0(p)` returns the per-player input-system struct: for p < 4 it
+is `DAT_82a74a0c[p + 8]` (a pointer table), for p >= 4 a second table
+(`DAT_829b858c`). `FUN_820e7cb0(p)` = the byte `DAT_829b8594[p]`, the
+per-player "this port has a usable controller" flag; the readers bail when it
+is 0. Inside the struct: `+0x18` = the pad record pointer, `+0x1c` = the
+device descriptor.
+
+**A2. Controller TYPE detection: binary guitar-vs-pad [C 0x82100DA0,
+0x82100FC0].** The reader sets a guitar flag by `descriptor[+0x08] == 8`
+(only for p < 4; p >= 4 is always a guitar). There is NO separate X-plorer /
+Les Paul / wireless branch at the gameplay input layer: every guitar model
+is the one "guitar" code path (==8), everything else the "pad" path. The
+descriptor's `+0x08` field is an internal device class, not the raw XInput
+`SubType` (the XInput SubType is only touched by the rumble/caps helper
+0x824ACBF8, which gates vibration on SubType == 2 and the motor caps bits).
+QScript side: `get_musician_instrument_type`, `instrument_type`,
+`get_instrument_from_character` pick the on-screen instrument (Les Paul /
+other guitar skins such as `Instrument_LP_Pro6X`) — cosmetic, separate from
+the play path.
+
+**A3. Pad record layout and the fret read [C 0x82100DA0].** The judge's
+held-fret mask is built nibble-per-fret: green 0x1, red 0x10, yellow 0x100,
+blue 0x1000, orange 0x10000 (so a 5-fret shape is a 20-bit value, not bits
+0-4). The source bytes in the pad record differ by path:
+- guitar path: yellow = pad[+0x08], blue = pad[+0x09], orange = pad[+0x0a],
+  red = pad[+0x0b], green = pad[+0x0c];
+- pad path: the digital button field pad[+0x34] (green/red/yellow/blue/orange
+  from bits 0x40 / 0x02 / 0x08 / 0x04 / 0x01) OR'd with analog bytes
+  orange = pad[+0x0e], blue = pad[+0x0c], yellow = pad[+0x0d], red = pad[+0x0f],
+  green = pad[+0x0a].
+A fret counts as held when its byte is non-zero: the pad record already holds
+a thresholded value, so there is no per-fret dead zone in this layer (any raw
+dead-zone / analog-to-byte conversion lives in the XInput->pad-record fill,
+which is not in the decompiled set — see "Uncertain").
+
+**A4. Strum source [C 0x82100FC0, matches §3].** guitar: a strum is the
+strum-bar bits `0x1000 | 0x4000` set in pad[+0x34]; on a strum the held
+frets (A3 guitar bytes) are latched and a strum flag is raised. pad: a strum
+is any change of the held fret/face set (each new press strums), with a
+QScript rule keyed `0x67e6859a` consulted and a per-player "all buttons
+released" latch at `DAT_829ba034[p]` (a pad chord must release fully before
+the next, cf. §3 chord rule). force_mercury Select is Star Power on both.
+There is no strum-repeat / strum-debounce constant here (RB's "strum <= 52 ms
+repeats" has no GH3 equivalent): repeated strums are governed by the judge's
+`disallow_tolerance_strums` + `strum_before_forming` pending model (§3), not
+by an input-layer timer.
+
+**A5. Tilt / Star Power [C 0x82112EE0-0x82112F90, already §6].** The tilt
+value is pad[+0x01] (the right-stick-Y byte [I]); `v = b - 128`, normalised
+`(v - 50) / 77` for v > 0 and `(v + 50) / 77` for v < 0 (so -127 -> -1.0,
++127 -> +1.0). A frame "counts" when the value is <= the player's
+`star_tilt_threshold`, which `start_gem_scroller` loads from the user option
+`star_power_position_device_<controller>` (default -1.0, the calibration
+screen stores the held value clamped <= 0; guitar_tweaks' 16.0 is only a
+placeholder). `star_power_trigger_frames` (3) consecutive counting frames
+deploy; Select (qbkey 0xB40D153F) deploys at once. Co-op needs both triggers
+inside `star_power_coop_trigger_ms` (1000).
+
+**A6. Whammy [C scripts; §5].** The judge reads a continuous whammy value
+0..1; star whammy requires movement > 0.03 over the last 5 frames
+(`star_power_whammy_add` 3.333 / co-op 2.5 per beat); the pitch shift is
+`1 - 0.057 * bar`. `whammy_units_per_second`, `whammy_shorten` (0.25),
+`whammy_min_hold_pct` (10% / 35% short) are in guitar_tweaks.qb. The raw
+whammy axis -> 0..1 mapping and its dead zone are in the pad-record fill, not
+recovered (see "Uncertain"); a `deadZone` string exists at 0x82056ca0 but has
+no code xref in `refs.tsv` (data / VMX).
+
+### B. What OUR port does (input.cpp / song_screen.cpp / player.cpp)
+
+- Pipeline: SDL event -> `Input::handle` -> `InputEvent` (action, down,
+  per-device player, flags analog / joypad / fretsStrum / tilt) ->
+  `SongScreen::handle` latches `held_` (bits 0 green..4 orange), a `strum_`
+  pulse, `star_`/`tilt_`, `whammyBar_`/`whammyKey_` -> `SongScreen::tick`
+  runs a FIXED 60 Hz step loop building `FrameInput{frets, strum, fretStrum,
+  starPower, tilt, whammy}` once per step -> `Match::frame` / the C judge.
+- TYPE model: 5 pad profiles (XboxGuitar, XboxGuitarOld, Ps2Guitar, RockBand,
+  Joypad) + Keyboard + Midi, chosen by GUID and saved in controllers.json;
+  functionally they collapse to a guitar watcher (strum bar) vs a joypad
+  watcher (every fret press strums, `Require Strum` off) — the same binary
+  split as GH3's A2, with the extra labels only changing the default fret
+  bindings and tilt source. `controller_mode.h` is just {Guitar, Joypad}.
+- Fret read: SDL buttons (digital) and axis-as-button. Axis-as-button
+  (`sourceActive`, input.cpp:943): pressed when `|axis - rest| > 16000`,
+  released below 10000 (hysteresis), i.e. ~0.49 of full range to press,
+  ~0.31 to release. The Joypad profile puts green on LT and blue on RT as
+  AxisPos (input.cpp defaults): a ~half trigger pull registers a fret.
+- Whammy (input.cpp:961-976): a bound axis is normalised from its rest,
+  dead zone 0.08, value `(x-0.08)/0.92`; the discrete Whammy ACTION fires
+  past 0.15; the continuous value goes to the judge via `whammy()`.
+- Tilt (input.cpp:979-989, player.cpp:255-264): Gyro held by an axis source
+  ALONE sets `p.tilt`; `FrameInput::tilt` then deploys after
+  `star_power_trigger_frames` (3) judge steps; a Back/Select button sets
+  `starPower` and deploys at once. The axis uses the generic half-way
+  threshold (16000/10000), NOT a per-controller calibrated tilt position.
+- Connect hygiene: 300 ms settle after plug-in (rest re-read, no actions);
+  buttons held across connect are masked until released (`stuck`); SDL
+  mapping axis-buttons get the same hysteresis. Steam virtual pads taken.
+
+### C. Gaps and errors (original vs port)
+
+1. [I, needs-coordination] Tilt threshold is not calibrated. GH3 fires the
+   tilt per `star_power_position_device_*` (default near full up, -1.0; A5);
+   the port fires at a generic ~0.49 axis deflection. Net: tilt Star Power is
+   easier (or, for a guitar whose rest is off-centre, harder) than the
+   original, and ignores the calibration screen. Already flagged [I] in §6.
+   RB reconciliation: RB's "mercury filter" holds the sign past 0.93 for 12
+   frames; GH3 holds the value past the calibrated threshold for 3 frames.
+2. [I, needs-coordination] Axis-as-button press threshold ~0.49 vs RB's
+   0.75. For frets/strum bound to triggers or a stick (Joypad green=LT,
+   blue=RT; pad strum on LEFTY) a half-pull already registers, which can feel
+   like accidental frets or ghost strums. GH3's own pad frets are the digital
+   d-pad bits (instant) plus raw-thresholded analog bytes (A3), so there is
+   no single number to copy; this is a universal-model tuning decision.
+3. [I, low] The Joypad fret order is GH2's `joypad_guitar` (LT LB RB RT A =
+   green..orange), not GH3's pad mapping (A3/A4: d-pad bits 0x40/0x02/0x08/
+   0x04/0x01). A gamepad is a non-primary path and users can rebind, so this
+   is cosmetic-ish, but it is a documented divergence from GH3's own layout.
+4. [I, low] Whammy dead zone 0.08 and the 0.15 action threshold are port
+   inventions; GH3's raw whammy range / dead zone were not recovered, so
+   there is nothing to verify them against. The continuous value the judge
+   consumes (movement > 0.03 for star whammy) is faithful regardless.
+5. [faithful, note only] The 60 Hz fixed-step quantises strum/fret timing to
+   step boundaries (+-~8 ms) and collapses multiple SDL strums in one step to
+   one pulse. GH3 also samples the controller once per game frame, so this is
+   faithful; it is listed so it is not mistaken for a bug later.
+6. [faithful] guitar-vs-pad binary split, strum-bar = frets latched on the
+   strum edge, "each press strums" for pads, no input-layer strum-repeat
+   timer: all match A2/A4.
+
+### D. Prioritized improvement list
+
+Small-safe (isolated, unit-testable with virtual pads; still gated by the
+owner rule that input BEHAVIOUR changes need real-device logs — none here):
+- [S1] Add input-selftest coverage that pins the current axis-as-button
+  thresholds and the whammy dead zone (regression guard before any tuning).
+  Change: new cases in `input_selftest.cpp` driving a virtual pad trigger to
+  0.4 / 0.5 / 0.8 and asserting fret edges; risk: none (test-only).
+- [S2] Document the 0.49/0.31 and 0.08/0.15 constants as named `constexpr`
+  with the RB/GH3 references beside them (no value change). Risk: none.
+
+Needs-coordination (touch the shared control model; do with the other games):
+- [N1] A per-controller calibrated tilt threshold (wire the existing
+  `star_tilt` / calibration concept into the Gyro axis test) so GH3's A5 and
+  RB's mercury filter become one model. Risk: medium (shared input path,
+  affects every guitar). Concrete: replace the generic Gyro axis threshold
+  with a stored per-GUID tilt position, counting frames past it.
+- [N2] Decide one axis-as-button threshold across games (0.49 vs 0.75) and a
+  release hysteresis, grounded in device logs; GH3 has no single number so
+  this is a product decision. Risk: medium (changes fret/strum feel).
+- [N3] Optionally offer GH3's own pad fret order (A3/A4) as the Joypad
+  default for gd04, leaving rebinding intact. Risk: low-medium.
+
+### Uncertain / not recovered (VMX128 / undecompiled)
+
+- The XInput/XamInputGetState -> pad-record fill is not in the decompiled
+  function set (only the caps/rumble 0x824ACBF8 and keystroke 0x824ACCF8
+  helpers are), so the raw stick/trigger dead zones, the whammy axis->byte
+  scaling, and the exact source of pad[+0x01] (tilt) / pad[+0x34] (buttons)
+  are inferred from how the gameplay layer consumes them, not read at the
+  source. pad[+0x01] as right-stick-Y is [I] (as in §6).
+- `SetMenuAutoRepeatTimes` (menu hold/repeat, referenced in
+  `ui/natives_flow.cpp`) — its GH3 values (RB uses 500 ms hold / 50 ms
+  repeat) were not pulled this pass.
+- The `deadZone` string (0x82056ca0) has no code xref in `refs.tsv`.
+
+No code change was made. Per the owner rule (objective-checks-not-eyeballing:
+input behaviour changes need data-derived expected-vs-measured checks and
+real-device logs) there are no device logs in this pass, and the owner called
+the input engine fragile and asked for analysis-first; every candidate above
+is either test-only (S1/S2, deferred to keep this pass purely documentary) or
+a shared-model change for the orchestrator to coordinate across games.
